@@ -556,6 +556,25 @@ class TestProjectTemplatesToRecordings:
             assert output_path is not None
             assert (output_path / "roi_statistics.npz").exists()
 
+    def test_reprojects_when_a_later_output_is_missing(self, tmp_path: Path) -> None:
+        """Verifies that a projection missing one recording's output re-projects instead of reporting completion."""
+        configuration = _make_configuration()
+        contexts = [
+            _build_projection_context(tmp_path=tmp_path, configuration=configuration, recording_id="rec0"),
+            _build_projection_context(tmp_path=tmp_path, configuration=configuration, recording_id="rec1"),
+        ]
+        project_templates_to_recordings(contexts=contexts, workers=1)
+
+        # Reproduces the state a run killed between the two per-recording writes leaves behind, where the first
+        # recording carries its projected statistics and the second does not.
+        second_output = contexts[1].runtime.output_path
+        assert second_output is not None
+        (second_output / "roi_statistics.npz").unlink()
+
+        project_templates_to_recordings(contexts=contexts, workers=1)
+
+        assert (second_output / "roi_statistics.npz").exists()
+
 
 class TestApplyBackwardDeformation:
     """Tests _apply_backward_deformation."""

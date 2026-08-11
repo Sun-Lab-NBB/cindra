@@ -1085,9 +1085,11 @@ class ViewerData:
             )
             return
 
-        # Re-activates the already loaded dataset without reloading from disk.
+        # Re-activates the already loaded dataset without reloading from disk. The anchor is resolved again, because
+        # deactivating the dataset drops the recording selection.
         if dataset_name == self._loaded_dataset_name and self._recordings:
             self._active_dataset_name = dataset_name
+            self._resolve_anchor_recording_index()
             return
 
         # Loads a different dataset from disk, replacing the previous one.
@@ -1218,7 +1220,6 @@ class ViewerData:
         self._recordings = recordings
         self._loaded_dataset_name = dataset_name
         self._active_dataset_name = dataset_name
-        self._current_recording_index = 0
 
         # Resolves the dataset display name from runtime data or falls back to the directory name.
         if recordings:
@@ -1227,10 +1228,17 @@ class ViewerData:
         else:
             self.dataset_name = dataset_name
 
-        # Resolves the current recording index to point at the anchor recording. single_recording.output_path already
-        # returns the cindra root (plane output_path.parent), which matches recording.data_path directly.
+        self._resolve_anchor_recording_index()
+
+    def _resolve_anchor_recording_index(self) -> None:
+        """Points the current recording index at the anchor recording, which is the recording the viewer was launched
+        from, and falls back to the first recording when the loaded dataset does not include it.
+        """
+        # single_recording.output_path already returns the cindra root (plane output_path.parent), which matches
+        # recording.data_path directly.
+        self._current_recording_index = 0
         single_recording_root = self.single_recording.output_path
-        for index, recording in enumerate(recordings):
+        for index, recording in enumerate(self._recordings):
             if recording.data_path == single_recording_root:
                 self._current_recording_index = index
                 break

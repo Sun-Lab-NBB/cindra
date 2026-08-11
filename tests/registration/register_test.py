@@ -93,11 +93,10 @@ class TestComputeCrop:
             frame_width=64,
         )
 
-        # The valid region should be smaller than the full frame.
-        assert valid_y_range[0] >= 0
-        assert valid_y_range[1] <= 64
-        assert valid_x_range[0] >= 0
-        assert valid_x_range[1] <= 64
+        # Each range follows the offsets of its own axis, so the 10-pixel y offset and the 5-pixel x offset trim
+        # different amounts from the 64-pixel frame.
+        assert valid_y_range == (10, 54)
+        assert valid_x_range == (5, 59)
 
     def test_detects_bad_frames_from_large_offsets(self) -> None:
         """Verifies that frames exceeding the maximum offset fraction are flagged as bad."""

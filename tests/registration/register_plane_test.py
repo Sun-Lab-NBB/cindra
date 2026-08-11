@@ -7,9 +7,11 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from cindra.io import resolve_registration_marker_path
+from cindra.io import resolve_binary_write_marker_path
 from cindra.registration import register_plane
-from cindra.registration.register import _register_frames_batch
+from cindra.registration.rigid import translate_frame
+from cindra.registration.register import _register_frames_batch, _register_secondary_channel
+from cindra.registration.bidiphase_correction import apply_bidirectional_phase_correction
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -76,6 +78,45 @@ def _make_interrupted_registration_context(
         return _register_frames_batch(**kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr("cindra.registration.register._register_frames_batch", fail_after_first_batch)
+    return context
+
+
+def _make_interrupted_second_channel_context(
+    tmp_path: Path,
+    single_recording_context: Callable[..., RuntimeContext],
+    gaussian_blob_image: Callable[..., NDArray[np.float64]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> RuntimeContext:
+    """Builds a two-channel context whose registration fails once the alignment channel has been fully rewritten.
+
+    Args:
+        tmp_path: The temporary directory the context writes its binaries into.
+        single_recording_context: The context factory fixture.
+        gaussian_blob_image: The synthetic image builder fixture.
+        monkeypatch: The patcher used to inject the secondary-channel failure.
+
+    Returns:
+        The prepared context. Calling register_plane on it raises RuntimeError between the two channel rewrites.
+    """
+    movie = _build_static_blob_movie(gaussian_blob_image)
+    movie_channel_2 = _build_static_blob_movie(
+        gaussian_blob_image=gaussian_blob_image, centers=_SECONDARY_BLOB_CENTERS
+    )
+    context = single_recording_context(
+        tmp_path=tmp_path,
+        frame_height=128,
+        frame_width=128,
+        frame_count=30,
+        movie=movie,
+        movie_channel_2=movie_channel_2,
+    )
+
+    def fail_before_secondary_rewrite(**kwargs: object) -> None:
+        """Raises in place of the secondary-channel rewrite, leaving channel 1 registered and channel 2 raw."""
+        message = "Unable to register the secondary channel. Simulated inter-channel failure."
+        raise RuntimeError(message)
+
+    monkeypatch.setattr("cindra.registration.register._register_secondary_channel", fail_before_secondary_rewrite)
     return context
 
 
@@ -151,10 +192,13 @@ class TestRegisterPlane:
         """Verifies that register_plane returns early when the plane is registered and re-registration is disabled."""
         context = single_recording_context(tmp_path)
 
-        # Plants a reference image on disk so that the plane reports as already registered.
+        # Plants the full registration output set on disk so that the plane reports as already registered. A subset of
+        # it reads as an interrupted save, which the plane re-registers rather than skips.
         registration_directory = tmp_path / "output" / "cindra" / "plane_0" / "registration_data"
         registration_directory.mkdir(parents=True, exist_ok=True)
         np.save(registration_directory / "reference_image.npy", np.zeros((48, 48), dtype=np.float32))
+        np.save(registration_directory / "rigid_y_offsets.npy", np.zeros(40, dtype=np.int32))
+        np.save(registration_directory / "rigid_x_offsets.npy", np.zeros(40, dtype=np.int32))
 
         register_plane(context=context, workers=1)
 
@@ -177,10 +221,13 @@ class TestRegisterPlane:
             tmp_path=tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
         )
 
-        # Plants a reference image on disk so that the plane reports as already registered before the forced run.
+        # Plants the full registration output set on disk so that the plane reports as already registered before the
+        # forced run, which is what carries the run into the branch that clears the existing data.
         registration_directory = tmp_path / "output" / "cindra" / "plane_0" / "registration_data"
         registration_directory.mkdir(parents=True, exist_ok=True)
         np.save(registration_directory / "reference_image.npy", np.zeros((128, 128), dtype=np.float32))
+        np.save(registration_directory / "rigid_y_offsets.npy", np.zeros(30, dtype=np.int32))
+        np.save(registration_directory / "rigid_x_offsets.npy", np.zeros(30, dtype=np.int32))
 
         register_plane(context=context, workers=1)
 
@@ -459,7 +506,33 @@ class TestRegisterPlane:
         assert context.runtime.registration.bidirectional_phase_offset == 0
         assert not context.runtime.registration.bidirectional_phase_corrected
 
-    def test_leaves_no_registration_marker(
+    def test_two_step_registration_preserves_bidirectional_record(
+        self,
+        tmp_path: Path,
+        single_recording_context: Callable[..., RuntimeContext],
+        gaussian_blob_image: Callable[..., NDArray[np.float64]],
+    ) -> None:
+        """Verifies that the refinement pass keeps the bidirectional offset the first pass applied to the binary."""
+        movie = _build_static_blob_movie(gaussian_blob_image)
+        # Plants a bidirectional scanning artifact by shifting odd lines horizontally.
+        movie[:, 1::2, :] = np.roll(movie[:, 1::2, :], shift=4, axis=2)
+
+        def configure(configuration: SingleRecordingConfiguration) -> None:
+            configuration.registration.compute_bidirectional_phase_offset = True
+            configuration.registration.two_step_registration = True
+
+        context = single_recording_context(
+            tmp_path=tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
+        )
+
+        register_plane(context=context, workers=1)
+
+        # The refinement pass carries a zero working offset so that it does not correct the binary a second time,
+        # which must not overwrite the record of the offset the binary already carries.
+        assert context.runtime.registration.bidirectional_phase_offset != 0
+        assert context.runtime.registration.bidirectional_phase_corrected
+
+    def test_leaves_no_write_marker(
         self,
         tmp_path: Path,
         single_recording_context: Callable[..., RuntimeContext],
@@ -475,7 +548,7 @@ class TestRegisterPlane:
         register_plane(context=context, workers=1)
 
         assert binary_path.exists()
-        assert not resolve_registration_marker_path(binary_path=binary_path).exists()
+        assert not resolve_binary_write_marker_path(binary_path=binary_path).exists()
 
     def test_interrupted_registration_leaves_a_marker(
         self,
@@ -498,7 +571,7 @@ class TestRegisterPlane:
 
         # The binary now holds corrected frames up to the failure point and raw frames after it, which only the
         # marker records.
-        assert resolve_registration_marker_path(binary_path=binary_path).exists()
+        assert resolve_binary_write_marker_path(binary_path=binary_path).exists()
 
     def test_marker_blocks_a_later_registration(
         self,
@@ -523,3 +596,100 @@ class TestRegisterPlane:
 
         with pytest.raises(RuntimeError, match=r"was\s+interrupted"):
             register_plane(context=context, workers=1)
+
+    def test_interrupted_second_channel_leaves_both_markers(
+        self,
+        tmp_path: Path,
+        single_recording_context: Callable[..., RuntimeContext],
+        gaussian_blob_image: Callable[..., NDArray[np.float64]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verifies that a failure between the two channel rewrites leaves both of the plane's binaries marked."""
+        context = _make_interrupted_second_channel_context(
+            tmp_path=tmp_path,
+            single_recording_context=single_recording_context,
+            gaussian_blob_image=gaussian_blob_image,
+            monkeypatch=monkeypatch,
+        )
+        binary_path = context.runtime.io.registered_binary_path
+        binary_path_channel_2 = context.runtime.io.registered_binary_path_channel_2
+
+        with pytest.raises(RuntimeError, match="Simulated inter-channel failure"):
+            register_plane(context=context, workers=1)
+
+        # Channel 1 now holds motion-corrected frames while channel 2 is still raw, and only the markers record that
+        # the two binaries disagree about whether motion has been removed.
+        assert resolve_binary_write_marker_path(binary_path=binary_path).exists()
+        assert resolve_binary_write_marker_path(binary_path=binary_path_channel_2).exists()
+
+    def test_interrupted_second_channel_blocks_a_later_registration(
+        self,
+        tmp_path: Path,
+        single_recording_context: Callable[..., RuntimeContext],
+        gaussian_blob_image: Callable[..., NDArray[np.float64]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verifies that a plane left with one registered channel refuses to register again."""
+        context = _make_interrupted_second_channel_context(
+            tmp_path=tmp_path,
+            single_recording_context=single_recording_context,
+            gaussian_blob_image=gaussian_blob_image,
+            monkeypatch=monkeypatch,
+        )
+
+        with pytest.raises(RuntimeError, match="Simulated inter-channel failure"):
+            register_plane(context=context, workers=1)
+
+        # Restores the real secondary-channel pass, so the retry fails on the marker rather than the injected error.
+        monkeypatch.setattr("cindra.registration.register._register_secondary_channel", _register_secondary_channel)
+
+        with pytest.raises(RuntimeError, match=r"was\s+interrupted"):
+            register_plane(context=context, workers=1)
+
+    def test_applies_bidirectional_correction_to_second_channel(
+        self,
+        tmp_path: Path,
+        single_recording_context: Callable[..., RuntimeContext],
+        gaussian_blob_image: Callable[..., NDArray[np.float64]],
+        read_binary_movie: Callable[..., NDArray[np.int16]],
+    ) -> None:
+        """Verifies that the secondary channel receives the bidirectional phase correction, not the offsets alone."""
+        movie = _build_static_blob_movie(gaussian_blob_image)
+        movie_channel_2 = _build_static_blob_movie(
+            gaussian_blob_image=gaussian_blob_image, centers=_SECONDARY_BLOB_CENTERS
+        )
+        raw_channel_2 = movie_channel_2.copy()
+
+        def configure(configuration: SingleRecordingConfiguration) -> None:
+            configuration.registration.bidirectional_phase_offset_override = 3
+
+        context = single_recording_context(
+            tmp_path=tmp_path,
+            frame_height=128,
+            frame_width=128,
+            frame_count=30,
+            movie=movie,
+            movie_channel_2=movie_channel_2,
+            configure=configure,
+        )
+
+        register_plane(context=context, workers=1)
+
+        # Rebuilds the state the channel-2 binary has to hold: the odd lines shifted by the configured offset, then
+        # the rigid offsets the alignment channel computed.
+        registration_directory = tmp_path / "output" / "cindra" / "plane_0" / "registration_data"
+        y_offsets = np.load(registration_directory / "rigid_y_offsets.npy")
+        x_offsets = np.load(registration_directory / "rigid_x_offsets.npy")
+        expected = raw_channel_2.astype(np.float32)
+        apply_bidirectional_phase_correction(frames=expected, bidirectional_phase_offset=3)
+        for index in range(expected.shape[0]):
+            expected[index] = translate_frame(
+                frame=expected[index], y_offset=int(y_offsets[index]), x_offset=int(x_offsets[index])
+            )
+
+        registered = read_binary_movie(
+            file_path=tmp_path / "output" / "cindra" / "plane_0" / "channel_2_data.bin",
+            frame_height=128,
+            frame_width=128,
+        )
+        np.testing.assert_array_equal(registered, expected.astype(np.int16))

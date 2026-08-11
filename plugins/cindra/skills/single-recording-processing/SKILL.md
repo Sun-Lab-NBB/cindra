@@ -255,17 +255,17 @@ Cleaning `registration` deletes the plane's `registration_data` directory, which
 detection reads. Registration rewrites the plane binary in place, so clean `binarization` to rebuild that binary from
 the raw TIFFs.
 
-**Recovering an interrupted registration.** Registration rewrites the plane binary in place and holds a
-`<binary>.registering` marker for the duration. If the job is killed, the marker persists and every later registration
-of that plane fails with "Unable to register plane {index}. A previous registration of the binary file ... was
+**Recovering an interrupted write.** Binarization fills the plane binary and registration rewrites it in place, and
+both hold a `<binary>.writing` marker for the duration. If the job is killed, the marker persists and every later
+registration of that plane fails with "Unable to register plane {index}. A previous write of the binary file ... was
 interrupted". Cleaning or resetting `registration` does NOT clear it, because the marker sits beside the `.bin` rather
 than inside `registration_data`.
 
 Recover by resetting the `binarization` phase with `reset_processing_phases_tool` and re-dispatching. Binarization
 detects the marker, rebuilds the binary from the raw TIFFs, and clears the marker. You do NOT need to set
 `repeat_binarization`, and you do NOT need `clean_processing_output_tool`. Binarization also rebuilds automatically when
-a binary's size disagrees with the frame geometry recorded for its plane, which is what an interrupted conversion leaves
-behind. `repeat_binarization` remains necessary only to force a rebuild of binaries that are intact.
+a binary's size disagrees with the frame geometry recorded for its plane, which is what a binary truncated outside the
+pipeline leaves behind. `repeat_binarization` remains necessary only to force a rebuild of binaries that are intact.
 
 ---
 

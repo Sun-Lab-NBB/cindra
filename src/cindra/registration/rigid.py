@@ -19,6 +19,9 @@ from ..detection import compute_spatial_taper_mask
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
+_MINIMUM_CORRELATION_RADIUS: int = 1
+"""The smallest correlation search radius the quadrant rearrangement in compute_rigid_offsets can express."""
+
 
 def compute_edge_taper(
     reference_image: NDArray[np.float32],
@@ -114,8 +117,9 @@ def compute_rigid_offsets(
     Args:
         frames: The frame data with shape (num_frames, height, width) after edge tapering.
         reference_kernel: The phase correlation kernel from compute_phase_correlation_kernel.
-        maximum_offset_fraction: The maximum allowed offset as a fraction of the minimum spatial dimension.
-            The search window is limited to min(height, width) * maximum_offset_fraction pixels.
+        maximum_offset_fraction: The maximum allowed offset as a fraction of the minimum spatial dimension. The
+            search window is limited to min(height, width) * maximum_offset_fraction pixels, clamped to at least one
+            pixel, because a fraction that rounds to a zero-pixel radius describes a search window no offset fits in.
         temporal_smoothing_sigma: The standard deviation for temporal Gaussian smoothing of correlation
             maps. If 0, no smoothing is applied.
         workers: The number of parallel workers for FFT computation. Use -1 for all available cores.
@@ -125,10 +129,13 @@ def compute_rigid_offsets(
         are pixel displacements from the reference, and correlation_maxima indicates the peak correlation
         value for each frame.
     """
-    # Computes the correlation search window size based on maximum allowed offset.
+    # Computes the correlation search window size based on maximum allowed offset. The radius is clamped from below
+    # as well as from above, because Python's '-radius:' slice degenerates to the whole axis rather than to the empty
+    # slice the quadrant rearrangement below needs once the radius reaches zero.
     minimum_dimension = np.minimum(*frames.shape[1:])
     maximum_radius = minimum_dimension // 2
-    correlation_radius = int(np.minimum(np.round(maximum_offset_fraction * minimum_dimension), maximum_radius))
+    requested_radius = int(np.minimum(np.round(maximum_offset_fraction * minimum_dimension), maximum_radius))
+    correlation_radius = max(requested_radius, _MINIMUM_CORRELATION_RADIUS)
 
     correlation_data = apply_phase_correlation(frames=frames, kernel=reference_kernel, workers=workers)
 

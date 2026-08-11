@@ -125,7 +125,7 @@ cindra/
 ├── plane_0/                                    # Per-plane processing results
 │   ├── runtime_data.yaml                       # Plane runtime metadata
 │   ├── channel_1_data.bin                      # Registered binary data
-│   ├── channel_1_data.bin.registering          # Present only while registration rewrites the binary
+│   ├── channel_1_data.bin.writing              # Present only while a stage writes frames into the binary
 │   ├── registration_data/                      # Registration arrays
 │   │   ├── reference_image.npy
 │   │   ├── bad_frames.npy
@@ -164,15 +164,16 @@ and per-plane `detection_data/mean_image.npy` (plus `mean_image_channel_2.npy` i
 `binarization_time` into each plane's `runtime_data.yaml`. Each plane binary is sized by that plane's own interleave
 frame count, so a recording whose acquisition stopped partway through a volume gives its leading planes one frame more
 than its trailing planes, and channel 2 may hold one frame more or fewer than channel 1 of the same plane. Binarization
-also rebuilds an existing binary whose size disagrees with its recorded plane geometry, or that an interrupted
-registration left marked, without requiring `repeat_binarization`.
+also rebuilds an existing binary whose size disagrees with its recorded plane geometry, or that an interrupted write
+left marked, without requiring `repeat_binarization`.
 
 **Phase 2 (registration, per-plane):** Creates `registration_data/`, rewrites the plane binary in place, refreshes
 `detection_data/mean_image.npy`, and updates `runtime_data.yaml` with the registration section,
 `total_registration_time`, and `registration_workers`. For the duration of the in-place rewrite, a
-`{binary}.registering` marker sits beside the binary. A marker left on disk means the registration was interrupted, so
-the binary holds corrected frames up to an unknown point and raw frames after it. Registration refuses to run against a
-marked binary, and re-running binarization rebuilds the binary and clears the marker.
+`{binary}.writing` marker sits beside the binary, which binarization also writes while it fills that binary. A marker
+left on disk means the write was interrupted, so the binary holds finished frames up to an unknown point and unfinished
+frames after it. Registration refuses to run against a marked binary, and re-running binarization rebuilds the binary
+and clears the marker.
 
 **Phase 3 (processing, per-plane):** Creates the remaining `detection_data/` images (`enhanced_mean_image.npy`,
 `maximum_projection.npy`, `correlation_map.npy`), the ROI `.npz` files, the fluorescence `.npy` traces, and updates

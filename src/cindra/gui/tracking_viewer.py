@@ -178,7 +178,19 @@ class TrackingViewer(QMainWindow):
 
         Args:
             data: The ViewerData instance that stores the visualized dataset's data.
+
+        Raises:
+            ValueError: If the provided data holds no multi-recording dataset, since every panel this viewer displays
+                is derived from the active recording of a tracked dataset.
         """
+        if data.recording_count == 0:
+            message = (
+                f"Unable to populate the multi-recording tracking viewer with the data loaded from "
+                f"{data.single_recording.recording_label}. The viewer requires a multi-recording dataset that "
+                f"includes the visualized recording, but the provided data holds no tracked recordings."
+            )
+            console.error(message=message, error=ValueError)
+
         self._data = data
 
         # Populates the dataset selector.
@@ -199,7 +211,9 @@ class TrackingViewer(QMainWindow):
         self._recording_combo.clear()
         for index, recording_id in enumerate(data.recording_ids):
             self._recording_combo.addItem(f"{index}: {recording_id}", userData=index)
-        self._recording_combo.setCurrentIndex(0)
+        # Opens on the recording the data object already points at, which is the recording the viewer was launched
+        # from. Anything else makes the dropdown name a different recording than the one on display.
+        self._recording_combo.setCurrentIndex(data.current_recording_index)
         self._recording_combo.blockSignals(False)
 
         # Shows channel 2 group only if channel 2 data exists.

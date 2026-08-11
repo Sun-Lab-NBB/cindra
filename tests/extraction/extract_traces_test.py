@@ -321,6 +321,60 @@ class TestExtractTracesChannel2:
         assert cell_colocalization.shape == (2, 2)
         assert corrected_structural_mean_image.shape == (frame_height, frame_width)
 
+    def test_structural_channel_2_reacquires_released_mean_images(
+        self, single_recording_context: Callable[..., RuntimeContext], tmp_path: Path
+    ) -> None:
+        """Verifies that colocalization runs when the mean images live only on disk, as detection leaves them."""
+        frame_height = frame_width = 48
+        frame_count = 10
+        movie = _constant_movie(
+            value=_CONSTANT_PIXEL_VALUE, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
+        )
+        movie_channel_2 = _constant_movie(
+            value=300, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
+        )
+
+        def configure(configuration: SingleRecordingConfiguration) -> None:
+            configuration.signal_extraction.minimum_neuropil_pixels = 10
+            configuration.spike_deconvolution.extract_spikes = False
+
+        context = single_recording_context(
+            tmp_path=tmp_path,
+            frame_height=frame_height,
+            frame_width=frame_width,
+            frame_count=frame_count,
+            movie=movie,
+            movie_channel_2=movie_channel_2,
+            configure=configure,
+        )
+        context.runtime.extraction.roi_statistics = _make_roi_statistics(
+            centers=((14, 14), (30, 30)), frame_height=frame_height, frame_width=frame_width
+        )
+
+        # Detection saves both mean images and then releases them from memory, so extraction inherits a context whose
+        # detection images are None while the files sit in the plane's detection_data directory.
+        plane_directory = context.runtime.io.output_path
+        detection_directory = plane_directory / "detection_data"
+        detection_directory.mkdir(parents=True, exist_ok=True)
+        np.save(
+            detection_directory / "mean_image.npy", arr=np.full((frame_height, frame_width), 100.0, dtype=np.float32)
+        )
+        np.save(
+            detection_directory / "mean_image_channel_2.npy",
+            arr=np.full((frame_height, frame_width), 80.0, dtype=np.float32),
+        )
+        assert context.runtime.detection.mean_image is None
+        assert context.runtime.detection.mean_image_channel_2 is None
+
+        extract_traces(context=context, workers=1)
+
+        cell_colocalization = _load_result(plane_directory=plane_directory, name="cell_colocalization")
+        corrected_structural_mean_image = _load_result(
+            plane_directory=plane_directory, name="corrected_structural_mean_image"
+        )
+        assert cell_colocalization.shape == (2, 2)
+        assert corrected_structural_mean_image.shape == (frame_height, frame_width)
+
     def test_structural_channel_2_without_mean_images_skips_colocalization(
         self, single_recording_context: Callable[..., RuntimeContext], tmp_path: Path
     ) -> None:

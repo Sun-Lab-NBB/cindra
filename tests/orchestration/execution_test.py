@@ -142,10 +142,29 @@ def _make_recording_worker(observed: list[dict[str, Any]]) -> Callable[..., None
     return _worker
 
 
+def _refuse_submission(*args: Any, **kwargs: Any) -> Future[None]:
+    """Refuses a submission the way a pool that lost a worker outside that worker's control refuses every later one."""
+    raise BrokenProcessPool
+
+
 def _make_finished_future() -> Future[None]:
     """Returns a resolved future, which the reaper treats as a completed job."""
     future: Future[None] = Future()
     future.set_result(None)
+    return future
+
+
+def _make_failed_future(error: BaseException) -> Future[None]:
+    """Returns a future carrying the given error, which is how a pool reports a worker that raised out of its job."""
+    future: Future[None] = Future()
+    future.set_exception(error)
+    return future
+
+
+def _make_canceled_future() -> Future[None]:
+    """Returns a canceled future, which is how a pool reports a job no worker ever started."""
+    future: Future[None] = Future()
+    future.cancel()
     return future
 
 
@@ -352,6 +371,106 @@ class TestReapCompletedJobs:
         _reap_completed_jobs(state=state)
 
         assert list(state.active_futures[finished.resource_class.name]) == [running.dispatch_key]
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_abandoned_jobs_are_failed_before_they_leave_the_running_set(self, tmp_path: Path) -> None:
+        """Verifies that a job whose worker died or raised records its failure instead of staying running forever."""
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        tracker = _build_single_recording_tracker(tracker_path=tracker_path, plane_count=2)
+        killed = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.REGISTER, specifier="plane_0")
+        raised = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.REGISTER, specifier="plane_1")
+        state = _make_state(jobs=[killed, raised])
+        state.active_futures[killed.resource_class.name] = {
+            killed.dispatch_key: _make_failed_future(error=BrokenProcessPool()),
+            raised.dispatch_key: _make_failed_future(error=RuntimeError("Unable to acquire the tracker lock.")),
+        }
+
+        _reap_completed_jobs(state=state)
+
+        assert state.active_futures[killed.resource_class.name] == {}
+        assert tracker.get_job_status(job_id=killed.job_id) == ProcessingStatus.FAILED
+        assert tracker.get_job_info(job_id=killed.job_id).error_message == execution._BROKEN_POOL_MESSAGE
+        assert tracker.get_job_status(job_id=raised.job_id) == ProcessingStatus.FAILED
+        assert "RuntimeError" in str(tracker.get_job_info(job_id=raised.job_id).error_message)
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_abandoned_job_keeps_the_terminal_state_it_recorded_for_itself(self, tmp_path: Path) -> None:
+        """Verifies that a worker raising after its job succeeded leaves that success standing on the tracker."""
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        tracker = _build_single_recording_tracker(tracker_path=tracker_path)
+        job = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.REGISTER, specifier="plane_0")
+        tracker.complete_job(job_id=job.job_id)
+        state = _make_state(jobs=[job])
+        state.active_futures[job.resource_class.name] = {
+            job.dispatch_key: _make_failed_future(error=TimeoutError("Unable to acquire the tracker lock.")),
+        }
+
+        _reap_completed_jobs(state=state)
+
+        assert state.active_futures[job.resource_class.name] == {}
+        assert tracker.get_job_status(job_id=job.job_id) == ProcessingStatus.SUCCEEDED
+        assert tracker.get_job_info(job_id=job.job_id).error_message is None
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_running_entry_the_session_does_not_own_is_dropped_without_a_tracker_write(self, tmp_path: Path) -> None:
+        """Verifies that a running entry addressing no submitted job leaves the set without touching any tracker."""
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        tracker = _build_single_recording_tracker(tracker_path=tracker_path)
+        job = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.REGISTER, specifier="plane_0")
+        state = _make_state(jobs=[job])
+        state.all_jobs = {}
+        state.active_futures[job.resource_class.name] = {
+            job.dispatch_key: _make_failed_future(error=BrokenProcessPool()),
+        }
+
+        _reap_completed_jobs(state=state)
+
+        assert state.active_futures[job.resource_class.name] == {}
+        assert tracker.get_job_status(job_id=job.job_id) == ProcessingStatus.SCHEDULED
+
+
+class TestResolveJobOutcome:
+    """Tests the classification the manager takes from one dispatched job's worker pool future."""
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_unfinished_future_reports_a_running_job(self) -> None:
+        """Verifies that a future no worker has resolved keeps its job in the running set."""
+        assert execution._resolve_job_outcome(future=Future()) == (execution._JobOutcomes.RUNNING, "")
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_resolved_future_reports_a_completed_job(self) -> None:
+        """Verifies that a future carrying a result reports a job that recorded its own terminal state."""
+        outcome, message = execution._resolve_job_outcome(future=_make_finished_future())
+
+        assert outcome == execution._JobOutcomes.COMPLETED
+        assert message == ""
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_broken_pool_future_carries_the_killed_worker_reason(self) -> None:
+        """Verifies that a future the pool broke under reports an abandoned job with the killed worker reason."""
+        outcome, message = execution._resolve_job_outcome(future=_make_failed_future(error=BrokenProcessPool()))
+
+        assert outcome == execution._JobOutcomes.ABANDONED
+        assert message == execution._BROKEN_POOL_MESSAGE
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_canceled_future_carries_the_cancellation_reason(self) -> None:
+        """Verifies that a future canceled before any worker started it reports its own cancellation reason."""
+        outcome, message = execution._resolve_job_outcome(future=_make_canceled_future())
+
+        assert outcome == execution._JobOutcomes.ABANDONED
+        assert message == execution._CANCELED_JOB_MESSAGE
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_raised_future_names_the_error_that_escaped_the_worker(self) -> None:
+        """Verifies that any other error escaping the worker is reported with its type and its own reason."""
+        error = RuntimeError("Unable to acquire the tracker lock.")
+
+        outcome, message = execution._resolve_job_outcome(future=_make_failed_future(error=error))
+
+        assert outcome == execution._JobOutcomes.ABANDONED
+        assert "RuntimeError" in message
+        assert "Unable to acquire the tracker lock." in message
 
 
 class TestResolveJobAdmission:
@@ -615,6 +734,45 @@ class TestDispatchAdmittedJobs:
         assert dispatched is True
         assert list(state.active_futures[first.resource_class.name]) == [first.dispatch_key]
         assert state.pending_queues[first.resource_class.name] == [second]
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_idle_session_dispatches_a_job_larger_than_the_whole_memory_budget(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verifies that an idle session runs a job sized above its entire memory budget instead of stalling."""
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        job = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.PROCESS, specifier="plane_0")
+        job.memory_megabytes = 8192
+        state = _make_state(jobs=[job], admitted=True, capacity=4, workers=1, cpu_budget=64)
+        state.memory_budget_mb = 4096
+        monkeypatch.setattr(execution, "_pipeline_worker", _make_recording_worker(observed=[]))
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            dispatched = _dispatch_admitted_jobs(state=state, pool=pool)
+
+        _drain_active_futures(state=state)
+
+        assert dispatched is True
+        assert list(state.active_futures[job.resource_class.name]) == [job.dispatch_key]
+        assert state.pending_queues[job.resource_class.name] == []
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_refused_submission_leaves_the_job_at_the_head_of_its_queue(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verifies that a job the pool refuses stays queued, so the broken pool handler still reaches it."""
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        first = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.REGISTER, specifier="plane_0")
+        second = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.REGISTER, specifier="plane_1")
+        state = _make_state(jobs=[first, second], admitted=True, capacity=4, workers=1, cpu_budget=64)
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            monkeypatch.setattr(pool, "submit", _refuse_submission)
+            with pytest.raises(BrokenProcessPool):
+                _dispatch_admitted_jobs(state=state, pool=pool)
+
+        assert state.pending_queues[first.resource_class.name] == [first, second]
+        assert state.active_futures[first.resource_class.name] == {}
 
     @pytest.mark.xdist_group(name="execution_state")
     def test_unsized_jobs_dispatch_on_the_core_budget_alone(
@@ -899,6 +1057,52 @@ class TestBrokenPool:
         for job in (pooled, queued, running):
             assert tracker.get_job_status(job_id=job.job_id) == ProcessingStatus.FAILED
             assert tracker.get_job_info(job_id=job.job_id).error_message == execution._BROKEN_POOL_MESSAGE
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_job_that_finished_before_the_break_keeps_its_own_outcome(self, tmp_path: Path) -> None:
+        """Verifies that a broken pool records the reason each running job needs and leaves a finished job alone."""
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        tracker = _build_single_recording_tracker(tracker_path=tracker_path, plane_count=3)
+        succeeded = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.REGISTER, specifier="plane_0")
+        killed = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.REGISTER, specifier="plane_1")
+        running = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.REGISTER, specifier="plane_2")
+        tracker.complete_job(job_id=succeeded.job_id)
+        state = _make_state(jobs=[succeeded, killed, running])
+        state.admission_pool = []
+        state.active_futures[running.resource_class.name] = {
+            succeeded.dispatch_key: _make_finished_future(),
+            killed.dispatch_key: _make_failed_future(error=RuntimeError("Unable to acquire the tracker lock.")),
+            running.dispatch_key: Future(),
+            ("unknown", "job"): Future(),
+        }
+
+        execution._fail_broken_session(state=state)
+
+        assert state.active_futures[running.resource_class.name] == {}
+        assert tracker.get_job_status(job_id=succeeded.job_id) == ProcessingStatus.SUCCEEDED
+        assert tracker.get_job_status(job_id=killed.job_id) == ProcessingStatus.FAILED
+        assert "RuntimeError" in str(tracker.get_job_info(job_id=killed.job_id).error_message)
+        assert tracker.get_job_status(job_id=running.job_id) == ProcessingStatus.FAILED
+        assert tracker.get_job_info(job_id=running.job_id).error_message == execution._BROKEN_POOL_MESSAGE
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_abandoned_job_that_recorded_success_keeps_that_success(self, tmp_path: Path) -> None:
+        """Verifies that a broken pool leaves the success of a job whose worker raised after recording it."""
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        tracker = _build_single_recording_tracker(tracker_path=tracker_path)
+        job = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.REGISTER, specifier="plane_0")
+        tracker.complete_job(job_id=job.job_id)
+        state = _make_state(jobs=[job])
+        state.admission_pool = []
+        state.active_futures[job.resource_class.name] = {
+            job.dispatch_key: _make_failed_future(error=TimeoutError("Unable to acquire the tracker lock.")),
+        }
+
+        execution._fail_broken_session(state=state)
+
+        assert state.active_futures[job.resource_class.name] == {}
+        assert tracker.get_job_status(job_id=job.job_id) == ProcessingStatus.SUCCEEDED
+        assert tracker.get_job_info(job_id=job.job_id).error_message is None
 
     @pytest.mark.xdist_group(name="execution_state")
     def test_manager_ends_the_session_when_the_pool_breaks(

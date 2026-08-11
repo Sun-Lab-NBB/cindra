@@ -175,17 +175,19 @@ def apply_spatial_smoothing(data: NDArray[np.float32], window: int) -> NDArray[n
 
     Args:
         data: Recording frames with shape (num_frames, height, width) or a single image with shape (height, width).
-        window: The window size for smoothing. Must be an even integer.
+        window: The window size for smoothing. Must be a positive even integer.
 
     Returns:
         The spatially smoothed data. A 2D input returns a 2D array, and a 3D input returns a 3D array of the
         same shape.
 
     Raises:
-        ValueError: If the window size is not an even integer.
+        ValueError: If the window size is not a positive even integer.
     """
-    if window and window % 2:
-        message = f"Unable to apply spatial smoothing. Filter window must be an even integer, but got {window}."
+    # Rejects a zero or negative window here rather than letting it reach the integral-image differencing below, where
+    # the ':-window' slice bound degenerates to the empty prefix and the box normalization divides by zero.
+    if window <= 0 or window % 2:
+        message = f"Unable to apply spatial smoothing. Filter window must be a positive even integer, but got {window}."
         console.error(message=message, error=ValueError)
 
     # Promotes 2D input to 3D for uniform processing. The flag records the promotion so that the output drops only an

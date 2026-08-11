@@ -213,13 +213,19 @@ class RegistrationData:
     def is_registered(self, output_path: Path | None = None) -> bool:
         """Checks whether registration data exists in memory or on disk.
 
+        Notes:
+            The on-disk check requires the same three arrays the in-memory check requires. ``save_arrays`` writes each
+            array as its own file, so an interrupted save leaves a subset of them behind, and accepting any single
+            file would report a plane registered while the offsets every later stage reads are absent.
+
         Args:
             output_path: The directory containing the ``registration_data/`` subdirectory. When provided and arrays
                 are not loaded in memory, checks for registration files on disk. The calling context is responsible for
                 resolving the correct path.
 
         Returns:
-            True if registration arrays are loaded in memory or exist on disk at the given output path, False otherwise.
+            True if the reference image and both rigid offset arrays are loaded in memory or exist on disk at the given
+            output path, False otherwise.
         """
         arrays_loaded = (
             self.reference_image is not None and self.rigid_y_offsets is not None and self.rigid_x_offsets is not None
@@ -227,7 +233,15 @@ class RegistrationData:
         if arrays_loaded:
             return True
         if output_path is not None:
-            return (output_path / REGISTRATION_DATA_DIRECTORY_NAME / RegistrationArrays.REFERENCE_IMAGE).exists()
+            registration_directory = output_path / REGISTRATION_DATA_DIRECTORY_NAME
+            return all(
+                (registration_directory / array_name).exists()
+                for array_name in (
+                    RegistrationArrays.REFERENCE_IMAGE,
+                    RegistrationArrays.RIGID_Y_OFFSETS,
+                    RegistrationArrays.RIGID_X_OFFSETS,
+                )
+            )
         return False
 
     def clear(self) -> None:
@@ -1704,14 +1718,9 @@ class CombinedData:
 
         save_dictionary: dict[
             str,
-            NDArray[np.uint8]
-            | NDArray[np.uint16]
-            | NDArray[np.uint32]
-            | NDArray[np.int32]
-            | NDArray[np.float32]
-            | NDArray[np.str_],
+            NDArray[np.uint16] | NDArray[np.uint32] | NDArray[np.int32] | NDArray[np.float32] | NDArray[np.str_],
         ] = {
-            "plane_count": np.array([self.plane_count], dtype=np.uint8),
+            "plane_count": np.array([self.plane_count], dtype=np.uint32),
             "frame_count": np.array([self.frame_count], dtype=np.uint32),
             "plane_frame_counts": self.plane_frame_counts,
             "combined_height": np.array([self.combined_height], dtype=np.uint32),

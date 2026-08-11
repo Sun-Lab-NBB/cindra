@@ -1,5 +1,6 @@
 """Provides the high-level API for the single-recording processing pipeline."""
 
+from shutil import rmtree
 from pathlib import Path  # noqa: TC003 - the module does not defer annotation evaluation.
 
 import numba
@@ -11,18 +12,31 @@ from ataraxis_base_utilities import LogLevel, console
 from ..io import (
     combine_planes,
     convert_tiffs_to_binary,
-    resolve_registration_marker_path,
+    resolve_tiff_conversion_plan,
+    resolve_binary_write_marker_path,
     resolve_single_recording_contexts,
 )
 from ..layout import (
-    OUTPUT_DIRECTORY_NAME,
+    COMBINED_METADATA_FILENAME,
+    DETECTION_DATA_DIRECTORY_NAME,
     ACQUISITION_PARAMETERS_FILENAME,
+    REGISTRATION_DATA_DIRECTORY_NAME,
     SINGLE_RECORDING_CONFIGURATION_FILENAME,
+    DetectionImages,
+    RecordingArrays,
+    RegistrationArrays,
+    resolve_array_path,
+    resolve_output_path,
+    parse_plane_specifier,
 )
 from ..detection import detect_plane_rois
 from ..extraction import extract_traces
 from ..dataclasses import (
+    TimingData,
+    DetectionData,
+    ExtractionData,
     RuntimeContext,
+    RegistrationData,
     SingleRecordingConfiguration,
 )
 from ..registration import register_plane
@@ -44,9 +58,16 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
         This function executes the first phase of the single-recording pipeline: it converts the raw recording data
         into the internal binary format and initializes the per-plane runtime data hierarchy. The conversion is
         skipped only when every plane already has a valid binary at the output path and 'repeat_binarization' is
-        disabled in the FileIO configuration section. A binary left marked by an interrupted registration, or one
-        whose size disagrees with its plane's recorded frame geometry, is treated as invalid and rebuilt from the
-        source TIFF files even when that parameter is disabled.
+        disabled in the FileIO configuration section. A binary left marked by an interrupted write, or one whose size
+        disagrees with its plane's recorded frame geometry, is treated as invalid and rebuilt from the source TIFF
+        files even when that parameter is disabled.
+
+        A conversion replaces every plane binary of the recording, so it first deletes the registration, detection,
+        and extraction outputs of every plane along with the recording's combined dataset. It also removes whole every
+        plane directory the recording's current plane count no longer covers. The rebuilt binaries hold raw frames
+        again, which voids every offset, image, and trace measured from the previous binaries, and deleting the
+        registration output is what makes the registration stage run instead of skipping the plane. That deletion
+        follows the conversion plan, so a recording whose TIFF files cannot be converted keeps its results.
 
     Args:
         configuration: The single-recording pipeline configuration.
@@ -54,8 +75,8 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
             the caller resolves before invoking this function.
 
     Raises:
-        ValueError: If data_path or output_path is not configured, or if the discovered TIFF files do not all hold
-            frames of the same shape.
+        ValueError: If data_path or output_path is not configured, if the discovered TIFF files do not all hold
+            frames of the same shape, or if the frames they hold leave a plane with no frames on one of its channels.
         FileNotFoundError: If a plane's runtime_data.yaml was not written by an earlier bootstrap step, or if no TIFF
             files are found in the data directory.
     """
@@ -76,7 +97,8 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
         console.error(message=message, error=ValueError)
 
     # Checks for existing valid binaries to allow early return.
-    root_path = configuration.file_io.output_path / OUTPUT_DIRECTORY_NAME
+    output_root = configuration.file_io.output_path
+    root_path = resolve_output_path(output_root=output_root)
     config_path = root_path / SINGLE_RECORDING_CONFIGURATION_FILENAME
     acquisition_path = root_path / ACQUISITION_PARAMETERS_FILENAME
     if config_path.exists() and acquisition_path.exists():
@@ -96,12 +118,13 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
                 binaries_valid = False
                 break
 
-            # An interrupted registration leaves its binary holding motion-corrected frames up to an unknown point and
-            # raw frames after it, which only the marker beside the binary records.
+            # An interrupted conversion leaves its binary holding zeros past the last frame it wrote, and an
+            # interrupted registration leaves one holding motion-corrected frames up to an unknown point and raw
+            # frames after it. Only the marker beside the binary records either state.
             marked_binaries.extend(
                 path
                 for path in (registered_path, context.runtime.io.registered_binary_path_channel_2)
-                if path is not None and resolve_registration_marker_path(binary_path=path).exists()
+                if path is not None and resolve_binary_write_marker_path(binary_path=path).exists()
             )
 
         # Rebuilds a marked binary without waiting for the caller to request it. The frames it holds are indeterminate,
@@ -110,15 +133,16 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
             binaries_valid = False
             console.echo(
                 message=(
-                    f"Rebuilding {len(marked_binaries)} binary file(s) that a previous interrupted registration left "
-                    f"in an indeterminate state: {natsorted(str(path) for path in marked_binaries)}."
+                    f"Rebuilding {len(marked_binaries)} binary file(s) that a previous interrupted conversion or "
+                    f"registration left in an indeterminate state: "
+                    f"{natsorted(str(path) for path in marked_binaries)}."
                 ),
                 level=LogLevel.WARNING,
             )
 
-        # Rebuilds a binary whose size disagrees with the geometry recorded for its plane, which is what an
-        # interrupted conversion leaves behind. Every later stage derives its frame count by dividing the file size by
-        # the frame size, so a short binary would otherwise be processed as a silently truncated movie.
+        # Rebuilds a binary whose size disagrees with the geometry recorded for its plane, which is what a truncated
+        # copy or a changed plane geometry leaves behind. Every later stage derives its frame count by dividing the
+        # file size by the frame size, so a short binary would otherwise be processed as a silently truncated movie.
         if binaries_valid:
             malformed_binaries = _resolve_malformed_binaries(contexts=loaded_contexts)
             if malformed_binaries:
@@ -157,7 +181,25 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
     # per-plane runtime_data.yaml files, so this call is load-only to avoid racing against peer worker threads.
     contexts = resolve_single_recording_contexts(configuration=configuration, persist=False)
 
-    convert_tiffs_to_binary(contexts=contexts, workers=workers)
+    # Resolves the source files, the frame accounting, and the destination binaries before anything is deleted. The
+    # resolution runs every check that can reject the recording, from TIFF files that disagree about their frame
+    # shape to a plane the frame accounting leaves with no frames, so a rejected recording keeps its results.
+    plan = resolve_tiff_conversion_plan(contexts=contexts, workers=workers)
+
+    # The conversion replaces all of the recording's plane binaries from here on, so the outputs describing the
+    # previous binaries go first. The per-plane runtime sections are reset alongside them, because registration reads
+    # back the bidirectional correction it recorded and would otherwise skip a correction the rebuilt binary needs.
+    # Each reset is persisted before the conversion starts, so an interrupted rebuild leaves every runtime record
+    # agreeing with the results the sweep removed instead of still advertising them.
+    _clear_downstream_data(output_root=output_root, plane_count=len(contexts))
+    for context in contexts:
+        context.runtime.registration = RegistrationData()
+        context.runtime.detection = DetectionData()
+        context.runtime.extraction = ExtractionData()
+        context.runtime.timing = TimingData()
+        context.save_runtime()
+
+    convert_tiffs_to_binary(plan=plan)
 
     # Records the binarization time and saves runtime data for each plane. Each plane's runtime_data.yaml has only
     # one writer here (the single BINARIZE worker for this recording), so the per-plane save is race-free.
@@ -321,8 +363,9 @@ def save_combined_data(contexts: list[RuntimeContext]) -> None:
 
     combined_data = combine_planes(plane_contexts=contexts)
 
-    combined_data.save(root_path=root_path / OUTPUT_DIRECTORY_NAME)
-    console.echo(message=f"Combined data saved to: {root_path / 'cindra'}", level=LogLevel.SUCCESS)
+    output_path = resolve_output_path(output_root=root_path)
+    combined_data.save(root_path=output_path)
+    console.echo(message=f"Combined data saved to: {output_path}", level=LogLevel.SUCCESS)
 
 
 def _resolve_malformed_binaries(contexts: list[RuntimeContext]) -> list[Path]:
@@ -334,9 +377,12 @@ def _resolve_malformed_binaries(contexts: list[RuntimeContext]) -> list[Path]:
         invariant across every stage that consumes the binary. A content check would instead report every registered
         plane as malformed.
 
-        A size mismatch is what a conversion that did not finish leaves behind. The frame count every later stage
+        A size mismatch is what a binary damaged outside the pipeline leaves behind, such as one truncated by a
+        partial copy or written for a plane geometry the recording no longer uses. The frame count every later stage
         works from is derived by dividing the file size by the frame size, so a short file silently yields a truncated
-        movie rather than an error.
+        movie rather than an error. A write the pipeline itself abandoned partway is caught by the marker beside the
+        binary instead, because both stages that write a binary size it to its full frame count before the first
+        frame lands.
 
         Channel 2 is allowed to hold one frame more or fewer than channel 1, because a recording whose acquisition
         stopped partway through a volume delivers a different number of frames to the two channels of one plane.
@@ -367,6 +413,73 @@ def _resolve_malformed_binaries(contexts: list[RuntimeContext]) -> list[Path]:
                 malformed.append(path)
 
     return malformed
+
+
+def _clear_downstream_data(output_root: Path, plane_count: int) -> None:
+    """Removes every artifact the pipeline derived from the recording's previous plane binaries.
+
+    Notes:
+        The conversion replaces every plane binary of the recording, so the offsets, images, traces, and combined
+        dataset that earlier runs measured describe frames that no longer exist. Removing the registration reference
+        image is what makes the registration stage run again, because that image is the marker it reads before
+        skipping an already registered plane.
+
+        The combined outputs belong to the recording rather than to one plane, and the combination stage merges every
+        plane into them, so rebuilding any plane voids them. The completion marker goes first, which leaves an
+        interrupted clearing reporting the recording as unfinished rather than as complete with a payload that is
+        partly gone.
+
+        A plane directory the recording's current plane count no longer covers is removed whole. It holds the binary,
+        the runtime record, and the results of a plane geometry the recording has left behind, and every reader that
+        enumerates the output root would otherwise load it as a plane of the recording.
+
+        The tracked multi-recording outputs of this recording stay on disk, because they belong to a dataset spanning
+        other recordings. Every multi-recording stage resolves its contexts through the combined metadata removed
+        above, so they stay unreachable until this recording is processed and combined again.
+
+    Args:
+        output_root: The output root the caller configured for the recording.
+        plane_count: The number of virtual imaging planes the recording holds.
+    """
+    root_path = resolve_output_path(output_root=output_root)
+    (root_path / COMBINED_METADATA_FILENAME).unlink(missing_ok=True)
+
+    # Reads the plane directories the recording actually holds, rather than the contiguous range the current plane
+    # count spans. An acquisition re-declared with fewer planes than an earlier run wrote keeps every surplus
+    # directory on disk, and its contents describe frames the rebuilt binaries no longer hold.
+    plane_directories: dict[int, Path] = {}
+    for entry in root_path.iterdir():
+        if not entry.is_dir():
+            continue
+        plane_index = parse_plane_specifier(specifier=entry.name)
+        if plane_index is not None:
+            plane_directories[plane_index] = entry
+
+    for surplus_path in [path for index, path in plane_directories.items() if index >= plane_count]:
+        rmtree(path=surplus_path)
+
+    # The combination stage writes the merged result arrays and detection images into the recording's own output
+    # directory under the names each plane writes into its own directory, so one sweep covers both scopes.
+    plane_paths = [path for index, path in plane_directories.items() if index < plane_count]
+    for directory in (root_path, *plane_paths):
+        stale_paths = [
+            resolve_array_path(root_path=directory, array=result, second_channel=second_channel)
+            for result in RecordingArrays
+            for second_channel in (False, True)
+        ]
+        stale_paths.extend(
+            resolve_array_path(
+                root_path=directory / DETECTION_DATA_DIRECTORY_NAME, array=image, second_channel=second_channel
+            )
+            for image in DetectionImages
+            for second_channel in (False, True)
+        )
+        stale_paths.extend(
+            resolve_array_path(root_path=directory / REGISTRATION_DATA_DIRECTORY_NAME, array=offsets)
+            for offsets in RegistrationArrays
+        )
+        for stale_path in stale_paths:
+            stale_path.unlink(missing_ok=True)
 
 
 def _resolve_plane_context(
@@ -421,7 +534,7 @@ def _resolve_plane_context(
         )
         console.error(message=message, error=ValueError)
 
-    root_path = configuration.file_io.output_path / OUTPUT_DIRECTORY_NAME
+    root_path = resolve_output_path(output_root=configuration.file_io.output_path)
     context = RuntimeContext.load(root_path=root_path, plane_index=plane_index)
     if isinstance(context, list):
         message = (

@@ -77,6 +77,12 @@ _BROKEN_POOL_MESSAGE: str = (
 )
 """The tracker error message recorded for a job the session can no longer dispatch or complete."""
 
+_CANCELED_JOB_MESSAGE: str = (
+    "Unable to execute job. The worker process pool canceled the job before any worker started it, which happens "
+    "when the pool shuts down while the job is still waiting inside it."
+)
+"""The tracker error message recorded for a job whose worker pool future was canceled before it ran."""
+
 
 class _AdmissionDecisions(StrEnum):
     """Defines the outcomes of evaluating one queued job's prerequisites against its own tracker."""
@@ -87,6 +93,18 @@ class _AdmissionDecisions(StrEnum):
     """At least one prerequisite job has not finished, so the job stays in the admission pool."""
     ABORT = "abort"
     """At least one prerequisite job failed or is absent from the tracker, so the job can never run."""
+
+
+class _JobOutcomes(StrEnum):
+    """Defines the outcomes of examining the worker pool future the session holds for one dispatched job."""
+
+    RUNNING = "running"
+    """The worker has not finished the job, so the job keeps its place in its resource class running set."""
+    COMPLETED = "completed"
+    """The worker returned, so the job already recorded its own terminal state on its tracker."""
+    ABANDONED = "abandoned"
+    """The future carries an exception or a cancellation rather than a result. That covers a worker the host killed, a
+    worker that raised on its way out of the job, and a job the pool canceled before any worker started it."""
 
 
 @dataclass(slots=True)
@@ -410,13 +428,61 @@ def _clear_owned_session(state: JobExecutionState) -> None:
 def _reap_completed_jobs(state: JobExecutionState) -> None:
     """Removes the finished jobs from every resource class, freeing that class's concurrency.
 
+    Notes:
+        A job whose worker returned recorded its own terminal state before its future resolved, so the reaper only
+        frees the capacity that job held. A future carrying an exception or a cancellation instead covers a worker the
+        host killed and a job the pool never started. The reaper records a failure for such a job only when its tracker
+        holds no terminal state, so a worker that raised after succeeding keeps its success.
+
     Args:
         state: The current job execution state, accessed under its lock.
     """
     for active_futures in state.active_futures.values():
-        completed_keys = [key for key, future in active_futures.items() if future.done()]
-        for key in completed_keys:
+        outcomes = [(key, _resolve_job_outcome(future=future)) for key, future in active_futures.items()]
+        for key, (outcome, outcome_message) in outcomes:
+            if outcome == _JobOutcomes.RUNNING:
+                continue
+
+            reaped_job = state.all_jobs.get(key)
+            if outcome == _JobOutcomes.ABANDONED and reaped_job is not None:
+                _fail_dispatched_job(job=reaped_job, message=outcome_message)
             active_futures.pop(key, None)
+
+
+def _resolve_job_outcome(future: Future[None]) -> tuple[_JobOutcomes, str]:
+    """Classifies one dispatched job by the state of the worker pool future that carries it.
+
+    Notes:
+        A finished future alone does not state that its job ran to completion. A worker the host killed, most often
+        for exhausting memory, leaves its future finished carrying a BrokenProcessPool, and a pool shutting down
+        leaves the futures it never started canceled. Both leave the job in the same place as a worker whose own
+        terminal-state guard raised, which is a job holding no outcome of its own.
+
+    Args:
+        future: The worker pool future the session holds for the dispatched job.
+
+    Returns:
+        A tuple of the job's outcome and the error message to record when that outcome is ABANDONED. The message is
+        an empty string for every other outcome.
+    """
+    if not future.done():
+        return _JobOutcomes.RUNNING, ""
+
+    if future.cancelled():
+        return _JobOutcomes.ABANDONED, _CANCELED_JOB_MESSAGE
+
+    error = future.exception()
+    if error is None:
+        return _JobOutcomes.COMPLETED, ""
+
+    if isinstance(error, BrokenProcessPool):
+        return _JobOutcomes.ABANDONED, _BROKEN_POOL_MESSAGE
+
+    message = (
+        f"Unable to execute job. The worker process raised {type(error).__name__} outside the job's own error "
+        f"handling, which leaves the job holding no terminal state of its own. The reported reason is '{error}'."
+    )
+    return _JobOutcomes.ABANDONED, message
 
 
 def _admit_ready_jobs(state: JobExecutionState) -> bool:
@@ -537,6 +603,11 @@ def _dispatch_admitted_jobs(state: JobExecutionState, pool: Executor) -> bool:
 def _dispatch_pass(state: JobExecutionState, pool: Executor, *, release_reservations: bool) -> bool:
     """Submits admitted jobs during one pass of the dispatcher.
 
+    Notes:
+        Each submission precedes the queue mutation it belongs to, so a job the pool refuses stays at the head of its
+        class queue. That keeps it inside a collection the broken-pool handler scans, which is what lets the one job
+        the pool refused reach a terminal state alongside its peers.
+
     Args:
         state: The current job execution state, accessed under its lock.
         pool: The worker pool the session dispatches its jobs into.
@@ -572,7 +643,6 @@ def _dispatch_pass(state: JobExecutionState, pool: Executor, *, release_reservat
             ):
                 break
 
-            pending_queue.pop(0)
             future: Future[None] = pool.submit(
                 _pipeline_worker,
                 configuration_path=pending_job.configuration_path,
@@ -581,6 +651,7 @@ def _dispatch_pass(state: JobExecutionState, pool: Executor, *, release_reservat
                 single_recording=pending_job.single_recording,
                 workers=pending_job.resolved_workers,
             )
+            pending_queue.pop(0)
             active_futures[pending_job.dispatch_key] = future
             dispatched = True
 
@@ -730,20 +801,50 @@ def _fail_broken_session(state: JobExecutionState) -> None:
         rather than left reporting as scheduled or running forever, which is what a consumer polling the trackers
         would otherwise see.
 
+        A dispatched job that already recorded a terminal state of its own keeps that state, so a stage that succeeded
+        before the pool broke stays a satisfied prerequisite instead of being failed and re-run.
+
     Args:
         state: The execution state whose pool broke, accessed under its lock.
     """
-    stranded = list(state.admission_pool)
+    stranded: list[PendingJob] = list(state.admission_pool)
     for pending_queue in state.pending_queues.values():
         stranded.extend(pending_queue)
         pending_queue.clear()
     state.admission_pool.clear()
 
     for active_futures in state.active_futures.values():
-        stranded.extend(state.all_jobs[key] for key in active_futures if key in state.all_jobs)
+        for key, future in active_futures.items():
+            outcome, outcome_message = _resolve_job_outcome(future=future)
+            if outcome == _JobOutcomes.COMPLETED or key not in state.all_jobs:
+                continue
+
+            # A job still running when the pool broke holds no reason of its own, so it takes the pool's reason.
+            reason = outcome_message if outcome == _JobOutcomes.ABANDONED else _BROKEN_POOL_MESSAGE
+            _fail_dispatched_job(job=state.all_jobs[key], message=reason)
         active_futures.clear()
 
     _fail_pending_jobs(jobs=stranded, message=_BROKEN_POOL_MESSAGE)
+
+
+def _fail_dispatched_job(job: PendingJob, message: str) -> None:
+    """Records a failure for one dispatched job, unless that job already reached a terminal state of its own.
+
+    Notes:
+        A worker records its own terminal state before its future resolves, and it can then raise on the way out of
+        the guard that verified that state. Reading the tracker keeps the outcome the job recorded, so a stage that
+        succeeded stays a satisfied prerequisite rather than being failed and re-run.
+
+    Args:
+        job: The dispatched job whose future carried no result of its own.
+        message: The error message to record when the job holds no terminal state.
+    """
+    tracker = ProcessingTracker(file_path=job.tracker_path)
+    if tracker.get_job_status(job_id=job.job_id) in (ProcessingStatus.SUCCEEDED, ProcessingStatus.FAILED):
+        return
+
+    tracker.start_job(job_id=job.job_id)
+    tracker.fail_job(job_id=job.job_id, error_message=message)
 
 
 def _fail_pending_jobs(jobs: list[PendingJob], message: str) -> None:

@@ -419,6 +419,24 @@ class TestBinMovie:
             # all 5 of its frames, and bin_size=2 yields floor(5/2) = 2 bins per batch, for 8 bins total.
             assert result.shape[0] == 8
 
+    def test_bins_movie_whose_every_frame_is_bad(self, tmp_path: Path) -> None:
+        """Verifies that a mask marking every frame bad bins the whole movie instead of raising."""
+        file_path = tmp_path / "test.bin"
+        data = _create_test_binary(file_path=file_path)
+
+        # A bad_frames.npy naming every frame index produces this mask, which leaves no good frame to derive the batch
+        # stride from. The stride floors at one frame, and the below-threshold path then keeps the bad frames.
+        bad_frames = np.ones(_FRAME_COUNT, dtype=np.bool_)
+
+        with BinaryFile(height=_FRAME_HEIGHT, width=_FRAME_WIDTH, file_path=file_path) as binary_file:
+            result = binary_file.bin_movie(bin_size=5, bad_frames=bad_frames)
+
+        assert result.dtype == np.float32
+        # Each single-frame batch becomes its own bin, so every frame of the movie survives the binning.
+        assert result.shape == (_FRAME_COUNT, _FRAME_HEIGHT, _FRAME_WIDTH)
+        np.testing.assert_allclose(result[0], data[0])
+        np.testing.assert_allclose(result[-1], data[-1])
+
     def test_bins_small_batch_averaged_into_single_bin(self, tmp_path: Path) -> None:
         """Verifies that a batch smaller than bin_size is averaged into a single bin to preserve data."""
         file_path = tmp_path / "test.bin"

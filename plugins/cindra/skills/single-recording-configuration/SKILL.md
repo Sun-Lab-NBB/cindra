@@ -133,7 +133,7 @@ Controls input data ingestion and output directory paths. During binarization (t
 reads raw multipage TIFF files from the data directory, splits them by imaging plane, and writes each plane's frames
 into a contiguous binary file optimized for fast random access during processing. This TIFF-to-binary conversion is
 skipped on subsequent runs unless `repeat_binarization` is enabled or the existing binaries are invalid (missing, sized
-inconsistently with the recorded plane geometry, or left marked by an interrupted registration).
+inconsistently with the recorded plane geometry, or left marked by an interrupted conversion or registration).
 
 | Parameter             | Type         | Default | Description                                                 |
 |-----------------------|--------------|---------|-------------------------------------------------------------|
@@ -143,12 +143,13 @@ inconsistently with the recorded plane geometry, or left marked by an interrupte
 | `repeat_binarization` | bool         | False   | Force re-conversion even when binaries are intact.          |
 
 Every TIFF the pipeline loads must hold frames of the same shape. A differently shaped file in the data directory, most
-commonly an anatomical z-stack, fails binarization with an error naming the file and this parameter, so list its stem in
-`ignored_file_names` to exclude it. Match on the stem without the extension, so `zstack` rather than `zstack.tiff`.
+commonly an anatomical z-stack, fails binarization with an error naming the file and this parameter, and leaves any
+results the recording already holds in place, so list its stem in `ignored_file_names` to exclude it. Match on the
+stem without the extension, so `zstack` rather than `zstack.tiff`.
 
 `repeat_binarization` forces a rebuild of binaries that are otherwise intact. It is not needed to recover a damaged
 recording: binarization already rebuilds a binary whose size disagrees with its plane geometry, or that an interrupted
-registration left marked, on its own.
+write left marked, on its own.
 
 ---
 

@@ -9,7 +9,7 @@ import numpy as np
 from tifffile import TiffWriter
 from ataraxis_base_utilities import LogLevel, console
 
-from ..layout import resolve_registration_marker_name
+from ..layout import resolve_binary_write_marker_name
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -22,22 +22,23 @@ _INT16_MAX_VALUE: int = 2**15 - 2
 _DEFAULT_BIN_BATCH_SIZE: int = 500
 """The default maximum batch size for frame binning operations."""
 
-_REGISTRATION_MARKER_CONTENTS: str = (
-    "The registration stage was writing motion-corrected frames into the binary this marker sits beside when it was "
-    "interrupted. The binary therefore holds corrected frames up to some unknown point and raw frames after it. "
-    "Re-run the binarization stage for this recording to rebuild the binary from its source TIFF files.\n"
+_BINARY_WRITE_MARKER_CONTENTS: str = (
+    "The binarization or the registration stage was writing frames into the binary this marker sits beside when it "
+    "was interrupted. The binary therefore holds finished frames up to some unknown point and unfinished frames after "
+    "it. Re-run the binarization stage for this recording to rebuild the binary from its source TIFF files.\n"
 )
-"""The text written into a registration marker, so that the marker explains itself to whoever finds it on disk."""
+"""The text written into a write marker, so that the marker explains itself to whoever finds it on disk."""
 
 
-def resolve_registration_marker_path(binary_path: Path) -> Path:
-    """Returns the path of the marker that flags a binary as being mid-registration.
+def resolve_binary_write_marker_path(binary_path: Path) -> Path:
+    """Returns the path of the marker that flags a binary as being mid-write.
 
     Notes:
-        The registration stage rewrites a plane binary in place, so an interrupted run leaves the binary holding a
-        mixture of corrected and raw frames with nothing in the registration outputs recording that. The marker exists
-        for the duration of the rewrite and names the binary it guards, which lets a later run refuse to consume a
-        binary whose contents are indeterminate.
+        The binarization stage sizes a plane binary to its full frame count the moment it opens it, and the
+        registration stage then rewrites that binary in place. An interrupted run of either stage therefore leaves a
+        binary of the expected size holding an indeterminate mixture of frames. The marker exists for the duration of
+        the write and names the binary it guards, which lets a later run refuse to consume a binary whose contents are
+        indeterminate and rebuild it instead.
 
     Args:
         binary_path: The path to the binary the marker guards.
@@ -45,29 +46,29 @@ def resolve_registration_marker_path(binary_path: Path) -> Path:
     Returns:
         The marker path, which sits beside the binary it guards.
     """
-    return binary_path.with_name(resolve_registration_marker_name(binary_name=binary_path.name))
+    return binary_path.with_name(resolve_binary_write_marker_name(binary_name=binary_path.name))
 
 
-def create_registration_marker(binary_path: Path) -> None:
-    """Marks a binary as being mid-registration.
+def create_binary_write_marker(binary_path: Path) -> None:
+    """Marks a binary as being mid-write, which declares its contents indeterminate until the mark is cleared.
 
     Args:
-        binary_path: The path to the binary whose rewrite is about to begin.
+        binary_path: The path to the binary whose write is about to begin.
     """
-    resolve_registration_marker_path(binary_path=binary_path).write_text(_REGISTRATION_MARKER_CONTENTS)
+    resolve_binary_write_marker_path(binary_path=binary_path).write_text(_BINARY_WRITE_MARKER_CONTENTS)
 
 
-def clear_registration_marker(binary_path: Path) -> None:
-    """Clears the mid-registration mark from a binary, which declares its contents consistent again.
+def clear_binary_write_marker(binary_path: Path) -> None:
+    """Clears the mid-write mark from a binary, which declares its contents consistent again.
 
     Notes:
-        Clearing a marker that does not exist is not an error, so the binarization stage can call this for every
-        binary it writes without first checking whether an interrupted registration left one behind.
+        Clearing a marker that does not exist is not an error, so a stage can call this for every binary it finishes
+        without first checking whether an earlier interrupted write left one behind.
 
     Args:
         binary_path: The path to the binary to clear the mark from.
     """
-    resolve_registration_marker_path(binary_path=binary_path).unlink(missing_ok=True)
+    resolve_binary_write_marker_path(binary_path=binary_path).unlink(missing_ok=True)
 
 
 class BinaryFile:
@@ -348,8 +349,9 @@ class BinaryFile:
         good_frames = ~bad_frames if bad_frames is not None else np.ones(self.frame_number, dtype=np.bool_)
 
         # Resolves the batch size. It is capped either to the total number of good frames or the default maximum batch
-        # size, whichever is smaller.
-        batch_size = min(int(np.sum(good_frames)), _DEFAULT_BIN_BATCH_SIZE)
+        # size, whichever is smaller. A movie whose every frame is marked bad has no good frames to count, so the batch
+        # floors at a single frame and the below-threshold branch bins the bad frames rather than discarding them.
+        batch_size = max(1, min(int(np.sum(good_frames)), _DEFAULT_BIN_BATCH_SIZE))
 
         # Bins the frames in batches to reduce memory consumption.
         batches: list[NDArray[np.float32]] = []

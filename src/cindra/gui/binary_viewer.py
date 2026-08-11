@@ -407,8 +407,12 @@ class BinaryPlayer(QMainWindow):
         average_x = np.zeros(frame_count, dtype=np.float32)
         for plane_index in range(plane_count):
             rigid_y, rigid_x = self.data.plane_rigid_offsets(plane_index=plane_index)
-            average_y += rigid_y
-            average_x += rigid_x
+            # Each plane's offsets span that plane's own frame count, which exceeds the combined frame count for a
+            # recording whose acquisition stopped partway through a volume. Accumulates only over the frames the
+            # combined product retained, matching the trim the combination stage applies to the combined traces.
+            shared_count = min(frame_count, rigid_y.shape[0], rigid_x.shape[0])
+            average_y[:shared_count] += rigid_y[:shared_count]
+            average_x[:shared_count] += rigid_x[:shared_count]
         average_y = np.asarray(average_y / plane_count, dtype=np.float32)
         average_x = np.asarray(average_x / plane_count, dtype=np.float32)
         self._average_rigid_y_offsets = average_y

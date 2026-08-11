@@ -57,8 +57,8 @@ def _registered_context(
     return context
 
 
-def _assert_metric_outputs(context: RuntimeContext) -> None:
-    """Asserts that the three principal-component metric arrays are present, correctly shaped, and finite."""
+def _assert_metric_outputs(context: RuntimeContext, *, nonrigid: bool) -> None:
+    """Asserts that the principal-component metric arrays are present, correctly shaped, finite, and separated."""
     extreme = context.runtime.registration.principal_component_extreme_images
     projections = context.runtime.registration.principal_component_projections
     shift = context.runtime.registration.principal_component_shift_metrics
@@ -71,6 +71,16 @@ def _assert_metric_outputs(context: RuntimeContext) -> None:
     assert np.all(np.isfinite(extreme))
     assert np.all(np.isfinite(shift))
     assert np.all(shift >= 0)
+
+    # Column 1 carries the mean per-block nonrigid magnitude and column 2 carries the maximum. The per-block
+    # magnitudes of the synthetic movie spread out, so the mean of every component stays strictly below its maximum,
+    # and both columns are zero whenever nonrigid registration is disabled.
+    if nonrigid:
+        assert np.all(shift[:, 2] > 0.0)
+        assert np.all(shift[:, 1] < shift[:, 2])
+    else:
+        assert np.all(shift[:, 1] == 0.0)
+        assert np.all(shift[:, 2] == 0.0)
 
 
 class TestComputePcMetrics:
@@ -97,7 +107,7 @@ class TestComputePcMetrics:
 
         compute_pc_metrics(context=context, workers=1)
 
-        _assert_metric_outputs(context=context)
+        _assert_metric_outputs(context=context, nonrigid=False)
 
     def test_computes_metric_outputs_with_nonrigid(
         self,
@@ -121,7 +131,7 @@ class TestComputePcMetrics:
 
         compute_pc_metrics(context=context, workers=1)
 
-        _assert_metric_outputs(context=context)
+        _assert_metric_outputs(context=context, nonrigid=True)
 
     def test_applies_bidirectional_correction(
         self,
@@ -147,7 +157,7 @@ class TestComputePcMetrics:
 
         compute_pc_metrics(context=context, workers=1)
 
-        _assert_metric_outputs(context=context)
+        _assert_metric_outputs(context=context, nonrigid=False)
 
     def test_computes_metrics_in_one_photon_mode(
         self,
@@ -172,7 +182,7 @@ class TestComputePcMetrics:
 
         compute_pc_metrics(context=context, workers=1)
 
-        _assert_metric_outputs(context=context)
+        _assert_metric_outputs(context=context, nonrigid=False)
 
     def test_raises_when_binary_path_unset(
         self,

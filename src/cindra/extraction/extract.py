@@ -13,7 +13,7 @@ from scipy import stats
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 
-from ..io import BinaryFile, BinaryFileCombined
+from ..io import BinaryFile, BinaryFileCombined, resolve_binary_write_marker_path
 from .masks import create_masks
 from .deconvolve import apply_oasis_deconvolution, compute_delta_fluorescence
 from ..dataclasses import RuntimeContext
@@ -109,6 +109,10 @@ def _extract_neuropil_fluorescence(  # pragma: no cover
 ) -> NDArray[np.float32]:
     """Extracts neuropil fluorescence traces for the requested ROIs.
 
+    Notes:
+        An ROI whose neuropil mask holds no pixels reports zero neuropil fluorescence, which matches the traces an
+        ROI receives when neuropil extraction is disabled.
+
     Args:
         output_prototype: The pre-initialized output array to be updated with the extracted fluorescence traces.
         data: The raw activity data from which to extract the fluorescence traces.
@@ -127,7 +131,10 @@ def _extract_neuropil_fluorescence(  # pragma: no cover
         end = mask_offsets[cell_index + 1]
 
         # Pre-computes the reciprocal of the neuropil pixel count to replace per-frame division with multiplication.
-        reciprocal = np.float32(1.0) / np.float32(neuropil_pixel_count[cell_index])
+        # A mask with no pixels takes a zero reciprocal, since float32 division by zero yields infinity, which the
+        # empty accumulator below would turn into a NaN trace that propagates into every downstream array.
+        pixel_count = neuropil_pixel_count[cell_index]
+        reciprocal = np.float32(0.0) if pixel_count == 0 else np.float32(1.0) / np.float32(pixel_count)
 
         # Computes the average fluorescence over the entire neuropil region for each frame.
         for frame_index in range(frame_count):
@@ -586,6 +593,13 @@ def _extract_structural_channel_2(
 
     context.runtime.timing.extraction_time_channel_2 = int(timer.elapsed)
 
+    # Re-acquires the two mean images colocalization consumes. Detection releases them before extraction runs, and
+    # both are on disk by this point, the functional one written by detection and the structural one by registration.
+    # Memory-mapped arrays are skipped by the save that follows, so re-mapping them here does not rewrite the files.
+    output_path = io_data.output_path
+    if output_path is not None and (detection_data.mean_image is None or detection_data.mean_image_channel_2 is None):
+        detection_data.memory_map_arrays(output_path=output_path)
+
     # Computes intensity colocalization between functional channel 1 ROIs and the structural channel 2 image.
     extraction_config = context.configuration.signal_extraction
     if (
@@ -606,6 +620,14 @@ def _extract_structural_channel_2(
                 inner_neuropil_border_radius=extraction_config.inner_neuropil_border_radius,
                 minimum_neuropil_pixels=extraction_config.minimum_neuropil_pixels,
             )
+        )
+    else:
+        console.echo(
+            message=(
+                f"Skipping {channel_2_label} intensity colocalization. The ROI statistics or one of the two mean "
+                f"images required to measure it are not available for this plane."
+            ),
+            level=LogLevel.WARNING,
         )
 
 
@@ -771,7 +793,7 @@ def _extract_multi_recording_channel(
     channel_label: str,
     time_constant: float,
     sampling_rate: float,
-) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
+) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], int]:
     """Extracts fluorescence, computes delta-F, and deconvolves spikes for one channel of a multi-recording extraction.
 
     Notes:
@@ -789,9 +811,10 @@ def _extract_multi_recording_channel(
         sampling_rate: The per-plane sampling rate in Hertz.
 
     Returns:
-        A tuple of four arrays: cell fluorescence, neuropil fluorescence, neuropil-and-baseline-corrected delta
-        fluorescence, and deconvolved spikes. Each has shape (roi_count, frame_count). If spike extraction is
-        disabled, the delta fluorescence and spikes arrays are filled with zeroes.
+        A tuple of four arrays and the deconvolution time in seconds. The arrays are the cell fluorescence, the
+        neuropil fluorescence, the neuropil-and-baseline-corrected delta fluorescence, and the deconvolved spikes,
+        each with shape (roi_count, frame_count). If spike extraction is disabled, the delta fluorescence and spikes
+        arrays are filled with zeroes and the reported time is zero.
     """
     # Creates cell and neuropil masks from backward-transformed tracked ROI statistics.
     roi_masks, neuropil_masks = _create_and_unpack_masks(
@@ -815,8 +838,12 @@ def _extract_multi_recording_channel(
         channel_label=channel_label,
     )
 
-    # Computes delta fluorescence and spike deconvolution.
+    # Computes delta fluorescence and spike deconvolution. The segment is timed separately from the trace extraction
+    # above, because the caller persists the two durations as disjoint fields of the recording's timing data.
+    deconvolution_time = 0
     if deconvolution_config.extract_spikes:
+        timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+        timer.reset()
         subtracted_fluorescence = compute_delta_fluorescence(
             cell_fluorescence=cell_fluorescence,
             neuropil_fluorescence=neuropil_fluorescence,
@@ -833,8 +860,12 @@ def _extract_multi_recording_channel(
             time_constant=time_constant,
             sampling_rate=sampling_rate,
         )
+        deconvolution_time = int(timer.elapsed)
         console.echo(
-            message=f"{channel_label.capitalize()} spike deconvolution: complete.",
+            message=(
+                f"{channel_label.capitalize()} spike deconvolution: complete. Time taken: {deconvolution_time} "
+                f"seconds."
+            ),
             level=LogLevel.SUCCESS,
         )
     else:
@@ -848,7 +879,36 @@ def _extract_multi_recording_channel(
         subtracted_fluorescence = np.zeros_like(cell_fluorescence)
         spikes = np.zeros_like(cell_fluorescence)
 
-    return cell_fluorescence, neuropil_fluorescence, subtracted_fluorescence, spikes
+    return cell_fluorescence, neuropil_fluorescence, subtracted_fluorescence, spikes, deconvolution_time
+
+
+def _validate_registered_binaries(binary_paths: list[Path], recording_id: str) -> None:
+    """Verifies that no interrupted write left any of the read plane binaries in an indeterminate state.
+
+    Notes:
+        The binarization stage fills each plane binary and the registration stage rewrites it in place, and both mark
+        the binary for the duration of that write. A run that dies partway therefore leaves finished frames up to an
+        unknown point and unfinished frames after it. The multi-recording pipeline resolves those binaries through the
+        combined metadata rather than through the plane runtime data, so this is the only point at which it consults
+        the marker.
+
+    Args:
+        binary_paths: The paths of the plane binaries the extraction reads.
+        recording_id: The identifier of the recording being processed, used to identify it in the error message.
+
+    Raises:
+        RuntimeError: If a marker shows that a previous write of one of the binaries was interrupted.
+    """
+    for binary_path in binary_paths:
+        marker_path = resolve_binary_write_marker_path(binary_path=binary_path)
+        if marker_path.exists():
+            message = (
+                f"Unable to extract multi-recording traces for recording {recording_id}. A previous write of the "
+                f"binary file '{binary_path}' was interrupted, so the file holds finished frames up to an unknown "
+                f"point and unfinished frames after it. Re-run the binarization and registration stages of the "
+                f"single-recording pipeline for that recording, which also clears the marker at '{marker_path}'."
+            )
+            console.error(message=message, error=RuntimeError)
 
 
 def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
@@ -864,8 +924,8 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
             and colocalization data.
 
     Raises:
-        RuntimeError: If the combined single-recording data is not loaded or if backward-transformed ROI statistics
-            are not available.
+        RuntimeError: If the combined single-recording data is not loaded, if backward-transformed ROI statistics are
+            not available, or if an interrupted registration left one of the recording's plane binaries marked.
     """
     # Resolves configuration and runtime references.
     extraction_config = context.configuration.signal_extraction
@@ -913,6 +973,7 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
 
     # Reads channel 1 registered binary paths from combined data.
     channel_1_binary_paths: list[Path] = list(combined_data.registered_binary_paths)
+    _validate_registered_binaries(binary_paths=channel_1_binary_paths, recording_id=recording_id)
 
     # Extracts channel 1 fluorescence, delta-F, and spikes via the generic channel worker.
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
@@ -932,6 +993,7 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
             extraction_data.neuropil_fluorescence,
             extraction_data.subtracted_fluorescence,
             extraction_data.spikes,
+            deconvolution_time,
         ) = _extract_multi_recording_channel(
             frames=binary,
             roi_statistics=roi_statistics,
@@ -950,8 +1012,11 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
         neuropil_coefficient=deconvolution_config.neuropil_coefficient,
     )
 
+    # Records the two segments disjointly, so that the deconvolution time is not also counted as extraction time and
+    # their sum is the whole phase.
     timing = context.runtime.timing
-    timing.extraction_time = int(timer.elapsed)
+    timing.deconvolution_time = deconvolution_time
+    timing.extraction_time = int(timer.elapsed) - deconvolution_time
 
     # Processes channel 2 if backward-transformed channel 2 tracked ROI statistics are available. This indicates a
     # dual-channel recording where both channels were functional during single-recording processing.
@@ -961,6 +1026,7 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
         channel_2_binary_paths: list[Path] = list(
             combined_data.registered_binary_paths_channel_2  # type: ignore[arg-type]
         )
+        _validate_registered_binaries(binary_paths=channel_2_binary_paths, recording_id=recording_id)
 
         timer.reset()
 
@@ -978,6 +1044,7 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
                 extraction_data.neuropil_fluorescence_channel_2,
                 extraction_data.subtracted_fluorescence_channel_2,
                 extraction_data.spikes_channel_2,
+                deconvolution_time_channel_2,
             ) = _extract_multi_recording_channel(
                 frames=binary_channel_2,
                 roi_statistics=roi_statistics_channel_2,
@@ -996,7 +1063,8 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
             neuropil_coefficient=deconvolution_config.neuropil_coefficient,
         )
 
-        timing.extraction_time += int(timer.elapsed)
+        timing.deconvolution_time += deconvolution_time_channel_2
+        timing.extraction_time += int(timer.elapsed) - deconvolution_time_channel_2
 
         # Computes spatial colocalization between channel 1 and channel 2 tracked ROIs.
         extraction_data.cell_colocalization = compute_spatial_colocalization(
@@ -1007,14 +1075,16 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
             colocalization_threshold=extraction_config.colocalization_threshold,
         )
 
+    # Totals the phase before the save, since the save is what persists the timing data for this recording.
+    total_extraction_time = timing.extraction_time + timing.deconvolution_time
+    timing.total_extraction_time = total_extraction_time
+
     # Saves updated runtime data to disk.
     context.save_runtime()
 
     # Releases extraction arrays to free memory.
     context.runtime.extraction.release_arrays()
 
-    total_extraction_time = timing.extraction_time + timing.deconvolution_time
-    timing.total_extraction_time = total_extraction_time
     console.echo(
         message=(
             f"Recording {recording_id} multi-recording extraction: complete. "

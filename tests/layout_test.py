@@ -10,8 +10,8 @@ from cindra.layout import (
     OUTPUT_DIRECTORY_NAME,
     CHANNEL_2_ARRAY_SUFFIX,
     PLANE_SPECIFIER_PREFIX,
+    BINARY_WRITE_MARKER_SUFFIX,
     COMBINED_METADATA_FILENAME,
-    REGISTRATION_MARKER_SUFFIX,
     MULTI_RECORDING_DIRECTORY_NAME,
     RecordingArrays,
     resolve_array_path,
@@ -20,7 +20,7 @@ from cindra.layout import (
     resolve_dataset_path,
     parse_plane_specifier,
     resolve_plane_specifier,
-    resolve_registration_marker_name,
+    resolve_binary_write_marker_name,
 )
 
 
@@ -45,10 +45,10 @@ class TestPathResolvers:
             Path("/data/session") / OUTPUT_DIRECTORY_NAME / MULTI_RECORDING_DIRECTORY_NAME / "animal_one"
         )
 
-    def test_registration_marker_name_appends_the_suffix(self) -> None:
-        """Verifies that the registration marker name is the binary name plus the marker suffix."""
-        assert resolve_registration_marker_name(binary_name="channel_1_data.bin") == (
-            f"channel_1_data.bin{REGISTRATION_MARKER_SUFFIX}"
+    def test_write_marker_name_appends_the_suffix(self) -> None:
+        """Verifies that the write marker name is the binary name plus the marker suffix."""
+        assert resolve_binary_write_marker_name(binary_name="channel_1_data.bin") == (
+            f"channel_1_data.bin{BINARY_WRITE_MARKER_SUFFIX}"
         )
 
 

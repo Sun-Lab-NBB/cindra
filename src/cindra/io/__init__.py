@@ -1,12 +1,17 @@
 """Provides assets for importing, converting, and combining multi-plane imaging data."""
 
-from .tiff import TIFF_EXTENSIONS, TIFF_DECODE_CEILING, convert_tiffs_to_binary
+from .tiff import (
+    TIFF_EXTENSIONS,
+    TIFF_DECODE_CEILING,
+    convert_tiffs_to_binary,
+    resolve_tiff_conversion_plan,
+)
 from .binary import (
     BinaryFile,
     BinaryFileCombined,
-    clear_registration_marker,
-    create_registration_marker,
-    resolve_registration_marker_path,
+    clear_binary_write_marker,
+    create_binary_write_marker,
+    resolve_binary_write_marker_path,
 )
 from .select import select_recording_rois
 from .combine import combine_planes, compute_plane_offsets
@@ -44,11 +49,11 @@ __all__ = [
     "BinaryFileCombined",
     "DatasetRecordings",
     "RecordingPlanes",
-    "clear_registration_marker",
+    "clear_binary_write_marker",
     "combine_planes",
     "compute_plane_offsets",
     "convert_tiffs_to_binary",
-    "create_registration_marker",
+    "create_binary_write_marker",
     "extract_unique_components",
     "is_dataset_discovered",
     "is_plane_converted",
@@ -58,11 +63,12 @@ __all__ = [
     "is_recording_processed",
     "load_acquisition_parameters",
     "resolve_acquisition_parameters",
+    "resolve_binary_write_marker_path",
     "resolve_dataset_recordings",
     "resolve_multi_recording_contexts",
     "resolve_recording_planes",
     "resolve_recording_roots",
-    "resolve_registration_marker_path",
     "resolve_single_recording_contexts",
+    "resolve_tiff_conversion_plan",
     "select_recording_rois",
 ]

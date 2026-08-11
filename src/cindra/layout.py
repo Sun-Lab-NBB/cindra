@@ -83,13 +83,13 @@ CHANNEL_1_BINARY_FILENAME: str = "channel_1_data.bin"
 CHANNEL_2_BINARY_FILENAME: str = "channel_2_data.bin"
 """The name of the binary holding the second channel frames of one imaging plane."""
 
-REGISTRATION_MARKER_SUFFIX: str = ".registering"
-"""The suffix appended to a plane binary's name while registration rewrites that binary in place.
+BINARY_WRITE_MARKER_SUFFIX: str = ".writing"
+"""The suffix appended to a plane binary's name while a stage writes frames into that binary.
 
 Notes:
-    Registration rewrites its input binary rather than writing a second copy, so a binary carrying this marker holds a
-    partially registered movie. The binarization stage treats a marked binary as invalid and rebuilds it from the
-    source images.
+    Binarization sizes a binary to its full frame count before writing its first frame, and registration rewrites that
+    binary in place. A binary carrying this marker therefore holds an indeterminate mixture of finished and unfinished
+    frames, which the binarization stage treats as invalid and rebuilds from the source images.
 """
 
 CHANNEL_2_ARRAY_SUFFIX: str = "_channel_2"
@@ -284,16 +284,16 @@ def resolve_array_path(root_path: Path, array: PipelineArray, *, second_channel:
     return root_path.joinpath(resolve_array_name(array=array, second_channel=second_channel))
 
 
-def resolve_registration_marker_name(binary_name: str) -> str:
-    """Resolves the name of the marker written beside a plane binary while registration rewrites it.
+def resolve_binary_write_marker_name(binary_name: str) -> str:
+    """Resolves the name of the marker written beside a plane binary while a stage writes frames into it.
 
     Args:
-        binary_name: The name of the plane binary being rewritten.
+        binary_name: The name of the plane binary being written.
 
     Returns:
-        The name of the marker file guarding the rewrite.
+        The name of the marker file guarding the write.
     """
-    return f"{binary_name}{REGISTRATION_MARKER_SUFFIX}"
+    return f"{binary_name}{BINARY_WRITE_MARKER_SUFFIX}"
 
 
 def resolve_plane_specifier(plane_index: int) -> str:
