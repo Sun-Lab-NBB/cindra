@@ -12,12 +12,12 @@ from ataraxis_base_utilities import ensure_directory_exists
 from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 
 from cindra.io import (
-    create_registration_marker,
-    resolve_registration_marker_path,
+    create_binary_write_marker,
+    resolve_binary_write_marker_path,
     resolve_single_recording_contexts,
 )
 from cindra.io.context import PARAMETERS_FILENAME
-from cindra.dataclasses import RuntimeContext, SingleRecordingConfiguration
+from cindra.dataclasses import RuntimeContext, AcquisitionParameters, SingleRecordingConfiguration
 from cindra.orchestration import SingleRecordingJobNames
 from cindra.orchestration.worker import (
     prime_recording,
@@ -83,15 +83,36 @@ def _build_flickering_movie(*, frame_count: int, seed: int) -> NDArray[np.int16]
     return np.clip(movie, 0, _MAXIMUM_PIXEL_VALUE).astype(np.int16)
 
 
-def _write_raw_recording(data_directory: Path, *, frame_count: int = _FRAME_COUNT, seed: int = 0) -> None:
-    """Writes a multi-page TIFF and a raw acquisition parameters file describing one single-channel imaging plane."""
+def _write_raw_recording(
+    data_directory: Path, *, frame_count: int = _FRAME_COUNT, seed: int = 0, plane_number: int = 1
+) -> None:
+    """Writes a multi-page TIFF and a raw acquisition parameters file describing a single-channel recording."""
     ensure_directory_exists(data_directory)
     movie = _build_flickering_movie(frame_count=frame_count, seed=seed)
     with TiffWriter(data_directory / "recording.tif") as writer:
         for frame_index in range(frame_count):
             writer.write(movie[frame_index])
-    parameters = {"frame_rate": 30.0, "plane_number": 1, "channel_number": 1}
+    parameters = {"frame_rate": 30.0, "plane_number": plane_number, "channel_number": 1}
     (data_directory / PARAMETERS_FILENAME).write_text(json.dumps(parameters))
+
+
+def _declare_plane_count(root: Path, *, plane_count: int) -> None:
+    """Re-declares the imaging plane count in the recording's raw and saved acquisition parameter files."""
+    raw_path = root / "data" / PARAMETERS_FILENAME
+    parameters = json.loads(raw_path.read_text())
+    parameters["plane_number"] = plane_count
+    raw_path.write_text(json.dumps(parameters))
+
+    saved_path = root / "output" / "cindra" / "acquisition_parameters.yaml"
+    acquisition = AcquisitionParameters.from_yaml(file_path=saved_path)
+    acquisition.plane_number = plane_count
+    acquisition.to_yaml(file_path=saved_path)
+
+
+def _write_mismatched_tiff(data_directory: Path) -> None:
+    """Writes a TIFF whose frames are shaped unlike the recording's, which the conversion refuses to bind together."""
+    with TiffWriter(data_directory / "zstack.tif") as writer:
+        writer.write(np.zeros((_FRAME_HEIGHT * 2, _FRAME_WIDTH * 2), dtype=np.int16))
 
 
 def _make_configuration(*, data_directory: Path | None, output_directory: Path | None) -> SingleRecordingConfiguration:
@@ -125,11 +146,13 @@ def _prepare_pipeline_inputs(
     return configuration_path, output_directory
 
 
-def _binarize_to_disk(root: Path, *, frame_count: int = _FRAME_COUNT, seed: int = 0) -> SingleRecordingConfiguration:
+def _binarize_to_disk(
+    root: Path, *, frame_count: int = _FRAME_COUNT, seed: int = 0, plane_number: int = 1
+) -> SingleRecordingConfiguration:
     """Writes a raw recording and binarizes it, returning the configuration bound to the on-disk binary outputs."""
     data_directory = root / "data"
     output_directory = root / "output"
-    _write_raw_recording(data_directory=data_directory, frame_count=frame_count, seed=seed)
+    _write_raw_recording(data_directory=data_directory, frame_count=frame_count, seed=seed, plane_number=plane_number)
     configuration = _make_configuration(data_directory=data_directory, output_directory=output_directory)
     # Writes the single-threaded filesystem bootstrap that binarize_recording's load-only resolution depends on.
     resolve_single_recording_contexts(configuration=configuration, persist=True)
@@ -142,6 +165,13 @@ def _register_to_disk(root: Path, *, frame_count: int = _FRAME_COUNT, seed: int 
     configuration = _binarize_to_disk(root=root, frame_count=frame_count, seed=seed)
     register_recording_plane(configuration=configuration, plane_index=0, workers=_TEST_WORKERS)
     return configuration
+
+
+def _process_to_disk(root: Path) -> SingleRecordingConfiguration:
+    """Runs all four phases, returning a configuration bound to the fully processed on-disk outputs."""
+    configuration_path, output_directory = _prepare_pipeline_inputs(root)
+    run_single_recording_pipeline(configuration_path=configuration_path)
+    return _make_configuration(data_directory=root / "data", output_directory=output_directory)
 
 
 class TestRunSingleRecordingPipeline:
@@ -365,12 +395,167 @@ class TestBinarizeRecording:
         """Verifies that binarization rebuilds a marked binary and clears its marker without a caller request."""
         configuration = _binarize_to_disk(tmp_path)
         binary_path = tmp_path / "output" / "cindra" / "plane_0" / "channel_1_data.bin"
-        create_registration_marker(binary_path=binary_path)
+        create_binary_write_marker(binary_path=binary_path)
 
         binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
 
         assert binary_path.exists()
-        assert not resolve_registration_marker_path(binary_path=binary_path).exists()
+        assert not resolve_binary_write_marker_path(binary_path=binary_path).exists()
+
+    @pytest.mark.parametrize("trigger", ["repeat_binarization", "missing_binary", "truncated_binary", "write_marker"])
+    def test_rebuild_clears_downstream_data(self, tmp_path: Path, trigger: str) -> None:
+        """Verifies that every trigger that rebuilds the plane binaries discards the data measured from them."""
+        configuration = _process_to_disk(tmp_path)
+        root_directory = tmp_path / "output" / "cindra"
+        plane_directory = root_directory / "plane_0"
+        binary_path = plane_directory / "channel_1_data.bin"
+        full_size = binary_path.stat().st_size
+
+        # A fully processed recording carries the outputs of all four phases before the rebuild.
+        assert (plane_directory / "registration_data" / "reference_image.npy").exists()
+        assert (plane_directory / "cell_fluorescence.npy").exists()
+        assert (root_directory / "cell_fluorescence.npy").exists()
+        assert (root_directory / "detection_data" / "mean_image.npy").exists()
+        assert (root_directory / "combined_metadata.npz").exists()
+
+        if trigger == "repeat_binarization":
+            configuration.file_io.repeat_binarization = True
+        elif trigger == "missing_binary":
+            binary_path.unlink()
+        elif trigger == "truncated_binary":
+            with binary_path.open(mode="r+b") as binary_file:
+                binary_file.truncate(full_size // 2)
+        else:
+            create_binary_write_marker(binary_path=binary_path)
+
+        binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
+
+        assert binary_path.stat().st_size == full_size
+        assert not resolve_binary_write_marker_path(binary_path=binary_path).exists()
+
+        # The registration outputs and everything measured from them are gone, at plane and recording scope alike.
+        assert not (plane_directory / "registration_data" / "reference_image.npy").exists()
+        assert not (plane_directory / "registration_data" / "rigid_y_offsets.npy").exists()
+        assert not (plane_directory / "roi_statistics.npz").exists()
+        assert not (plane_directory / "cell_fluorescence.npy").exists()
+        assert not (plane_directory / "spikes.npy").exists()
+        assert not (root_directory / "cell_fluorescence.npy").exists()
+        assert not (root_directory / "detection_data" / "mean_image.npy").exists()
+        assert not (root_directory / "combined_metadata.npz").exists()
+
+        # The plane's runtime record no longer reports a registration or a processing run either.
+        context = RuntimeContext.load(root_path=root_directory, plane_index=0)
+        assert not isinstance(context, list)
+        assert not context.runtime.registration.is_registered(output_path=context.runtime.io.output_path)
+        assert context.runtime.timing.registration_workers == 0
+        assert not context.runtime.timing.date_processed
+
+        # Binarization recomputes the per-plane mean image, so the plane keeps the one output it writes itself.
+        assert (plane_directory / "detection_data" / "mean_image.npy").exists()
+
+    def test_failed_conversion_keeps_downstream_data(self, tmp_path: Path) -> None:
+        """Verifies that a rebuild the source files reject leaves every result the previous run measured on disk."""
+        configuration = _process_to_disk(tmp_path)
+        root_directory = tmp_path / "output" / "cindra"
+        plane_directory = root_directory / "plane_0"
+        binary_path = plane_directory / "channel_1_data.bin"
+        full_size = binary_path.stat().st_size
+
+        # An anatomical z-stack dropped beside the recording holds differently shaped frames, which the conversion
+        # refuses to write into binaries sized for the recording.
+        _write_mismatched_tiff(data_directory=tmp_path / "data")
+        configuration.file_io.repeat_binarization = True
+
+        with pytest.raises(ValueError, match="must hold frames of the same shape"):
+            binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
+
+        # The conversion never began, so the recording is still the fully processed recording it was.
+        assert binary_path.stat().st_size == full_size
+        assert not resolve_binary_write_marker_path(binary_path=binary_path).exists()
+        assert (plane_directory / "registration_data" / "reference_image.npy").exists()
+        assert (plane_directory / "roi_statistics.npz").exists()
+        assert (plane_directory / "cell_fluorescence.npy").exists()
+        assert (root_directory / "cell_fluorescence.npy").exists()
+        assert (root_directory / "detection_data" / "mean_image.npy").exists()
+        assert (root_directory / "combined_metadata.npz").exists()
+
+    def test_plane_without_frames_keeps_downstream_data(self, tmp_path: Path) -> None:
+        """Verifies that a recording too short to fill one interleave cycle fails before any result is deleted."""
+        configuration = _process_to_disk(tmp_path)
+        root_directory = tmp_path / "output" / "cindra"
+        plane_directory = root_directory / "plane_0"
+        binary_path = plane_directory / "channel_1_data.bin"
+        full_size = binary_path.stat().st_size
+
+        # Re-declares the recording as two planes and replaces its movie with a single frame, which leaves the second
+        # position of the interleave cycle with no frames of its own.
+        _write_raw_recording(data_directory=tmp_path / "data", frame_count=1)
+        _declare_plane_count(root=tmp_path, plane_count=2)
+        resolve_single_recording_contexts(configuration=configuration, persist=True)
+
+        with pytest.raises(ValueError, match=r"receives\s+no\s+channel\s+1\s+frames"):
+            binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
+
+        # The conversion never began, so the recording is still the fully processed recording it was.
+        assert binary_path.stat().st_size == full_size
+        assert not resolve_binary_write_marker_path(binary_path=binary_path).exists()
+        assert (plane_directory / "registration_data" / "reference_image.npy").exists()
+        assert (plane_directory / "roi_statistics.npz").exists()
+        assert (plane_directory / "cell_fluorescence.npy").exists()
+        assert (root_directory / "cell_fluorescence.npy").exists()
+        assert (root_directory / "detection_data" / "mean_image.npy").exists()
+        assert (root_directory / "combined_metadata.npz").exists()
+
+        # The runtime record still describes that processed state, because the reset is persisted after the plan.
+        context = RuntimeContext.load(root_path=root_directory, plane_index=0)
+        assert not isinstance(context, list)
+        assert context.runtime.registration.is_registered(output_path=context.runtime.io.output_path)
+
+    def test_rebuild_removes_surplus_plane_directories(self, tmp_path: Path) -> None:
+        """Verifies that a rebuild deletes the plane directories the recording's reduced plane count leaves behind."""
+        configuration = _binarize_to_disk(tmp_path, plane_number=2)
+        root_directory = tmp_path / "output" / "cindra"
+        surplus_directory = root_directory / "plane_1"
+
+        # Plants the registration output of the earlier two-plane run, which is the marker the registration stage
+        # reads before skipping a plane and the kind of stale result a later reader would consume.
+        stale_reference = surplus_directory / "registration_data" / "reference_image.npy"
+        ensure_directory_exists(stale_reference.parent)
+        np.save(stale_reference, np.zeros((_FRAME_HEIGHT, _FRAME_WIDTH), dtype=np.float32))
+
+        # Re-declares the recording as a single plane, which leaves the second plane's outputs describing a geometry
+        # the recording no longer holds.
+        _declare_plane_count(root=tmp_path, plane_count=1)
+        configuration.file_io.repeat_binarization = True
+
+        binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
+
+        assert not surplus_directory.exists()
+        assert (root_directory / "plane_0" / "channel_1_data.bin").exists()
+
+        # A reader enumerating the output root now finds the one plane the recording declares.
+        contexts = RuntimeContext.load(root_path=root_directory, plane_index=-1)
+        assert isinstance(contexts, list)
+        assert len(contexts) == 1
+        assert contexts[0].runtime.io.frame_count == _FRAME_COUNT
+
+    def test_rebuilt_plane_registers_again(self, tmp_path: Path) -> None:
+        """Verifies that a plane whose binary was rebuilt re-registers rather than skipping on the discarded output."""
+        configuration = _process_to_disk(tmp_path)
+        reference_path = tmp_path / "output" / "cindra" / "plane_0" / "registration_data" / "reference_image.npy"
+        configuration.file_io.repeat_binarization = True
+
+        binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
+        assert not reference_path.exists()
+
+        register_recording_plane(configuration=configuration, plane_index=0, workers=_TEST_WORKERS)
+
+        # Re-registration is the only writer of the reference image, so its return proves the stage ran again.
+        assert reference_path.exists()
+        context = RuntimeContext.load(root_path=tmp_path / "output" / "cindra", plane_index=0)
+        assert not isinstance(context, list)
+        assert context.runtime.registration.is_registered(output_path=context.runtime.io.output_path)
+        assert context.runtime.timing.registration_workers == _TEST_WORKERS
 
     def test_skips_a_registered_binary(self, tmp_path: Path) -> None:
         """Verifies that a binary whose contents registration rewrote in place is treated as valid and left intact."""

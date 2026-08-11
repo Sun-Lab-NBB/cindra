@@ -248,11 +248,12 @@ This section describes the key data files produced by the pipelines. All per-pla
 Registration writes corrected frames back to the same binary files created during binarization. There are no separate
 "registered" binary files. `channel_1_data.bin` is overwritten in place with motion-corrected data.
 
-Because the rewrite happens in place, registration creates a `channel_1_data.bin.registering` marker file beside the
-binary for the duration of the rewrite and removes it once every frame carries the same correction. If a run is
-interrupted, the marker survives, and the binary holds corrected frames up to an unknown point and raw frames after it.
-Registration refuses to run against a marked binary. Re-run the binarization phase to rebuild the binary from its
-source TIFF files, which also clears the marker.
+Both stages that write frames into a binary guard the write with a `channel_1_data.bin.writing` marker file beside it,
+which they remove once every frame is in place. Binarization sizes the binary to its full frame count before writing
+its first frame, and registration rewrites the binary it reads. An interrupted run of either stage therefore leaves a
+correctly sized file whose contents are indeterminate, and the marker is the only record of that state. Registration
+refuses to run against a marked binary. Re-run the binarization phase to rebuild the binary from its source TIFF
+files, which also clears the marker.
 
 Each binary is sized by the number of frames its own plane-and-channel interleave position receives. When an
 acquisition stops partway through a volume, the leading interleave positions receive one frame more than the trailing
@@ -369,11 +370,18 @@ or in parallel.
 
 Binarization is idempotent. When the output directory already holds a complete set of plane binaries whose sizes match
 the geometry recorded for their planes, the conversion is skipped. A binary is rebuilt from the source TIFFs when it is
-missing, when it carries a `.registering` marker left by an interrupted registration, or when the
+missing, when it carries a `.writing` marker left by an interrupted conversion or registration, or when the
 `file_io.repeat_binarization` configuration parameter is enabled. A rebuild also happens when the binary's size
-disagrees with its plane's recorded frame geometry, which is what an interrupted conversion leaves behind. Re-running
-this phase is therefore the recovery path for both an interrupted conversion and an interrupted registration, and it
-needs no configuration change.
+disagrees with its plane's recorded frame geometry, which is what a binary truncated outside the pipeline leaves
+behind. Re-running this phase is therefore the recovery path for both an interrupted conversion and an interrupted
+registration, and it needs no configuration change.
+
+A rebuild replaces every plane binary of the recording, so it first discards everything the pipeline measured from the
+previous ones: each plane's registration and detection output, its extracted traces, and the recording's combined
+dataset. The rebuilt binaries hold raw frames again, so every plane has to be registered and processed once more before
+the recording can be combined. The discard follows the resolution of every source file and destination the conversion
+needs, so a rebuild that the source files reject, such as one whose TIFF files disagree about their frame shape,
+leaves the previous results in place.
 
 Reads:
 

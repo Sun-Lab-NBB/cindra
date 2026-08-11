@@ -432,6 +432,9 @@ def extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str
         carrying a colon would therefore collide with a differently split pair, so it is rejected here rather than at
         identifier generation, where the diagnostic no longer names the directory that produced it.
 
+        A directory listed twice shares every component with its duplicate, so it carries no unique component and is
+        rejected, which keeps two jobs of the same dataset from collapsing onto one tracker record.
+
     Args:
         paths: A list or tuple of Path objects.
 
@@ -445,7 +448,7 @@ def extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str
     paths_list = list(paths)
     unique_components: list[str] = []
 
-    for path in paths_list:
+    for path_index, path in enumerate(paths_list):
         # Gets components from right to left.
         components = list(path.parts)[::-1]
         found_unique = False
@@ -454,8 +457,10 @@ def extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str
             # Checks if this component appears in any other path.
             is_unique = True
 
-            for other_path in paths_list:
-                if path == other_path:
+            for other_index, other_path in enumerate(paths_list):
+                # Skips the path itself by position rather than by value, so a directory listed twice disqualifies
+                # every component it shares with its duplicate instead of yielding the same specifier for both entries.
+                if other_index == path_index:
                     continue
 
                 # If the component appears anywhere in the other path, it is not unique.
@@ -538,6 +543,12 @@ def load_acquisition_parameters(json_path: Path) -> AcquisitionParameters:
     For single-ROI data, frame_rate, plane_number, and channel_number are required. For MROI data (roi_number > 1),
     roi_lines, roi_x_coordinates, and roi_y_coordinates are additionally required.
 
+    Notes:
+        The file is authored by the user or by a conversion script, so the counts it carries are checked for a positive
+        numeric domain alongside their presence. The frame rate divides by the plane count and the plane and channel
+        counts size the interleave cycle, so a zero or negative value otherwise surfaces deep inside context
+        resolution as a division by zero or an empty context list.
+
     Args:
         json_path: The path to the JSON file containing acquisition parameters.
 
@@ -546,7 +557,8 @@ def load_acquisition_parameters(json_path: Path) -> AcquisitionParameters:
 
     Raises:
         FileNotFoundError: If the JSON file does not exist.
-        ValueError: If required fields are missing from the JSON data.
+        ValueError: If required fields are missing from the JSON data, if frame_rate is not a positive number, or if
+            plane_number, channel_number, or roi_number is not a positive integer.
     """
     if not json_path.exists():
         message = f"Unable to load acquisition parameters. The file was not found: {json_path}."
@@ -563,6 +575,12 @@ def load_acquisition_parameters(json_path: Path) -> AcquisitionParameters:
             f"located at {json_path}."
         )
         console.error(message=message, error=ValueError)
+    if not isinstance(frame_rate, (int, float)) or frame_rate <= 0:
+        message = (
+            f"Unable to load the acquisition parameters stored inside the file located at {json_path}. The "
+            f"'frame_rate' field must be a positive number, but it is {frame_rate}."
+        )
+        console.error(message=message, error=ValueError)
 
     # Extracts plane_number (required).
     plane_number = data.get("plane_number")
@@ -572,6 +590,7 @@ def load_acquisition_parameters(json_path: Path) -> AcquisitionParameters:
             f"located at {json_path}."
         )
         console.error(message=message, error=ValueError)
+    _validate_positive_count(value=plane_number, field_name="plane_number", json_path=json_path)
 
     # Extracts channel_number (required).
     channel_number = data.get("channel_number")
@@ -581,9 +600,11 @@ def load_acquisition_parameters(json_path: Path) -> AcquisitionParameters:
             f"located at {json_path}."
         )
         console.error(message=message, error=ValueError)
+    _validate_positive_count(value=channel_number, field_name="channel_number", json_path=json_path)
 
     # Extracts roi_number (defaults to 1 for single-ROI).
     roi_number = data.get("roi_number", 1)
+    _validate_positive_count(value=roi_number, field_name="roi_number", json_path=json_path)
 
     # For MROI data (roi_number > 1), validates that all MROI fields are present.
     if roi_number > 1:
@@ -624,6 +645,25 @@ def load_acquisition_parameters(json_path: Path) -> AcquisitionParameters:
         roi_x_coordinates=roi_x_coordinates,
         roi_y_coordinates=roi_y_coordinates,
     )
+
+
+def _validate_positive_count(value: object, field_name: str, json_path: Path) -> None:
+    """Verifies that the given acquisition parameters field holds a positive whole number.
+
+    Args:
+        value: The value read from the acquisition parameters file.
+        field_name: The name of the acquisition parameters field the value was read from.
+        json_path: The path to the acquisition parameters file the value was read from.
+
+    Raises:
+        ValueError: If the value is not a positive integer.
+    """
+    if not isinstance(value, int) or value < 1:
+        message = (
+            f"Unable to load the acquisition parameters stored inside the file located at {json_path}. The "
+            f"'{field_name}' field must be a positive integer, but it is {value}."
+        )
+        console.error(message=message, error=ValueError)
 
 
 def _find_acquisition_parameters(data_path: Path) -> AcquisitionParameters:

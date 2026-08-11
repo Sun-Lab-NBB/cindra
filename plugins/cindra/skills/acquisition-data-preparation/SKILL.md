@@ -378,7 +378,7 @@ later stage reads the geometry from this file, so a plane left at 0 fails regist
 
 With the bootstrap (Step 3) and valid binaries (Step 4) in place, run binarization normally. Cindra loads the existing
 plane contexts and skips TIFF conversion only when three checks pass for every plane: each `registered_binary_path`
-exists, no `<binary>.registering` marker sits beside it, and the binary's size matches the frame geometry recorded for
+exists, no `<binary>.writing` marker sits beside it, and the binary's size matches the frame geometry recorded for
 its plane in Step 5. Any check failing, or `file_io.repeat_binarization` being True, makes cindra rebuild every plane's
 binary from the source TIFFs instead, which cannot succeed for adopted data because no raw TIFFs exist, so re-check
 Steps 3-5 and the format requirements above.

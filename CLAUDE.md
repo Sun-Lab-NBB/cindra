@@ -270,11 +270,14 @@ outputs.
   `detection/denoise.py` limits to 1 because its own block pool already spends the budget. The BLAS width these set
   is a property of the process rather than of the thread that asked for it, which is why the engine gives each job
   its own process.
-- **Registration integrity**: Registration rewrites the plane binary in place and guards the rewrite with a
-  `<binary>.registering` marker (`create_registration_marker`, `clear_registration_marker`,
-  `resolve_registration_marker_path`, exported from `cindra.io`). `register_plane` refuses to run while a marker exists,
-  and `binarize_recording` treats a marked binary, or one whose size disagrees with its plane's recorded frame geometry,
-  as invalid and rebuilds it from the source TIFFs without requiring `repeat_binarization`.
+- **Binary write integrity**: Binarization fills a plane binary sized to its full frame count, and registration
+  rewrites that binary in place. Both guard the write with a `<binary>.writing` marker
+  (`create_binary_write_marker`, `clear_binary_write_marker`, `resolve_binary_write_marker_path`, exported from
+  `cindra.io`). `register_plane` refuses to run while a marker exists, and `binarize_recording` treats a marked binary,
+  or one whose size disagrees with its plane's recorded frame geometry, as invalid and rebuilds it from the source
+  TIFFs without requiring `repeat_binarization`. `binarize_recording` resolves the conversion plan
+  (`resolve_tiff_conversion_plan`) before it clears the outputs derived from the previous binaries, so a conversion
+  that fails its input validation leaves the recording's results in place.
 - **Memory efficiency**: Pre-allocates arrays with `np.empty` when overwritten immediately. Uses flattened mask arrays
   with offset indices to reduce per-ROI allocations. Memory maps registration arrays on demand via
   `memory_map_arrays()`. Results tools use lightweight NumPy/YAML reads for targeted queries without full data loading.

@@ -269,16 +269,27 @@ class TestApplyRollingMeanHighPass:
         np.testing.assert_allclose(frames, 0.0, atol=1e-6)
 
     def test_with_remainder(self) -> None:
-        """Verifies rolling mean handles remaining frames after complete windows."""
+        """Verifies rolling mean folds the leftover frames into the last complete window."""
         rng = np.random.default_rng(42)
         frames = rng.standard_normal((35, 4, 4)).astype(np.float32) + 100.0
         _apply_rolling_mean_high_pass(frames=frames, kernel_size=10)
-        # Complete windows (30 frames): within-window mean should be ~0.
-        for window_start in range(0, 30, 10):
+        # Batched windows (the first 20 frames): within-window mean should be ~0.
+        for window_start in range(0, 20, 10):
             window = frames[window_start : window_start + 10]
             np.testing.assert_allclose(window.mean(axis=0), 0.0, atol=1e-4)
-        # Remainder (5 frames): their mean should also be ~0.
-        np.testing.assert_allclose(frames[30:].mean(axis=0), 0.0, atol=1e-4)
+        # The trailing span holds the last complete window and the 5 leftover frames, filtered as one window.
+        np.testing.assert_allclose(frames[20:].mean(axis=0), 0.0, atol=1e-4)
+
+    def test_single_leftover_frame_is_high_passed(self) -> None:
+        """Verifies that a lone leftover frame is folded into the preceding window instead of being zeroed."""
+        rng = np.random.default_rng(0)
+        frames = (100.0 + 10.0 * rng.standard_normal((101, 4, 4))).astype(np.float32)
+        original = frames.copy()
+        _apply_rolling_mean_high_pass(frames=frames, kernel_size=100)
+        # A lone frame filtered on its own would be subtracted from itself, leaving exact zeroes.
+        assert np.any(frames[100] != 0.0)
+        # All 101 frames form one folded span, so each frame keeps its deviation from that span's mean.
+        np.testing.assert_allclose(frames, original - original.mean(axis=0), atol=1e-4)
 
 
 class TestComputeBlockSmoothingKernel:

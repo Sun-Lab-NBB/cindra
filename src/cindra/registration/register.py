@@ -14,9 +14,9 @@ from ataraxis_base_utilities import LogLevel, console
 
 from ..io import (
     BinaryFile,
-    clear_registration_marker,
-    create_registration_marker,
-    resolve_registration_marker_path,
+    clear_binary_write_marker,
+    create_binary_write_marker,
+    resolve_binary_write_marker_path,
 )
 from .rigid import (
     translate_frame,
@@ -42,6 +42,8 @@ from ..detection import compute_registration_blocks
 from .bidiphase_correction import compute_bidirectional_phase_offset, apply_bidirectional_phase_correction
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from numpy.typing import NDArray
 
     from ..dataclasses import IOData, RuntimeContext
@@ -78,14 +80,20 @@ def register_plane(context: RuntimeContext, *, workers: int) -> None:
 
     All configuration is read from context.configuration, file paths from context.runtime.io, and results are stored in
     context.runtime.registration, context.runtime.detection, and context.runtime.timing. The registered frames are
-    written back into the plane's channel binaries in place, guarded by a '<binary>.registering' marker. The runtime
-    data is persisted with context.save_runtime() before returning, after which the registration arrays are released
-    from memory, so consumers re-acquire them with memory_map_arrays() or load_arrays().
+    written back into the plane's channel binaries in place. The runtime data is persisted with context.save_runtime()
+    before returning, after which the registration arrays are released from memory, so consumers re-acquire them with
+    memory_map_arrays() or load_arrays().
 
     Notes:
         The worker count drives both the FFT thread pool used by phase correlation and the Numba thread mask used by
         the nonrigid warping kernels. The Numba mask is thread-local, so concurrently dispatched planes can hold
         different worker budgets inside a single process.
+
+        A '<binary>.writing' marker guards every one of the plane's channel binaries for the whole registration.
+        Only the alignment channel is registered against a reference, and the secondary channel receives the offsets
+        computed from that channel. The two binaries therefore agree about whether motion has been removed only once
+        both rewrites have finished, so the markers are cleared after the registration outputs that describe those
+        rewrites are persisted, and an interrupted run leaves them behind for the binarization stage to act on.
 
     Args:
         context: The RuntimeContext containing configuration, file paths, and mutable runtime data structures. Modified
@@ -100,10 +108,10 @@ def register_plane(context: RuntimeContext, *, workers: int) -> None:
     registration_data = context.runtime.registration
     plane_index = io_data.plane_index if io_data.plane_index is not None else 0
 
-    # Refuses to consume a binary that an interrupted registration left in an indeterminate state. This check precedes
-    # the skip and re-registration branches below, because neither the registration outputs nor their absence reveal
-    # that the binary itself holds a mixture of corrected and raw frames.
-    _validate_binaries_are_not_mid_registration(io_data=io_data, plane_index=plane_index)
+    # Refuses to consume a binary that an interrupted conversion or registration left in an indeterminate state. This
+    # check precedes the skip and re-registration branches below, because neither the registration outputs nor their
+    # absence reveal that the binary itself holds a mixture of finished and unfinished frames.
+    _validate_binaries_are_not_mid_write(io_data=io_data, plane_index=plane_index)
 
     # Checks if registration should be skipped (already registered and not forcing re-registration).
     if registration_data.is_registered(output_path=io_data.output_path) and not config.registration.repeat_registration:
@@ -149,9 +157,10 @@ def register_plane(context: RuntimeContext, *, workers: int) -> None:
         # Computes registration offsets from the alignment channel and applies them.
         _register_alignment_channel(context=context, workers=workers)
 
-        # Applies the same registration offsets to the secondary channel if present.
+        # Applies the same registration offsets to the secondary channel if present. The secondary binary has not been
+        # bidirectionally corrected at this point, so the correction travels with the offsets.
         if has_second_channel:
-            _register_secondary_channel(context=context)
+            _register_secondary_channel(context=context, bidirectional_phase_corrected=False)
 
         context.runtime.timing.registration_time = timer.elapsed
         console.echo(
@@ -171,9 +180,12 @@ def register_plane(context: RuntimeContext, *, workers: int) -> None:
             # Re-runs registration (computes new reference from already-registered frames).
             _register_alignment_channel(context=context, workers=workers)
 
-            # Re-applies offsets to the secondary channel if present.
+            # Re-applies offsets to the secondary channel if present. The step-1 pass above already applied the
+            # bidirectional correction to that binary, so this pass carries the rigid offsets alone.
             if has_second_channel:
-                _register_secondary_channel(context=context)  # pragma: no cover, duplicates the step-1 secondary path
+                _register_secondary_channel(  # pragma: no cover, duplicates the step-1 secondary path
+                    context=context, bidirectional_phase_corrected=True
+                )
 
             context.runtime.timing.two_step_registration_time = int(timer.elapsed)
             console.echo(
@@ -242,6 +254,11 @@ def register_plane(context: RuntimeContext, *, workers: int) -> None:
         # registration offsets
         # and valid ranges are not lost if the metrics computation fails.
         context.save_runtime()
+
+        # Clears the markers that guarded the in-place rewrites. Both of the plane's binaries now carry the same
+        # correction and the registration outputs that describe it are on disk, so the plane is consistent again.
+        for binary_path in _resolve_plane_binary_paths(io_data=io_data):
+            clear_binary_write_marker(binary_path=binary_path)
 
         # Computes registration quality metrics if enabled and recording has enough frames.
         principal_component_count = config.registration.registration_metric_principal_components
@@ -475,8 +492,8 @@ def _compute_reference(
         frames: The frames to use for reference computation with shape (num_frames, height, width). Modified in-place
             by the iterative refinement, which overwrites each frame with its aligned version, unless one-photon
             preprocessing replaces the working array with a filtered copy.
-        pre_smoothing_sigma: The sliding-window (box) smoothing size, in pixels, applied before high-pass
-            filtering. Cast to an integer and passed to apply_spatial_smoothing, which requires an even window.
+        pre_smoothing_sigma: The sliding-window (box) smoothing size, in pixels, applied before high-pass filtering.
+            Cast to an integer and passed to apply_spatial_smoothing, which requires a positive even window.
         spatial_highpass_window: The window size for the spatial high-pass filter that removes low-frequency background.
         edge_taper_pixels: Controls the steepness of the edge taper falloff. Larger values produce a more gradual
             taper that suppresses border artifacts during phase correlation.
@@ -578,8 +595,8 @@ def _register_frames_batch(
         normalization_minimum: The minimum intensity value for clipping frames before correlation.
         normalization_maximum: The maximum intensity value for clipping frames before correlation.
         bidirectional_phase_offset: The pixel offset to correct bidirectional scanning artifacts.
-        pre_smoothing_sigma: The sliding-window (box) smoothing size, in pixels, applied before high-pass
-            filtering. Cast to an integer and passed to apply_spatial_smoothing, which requires an even window.
+        pre_smoothing_sigma: The sliding-window (box) smoothing size, in pixels, applied before high-pass filtering.
+            Cast to an integer and passed to apply_spatial_smoothing, which requires a positive even window.
         spatial_highpass_window: The window size for the spatial high-pass filter that removes low-frequency background.
         temporal_smoothing_sigma: The standard deviation for temporal Gaussian smoothing of correlation maps.
             If 0, no smoothing is applied.
@@ -778,35 +795,49 @@ def _apply_precomputed_offsets_batch(
     return frames
 
 
-def _validate_binaries_are_not_mid_registration(io_data: IOData, plane_index: int) -> None:
-    """Verifies that no interrupted registration left the plane's binaries in an indeterminate state.
+def _resolve_plane_binary_paths(io_data: IOData) -> tuple[Path, ...]:
+    """Resolves the paths of every channel binary the registration stage rewrites for one plane.
+
+    Args:
+        io_data: The plane's IOData, which holds the paths of the binaries the registration stage rewrites.
+
+    Returns:
+        A tuple of the plane's channel binary paths, which holds a single path when the plane has one channel.
+    """
+    return tuple(
+        binary_path
+        for binary_path in (io_data.registered_binary_path, io_data.registered_binary_path_channel_2)
+        if binary_path is not None
+    )
+
+
+def _validate_binaries_are_not_mid_write(io_data: IOData, plane_index: int) -> None:
+    """Verifies that no interrupted write left the plane's binaries in an indeterminate state.
 
     Notes:
-        The registration stage rewrites its input binary in place, so a run that dies partway leaves corrected frames
-        up to some unknown point and raw frames after it. Re-registering such a binary computes its offsets and its
-        valid crop region from a movie whose frames disagree about whether motion has already been removed, and both
-        the resulting traces and the reported registration quality look ordinary. Failing here converts that silent
-        corruption into an actionable error.
+        The binarization stage fills its output binaries and the registration stage rewrites them in place, so a run of
+        either that dies partway leaves finished frames up to some unknown point and unfinished frames after it. On a
+        two-channel plane registration can also leave one binary fully corrected while the other is untouched.
+        Registering such a plane computes its offsets and its valid crop region from a movie whose frames disagree
+        about what they hold, and both the resulting traces and the reported registration quality look ordinary.
+        Failing here converts that silent corruption into an actionable error.
 
     Args:
         io_data: The plane's IOData, which holds the paths of the binaries the registration stage rewrites.
         plane_index: The index of the plane, used to identify the plane in the error message.
 
     Raises:
-        RuntimeError: If a marker shows that a previous registration of one of the plane's binaries was interrupted.
+        RuntimeError: If a marker shows that a previous write of one of the plane's binaries was interrupted.
     """
-    for binary_path in (io_data.registered_binary_path, io_data.registered_binary_path_channel_2):
-        if binary_path is None:
-            continue
-
-        marker_path = resolve_registration_marker_path(binary_path=binary_path)
+    for binary_path in _resolve_plane_binary_paths(io_data=io_data):
+        marker_path = resolve_binary_write_marker_path(binary_path=binary_path)
         if marker_path.exists():
             message = (
-                f"Unable to register plane {plane_index}. A previous registration of the binary file "
-                f"'{binary_path}' was interrupted, so the file holds motion-corrected frames up to an unknown point "
-                f"and raw frames after it. Re-run the binarization stage to rebuild the binary from its source TIFF "
-                f"files, which also clears the marker at '{marker_path}'. Binarization rebuilds a marked binary on "
-                f"its own, so enabling 'repeat_binarization' is not required."
+                f"Unable to register plane {plane_index}. A previous write of the binary file "
+                f"'{binary_path}' was interrupted, so the file holds finished frames up to an unknown point and "
+                f"unfinished frames after it. Re-run the binarization stage to rebuild the binary from its source "
+                f"TIFF files, which also clears the marker at '{marker_path}'. Binarization rebuilds a marked binary "
+                f"on its own, so enabling 'repeat_binarization' is not required."
             )
             console.error(message=message, error=RuntimeError)
 
@@ -817,7 +848,9 @@ def _register_alignment_channel(context: RuntimeContext, *, workers: int) -> Non
     The alignment channel is determined by config.registration.align_by_first_channel. If True, channel 1 is used.
     If False, channel 2 is used. This function computes the reference image, calculates rigid and optionally nonrigid
     registration offsets, and applies them to all frames. Results are stored in context.runtime.registration and the
-    mean image is stored in the appropriate detection field.
+    mean image is stored in the appropriate detection field. Every channel binary of the plane is marked with a
+    '<binary>.writing' file before the in-place rewrite begins, and register_plane clears those markers once the
+    registration outputs are on disk.
 
     Args:
         context: The RuntimeContext containing configuration, acquisition parameters, and runtime data.
@@ -848,6 +881,7 @@ def _register_alignment_channel(context: RuntimeContext, *, workers: int) -> Non
     plane_index = io_data.plane_index if io_data.plane_index is not None else 0
     height, width, frame_count = io_data.frame_height, io_data.frame_width, io_data.frame_count
     bidirectional_phase_corrected = context.runtime.registration.bidirectional_phase_corrected
+    recorded_bidirectional_phase_offset = context.runtime.registration.bidirectional_phase_offset
 
     # Selects channel paths based on alignment configuration.
     if align_by_first_channel:
@@ -868,8 +902,10 @@ def _register_alignment_channel(context: RuntimeContext, *, workers: int) -> Non
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
     with BinaryFile(height=height, width=width, file_path=binary_path, frame_number=frame_count) as frames_file:
-        # Tracks the bidirectional phase offset (may be updated from data).
-        bidirectional_phase_offset = initial_bidirectional_phase_offset
+        # Tracks the bidirectional phase offset (may be updated from data). The configuration override takes
+        # precedence, and the offset an earlier pass recorded fills in behind it, so the two-step refinement pass
+        # republishes the offset the plane's binaries actually carry instead of overwriting it with a zero.
+        bidirectional_phase_offset = initial_bidirectional_phase_offset or recorded_bidirectional_phase_offset
 
         # Samples frames evenly across the recording and converts to float32 for processing.
         sample_indices = np.linspace(0, frame_count, 1 + np.minimum(reference_frame_count, frame_count), dtype=int)[:-1]
@@ -978,9 +1014,13 @@ def _register_alignment_channel(context: RuntimeContext, *, workers: int) -> Non
             level=LogLevel.INFO,
         )
 
-        # Marks the binary for the duration of the in-place rewrite below. Until the loop completes, the file holds a
-        # mixture of corrected and raw frames that nothing else on disk would reveal.
-        create_registration_marker(binary_path=binary_path)
+        # Marks every binary of the plane for the duration of the rewrites that follow. Until this loop completes, the
+        # aligned file holds a mixture of corrected and raw frames that nothing else on disk would reveal. The
+        # secondary channel is marked here as well, because it receives the offsets computed here rather than its own,
+        # so it stays raw until _register_secondary_channel rewrites it. register_plane clears both markers once the
+        # registration outputs that describe the rewrites are on disk.
+        for plane_binary_path in _resolve_plane_binary_paths(io_data=io_data):
+            create_binary_write_marker(binary_path=plane_binary_path)
 
         for batch_start_np in console.track(
             np.arange(0, frame_count, batch_size),
@@ -1042,10 +1082,9 @@ def _register_alignment_channel(context: RuntimeContext, *, workers: int) -> Non
             )
             frames_file[batch_start:batch_end] = batch_result.frames.astype(dtype=np.int16)
 
-        # Flushes the rewritten frames and clears the marker. Every frame now carries the same correction, so the
-        # binary is internally consistent again even though the registration outputs are not yet saved.
+        # Flushes the rewritten frames. The marker stays in place, because a two-channel plane is consistent only once
+        # the secondary channel has received the same offsets.
         frames_file.file.flush()
-        clear_registration_marker(binary_path=binary_path)
 
         # Normalizes accumulated sum to get mean image.
         mean_image /= frame_count
@@ -1089,17 +1128,20 @@ def _register_alignment_channel(context: RuntimeContext, *, workers: int) -> Non
         context.runtime.detection.mean_image_channel_2 = mean_image
 
 
-def _register_secondary_channel(context: RuntimeContext) -> None:
+def _register_secondary_channel(context: RuntimeContext, *, bidirectional_phase_corrected: bool) -> None:
     """Applies precomputed registration offsets to the secondary (non-alignment) channel's frames.
 
     The secondary channel is the opposite of the alignment channel. If align_by_first_channel is True, this function
     processes channel 2. If False, it processes channel 1. Registration offsets are read from
     context.runtime.registration (computed by _register_alignment_channel) and applied to all frames, which are
-    rewritten in place in the channel's binary under a '<binary>.registering' marker. The resulting mean image is
-    stored in the matching detection field.
+    rewritten in place in the channel's binary under the '<binary>.writing' marker _register_alignment_channel
+    created. The resulting mean image is stored in the matching detection field.
 
     Args:
         context: The RuntimeContext containing configuration, acquisition parameters, and runtime data.
+        bidirectional_phase_corrected: Determines whether this channel's binary already carries the bidirectional
+            phase correction, which holds for the two-step refinement pass that follows a completed first pass. The
+            flag stored in context.runtime.registration tracks the alignment channel rather than this one.
     """
     # Extracts configuration parameters.
     config = context.configuration
@@ -1116,7 +1158,6 @@ def _register_secondary_channel(context: RuntimeContext) -> None:
     # Extracts registration data (offsets computed from alignment channel).
     registration_data = context.runtime.registration
     bidirectional_phase_offset = registration_data.bidirectional_phase_offset
-    bidirectional_phase_corrected = registration_data.bidirectional_phase_corrected
 
     # Extracts rigid offsets and converts to int32 for translation operations. Fallback to empty arrays is for type
     # narrowing only. Offsets are always present since _register_alignment_channel populates them before this is called.
@@ -1168,9 +1209,6 @@ def _register_secondary_channel(context: RuntimeContext) -> None:
             level=LogLevel.INFO,
         )
         timer.reset()
-
-        # Marks the binary for the duration of the in-place rewrite below, matching the alignment channel.
-        create_registration_marker(binary_path=binary_path)
 
         # Prepares nonrigid offset arrays outside the loop. Fallback to empty arrays is for type narrowing only.
         # Offsets are always present when nonrigid_enabled is True.
@@ -1224,9 +1262,9 @@ def _register_secondary_channel(context: RuntimeContext) -> None:
             np.clip(frames, a_min=np.iinfo(np.int16).min, a_max=np.iinfo(np.int16).max, out=frames)
             frames_file[batch_start:batch_end] = frames.astype(dtype=np.int16)
 
-        # Flushes the rewritten frames and clears the marker, which declares the binary internally consistent again.
+        # Flushes the rewritten frames. Both of the plane's binaries now carry the same correction, and register_plane
+        # clears their markers once the registration outputs that describe it are on disk.
         frames_file.file.flush()
-        clear_registration_marker(binary_path=binary_path)
 
         # Normalizes accumulated sum to get mean image.
         mean_image /= frame_count

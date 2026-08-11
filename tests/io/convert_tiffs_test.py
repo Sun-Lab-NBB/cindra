@@ -1,4 +1,4 @@
-"""Contains integration tests for the convert_tiffs_to_binary stage entry point."""
+"""Contains integration tests for the TIFF to binary conversion stage entry points."""
 
 from __future__ import annotations
 
@@ -11,11 +11,14 @@ from tifffile import TiffWriter
 
 from cindra.io.tiff import (
     _MISMATCH_REPORT_LIMIT,
+    TiffConversionPlan,
     _create_binary_files,
     _get_frame_dimensions,
+    _resolve_binary_paths,
     convert_tiffs_to_binary,
+    resolve_tiff_conversion_plan,
 )
-from cindra.io.binary import create_registration_marker, resolve_registration_marker_path
+from cindra.io.binary import create_binary_write_marker, resolve_binary_write_marker_path
 from cindra.io.context import PARAMETERS_FILENAME
 from cindra.dataclasses import (
     IOData,
@@ -90,6 +93,24 @@ def _build_context(
     return RuntimeContext(configuration=configuration, acquisition=acquisition, runtime=runtime)
 
 
+def _build_plan(*, context: RuntimeContext) -> TiffConversionPlan:
+    """Builds a conversion plan that writes a single frame into every binary the given context names."""
+    channel_2_path = context.runtime.io.registered_binary_path_channel_2
+    return TiffConversionPlan(
+        contexts=(context,),
+        tiff_files=(),
+        total_frames=1,
+        batch_size=1,
+        decode_workers=1,
+        frame_heights=(_FRAME_HEIGHT,),
+        frame_widths=(_FRAME_WIDTH,),
+        channel_1_paths=(context.runtime.io.registered_binary_path,),
+        channel_2_paths=() if channel_2_path is None else (channel_2_path,),
+        channel_1_frame_counts=(1,),
+        channel_2_frame_counts=() if channel_2_path is None else (1,),
+    )
+
+
 class TestConvertTiffsToBinary:
     """Tests convert_tiffs_to_binary."""
 
@@ -111,7 +132,7 @@ class TestConvertTiffsToBinary:
             output_path=output_path, configuration=configuration, acquisition=acquisition, plane_index=0
         )
 
-        convert_tiffs_to_binary(contexts=[context], workers=1)
+        convert_tiffs_to_binary(plan=resolve_tiff_conversion_plan(contexts=[context], workers=1))
 
         io_data = context.runtime.io
         assert io_data.frame_count == len(frame_values)
@@ -151,7 +172,7 @@ class TestConvertTiffsToBinary:
             output_path=output_path, configuration=configuration, acquisition=acquisition, plane_index=1
         )
 
-        convert_tiffs_to_binary(contexts=[context_0, context_1], workers=1)
+        convert_tiffs_to_binary(plan=resolve_tiff_conversion_plan(contexts=[context_0, context_1], workers=1))
 
         binary_0 = read_binary_movie(
             file_path=context_0.runtime.io.registered_binary_path, frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH
@@ -195,7 +216,7 @@ class TestConvertTiffsToBinary:
             two_channels=True,
         )
 
-        convert_tiffs_to_binary(contexts=[context], workers=1)
+        convert_tiffs_to_binary(plan=resolve_tiff_conversion_plan(contexts=[context], workers=1))
 
         io_data = context.runtime.io
         binary_1 = read_binary_movie(
@@ -238,7 +259,7 @@ class TestConvertTiffsToBinary:
             two_channels=True,
         )
 
-        convert_tiffs_to_binary(contexts=[context], workers=1)
+        convert_tiffs_to_binary(plan=resolve_tiff_conversion_plan(contexts=[context], workers=1))
 
         io_data = context.runtime.io
         binary_1 = read_binary_movie(
@@ -278,7 +299,7 @@ class TestConvertTiffsToBinary:
             mroi_lines=mroi_lines,
         )
 
-        convert_tiffs_to_binary(contexts=[context], workers=1)
+        convert_tiffs_to_binary(plan=resolve_tiff_conversion_plan(contexts=[context], workers=1))
 
         io_data = context.runtime.io
         roi_height = mroi_lines[-1] - mroi_lines[0] + 1
@@ -315,7 +336,7 @@ class TestConvertTiffsToBinary:
             mroi_lines=mroi_lines,
         )
 
-        convert_tiffs_to_binary(contexts=[context], workers=1)
+        convert_tiffs_to_binary(plan=resolve_tiff_conversion_plan(contexts=[context], workers=1))
 
         io_data = context.runtime.io
         roi_height = mroi_lines[-1] - mroi_lines[0] + 1
@@ -332,6 +353,52 @@ class TestConvertTiffsToBinary:
         assert np.array_equal(
             binary_2, _constant_stack(frame_values=[1, 3, 5, 7], height=roi_height, width=_FRAME_WIDTH)
         )
+
+    def test_mroi_partial_final_volume_sizes_every_roi_by_its_physical_plane(
+        self, tmp_path: Path, read_binary_movie: Callable[[Path, int, int], NDArray[np.int16]]
+    ) -> None:
+        """Verifies that MROI planes sharing a physical plane receive the same frames whatever ROI they belong to."""
+        data_path = tmp_path / "data"
+        output_path = tmp_path / "output"
+        _write_parameters_json(directory=data_path, plane_number=2, channel_number=1)
+        # Five pages over a two-plane interleave end the recording partway through a volume, which is what an
+        # operator-stopped acquisition leaves behind. The leading plane then receives one frame more than the trailing
+        # one, and a virtual plane of ROI 1 must be sized by the physical plane it belongs to rather than by its own
+        # index.
+        frame_values = [0, 1, 2, 3, 4]
+        _write_constant_tiff(
+            file_path=data_path / "recording.tif", frame_values=frame_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH
+        )
+
+        configuration = _build_configuration(data_path=data_path, output_path=output_path)
+        acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=2, channel_number=1, roi_number=2)
+        roi_lines = ((0, 1, 2, 3), (4, 5, 6, 7))
+        contexts = [
+            _build_context(
+                output_path=output_path,
+                configuration=configuration,
+                acquisition=acquisition,
+                plane_index=virtual_plane_index,
+                mroi_lines=roi_lines[virtual_plane_index // acquisition.plane_number],
+            )
+            for virtual_plane_index in range(acquisition.plane_number * acquisition.roi_number)
+        ]
+
+        convert_tiffs_to_binary(plan=resolve_tiff_conversion_plan(contexts=contexts, workers=1))
+
+        roi_height = len(roi_lines[0])
+        # Virtual planes 0 and 2 belong to physical plane 0 and virtual planes 1 and 3 belong to physical plane 1, so
+        # the two members of each pair hold the same frames of the interleave cycle.
+        expected_selections = [[0, 2, 4], [1, 3], [0, 2, 4], [1, 3]]
+        for context, selection in zip(contexts, expected_selections, strict=True):
+            io_data = context.runtime.io
+            assert io_data.frame_count == len(selection)
+            binary = read_binary_movie(
+                file_path=io_data.registered_binary_path, frame_height=roi_height, frame_width=_FRAME_WIDTH
+            )
+            assert np.array_equal(
+                binary, _constant_stack(frame_values=selection, height=roi_height, width=_FRAME_WIDTH)
+            )
 
     def test_multiple_files_continue_on_empty_plane_batch(
         self, tmp_path: Path, read_binary_movie: Callable[[Path, int, int], NDArray[np.int16]]
@@ -358,7 +425,7 @@ class TestConvertTiffsToBinary:
             output_path=output_path, configuration=configuration, acquisition=acquisition, plane_index=1
         )
 
-        convert_tiffs_to_binary(contexts=[context_0, context_1], workers=1)
+        convert_tiffs_to_binary(plan=resolve_tiff_conversion_plan(contexts=[context_0, context_1], workers=1))
 
         binary_0 = read_binary_movie(
             file_path=context_0.runtime.io.registered_binary_path, frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH
@@ -406,7 +473,7 @@ class TestConvertTiffsToBinary:
             for plane_index in range(2)
         ]
 
-        convert_tiffs_to_binary(contexts=contexts, workers=1)
+        convert_tiffs_to_binary(plan=resolve_tiff_conversion_plan(contexts=contexts, workers=1))
 
         expected_selections = [([0, 4, 8], [1, 5, 9]), ([2, 6, 10], [3, 7])]
         for context, (channel_1_values, channel_2_values) in zip(contexts, expected_selections, strict=True):
@@ -447,7 +514,7 @@ class TestConvertTiffsToBinary:
             output_path=output_path, configuration=configuration, acquisition=acquisition, plane_index=0
         )
 
-        convert_tiffs_to_binary(contexts=[context], workers=1)
+        convert_tiffs_to_binary(plan=resolve_tiff_conversion_plan(contexts=[context], workers=1))
 
         io_data = context.runtime.io
         assert io_data.frame_count == 1
@@ -476,7 +543,7 @@ class TestConvertTiffsToBinary:
             output_path=output_path, configuration=configuration, acquisition=acquisition, plane_index=0
         )
 
-        convert_tiffs_to_binary(contexts=[context], workers=1)
+        convert_tiffs_to_binary(plan=resolve_tiff_conversion_plan(contexts=[context], workers=1))
 
         io_data = context.runtime.io
         assert io_data.frame_count == len(frame_values)
@@ -511,12 +578,81 @@ class TestConvertTiffsToBinary:
         )
 
         with pytest.raises(RuntimeError, match=r"binary file\s+was sized for 4 frames"):
-            convert_tiffs_to_binary(contexts=[context], workers=1)
+            convert_tiffs_to_binary(plan=resolve_tiff_conversion_plan(contexts=[context], workers=1))
+
+    def test_completed_conversion_clears_the_binary_marks(self, tmp_path: Path) -> None:
+        """Verifies that a conversion that writes every frame leaves both channel binaries unmarked."""
+        data_path = tmp_path / "data"
+        output_path = tmp_path / "output"
+        _write_parameters_json(directory=data_path, plane_number=1, channel_number=2)
+        _write_constant_tiff(
+            file_path=data_path / "recording.tif",
+            frame_values=[0, 1, 2, 3],
+            height=_FRAME_HEIGHT,
+            width=_FRAME_WIDTH,
+        )
+
+        configuration = _build_configuration(data_path=data_path, output_path=output_path)
+        configuration.main.two_channels = True
+        acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=1, channel_number=2)
+        context = _build_context(
+            output_path=output_path,
+            configuration=configuration,
+            acquisition=acquisition,
+            plane_index=0,
+            two_channels=True,
+        )
+
+        convert_tiffs_to_binary(plan=resolve_tiff_conversion_plan(contexts=[context], workers=1))
+
+        io_data = context.runtime.io
+        assert not resolve_binary_write_marker_path(binary_path=io_data.registered_binary_path).exists()
+        assert not resolve_binary_write_marker_path(binary_path=io_data.registered_binary_path_channel_2).exists()
+
+    def test_interrupted_conversion_leaves_the_binary_marked(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verifies that a conversion that fails partway leaves its full-size binary marked for rebuilding."""
+        data_path = tmp_path / "data"
+        output_path = tmp_path / "output"
+        _write_parameters_json(directory=data_path, plane_number=1, channel_number=1)
+        frame_values = [0, 1, 2, 3, 4]
+        _write_constant_tiff(
+            file_path=data_path / "recording.tif", frame_values=frame_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH
+        )
+
+        # Reproduces an interruption that reaches the conversion loop after the destination binary has been opened.
+        def _interrupted_read(
+            tiff: object, start_index: int, batch_size: int, decode_workers: int
+        ) -> NDArray[np.int16] | None:
+            """Fails the first read of the conversion loop, leaving the destination binary untouched."""
+            raise RuntimeError("Simulated conversion interruption")
+
+        monkeypatch.setattr("cindra.io.tiff._read_tiff", _interrupted_read)
+
+        configuration = _build_configuration(data_path=data_path, output_path=output_path)
+        acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=1, channel_number=1)
+        context = _build_context(
+            output_path=output_path, configuration=configuration, acquisition=acquisition, plane_index=0
+        )
+
+        with pytest.raises(RuntimeError, match="Simulated conversion interruption"):
+            convert_tiffs_to_binary(plan=resolve_tiff_conversion_plan(contexts=[context], workers=1))
+
+        binary_path = context.runtime.io.registered_binary_path
+        # The abandoned binary holds the exact byte count a finished conversion would leave behind, with every frame
+        # still zero, so the mark beside it is the only record that its contents are incomplete.
+        assert binary_path.stat().st_size == len(frame_values) * _FRAME_HEIGHT * _FRAME_WIDTH * 2
+        assert resolve_binary_write_marker_path(binary_path=binary_path).exists()
+
+
+class TestResolveTiffConversionPlan:
+    """Tests resolve_tiff_conversion_plan."""
 
     def test_empty_contexts_raises(self) -> None:
         """Verifies that providing no contexts raises a ValueError."""
         with pytest.raises(ValueError, match="At least one RuntimeContext"):
-            convert_tiffs_to_binary(contexts=[], workers=1)
+            resolve_tiff_conversion_plan(contexts=[], workers=1)
 
     def test_missing_data_path_raises(self, tmp_path: Path) -> None:
         """Verifies that a configuration without a data_path raises a ValueError."""
@@ -528,7 +664,90 @@ class TestConvertTiffsToBinary:
         )
 
         with pytest.raises(ValueError, match="data_path must be configured"):
-            convert_tiffs_to_binary(contexts=[context], workers=1)
+            resolve_tiff_conversion_plan(contexts=[context], workers=1)
+
+    def test_resolution_leaves_the_previous_binary_in_place(self, tmp_path: Path) -> None:
+        """Verifies that resolving a plan changes nothing on disk, which is what lets the caller delete after it."""
+        data_path = tmp_path / "data"
+        output_path = tmp_path / "output"
+        _write_parameters_json(directory=data_path, plane_number=1, channel_number=1)
+        _write_constant_tiff(
+            file_path=data_path / "recording.tif", frame_values=[0, 1], height=_FRAME_HEIGHT, width=_FRAME_WIDTH
+        )
+
+        configuration = _build_configuration(data_path=data_path, output_path=output_path)
+        acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=1, channel_number=1)
+        context = _build_context(
+            output_path=output_path, configuration=configuration, acquisition=acquisition, plane_index=0
+        )
+        binary_path = context.runtime.io.registered_binary_path
+        binary_path.write_bytes(b"previous binary")
+
+        plan = resolve_tiff_conversion_plan(contexts=[context], workers=1)
+
+        assert plan.total_frames == 2
+        assert plan.channel_1_paths == (binary_path,)
+        assert plan.channel_2_paths == ()
+        assert binary_path.read_bytes() == b"previous binary"
+        assert not resolve_binary_write_marker_path(binary_path=binary_path).exists()
+
+    def test_plane_without_frames_raises(self, tmp_path: Path) -> None:
+        """Verifies that a recording too short to fill one interleave cycle is rejected before a plan is returned."""
+        data_path = tmp_path / "data"
+        output_path = tmp_path / "output"
+        _write_parameters_json(directory=data_path, plane_number=2, channel_number=1)
+
+        # A single frame covers the first position of the two-plane interleave cycle and leaves the second empty.
+        _write_constant_tiff(
+            file_path=data_path / "recording.tif", frame_values=[0], height=_FRAME_HEIGHT, width=_FRAME_WIDTH
+        )
+
+        configuration = _build_configuration(data_path=data_path, output_path=output_path)
+        acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=2, channel_number=1)
+        contexts = [
+            _build_context(
+                output_path=output_path, configuration=configuration, acquisition=acquisition, plane_index=plane_index
+            )
+            for plane_index in range(2)
+        ]
+
+        with pytest.raises(ValueError, match=r"Plane\s+1\s+receives\s+no\s+channel\s+1\s+frames"):
+            resolve_tiff_conversion_plan(contexts=contexts, workers=1)
+
+
+class TestResolveBinaryPaths:
+    """Tests _resolve_binary_paths."""
+
+    def test_missing_channel_1_path_raises(self, tmp_path: Path) -> None:
+        """Verifies that a missing channel 1 binary path raises a ValueError."""
+        output_path = tmp_path / "output"
+        configuration = _build_configuration(data_path=tmp_path / "data", output_path=output_path)
+        acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=1, channel_number=1)
+        context = _build_context(
+            output_path=output_path, configuration=configuration, acquisition=acquisition, plane_index=0
+        )
+        context.runtime.io.registered_binary_path = None
+
+        with pytest.raises(ValueError, match="registered_binary_path is not"):
+            _resolve_binary_paths(contexts=[context])
+
+    def test_missing_channel_2_path_raises(self, tmp_path: Path) -> None:
+        """Verifies that a missing channel 2 binary path raises a ValueError for two-channel data."""
+        output_path = tmp_path / "output"
+        configuration = _build_configuration(data_path=tmp_path / "data", output_path=output_path)
+        configuration.main.two_channels = True
+        acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=1, channel_number=2)
+        context = _build_context(
+            output_path=output_path,
+            configuration=configuration,
+            acquisition=acquisition,
+            plane_index=0,
+            two_channels=True,
+        )
+        context.runtime.io.registered_binary_path_channel_2 = None
+
+        with pytest.raises(ValueError, match="registered_binary_path_channel_2 is not"):
+            _resolve_binary_paths(contexts=[context])
 
 
 class TestGetFrameDimensions:
@@ -641,15 +860,8 @@ class TestGetFrameDimensions:
 class TestCreateBinaryFiles:
     """Tests _create_binary_files."""
 
-    def test_empty_contexts_raises(self) -> None:
-        """Verifies that providing no contexts raises a ValueError."""
-        with pytest.raises(ValueError, match="At least one RuntimeContext"):
-            _create_binary_files(
-                contexts=[], frame_heights=[], frame_widths=[], channel_1_frame_counts=[], channel_2_frame_counts=[]
-            )
-
-    def test_clears_a_stale_registration_marker(self, tmp_path: Path) -> None:
-        """Verifies that rebuilding a binary clears the marker an interrupted registration left beside it."""
+    def test_marks_the_binary_it_opens(self, tmp_path: Path) -> None:
+        """Verifies that a freshly opened binary carries the mark that flags its contents as incomplete."""
         output_path = tmp_path / "output"
         configuration = _build_configuration(data_path=tmp_path / "data", output_path=output_path)
         acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=1, channel_number=1)
@@ -657,43 +869,17 @@ class TestCreateBinaryFiles:
             output_path=output_path, configuration=configuration, acquisition=acquisition, plane_index=0
         )
         binary_path = context.runtime.io.registered_binary_path
-        create_registration_marker(binary_path=binary_path)
-        assert resolve_registration_marker_path(binary_path=binary_path).exists()
+        create_binary_write_marker(binary_path=binary_path)
 
-        binaries, _ = _create_binary_files(
-            contexts=[context],
-            frame_heights=[_FRAME_HEIGHT],
-            frame_widths=[_FRAME_WIDTH],
-            channel_1_frame_counts=[1],
-            channel_2_frame_counts=[1],
-        )
+        binaries, _ = _create_binary_files(plan=_build_plan(context=context))
         binaries[0].close()
 
-        # Re-running binarization is the documented recovery path for an interrupted registration, so it must leave
-        # the rebuilt binary usable rather than permanently marked.
-        assert not resolve_registration_marker_path(binary_path=binary_path).exists()
+        # The binary is sized to its full frame count the moment it is opened, so nothing but the mark separates it
+        # from a finished conversion until the caller writes every frame and clears the mark.
+        assert resolve_binary_write_marker_path(binary_path=binary_path).exists()
 
-    def test_missing_channel_1_path_raises(self, tmp_path: Path) -> None:
-        """Verifies that a missing channel 1 binary path raises a ValueError."""
-        output_path = tmp_path / "output"
-        configuration = _build_configuration(data_path=tmp_path / "data", output_path=output_path)
-        acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=1, channel_number=1)
-        context = _build_context(
-            output_path=output_path, configuration=configuration, acquisition=acquisition, plane_index=0
-        )
-        context.runtime.io.registered_binary_path = None
-
-        with pytest.raises(ValueError, match="registered_binary_path is not"):
-            _create_binary_files(
-                contexts=[context],
-                frame_heights=[_FRAME_HEIGHT],
-                frame_widths=[_FRAME_WIDTH],
-                channel_1_frame_counts=[1],
-                channel_2_frame_counts=[1],
-            )
-
-    def test_missing_channel_2_path_raises(self, tmp_path: Path) -> None:
-        """Verifies that a missing channel 2 binary path raises a ValueError for two-channel data."""
+    def test_marks_both_channel_binaries_it_opens(self, tmp_path: Path) -> None:
+        """Verifies that a two-channel plane carries the mark on both of the binaries the conversion opens."""
         output_path = tmp_path / "output"
         configuration = _build_configuration(data_path=tmp_path / "data", output_path=output_path)
         configuration.main.two_channels = True
@@ -705,13 +891,11 @@ class TestCreateBinaryFiles:
             plane_index=0,
             two_channels=True,
         )
-        context.runtime.io.registered_binary_path_channel_2 = None
 
-        with pytest.raises(ValueError, match="registered_binary_path_channel_2 is not"):
-            _create_binary_files(
-                contexts=[context],
-                frame_heights=[_FRAME_HEIGHT],
-                frame_widths=[_FRAME_WIDTH],
-                channel_1_frame_counts=[1],
-                channel_2_frame_counts=[1],
-            )
+        channel_1_binaries, channel_2_binaries = _create_binary_files(plan=_build_plan(context=context))
+        channel_1_binaries[0].close()
+        channel_2_binaries[0].close()
+
+        io_data = context.runtime.io
+        assert resolve_binary_write_marker_path(binary_path=io_data.registered_binary_path).exists()
+        assert resolve_binary_write_marker_path(binary_path=io_data.registered_binary_path_channel_2).exists()

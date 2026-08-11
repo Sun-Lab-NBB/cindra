@@ -46,7 +46,9 @@ class Classifier:
         for the default training set.
 
     Args:
-        classifier_path: The path to a classifier .npz file containing training_labels and feature arrays.
+        classifier_path: The path to a classifier .npz file containing training_labels and feature arrays. The file
+            must hold at least _GRID_NODE_COUNT training samples, which is the number of nodes the fitted probability
+            grid spans.
         feature_names: The tuple of feature names to use for classification. Only these features will be loaded from
             the classifier file and used for model fitting. If None, the default classification feature set
             (_CLASSIFICATION_FEATURES: normalized_pixel_count, compactness, skewness) is used, restricted to the
@@ -64,6 +66,12 @@ class Classifier:
             with shape (n_nodes - 1, n_features). Used to compute log probability ratios that serve as input
             features for the logistic regression model.
         _model: The fitted LogisticRegression model.
+
+    Raises:
+        FileNotFoundError: If the classifier file does not exist.
+        ValueError: If the classifier file is unreadable, holds a column that does not cast to its numeric type, is
+            missing the training labels, holds fewer than _GRID_NODE_COUNT training samples, or contains none of the
+            requested feature columns.
     """
 
     def __init__(self, classifier_path: Path, feature_names: tuple[str, ...] | None = None) -> None:
@@ -74,60 +82,69 @@ class Classifier:
             )
             console.error(message=message, error=FileNotFoundError)
 
+        # Determines which features to load. If feature_names is specified, only those features are used. Otherwise,
+        # the default _CLASSIFICATION_FEATURES set is used.
+        target_features = feature_names if feature_names is not None else _CLASSIFICATION_FEATURES
+
+        # Reads and casts the archive columns under the handler that reports a malformed file. A column whose stored
+        # dtype does not cast is such a file, so both casts sit inside the handler. The handler spans nothing else,
+        # because every check below raises its own diagnosis that a wider handler would relabel as a corrupt file.
         try:
-            # Loads the training data.
             data = np.load(file=classifier_path, allow_pickle=False)
-
-            if "training_labels" not in data:
-                message = (
-                    f"Unable to load the classification training data. The classifier file at {classifier_path} is "
-                    f"missing the 'training_labels' column."
-                )
-                console.error(message=message, error=ValueError)
-
-            # Resolves the labels and the training dataset size.
-            training_labels = data["training_labels"].astype(np.bool_)
-            sample_count = len(training_labels)
-
-            training_features: dict[str, NDArray[np.float32]] = {}
-            available_features: list[str] = []
-
-            # Determines which features to load. If feature_names is specified, only those features are used.
-            # Otherwise, the default _CLASSIFICATION_FEATURES set is used.
-            target_features = feature_names if feature_names is not None else _CLASSIFICATION_FEATURES
-
-            # Loads the requested features from the classifier file. As long as the dataset contains at least one
-            # valid feature, the class can train the model. This allows flexibly working with incomplete datasets
-            # and extending the feature set in the future.
-            for feature_name in target_features:
-                if feature_name in data:
-                    feature_array = data[feature_name].astype(np.float32)
-                    if len(feature_array) == sample_count and not np.all(a=np.isnan(feature_array)):
-                        training_features[feature_name] = feature_array
-                        available_features.append(feature_name)
-
-            if not available_features:
-                message = (
-                    f"Unable to load the classification training data. The classifier file at {classifier_path} "
-                    f"does not contain any of the expected feature columns: {', '.join(target_features)}."
-                )
-                console.error(message=message, error=ValueError)
-
-            # Sets instance attributes after all validation passes.
-            self._classifier_path: Path = classifier_path
-            self._available_features: list[str] = available_features
-            self._training_features: dict[str, NDArray[np.float32]] = training_features
-            self._training_labels: NDArray[np.bool_] = training_labels
-
-            # Fits the logistic regression model using the validated training data.
-            self._fit_model()
-
+            training_labels = data["training_labels"].astype(np.bool_) if "training_labels" in data else None
+            feature_arrays = {name: data[name].astype(np.float32) for name in target_features if name in data}
         except (ValueError, KeyError, TypeError) as exception:
             message = (
                 f"Unable to load the classification training data. The classifier file at {classifier_path} is "
                 f"corrupted or has an invalid format. Original loader error: {exception}."
             )
             console.error(message=message, error=ValueError)
+
+        if training_labels is None:
+            message = (
+                f"Unable to load the classification training data. The classifier file at {classifier_path} is "
+                f"missing the 'training_labels' column."
+            )
+            console.error(message=message, error=ValueError)
+
+        sample_count = len(training_labels)
+
+        # Rejects a dataset the probability grid cannot span. The grid samples _GRID_NODE_COUNT positions across the
+        # sorted samples, so a smaller dataset yields repeated positions, zero-width bins, and NaN bin probabilities
+        # that reach the model fit as a failure naming neither the file nor its sample count.
+        if sample_count < _GRID_NODE_COUNT:
+            message = (
+                f"Unable to load the classification training data. The classifier file at {classifier_path} holds "
+                f"{sample_count} training samples, but fitting the classification model requires at least "
+                f"{_GRID_NODE_COUNT} samples."
+            )
+            console.error(message=message, error=ValueError)
+
+        # Keeps the requested features that match the label count and carry at least one value. As long as the dataset
+        # contains at least one valid feature, the class can train the model. This allows flexibly working with
+        # incomplete datasets and extending the feature set in the future.
+        training_features: dict[str, NDArray[np.float32]] = {}
+        available_features: list[str] = []
+        for feature_name, feature_array in feature_arrays.items():
+            if len(feature_array) == sample_count and not np.all(a=np.isnan(feature_array)):
+                training_features[feature_name] = feature_array
+                available_features.append(feature_name)
+
+        if not available_features:
+            message = (
+                f"Unable to load the classification training data. The classifier file at {classifier_path} "
+                f"does not contain any of the expected feature columns: {', '.join(target_features)}."
+            )
+            console.error(message=message, error=ValueError)
+
+        # Sets instance attributes after all validation passes.
+        self._classifier_path: Path = classifier_path
+        self._available_features: list[str] = available_features
+        self._training_features: dict[str, NDArray[np.float32]] = training_features
+        self._training_labels: NDArray[np.bool_] = training_labels
+
+        # Fits the logistic regression model using the validated training data.
+        self._fit_model()
 
     def __repr__(self) -> str:
         """Returns a string representation of the Classifier instance."""
@@ -145,6 +162,10 @@ class Classifier:
         skewness: NDArray[np.float32],
     ) -> None:
         """Creates a new classifier training dataset file from the provided labels and features.
+
+        Notes:
+            The Classifier fits a probability grid of _GRID_NODE_COUNT nodes over the dataset, so it rejects a file
+            holding fewer samples than that when it loads the file.
 
         Args:
             file_path: The path where the classifier file will be saved. Should have .npz extension.

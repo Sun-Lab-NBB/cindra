@@ -11,7 +11,7 @@ demand by `/single-recording-results`.
 
 | NPZ key                             | Dtype   | Shape | Description                                            |
 |-------------------------------------|---------|-------|--------------------------------------------------------|
-| `plane_count`                       | uint8   | (1,)  | Number of planes combined                              |
+| `plane_count`                       | uint32  | (1,)  | Number of planes combined                              |
 | `frame_count`                       | uint32  | (1,)  | Frames the combined traces span                        |
 | `plane_frame_counts`                | uint32  | (N,)  | Per-plane frame counts recorded during binarization    |
 | `combined_height`                   | uint32  | (1,)  | Height of combined field of view in pixels             |
@@ -264,7 +264,7 @@ to None in the YAML.
 | Small counts        | uint16  | plane_heights, plane_widths, recording_count   |
 | Booleans            | bool    | bad_frames, soma_mask, overlap_mask            |
 | Plane indices       | int32   | plane_index                                    |
-| Plane counts        | uint8   | plane_count                                    |
+| Plane counts        | uint32  | plane_count                                    |
 
 Extraction trace, classification, and colocalization `.npy` files and all `.npz` archives are saved with
 `allow_pickle=False`. Detection and registration `.npy` files use NumPy save defaults but contain only numeric arrays

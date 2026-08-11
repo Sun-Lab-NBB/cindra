@@ -64,17 +64,48 @@ class TestClassifier:
             Classifier(classifier_path=tmp_path / "nonexistent.npz")
 
     def test_missing_labels_raises(self, tmp_path: Path) -> None:
-        """Verifies that a file without training_labels raises ValueError."""
+        """Verifies that a file without training_labels raises ValueError naming the missing column."""
         path = tmp_path / "bad_classifier.npz"
-        np.savez(path, compactness=np.ones(10, dtype=np.float32))
-        with pytest.raises(ValueError, match="Unable to load the classification training data"):
+        np.savez(path, compactness=np.ones(200, dtype=np.float32))
+        with pytest.raises(ValueError, match=r"missing\s+the\s+'training_labels'\s+column"):
             Classifier(classifier_path=path)
 
     def test_no_valid_features_raises(self, tmp_path: Path) -> None:
-        """Verifies that a file with labels but no valid features raises ValueError."""
+        """Verifies that a file with labels but no valid features raises ValueError naming the expected columns."""
         path = tmp_path / "labels_only.npz"
-        np.savez(path, training_labels=np.ones(10, dtype=np.bool_))
-        with pytest.raises(ValueError, match="Unable to load the classification training data"):
+        np.savez(path, training_labels=np.ones(200, dtype=np.bool_))
+        with pytest.raises(ValueError, match=r"does\s+not\s+contain\s+any\s+of\s+the\s+expected\s+feature\s+columns"):
+            Classifier(classifier_path=path)
+
+    def test_corrupted_file_raises(self, tmp_path: Path) -> None:
+        """Verifies that an unreadable archive raises ValueError describing the file as corrupted."""
+        path = tmp_path / "corrupted.npz"
+        path.write_bytes(b"not an archive at all")
+        with pytest.raises(ValueError, match=r"corrupted\s+or\s+has\s+an\s+invalid\s+format"):
+            Classifier(classifier_path=path)
+
+    def test_string_feature_column_raises(self, tmp_path: Path) -> None:
+        """Verifies that a feature column stored as strings raises ValueError describing the file as corrupted."""
+        # The cast to float32 is what rejects the column, so it has to sit inside the loader's handler. Outside it,
+        # the reader receives the bare NumPy conversion error instead of a message naming the classifier file.
+        path = tmp_path / "string_feature.npz"
+        generator = np.random.default_rng(seed=7)
+        np.savez(
+            path,
+            training_labels=generator.choice([True, False], size=200),
+            normalized_pixel_count=np.array(["not a number"] * 200),
+            compactness=generator.standard_normal(200).astype(np.float32) + 1.5,
+        )
+        with pytest.raises(ValueError, match=r"corrupted\s+or\s+has\s+an\s+invalid\s+format"):
+            Classifier(classifier_path=path)
+
+    def test_too_few_samples_raises(self, tmp_path: Path) -> None:
+        """Verifies that a dataset smaller than the probability grid is rejected by its sample count."""
+        path = tmp_path / "small_classifier.npz"
+        # The probability grid samples 100 positions across the sorted training values, so a 50-sample dataset would
+        # otherwise produce zero-width bins, NaN bin probabilities, and a model fit that fails for an unrelated reason.
+        _create_classifier_file(path=path, sample_count=50)
+        with pytest.raises(ValueError, match=r"holds\s+50\s+training\s+samples"):
             Classifier(classifier_path=path)
 
     def test_classify_output_shape(self, tmp_path: Path) -> None:

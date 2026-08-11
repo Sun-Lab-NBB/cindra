@@ -135,7 +135,20 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     # Normalizes shorthand aliases and resolves pipeline-specific parameters.
     single_recording = pipeline in ("single-recording", "sd")
     resolved_name = name if name is not None else ("cindra_sd_conf" if single_recording else "cindra_md_conf")
-    file_path = output_path.joinpath(resolved_name).with_suffix(".yaml")
+    if not resolved_name.strip():
+        message = (
+            f"Unable to generate the pipeline configuration file. The configuration file name must carry at least one "
+            f"non-whitespace character, but got {resolved_name!r}."
+        )
+        console.error(message=message, error=ValueError)
+
+    # Appends the extension the pipeline loader requires, keeping every component of the supplied name. Path
+    # 'with_suffix' would instead replace the component that follows the name's last dot.
+    if resolved_name.endswith(".yml"):
+        resolved_name = f"{resolved_name.removesuffix('.yml')}.yaml"
+    elif not resolved_name.endswith(".yaml"):
+        resolved_name = f"{resolved_name}.yaml"
+    file_path = output_path / resolved_name
 
     # Generates the precursor configuration file in the specified output directory.
     configuration = SingleRecordingConfiguration() if single_recording else MultiRecordingConfiguration()
@@ -143,8 +156,8 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
 
     message = (
         f"Default {'single-recording' if single_recording else 'multi-recording'} pipeline configuration file: "
-        f"generated in the {file_path.parent} directory. Modify the configuration parameters in the file to finish "
-        f"the configuration process."
+        f"generated as {file_path}. Modify the configuration parameters in the file to finish the configuration "
+        f"process."
     )
     console.echo(message=message, level=LogLevel.SUCCESS)
 
