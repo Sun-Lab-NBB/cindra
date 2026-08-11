@@ -1237,7 +1237,11 @@ class ROIViewer(QMainWindow):
             fluorescence[:, : bin_count * bin_size].reshape((roi_count, bin_count, bin_size)).mean(axis=2)
         )
         self._binned_fluorescence -= self._binned_fluorescence.mean(axis=1)[:, np.newaxis]
-        self._fluorescence_standard_deviation = (self._binned_fluorescence**2).mean(axis=1) ** 0.5
+        # The einsum contraction accumulates each row's sum of squares directly, holding only the per-ROI output.
+        self._fluorescence_standard_deviation = np.sqrt(
+            np.einsum("ij,ij->i", self._binned_fluorescence, self._binned_fluorescence)
+            / self._binned_fluorescence.shape[1]
+        )
         self._update_plot()
 
     def _on_channel_2_toggled(self, checked: bool) -> None:

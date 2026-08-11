@@ -66,40 +66,44 @@ def pca_denoise(
     normalization = np.zeros((height, width), dtype=np.float32)
     reconstruction = np.zeros_like(frames)
 
-    # Extracts and centers each block for PCA.
-    block_slices: list[tuple[slice, slice]] = []
-    centered_blocks: list[NDArray[np.float32]] = []
-    for y_block, x_block in zip(y_blocks, x_blocks, strict=True):
-        y_slice = slice(y_block[0], y_block[-1])
-        x_slice = slice(x_block[0], x_block[-1])
-        block_slices.append((y_slice, x_slice))
-        centered_blocks.append(
-            frames[:, y_slice, x_slice].reshape(num_frames, -1) - frame_mean[y_slice, x_slice].ravel()
-        )
+    block_slices: list[tuple[slice, slice]] = [
+        (slice(y_block[0], y_block[-1]), slice(x_block[0], x_block[-1]))
+        for y_block, x_block in zip(y_blocks, x_blocks, strict=True)
+    ]
 
-    # Fits PCA and reconstructs each block. When multiple workers are available, the fitting runs in parallel across
-    # blocks since each block's SVD is independent. LAPACK releases the GIL during SVD computation.
-    # Limits each block fit to a single BLAS thread. The worker budget is already spent on the block pool below, so
-    # leaving the BLAS thread count unconstrained would multiply the two and oversubscribe the host.
-    with threadpool_limits(limits=1):
-        if parallel_workers == 1:
-            reconstructed_blocks = [
-                _fit_and_reconstruct_block(block=block, num_components=num_components) for block in centered_blocks
-            ]
-        else:
-            with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
-                futures = [
-                    executor.submit(_fit_and_reconstruct_block, block=block, num_components=num_components)
-                    for block in centered_blocks
-                ]
-                reconstructed_blocks = [future.result() for future in futures]
+    def _center_and_reconstruct(block_slice: tuple[slice, slice]) -> NDArray[np.float32]:
+        """Centers one block against the frame mean and returns its low-rank reconstruction."""
+        y_slice, x_slice = block_slice
+        centered = frames[:, y_slice, x_slice].reshape(num_frames, -1) - frame_mean[y_slice, x_slice].ravel()
+        return _fit_and_reconstruct_block(block=centered, num_components=num_components)
 
-    # Accumulates the tapered reconstructions sequentially to avoid write conflicts on overlapping block regions.
-    for (y_slice, x_slice), block_reconstruction in zip(block_slices, reconstructed_blocks, strict=True):
+    def _accumulate(block_slice: tuple[slice, slice], block_reconstruction: NDArray[np.float32]) -> None:
+        """Adds one tapered block reconstruction into the running totals."""
+        y_slice, x_slice = block_slice
         reconstruction[:, y_slice, x_slice] += (
             block_reconstruction.reshape(num_frames, block_height, block_width) * taper_mask
         )
         normalization[y_slice, x_slice] += taper_mask
+
+    # Fits PCA and reconstructs each block. When multiple workers are available, the fitting runs in parallel across
+    # blocks since each block's SVD is independent. LAPACK releases the GIL during SVD computation.
+    # Limits each block fit to a single BLAS thread. The worker budget is already spent on the block pool below, so
+    # leaving the BLAS thread count unconstrained would multiply the two and oversubscribe the host. The limit also
+    # encloses the accumulation, because the BLAS width the fits run at decides their summation order.
+    # Each block is centered inside the worker that fits it and accumulated as soon as it returns, so the resident
+    # set holds one block per worker rather than a centered and a reconstructed copy of every block at once.
+    with threadpool_limits(limits=1):
+        if parallel_workers == 1:
+            for block_slice in block_slices:
+                _accumulate(block_slice=block_slice, block_reconstruction=_center_and_reconstruct(block_slice))
+        else:
+            with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
+                futures = [executor.submit(_center_and_reconstruct, block_slice) for block_slice in block_slices]
+
+                # Consumes the futures in submission order rather than completion order. Blocks overlap, so most
+                # pixels accumulate a float32 sum over several of them, and float addition is not associative.
+                for block_slice, future in zip(block_slices, futures, strict=True):
+                    _accumulate(block_slice=block_slice, block_reconstruction=future.result())
 
     # Normalizes and restores the mean.
     reconstruction /= normalization
@@ -130,6 +134,7 @@ def _fit_and_reconstruct_block(
     if np.ptp(block) == 0.0:
         return block.copy()
 
+    # A float32 block yields float32 components, so the projection and its back-projection stay float32 throughout.
     model = PCA(n_components=num_components, random_state=0).fit(block)
-    reconstructed: NDArray[np.float32] = ((block @ model.components_.T) @ model.components_).astype(np.float32)
+    reconstructed: NDArray[np.float32] = (block @ model.components_.T) @ model.components_
     return reconstructed

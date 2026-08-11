@@ -24,7 +24,7 @@ from .jobs import (
     resolve_multi_recording_jobs,
     resolve_single_recording_jobs,
 )
-from ..layout import resolve_plane_specifier
+from ..layout import parse_plane_specifier
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -194,7 +194,8 @@ def _is_single_recording_job_ready(
         return every_plane_processed
 
     ready_planes = converted if job_name == SingleRecordingJobNames.REGISTER else registered
-    return any(resolve_plane_specifier(plane_index=plane_index) == specifier for plane_index in ready_planes)
+    plane_index = parse_plane_specifier(specifier=specifier)
+    return plane_index is not None and plane_index in ready_planes
 
 
 def _is_multi_recording_job_ready(

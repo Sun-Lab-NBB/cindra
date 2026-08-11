@@ -171,6 +171,19 @@ class TestComputeTemporalStandardDeviation:
         result = compute_temporal_standard_deviation(frames=frames)
         assert result[:, :2].mean() > result[:, 2:].mean()
 
+    def test_matches_inline_reference_and_leaves_input_unchanged(self) -> None:
+        """Verifies the result matches the reference expression bit-for-bit and the caller's movie is not squared."""
+        generator = np.random.default_rng(seed=42)
+        frames = (generator.standard_normal((40, 48, 48)) * 100).astype(np.float32)
+        frames_before = frames.copy()
+        expected = np.maximum(1e-10, np.sqrt((np.diff(frames, axis=0) ** 2).sum(axis=0) / frames.shape[0]))
+
+        result = compute_temporal_standard_deviation(frames=frames)
+
+        assert result.dtype == np.float32
+        np.testing.assert_array_equal(result, expected)
+        np.testing.assert_array_equal(frames, frames_before)
+
 
 class TestComputeThresholdedVariance:
     """Tests compute_thresholded_variance."""

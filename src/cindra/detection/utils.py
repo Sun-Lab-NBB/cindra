@@ -52,8 +52,12 @@ def compute_temporal_standard_deviation(frames: NDArray[np.float32]) -> NDArray[
         Values are clipped to a minimum threshold to avoid division by zero in downstream processing.
     """
     frame_differences = np.diff(frames, axis=0)
+
+    # Squares the differences in their own buffer, because a second array of the movie's size dominates the peak
+    # memory of the detection stage.
+    np.square(frame_differences, out=frame_differences)
     result: NDArray[np.float32] = np.maximum(
-        _MINIMUM_STANDARD_DEVIATION, np.sqrt((frame_differences**2).sum(axis=0) / frames.shape[0])
+        _MINIMUM_STANDARD_DEVIATION, np.sqrt(frame_differences.sum(axis=0) / frames.shape[0])
     )
     return result
 

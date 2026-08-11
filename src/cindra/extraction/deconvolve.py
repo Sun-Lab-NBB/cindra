@@ -49,14 +49,20 @@ def compute_delta_fluorescence(
         The neuropil-and-baseline-corrected delta fluorescence traces with shape (roi_count, frame_count).
     """
     # Subtracts the scaled neuropil fluorescence from the ROI fluorescence. Casts the coefficient to float32 to
-    # prevent Python's native float64 from promoting the entire computation chain to double precision.
-    subtracted = cell_fluorescence - np.float32(neuropil_coefficient) * neuropil_fluorescence
+    # prevent Python's native float64 from promoting the entire computation chain to double precision. Scaling by the
+    # negated coefficient and accumulating in place holds one full-size buffer instead of two, and IEEE 754 defines
+    # the difference to equal the sum with the negated operand, so the values are unchanged.
+    subtracted = neuropil_fluorescence * np.float32(-neuropil_coefficient)
+    subtracted += cell_fluorescence
 
     # Converts the baseline window from seconds to frames using the acquisition sampling rate. Forces the window to be
     # odd for symmetric min/max filtering.
     window_frames = int(baseline_window * sampling_rate)
     if window_frames % 2 == 0:
         window_frames += 1
+
+    # The constant method reduces the baseline to a single value, while the other two keep it per-ROI.
+    baseline: NDArray[np.float32] | np.float32
 
     # Uses the requested method to calculate the baseline for the neuropil-subtracted fluorescence traces.
     if baseline_method == "maximin":

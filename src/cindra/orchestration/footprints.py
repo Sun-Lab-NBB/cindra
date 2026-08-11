@@ -283,8 +283,9 @@ def estimate_single_recording_job_memory_mb(
     """Estimates the memory one single-recording job occupies at its peak.
 
     Notes:
-        A per-plane job whose specifier names a plane is estimated from that plane alone. A per-plane job whose
-        specifier does not resolve is charged the largest per-plane estimate, so an unmatched job never understates.
+        A per-plane job whose specifier names a plane is estimated from that plane alone, and is charged its stage's
+        allowance when that plane carries no readable runtime data. A per-plane job whose specifier does not resolve
+        is charged the largest per-plane estimate, so an unmatched job never understates.
 
     Args:
         job_name: The pipeline stage the job runs.
@@ -297,26 +298,27 @@ def estimate_single_recording_job_memory_mb(
         The memory the job occupies in megabytes, and a flag that is True when the figure follows from the recording's
         own geometry rather than from the worker baseline alone.
     """
-    geometry = resolve_recording_geometry(output_root=output_root, data_path=data_path)
-    if not geometry.resolved:
-        return _resolve_stage_fallback(job_name=job_name), False
-
-    if job_name == SingleRecordingJobNames.BINARIZE:
-        return _apply_tolerance(
-            memory_mb=_estimate_binarization_mb(geometry=geometry, configuration=configuration)
-        ), True
-
-    if job_name == SingleRecordingJobNames.COMBINE:
+    if job_name in (SingleRecordingJobNames.BINARIZE, SingleRecordingJobNames.COMBINE):
+        geometry = resolve_recording_geometry(output_root=output_root, data_path=data_path)
+        if not geometry.resolved:
+            return _resolve_stage_fallback(job_name=job_name), False
+        if job_name == SingleRecordingJobNames.BINARIZE:
+            return _apply_tolerance(
+                memory_mb=_estimate_binarization_mb(geometry=geometry, configuration=configuration)
+            ), True
         return _apply_tolerance(memory_mb=_estimate_combination_mb(geometry=geometry)), True
 
-    if not geometry.planes:
+    inventory = resolve_recording_planes(output_root=output_root, data_path=data_path)
+    planes = _read_plane_geometries(
+        inventory=inventory, plane_index=_resolve_specifier_index(specifier=specifier, count=inventory.plane_count)
+    )
+    if not planes:
         return _resolve_stage_fallback(job_name=job_name), False
 
     estimator = _estimate_registration_mb if job_name == SingleRecordingJobNames.REGISTER else _estimate_processing_mb
-    estimates = [estimator(plane=plane, configuration=configuration) for plane in geometry.planes]
-    plane_index = _resolve_specifier_index(specifier=specifier, count=len(estimates))
-    memory_mb = estimates[plane_index] if plane_index is not None else max(estimates)
-    return _apply_tolerance(memory_mb=memory_mb), True
+    return _apply_tolerance(
+        memory_mb=max(estimator(plane=plane, configuration=configuration) for plane in planes)
+    ), True
 
 
 def estimate_multi_recording_job_memory_mb(
@@ -343,28 +345,27 @@ def estimate_multi_recording_job_memory_mb(
         The memory the job occupies in megabytes, and a flag that is True when the figure follows from the dataset's
         own geometry rather than from the worker baseline alone.
     """
-    geometries = [resolve_recording_geometry(output_root=root) for root in recording_roots]
-    resolved = [geometry for geometry in geometries if geometry.combined_pixels > 0]
-    if not resolved:
-        return _resolve_stage_fallback(job_name=job_name), False
-
     if job_name == MultiRecordingJobNames.DISCOVER:
+        geometries = [_read_tracked_recording_geometry(output_root=root) for root in recording_roots]
+        resolved = [geometry for geometry in geometries if geometry.combined_pixels > 0]
+        if not resolved:
+            return _resolve_stage_fallback(job_name=job_name), False
         return _apply_tolerance(memory_mb=_estimate_discovery_mb(geometries=resolved)), True
 
-    target = _resolve_target_geometry(
-        recording_roots=recording_roots, geometries=geometries, resolved=resolved, specifier=specifier
-    )
+    target = _resolve_target_geometry(recording_roots=recording_roots, specifier=specifier)
+    if target is None:
+        return _resolve_stage_fallback(job_name=job_name), False
+
+    target_root, geometry = target
     regions = _read_region_count(
         array_path=resolve_array_path(
-            root_path=resolve_dataset_path(
-                output_root=recording_roots[geometries.index(target)], dataset_name=dataset_name
-            ),
+            root_path=resolve_dataset_path(output_root=target_root, dataset_name=dataset_name),
             array=RecordingArrays.CELL_FLUORESCENCE,
         )
     )
     return _apply_tolerance(
         memory_mb=_estimate_extraction_mb(
-            geometry=target, tracked_regions=regions or target.region_count, configuration=configuration
+            geometry=geometry, tracked_regions=regions or geometry.region_count, configuration=configuration
         )
     ), True
 
@@ -582,44 +583,69 @@ def _resolve_specifier_index(specifier: str, count: int) -> int | None:
     return plane_index
 
 
-def _resolve_target_geometry(
-    recording_roots: Sequence[Path],
-    geometries: Sequence[RecordingGeometry],
-    resolved: Sequence[RecordingGeometry],
-    specifier: str,
-) -> RecordingGeometry:
-    """Resolves the geometry of the recording one extraction job runs on.
+def _resolve_target_geometry(recording_roots: Sequence[Path], specifier: str) -> tuple[Path, RecordingGeometry] | None:
+    """Resolves the recording one extraction job runs on, together with the geometry the estimate reads from it.
 
     Notes:
-        Charges the widest readable recording when the specifier names none of them, so an unmatched job never
-        understates.
+        Reads the combined archive of the recording the specifier names alone, and scans every recording only when the
+        specifier matches none of them, in which case the widest readable recording is charged so that an unmatched
+        job never understates. The channel count and the region count are read for the resolved recording alone.
 
     Args:
         recording_roots: The output root of every recording the dataset spans.
-        geometries: The geometry of every recording, in the same order.
-        resolved: The geometries carrying combined output, which is never empty.
         specifier: The specifier naming the target recording.
 
     Returns:
-        The target recording's geometry.
+        The target recording's output root paired with its geometry, or None when no recording carries combined
+        output.
     """
-    for root, geometry in zip(recording_roots, geometries, strict=True):
-        if root.name == specifier and geometry.combined_pixels > 0:
-            return geometry
-    return max(resolved, key=lambda geometry: geometry.combined_pixels)
+    target_root: Path | None = None
+    target = RecordingGeometry()
+    for root in recording_roots:
+        if root.name != specifier:
+            continue
+        candidate = _read_tracked_recording_geometry(output_root=root)
+        if candidate.combined_pixels > 0:
+            target_root, target = root, candidate
+            break
+
+    if target_root is None:
+        for root in recording_roots:
+            candidate = _read_tracked_recording_geometry(output_root=root)
+            if candidate.combined_pixels > target.combined_pixels:
+                target_root, target = root, candidate
+
+    if target_root is None:
+        return None
+
+    acquisition = resolve_acquisition_parameters(output_root=target_root, data_path=None)
+    region_count = _read_region_count(
+        array_path=resolve_array_path(
+            root_path=resolve_output_path(output_root=target_root), array=RecordingArrays.CELL_FLUORESCENCE
+        )
+    )
+    return target_root, RecordingGeometry(
+        combined_pixels=target.combined_pixels,
+        combined_frame_count=target.combined_frame_count,
+        two_channels=target.two_channels or (acquisition is not None and acquisition.channel_number > 1),
+        region_count=region_count,
+        resolved=True,
+    )
 
 
-def _read_plane_geometries(inventory: RecordingPlanes) -> tuple[PlaneGeometry, ...]:
-    """Reads the geometry of every plane from the runtime data each plane directory carries.
+def _read_plane_geometries(inventory: RecordingPlanes, plane_index: int | None = None) -> tuple[PlaneGeometry, ...]:
+    """Reads the geometry of one plane, or of every plane, from the runtime data each plane directory carries.
 
     Args:
         inventory: The recording's plane inventory.
+        plane_index: The index of the single plane to read, or None to read every plane the inventory names.
 
     Returns:
-        The geometry of every plane whose runtime data was readable.
+        The geometry of every covered plane whose runtime data was readable.
     """
+    plane_paths = inventory.plane_paths if plane_index is None else inventory.plane_paths[plane_index : plane_index + 1]
     geometries: list[PlaneGeometry] = []
-    for plane_path in inventory.plane_paths:
+    for plane_path in plane_paths:
         try:
             runtime = SingleRecordingRuntimeData.load(output_path=plane_path)
         except FileNotFoundError, ValueError:
@@ -635,6 +661,29 @@ def _read_plane_geometries(inventory: RecordingPlanes) -> tuple[PlaneGeometry, .
             )
         )
     return tuple(geometries)
+
+
+def _read_tracked_recording_geometry(output_root: Path) -> RecordingGeometry:
+    """Reads the geometry every multi-recording model reads from one recording of a tracked dataset.
+
+    Notes:
+        Covers the combined field extent, the combined frame count, and the second channel the metadata archive
+        records. The per-plane geometry and the raw frame extent stay unread, because every multi-recording stage
+        works at the combined view.
+
+    Args:
+        output_root: The output root the recording was configured with.
+
+    Returns:
+        The recording's geometry, whose resolved flag is False when the recording carries no combined output.
+    """
+    combined_pixels, combined_frame_count, two_channels = _read_combined_geometry(output_root=output_root)
+    return RecordingGeometry(
+        combined_pixels=combined_pixels,
+        combined_frame_count=combined_frame_count,
+        two_channels=two_channels,
+        resolved=combined_pixels > 0,
+    )
 
 
 def _read_combined_geometry(output_root: Path) -> tuple[int, int, bool]:

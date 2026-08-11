@@ -166,6 +166,25 @@ class TestSingleRecordingJobUniverse:
             output_root=tmp_path
         ).possible
 
+    def test_readiness_names_the_planes_on_disk_at_a_larger_plane_count(self, tmp_path: Path) -> None:
+        """Verifies that the readiness test names the planes carrying output whatever plane count is declared."""
+        _write_parameters(output_root=tmp_path, plane_count=10)
+        for plane_index in (0, 4, 9):
+            _convert_plane(output_root=tmp_path, plane_index=plane_index)
+        for plane_index in (0, 7):
+            _register_plane(output_root=tmp_path, plane_index=plane_index)
+
+        universe = resolve_single_recording_job_universe(output_root=tmp_path)
+
+        assert universe.possible == (
+            (SingleRecordingJobNames.BINARIZE, ""),
+            (SingleRecordingJobNames.REGISTER, "plane_0"),
+            (SingleRecordingJobNames.REGISTER, "plane_4"),
+            (SingleRecordingJobNames.REGISTER, "plane_9"),
+            (SingleRecordingJobNames.PROCESS, "plane_0"),
+            (SingleRecordingJobNames.PROCESS, "plane_7"),
+        )
+
     def test_possible_is_always_a_subset_of_the_universe(self, tmp_path: Path) -> None:
         """Verifies that no ready job falls outside the declared universe."""
         _write_parameters(output_root=tmp_path, plane_count=3)
