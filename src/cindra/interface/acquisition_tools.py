@@ -314,8 +314,9 @@ def validate_recording_readiness_tool(recording_directory: str) -> dict[str, obj
     # frames from those files alone. Receives a directory rather than a configuration, so it cannot read the
     # 'file_io.ignored_file_names' exclusions the pipeline applies. A raw directory commonly holds a differently shaped
     # file that is not part of the recording, such as an anatomical z-stack, and reporting it as an error here would
-    # fail a recording the pipeline processes correctly. The conversion stage still rejects a genuinely ragged
-    # recording, so this tool reports the outliers and leaves the verdict to the exclusions the caller configures.
+    # fail a recording the pipeline processes correctly. Binarization rejects a genuinely ragged recording on every
+    # page whose own header its file stores, so this tool reports the outliers and leaves the verdict to the
+    # exclusions the caller configures.
     if shape_groups:
         (reference_height, reference_width), majority_files = max(
             shape_groups.items(), key=lambda group: sum(page_count for _, page_count in group[1])
@@ -344,10 +345,9 @@ def validate_recording_readiness_tool(recording_directory: str) -> dict[str, obj
             warnings.append(
                 f"Total frames ({total_frames}) do not divide evenly by the interleave stride "
                 f"({interleave_stride} = {plane_number} planes x {channel_number} channels), which happens when an "
-                f"acquisition stops partway through a volume. Binarization keeps the {remainder} trailing frames by "
-                f"sizing each plane binary to the frames its own interleave position receives, so the leading planes "
-                f"hold one frame more than the trailing ones. The combination stage then trims the combined traces to "
-                f"the shortest contributing plane, so only the combined dataset loses those frames."
+                f"acquisition stops partway through a volume. Binarization discards the {remainder} trailing frames "
+                f"of that incomplete cycle, because they reach some planes and channels of the recording and not "
+                f"others. Every plane binary then holds the {frames_per_plane} frames reported below."
             )
 
         if frames_per_plane < _MINIMUM_RECOMMENDED_FRAMES_PER_PLANE:

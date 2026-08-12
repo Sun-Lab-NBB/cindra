@@ -180,4 +180,12 @@
   `cindra.io`). `register_plane` refuses to run while a marker exists, and `binarize_recording` treats a marked binary,
   or one whose size disagrees with its plane's recorded frame geometry, as invalid and rebuilds it from the source
   TIFFs. Preserve this protocol when modifying either stage, because re-running binarization is the recovery path
+- Binarization consumes whole plane and channel interleave cycles, discarding the frames of an incomplete final cycle
+  and rejecting a recording that holds fewer frames than one whole cycle. Keep both in `resolve_tiff_conversion_plan`,
+  because the plan resolves before the conversion touches any binary or deletes any result the recording already holds
+- Binarization has three outcomes: it skips, it converts, or it refuses. `_validate_declared_planes` raises the third
+  one when a skipped conversion finds a plane directory the declared plane count does not cover, and
+  `save_combined_data` raises its own when the contexts it receives do not number that count. Only
+  `_clear_downstream_data` removes a surplus directory, because the declared count comes from a user-editable file and
+  only a conversion rebuilds the recording at it. Keep the removal bound to the conversion when modifying either stage
 - Use `console.error()` from ataraxis-base-utilities for all error handling (no bare `raise`)

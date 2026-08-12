@@ -57,17 +57,30 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
     Notes:
         This function executes the first phase of the single-recording pipeline: it converts the raw recording data
         into the internal binary format and initializes the per-plane runtime data hierarchy. The conversion is
-        skipped only when every plane already has a valid binary at the output path and 'repeat_binarization' is
-        disabled in the FileIO configuration section. A binary left marked by an interrupted write, or one whose size
-        disagrees with its plane's recorded frame geometry, is treated as invalid and rebuilt from the source TIFF
-        files even when that parameter is disabled.
+        skipped only when every plane holds a functional channel binary at the output path and 'repeat_binarization'
+        is disabled in the FileIO configuration section. That check covers the functional channel alone, so a plane
+        missing its second channel binary stays valid. A binary left marked by an interrupted write, or one whose
+        size disagrees with its plane's recorded frame geometry, is treated as invalid and rebuilt from the source
+        TIFF files even when that parameter is disabled.
+
+        The conversion consumes whole plane and channel interleave cycles, so every plane and channel of the recording
+        receives the same frame count and the frames of an incomplete final cycle are discarded.
+
+        The frame shape check covers every page whose own header its file stores. tifffile builds the pages of a
+        ScanImage classic file, meaning a non-BigTIFF one, past the two gigabyte offset ceiling arithmetically, and
+        those frames carry no header to read. A differing frame among them is converted as if it matched, which
+        yields wrong data rather than a rejected recording.
 
         A conversion replaces every plane binary of the recording, so it first deletes the registration, detection,
-        and extraction outputs of every plane along with the recording's combined dataset. It also removes whole every
-        plane directory the recording's current plane count no longer covers. The rebuilt binaries hold raw frames
-        again, which voids every offset, image, and trace measured from the previous binaries, and deleting the
-        registration output is what makes the registration stage run instead of skipping the plane. That deletion
+        and extraction outputs of every plane along with the recording's combined dataset. The rebuilt binaries hold
+        raw frames again, which voids every offset, image, and trace measured from the previous binaries, and deleting
+        the registration output is what makes the registration stage run instead of skipping the plane. That deletion
         follows the conversion plan, so a recording whose TIFF files cannot be converted keeps its results.
+
+        A plane directory the recording's current plane count no longer covers is removed whole, together with the
+        combined dataset that merged it, as part of the conversion that rebuilds the recording at the declared count.
+        A skipped conversion rebuilds nothing, so it reports the disagreement and fails instead of deleting a binary
+        nothing replaces.
 
     Args:
         configuration: The single-recording pipeline configuration.
@@ -75,8 +88,10 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
             the caller resolves before invoking this function.
 
     Raises:
-        ValueError: If data_path or output_path is not configured, if the discovered TIFF files do not all hold
-            frames of the same shape, or if the frames they hold leave a plane with no frames on one of its channels.
+        ValueError: If data_path or output_path is not configured, if any page whose own header its TIFF file stores
+            holds a differently shaped frame, or if the frames they hold do not fill one complete plane and channel
+            interleave cycle. Also raised when a skipped conversion finds a plane directory the declared plane count
+            does not cover.
         FileNotFoundError: If a plane's runtime_data.yaml was not written by an earlier bootstrap step, or if no TIFF
             files are found in the data directory.
     """
@@ -141,8 +156,9 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
             )
 
         # Rebuilds a binary whose size disagrees with the geometry recorded for its plane, which is what a truncated
-        # copy or a changed plane geometry leaves behind. Every later stage derives its frame count by dividing the
-        # file size by the frame size, so a short binary would otherwise be processed as a silently truncated movie.
+        # copy, a changed plane geometry, or a conversion that predates the interleave-cycle accounting leaves behind.
+        # Every later stage derives its frame count by dividing the file size by the frame size, so a short binary
+        # would otherwise be processed as a silently truncated movie.
         if binaries_valid:
             malformed_binaries = _resolve_malformed_binaries(contexts=loaded_contexts)
             if malformed_binaries:
@@ -150,12 +166,22 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
                 console.echo(
                     message=(
                         f"Rebuilding {len(malformed_binaries)} binary file(s) whose size does not match the frame "
-                        f"geometry recorded for their plane: {natsorted(str(path) for path in malformed_binaries)}."
+                        f"geometry recorded for their plane: {natsorted(str(path) for path in malformed_binaries)}. A "
+                        f"recording converted before binarization began discarding incomplete plane and channel "
+                        f"interleave cycles holds channels of unequal length, which is the most common source of this "
+                        f"mismatch. The registration, detection, extraction, and combined results measured from these "
+                        f"binaries are discarded and recomputed by the stages that follow."
                     ),
                     level=LogLevel.WARNING,
                 )
 
         if binaries_valid and not configuration.file_io.repeat_binarization:
+            # The declared plane count is read from a user-editable acquisition parameters file, and a skipped
+            # conversion resolves no plan and rebuilds nothing, so nothing on this path corroborates that count. A
+            # plane directory it no longer covers is therefore reported rather than removed.
+            plane_count = loaded_contexts[0].acquisition.virtual_plane_count
+            _validate_declared_planes(root_path=root_path, plane_count=plane_count)
+
             message = f"Loaded {len(loaded_contexts)} existing plane contexts with valid binaries."
             console.echo(message=message, level=LogLevel.SUCCESS)
             return
@@ -345,12 +371,33 @@ def save_combined_data(contexts: list[RuntimeContext]) -> None:
         This function executes the final phase of the single-recording pipeline. The combined dataset is a
         prerequisite for running the multi-recording processing pipeline.
 
+        The combined dataset stands for the whole recording, so the combination accepts exactly as many contexts as
+        the acquisition parameters declare planes. The check counts the contexts rather than reading which planes they
+        carry, so a set holding a duplicated or out-of-range plane index passes whenever its size matches. A recording
+        whose declared plane count changed keeps the plane directories of the geometry it left behind until a
+        conversion rebuilds it, so a caller enumerating those directories can resolve a plane the recording no longer
+        declares.
+
     Args:
         contexts: A list of RuntimeContext instances, one per plane to combine. Each context must have valid runtime
             data populated by the processing pipeline.
+
+    Raises:
+        ValueError: If no context is provided, if the number of contexts differs from the plane count the acquisition
+            parameters declare, or if output_path is not configured.
     """
     if not contexts:
         message = "Unable to combine planes. At least one RuntimeContext must be provided."
+        console.error(message=message, error=ValueError)
+
+    declared_planes = contexts[0].acquisition.virtual_plane_count
+    if len(contexts) != declared_planes:
+        message = (
+            f"Unable to combine planes. The combination must receive exactly the {declared_planes} plane(s) the "
+            f"acquisition parameters declare, but it received {len(contexts)}. Correct the plane count in the "
+            f"acquisition parameters file, or re-run the binarization stage with 'repeat_binarization' enabled to "
+            f"rebuild the recording at its declared plane count."
+        )
         console.error(message=message, error=ValueError)
 
     root_path = contexts[0].configuration.file_io.output_path
@@ -384,8 +431,8 @@ def _resolve_malformed_binaries(contexts: list[RuntimeContext]) -> list[Path]:
         binary instead, because both stages that write a binary size it to its full frame count before the first
         frame lands.
 
-        Channel 2 is allowed to hold one frame more or fewer than channel 1, because a recording whose acquisition
-        stopped partway through a volume delivers a different number of frames to the two channels of one plane.
+        Both channels of a plane are held to the same frame count, because binarization consumes whole plane and
+        channel interleave cycles and therefore writes the two channels of one plane frame for frame.
 
     Args:
         contexts: The loaded plane contexts to check the binaries of.
@@ -400,19 +447,49 @@ def _resolve_malformed_binaries(contexts: list[RuntimeContext]) -> list[Path]:
         if frame_bytes <= 0:  # pragma: no cover - a persisted plane always records its frame dimensions
             continue
 
-        for path, expected_frames, tolerance in (
-            (io_data.registered_binary_path, io_data.frame_count, 0),
-            (io_data.registered_binary_path_channel_2, io_data.frame_count, 1),
-        ):
+        for path in (io_data.registered_binary_path, io_data.registered_binary_path_channel_2):
             if path is None or not path.exists():
                 continue
 
             byte_number = path.stat().st_size
-            stored_frames = byte_number // frame_bytes
-            if byte_number % frame_bytes != 0 or abs(stored_frames - expected_frames) > tolerance:
+            if byte_number % frame_bytes != 0 or byte_number // frame_bytes != io_data.frame_count:
                 malformed.append(path)
 
     return malformed
+
+
+def _validate_declared_planes(root_path: Path, plane_count: int) -> None:
+    """Verifies that the recording declares every plane directory its output root holds.
+
+    Notes:
+        The declared plane count is read from a user-editable acquisition parameters file, so a stale or mistyped
+        count reads exactly like a deliberate re-declaration. A conversion resolves its plan from the source files
+        before it removes anything and rebuilds the recording at the declared count, which pairs each of its removals
+        with a rebuild. A skipped conversion rebuilds nothing, so it reports the disagreement instead of acting on it.
+
+        Reporting it stops the recording rather than leaving the surplus directories for the stages that follow,
+        because the combination stage merges every plane directory the output root holds and would otherwise fold a
+        plane the recording no longer declares into the combined dataset.
+
+    Args:
+        root_path: The recording's cindra output directory.
+        plane_count: The number of virtual imaging planes the recording declares.
+
+    Raises:
+        ValueError: If the output root holds a plane directory the declared plane count does not cover.
+    """
+    _, surplus_paths = _partition_plane_directories(root_path=root_path, plane_count=plane_count)
+    if not surplus_paths:
+        return
+
+    message = (
+        f"Unable to binarize the recording. The acquisition parameters declare {plane_count} imaging plane(s), but "
+        f"the output directory holds {len(surplus_paths)} plane directory(ies) beyond that count: "
+        f"{natsorted(str(path) for path in surplus_paths)}. Correct the plane count in the acquisition parameters "
+        f"file, or enable 'repeat_binarization' to rebuild the recording at the declared count and discard the "
+        f"surplus planes."
+    )
+    console.error(message=message, error=ValueError)
 
 
 def _clear_downstream_data(output_root: Path, plane_count: int) -> None:
@@ -424,14 +501,15 @@ def _clear_downstream_data(output_root: Path, plane_count: int) -> None:
         image is what makes the registration stage run again, because that image is the marker it reads before
         skipping an already registered plane.
 
+        Every plane directory the declared plane count no longer covers is removed whole, binary and runtime record
+        included, because the conversion writes no binary into it and every reader that enumerates the output root
+        loads it as a plane of the recording. The removal is bound to the conversion that follows, which rebuilds the
+        recording at the count the removal was measured against.
+
         The combined outputs belong to the recording rather than to one plane, and the combination stage merges every
         plane into them, so rebuilding any plane voids them. The completion marker goes first, which leaves an
         interrupted clearing reporting the recording as unfinished rather than as complete with a payload that is
         partly gone.
-
-        A plane directory the recording's current plane count no longer covers is removed whole. It holds the binary,
-        the runtime record, and the results of a plane geometry the recording has left behind, and every reader that
-        enumerates the output root would otherwise load it as a plane of the recording.
 
         The tracked multi-recording outputs of this recording stay on disk, because they belong to a dataset spanning
         other recordings. Every multi-recording stage resolves its contexts through the combined metadata removed
@@ -444,9 +522,36 @@ def _clear_downstream_data(output_root: Path, plane_count: int) -> None:
     root_path = resolve_output_path(output_root=output_root)
     (root_path / COMBINED_METADATA_FILENAME).unlink(missing_ok=True)
 
-    # Reads the plane directories the recording actually holds, rather than the contiguous range the current plane
-    # count spans. An acquisition re-declared with fewer planes than an earlier run wrote keeps every surplus
-    # directory on disk, and its contents describe frames the rebuilt binaries no longer hold.
+    # Reads the output root once, because the surplus removal below and the result sweep that follows it both work
+    # through the plane directories the root holds.
+    declared_paths, surplus_paths = _partition_plane_directories(root_path=root_path, plane_count=plane_count)
+    for surplus_path in surplus_paths:
+        rmtree(path=surplus_path)
+
+    # The combination stage writes the merged result arrays and detection images into the recording's own output
+    # directory under the names each plane writes into its own directory, so one sweep covers both scopes. The sweep
+    # covers the plane directories the recording still declares, which the removal above leaves in place.
+    for directory in (root_path, *declared_paths):
+        _clear_result_arrays(directory=directory)
+
+
+def _partition_plane_directories(root_path: Path, plane_count: int) -> tuple[list[Path], list[Path]]:
+    """Splits the plane directories the recording holds on disk into the declared ones and the surplus ones.
+
+    Notes:
+        The directories are read off disk rather than derived from the contiguous range the recording's plane count
+        spans, because a recording re-declared with fewer planes than an earlier run wrote keeps every directory its
+        previous geometry left behind. Every reader that enumerates the output root loads those directories as planes
+        of the recording.
+
+    Args:
+        root_path: The recording's cindra output directory.
+        plane_count: The number of virtual imaging planes the recording declares.
+
+    Returns:
+        A tuple of the plane directories whose plane index falls inside the declared plane range and the plane
+        directories whose index falls outside it, both in plane order.
+    """
     plane_directories: dict[int, Path] = {}
     for entry in root_path.iterdir():
         if not entry.is_dir():
@@ -455,31 +560,42 @@ def _clear_downstream_data(output_root: Path, plane_count: int) -> None:
         if plane_index is not None:
             plane_directories[plane_index] = entry
 
-    for surplus_path in [path for index, path in plane_directories.items() if index >= plane_count]:
-        rmtree(path=surplus_path)
+    declared_paths: list[Path] = []
+    surplus_paths: list[Path] = []
+    for plane_index, plane_path in sorted(plane_directories.items()):
+        if plane_index < plane_count:
+            declared_paths.append(plane_path)
+        else:
+            surplus_paths.append(plane_path)
 
-    # The combination stage writes the merged result arrays and detection images into the recording's own output
-    # directory under the names each plane writes into its own directory, so one sweep covers both scopes.
-    plane_paths = [path for index, path in plane_directories.items() if index < plane_count]
-    for directory in (root_path, *plane_paths):
-        stale_paths = [
-            resolve_array_path(root_path=directory, array=result, second_channel=second_channel)
-            for result in RecordingArrays
-            for second_channel in (False, True)
-        ]
-        stale_paths.extend(
-            resolve_array_path(
-                root_path=directory / DETECTION_DATA_DIRECTORY_NAME, array=image, second_channel=second_channel
-            )
-            for image in DetectionImages
-            for second_channel in (False, True)
+    return declared_paths, surplus_paths
+
+
+def _clear_result_arrays(directory: Path) -> None:
+    """Removes every result array, detection image, and registration offset file stored under one directory.
+
+    Args:
+        directory: The plane output directory, or the recording output directory the combination stage writes the
+            merged arrays into.
+    """
+    stale_paths = [
+        resolve_array_path(root_path=directory, array=result, second_channel=second_channel)
+        for result in RecordingArrays
+        for second_channel in (False, True)
+    ]
+    stale_paths.extend(
+        resolve_array_path(
+            root_path=directory / DETECTION_DATA_DIRECTORY_NAME, array=image, second_channel=second_channel
         )
-        stale_paths.extend(
-            resolve_array_path(root_path=directory / REGISTRATION_DATA_DIRECTORY_NAME, array=offsets)
-            for offsets in RegistrationArrays
-        )
-        for stale_path in stale_paths:
-            stale_path.unlink(missing_ok=True)
+        for image in DetectionImages
+        for second_channel in (False, True)
+    )
+    stale_paths.extend(
+        resolve_array_path(root_path=directory / REGISTRATION_DATA_DIRECTORY_NAME, array=offsets)
+        for offsets in RegistrationArrays
+    )
+    for stale_path in stale_paths:
+        stale_path.unlink(missing_ok=True)
 
 
 def _resolve_plane_context(

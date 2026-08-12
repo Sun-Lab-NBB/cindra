@@ -109,6 +109,19 @@ Phase 4: COMBINE (phase name combination, serial merge, 1 core per job)
 └── Merges all plane results into a unified combined_metadata.npz dataset
 ```
 
+Phase 1 consumes whole plane-and-channel interleave cycles, so it discards the frames of an incomplete final cycle and
+warns with their count, and it fails a recording holding fewer frames than one whole cycle. Every plane and channel of a
+recording this phase converts therefore holds the same frame count, while one converted by an earlier version can hold
+them at unequal lengths.
+
+Phase 1 has three outcomes: it skips the conversion, it rebuilds every plane binary, or it refuses the recording. It
+refuses when the output directory holds a plane directory beyond the plane count the acquisition parameters declare,
+naming every surplus directory. Only a conversion removes such a directory, so tell the user to correct the declared
+count in `cindra_parameters.json`, which is `plane_number` multiplied by `roi_number`, or to enable
+`file_io.repeat_binarization` and re-dispatch. Phase 4 refuses on the same disagreement, because it merges every plane
+directory the output root holds. Either refusal fails its job, and the prerequisite graph then withholds every job that
+depends on it, so a Phase 1 refusal stops the recording before any plane is registered.
+
 Batch processing across multiple recordings:
 
 ```text
@@ -265,7 +278,18 @@ Recover by resetting the `binarization` phase with `reset_processing_phases_tool
 detects the marker, rebuilds the binary from the raw TIFFs, and clears the marker. You do NOT need to set
 `repeat_binarization`, and you do NOT need `clean_processing_output_tool`. Binarization also rebuilds automatically when
 a binary's size disagrees with the frame geometry recorded for its plane, which is what a binary truncated outside the
-pipeline leaves behind. `repeat_binarization` remains necessary only to force a rebuild of binaries that are intact.
+pipeline leaves behind. `repeat_binarization` is needed to force a rebuild of binaries that are intact, to clear a
+plane directory the declared plane count no longer covers, and to restore a plane's missing channel 2 binary, whose
+absence leaves the recording valid.
+
+**Migrating a recording converted by an earlier version.** Such a recording can hold planes, or the two channels of one
+plane, at unequal lengths, because the frames of its final incomplete cycle reached some planes and channels and not
+others. A plane whose two channels received different counts holds one binary disagreeing with the frame count recorded
+for that plane, so the next binarization run reports it as malformed and rebuilds the whole recording without
+`repeat_binarization` being set. Every other such recording, including every single-channel one, is skipped instead and
+keeps its unequal plane lengths, so rebuilding it takes `repeat_binarization`. Either rebuild discards the recording's
+registration, detection, extraction, and combined results, which the later phases recompute. Warn the user before
+dispatching, and budget a full reprocessing run rather than a conversion alone.
 
 ---
 
@@ -362,6 +386,9 @@ When processing fails for some recordings, read the error messages and route to 
 | Missing `cindra_parameters.json`, TIFF read error | `/acquisition-data-preparation`   |
 | Invalid parameter values, wrong plane/channel     | `/acquisition-data-preparation`   |
 | TIFF files hold frames of differing shapes        | `/acquisition-data-preparation`   |
+| TIFF frames fall short of one interleave cycle    | `/acquisition-data-preparation`   |
+| Plane directory beyond the declared plane count   | `/acquisition-data-preparation`   |
+| Combination received the wrong number of planes   | `/acquisition-data-preparation`   |
 | Registration of the binary file was interrupted   | Reset `binarization`, re-dispatch |
 | Configuration parameter issues                    | `/single-recording-configuration` |
 | MCP tools unavailable, server connection errors   | `/cindra-mcp-environment-setup`   |
