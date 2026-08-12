@@ -217,7 +217,7 @@ def convert_tiffs_to_binary(plan: TiffConversionPlan) -> None:
         Every destination binary carries a mid-write mark for the duration of the conversion and is cleared of it once
         the frame accounting agrees and the file is closed. Each binary is sized to its full frame count when it is
         opened, so an interrupted conversion leaves a correctly sized file whose tail frames are zeros. The mark is
-        what makes the binarization stage rebuild that file instead of consuming it.
+        what makes the binarization stage refuse that file instead of consuming it.
 
     Args:
         plan: The conversion plan resolved by resolve_tiff_conversion_plan(), which names the source files, the

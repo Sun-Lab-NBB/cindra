@@ -263,8 +263,8 @@ Channel 2 uses identical keys in `roi_masks_channel_2.npz` and `roi_statistics_c
 Saved at the dataset output root. All files are `.npy` format, float32 dtype.
 
 `frames` is the frame count of the combined view over the recording's registered plane binaries, which is that of the
-recording's shortest plane binary. Binarization gives every plane of a recording converted in one run the same frame
-count, so this matches that recording's single-recording combined `frame_count`.
+recording's shortest plane binary. Binarization gives every plane of the recording the same frame count, so this
+matches that recording's single-recording combined `frame_count`.
 
 **Channel 1 (always present):**
 

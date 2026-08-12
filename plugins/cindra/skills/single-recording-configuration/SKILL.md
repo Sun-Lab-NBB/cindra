@@ -132,10 +132,11 @@ independent ROI detection on both channels.
 Controls input data ingestion and output directory paths. During binarization (the first processing step), the pipeline
 reads raw multipage TIFF files from the data directory, splits them by imaging plane, and writes each plane's frames
 into a contiguous binary file optimized for fast random access during processing. This TIFF-to-binary conversion is
-skipped on subsequent runs unless `repeat_binarization` is enabled or the existing binaries are invalid (a missing
-channel 1 binary, a binary on disk sized inconsistently with the recorded plane geometry, or either channel's binary
-left marked by an interrupted conversion or registration). Only channel 1 has to exist, so a missing channel 2 binary
-leaves the recording valid and the conversion skipped.
+skipped on subsequent runs when every converted plane holds the channel binaries the recording declares, each unmarked
+and sized to the recorded plane geometry. A plane holding no channel 1 binary converts, and `repeat_binarization`
+converts any recording. A binary either phase left marked, a binary sized inconsistently with the recorded plane
+geometry, or a two-channel plane holding no channel 2 binary fails the run with a RuntimeError naming the affected
+files and `repeat_binarization` as the remedy.
 
 | Parameter             | Type         | Default | Description                                                 |
 |-----------------------|--------------|---------|-------------------------------------------------------------|
@@ -157,10 +158,9 @@ channel_number)` frames. A recording holding fewer frames than one whole cycle f
 the count it holds, so advise the user to acquire a longer recording or correct `plane_number` and `channel_number` in
 `cindra_parameters.json`.
 
-`repeat_binarization` forces a rebuild of binaries that are otherwise intact. It is not needed to recover a damaged
-recording: binarization already rebuilds a binary whose size disagrees with its plane geometry, or that an interrupted
-write left marked, on its own. It is needed to restore a plane's missing channel 2 binary, which invalidates nothing on
-its own.
+`repeat_binarization` forces a rebuild of binaries that are otherwise intact, and it is the remedy every binarization
+refusal names. Enable it to recover a recording whose binary an interrupted write left marked, whose binary disagrees
+with its plane geometry, or whose two-channel plane lost its channel 2 binary.
 
 ---
 

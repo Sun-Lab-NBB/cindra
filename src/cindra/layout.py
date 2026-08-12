@@ -88,9 +88,10 @@ BINARIZATION_MARKER_SUFFIX: str = ".binarizing"
 
 Notes:
     Binarization sizes a binary to its full frame count before writing its first frame, so an interrupted run leaves a
-    correctly sized binary whose tail was never written. The pipeline rebuilds a binary carrying either phase marker,
-    and the two suffixes differ so that whoever finds one on disk reads which phase died without opening the source.
-    Each suffix spells its phase the way the reported job status spells it.
+    correctly sized binary whose tail was never written. The pipeline refuses a binary carrying either phase marker,
+    and enabling 'file_io.repeat_binarization' rebuilds it. The two suffixes differ so that whoever finds one on disk
+    reads which phase died without opening the source, and each suffix spells its phase the way the reported job
+    status spells it.
 """
 
 REGISTRATION_MARKER_SUFFIX: str = ".registering"
@@ -98,9 +99,10 @@ REGISTRATION_MARKER_SUFFIX: str = ".registering"
 
 Notes:
     Registration rewrites its input binary rather than writing a second copy, so an interrupted run leaves a binary
-    holding corrected frames up to an unknown point and raw frames after it. The pipeline rebuilds a binary carrying
-    either phase marker, and the two suffixes differ so that whoever finds one on disk reads which phase died without
-    opening the source. Each suffix spells its phase the way the reported job status spells it.
+    holding corrected frames up to an unknown point and raw frames after it. The pipeline refuses a binary carrying
+    either phase marker, and enabling 'file_io.repeat_binarization' rebuilds it. The two suffixes differ so that
+    whoever finds one on disk reads which phase died without opening the source, and each suffix spells its phase the
+    way the reported job status spells it.
 """
 
 CHANNEL_2_ARRAY_SUFFIX: str = "_channel_2"

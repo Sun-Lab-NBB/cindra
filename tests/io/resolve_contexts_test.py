@@ -110,6 +110,22 @@ class TestResolveSingleRecordingContexts:
         expected_path = output_path / "cindra" / "plane_0" / "channel_2_data.bin"
         assert contexts[0].runtime.io.registered_binary_path_channel_2 == expected_path
 
+    def test_redeclared_second_channel_fills_missing_binary_path(self, tmp_path: Path) -> None:
+        """Verifies that a plane persisted as single-channel gains a channel 2 path when two channels are declared."""
+        output_path = tmp_path / "output"
+        single_channel = AcquisitionParameters(frame_rate=30.0, plane_number=1, channel_number=1)
+        _write_saved_acquisition(output_path=output_path, acquisition=single_channel)
+        configuration = _make_single_configuration(output_path=output_path)
+        resolve_single_recording_contexts(configuration=configuration)
+
+        two_channels = AcquisitionParameters(frame_rate=30.0, plane_number=1, channel_number=2)
+        _write_saved_acquisition(output_path=output_path, acquisition=two_channels)
+
+        contexts = resolve_single_recording_contexts(configuration=configuration)
+
+        expected_path = output_path / "cindra" / "plane_0" / "channel_2_data.bin"
+        assert contexts[0].runtime.io.registered_binary_path_channel_2 == expected_path
+
     def test_mroi_creates_one_context_per_virtual_plane(self, tmp_path: Path) -> None:
         """Verifies that MROI data produces one context per virtual plane with populated MROI geometry fields."""
         output_path = tmp_path / "output"

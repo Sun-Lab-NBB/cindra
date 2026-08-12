@@ -16,6 +16,7 @@ from ..io import (
     resolve_single_recording_contexts,
 )
 from ..layout import (
+    CHANNEL_2_BINARY_FILENAME,
     COMBINED_METADATA_FILENAME,
     DETECTION_DATA_DIRECTORY_NAME,
     ACQUISITION_PARAMETERS_FILENAME,
@@ -56,11 +57,14 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
     Notes:
         This function executes the first phase of the single-recording pipeline: it converts the raw recording data
         into the internal binary format and initializes the per-plane runtime data hierarchy. The conversion is
-        skipped only when every plane holds a functional channel binary at the output path and 'repeat_binarization'
-        is disabled in the FileIO configuration section. That check covers the functional channel alone, so a plane
-        missing its second channel binary stays valid. A binary left marked by an interrupted write, or one whose
-        size disagrees with its plane's recorded frame geometry, is treated as invalid and rebuilt from the source
-        TIFF files even when that parameter is disabled.
+        skipped when every plane already holds the channel binaries the recording declares and 'repeat_binarization'
+        is disabled in the FileIO configuration section.
+
+        An existing output that disagrees with what the recording declares is refused rather than repaired. The
+        refusals cover a binary an interrupted conversion or registration left marked, a plane of a two-channel
+        recording holding no second channel binary, and a binary whose size disagrees with its plane's recorded frame
+        geometry. Enabling 'repeat_binarization' rebuilds the recording past all three, because that parameter is the
+        caller asking for the conversion that replaces every binary those refusals name.
 
         The conversion consumes whole plane and channel interleave cycles, so every plane and channel of the recording
         receives the same frame count and the frames of an incomplete final cycle are discarded.
@@ -80,6 +84,9 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
     Raises:
         ValueError: If data_path or output_path is not configured, if the discovered TIFF files do not all hold frames
             of the same shape, or if the frames they hold do not fill one complete plane and channel interleave cycle.
+        RuntimeError: If a converted plane binary carries the marker of an interrupted write, if a converted plane of
+            a two-channel recording holds no second channel binary, or if a binary's size disagrees with the frame
+            geometry recorded for its plane.
         FileNotFoundError: If a plane's runtime_data.yaml was not written by an earlier bootstrap step, or if no TIFF
             files are found in the data directory.
     """
@@ -99,7 +106,9 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
         )
         console.error(message=message, error=ValueError)
 
-    # Checks for existing valid binaries to allow early return.
+    # Holds the recording's existing output to what the recording declares, which either refuses the recording or
+    # allows an early return. Every refusal fires before the conversion plan is resolved, so a refused recording keeps
+    # every binary and every result it arrived with.
     output_root = configuration.file_io.output_path
     root_path = resolve_output_path(output_root=output_root)
     config_path = root_path / SINGLE_RECORDING_CONFIGURATION_FILENAME
@@ -112,72 +121,33 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
         if not isinstance(loaded_contexts, list):  # pragma: no cover - load with plane_index=-1 always returns a list
             loaded_contexts = [loaded_contexts]
 
-        # Validates that required binary files exist for all contexts.
-        binaries_valid = True
-        marked_binaries: list[Path] = []
-        for context in loaded_contexts:
-            registered_path = context.runtime.io.registered_binary_path
-            if registered_path is None or not registered_path.exists():
-                binaries_valid = False
-                break
-
-            # An interrupted conversion leaves its binary holding zeros past the last frame it wrote, and an
-            # interrupted registration leaves one holding motion-corrected frames up to an unknown point and raw
-            # frames after it. Only the marker beside the binary records either state, and both call for the same
-            # rebuild, so the phase its suffix names serves the reader rather than the branch taken here.
-            marked_binaries.extend(
-                path
-                for path in (registered_path, context.runtime.io.registered_binary_path_channel_2)
-                if path is not None and resolve_active_binary_marker(binary_path=path) is not None
-            )
-
-        # Rebuilds a marked binary without waiting for the caller to request it. The frames it holds are indeterminate,
-        # so re-converting from the source TIFF files is the only way to make the recording processable again.
-        if marked_binaries:
-            binaries_valid = False
-            console.echo(
-                message=(
-                    f"Rebuilding {len(marked_binaries)} binary file(s) that a previous interrupted conversion or "
-                    f"registration left in an indeterminate state: "
-                    f"{natsorted(str(path) for path in marked_binaries)}."
-                ),
-                level=LogLevel.WARNING,
-            )
-
-        # Rebuilds a binary whose size disagrees with the geometry recorded for its plane, which is what a truncated
-        # copy, a changed plane geometry, or a conversion that predates the interleave-cycle accounting leaves behind.
-        # Every later stage derives its frame count by dividing the file size by the frame size, so a short binary
-        # would otherwise be processed as a silently truncated movie.
-        if binaries_valid:
-            malformed_binaries = _resolve_malformed_binaries(contexts=loaded_contexts)
-            if malformed_binaries:
-                binaries_valid = False
-                console.echo(
-                    message=(
-                        f"Rebuilding {len(malformed_binaries)} binary file(s) whose size does not match the frame "
-                        f"geometry recorded for their plane: {natsorted(str(path) for path in malformed_binaries)}. A "
-                        f"recording converted before binarization began discarding incomplete plane and channel "
-                        f"interleave cycles holds channels of unequal length, which is the most common source of this "
-                        f"mismatch. The registration, detection, extraction, and combined results measured from these "
-                        f"binaries are discarded and recomputed by the stages that follow."
-                    ),
-                    level=LogLevel.WARNING,
-                )
-
-        if binaries_valid and not configuration.file_io.repeat_binarization:
-            message = f"Loaded {len(loaded_contexts)} existing plane contexts with valid binaries."
-            console.echo(message=message, level=LogLevel.SUCCESS)
-            return
-
         if configuration.file_io.repeat_binarization:
             console.echo(
                 message="Repeating binarization as requested by 'repeat_binarization' parameter...",
                 level=LogLevel.WARNING,
             )
         else:
-            # Binaries are missing or invalid, so the code below recreates them from the source TIFF files.
+            # A plane holding no functional channel binary has not been converted yet, so the checks below hold the
+            # converted planes alone to what the recording declares and a recording holding no binary at all converts
+            # normally. A caller that enabled 'repeat_binarization' skips them, because the conversion replaces every
+            # binary they would refuse.
+            converted_contexts = [
+                context
+                for context in loaded_contexts
+                if context.runtime.io.registered_binary_path is not None
+                and context.runtime.io.registered_binary_path.exists()
+            ]
+            _validate_binaries_are_unmarked(contexts=converted_contexts)
+            _validate_second_channel_binaries(contexts=converted_contexts)
+            _validate_binary_sizes(contexts=converted_contexts)
+
+            if len(converted_contexts) == len(loaded_contexts):
+                message = f"Loaded {len(loaded_contexts)} existing plane contexts with valid binaries."
+                console.echo(message=message, level=LogLevel.SUCCESS)
+                return
+
             console.echo(
-                message="Existing binaries are missing or invalid. Recreating from TIFF files...",
+                message="Existing binaries are missing. Recreating them from the source TIFF files...",
                 level=LogLevel.WARNING,
             )
 
@@ -380,8 +350,78 @@ def save_combined_data(contexts: list[RuntimeContext]) -> None:
     console.echo(message=f"Combined data saved to: {output_path}", level=LogLevel.SUCCESS)
 
 
-def _resolve_malformed_binaries(contexts: list[RuntimeContext]) -> list[Path]:
-    """Returns the plane binaries whose size disagrees with the frame geometry recorded for their plane.
+def _validate_binaries_are_unmarked(contexts: list[RuntimeContext]) -> None:
+    """Verifies that no interrupted write left one of the recording's plane binaries in an indeterminate state.
+
+    Notes:
+        An interrupted conversion leaves its binary holding zeros past the last frame it wrote, and an interrupted
+        registration leaves one holding motion-corrected frames up to an unknown point and raw frames after it. Only
+        the marker beside the binary records either state, so its suffix is what names the interrupted phase.
+
+    Args:
+        contexts: The plane contexts whose functional channel binary exists on disk.
+
+    Raises:
+        RuntimeError: If a marker sits beside any binary the given planes hold.
+    """
+    marked_binaries: list[str] = []
+    for context in contexts:
+        for binary_path in _resolve_existing_plane_binaries(context=context):
+            marker_path = resolve_active_binary_marker(binary_path=binary_path)
+            if marker_path is not None:
+                marked_binaries.append(f"'{binary_path}' marked by '{marker_path.name}'")
+
+    if not marked_binaries:
+        return
+
+    report = natsorted(marked_binaries)
+    message = (
+        f"Unable to binarize the recording. An interrupted write left {len(marked_binaries)} plane binary file(s) "
+        f"holding finished frames up to an unknown point and unfinished frames after it. The marker beside each of "
+        f"them names the interrupted phase: {report}. Enable 'file_io.repeat_binarization' to rebuild the recording "
+        f"from its source TIFF files, which also clears every marker."
+    )
+    console.error(message=message, error=RuntimeError)
+
+
+def _validate_second_channel_binaries(contexts: list[RuntimeContext]) -> None:
+    """Verifies that every converted plane of a two-channel recording holds its second channel binary.
+
+    Notes:
+        A binary the pipeline opens for writing is created when it does not exist. Registration would therefore fill
+        the absent binary with zeros, and every stage after it would measure a black mean image, a zero trace, and a
+        colocalization against nothing. The file that write leaves behind carries no marker and matches the recorded
+        frame geometry exactly, so the recording reports itself healthy from then on.
+
+        A single-channel recording holds no second channel binary at all, which is why the declared channel count
+        gates the check.
+
+    Args:
+        contexts: The plane contexts whose functional channel binary exists on disk.
+
+    Raises:
+        RuntimeError: If a converted plane of a two-channel recording holds no second channel binary.
+    """
+    missing_binaries: list[Path] = []
+    for context in contexts:
+        binary_path = _resolve_second_channel_binary(context=context)
+        if binary_path is not None and not binary_path.exists():
+            missing_binaries.append(binary_path)
+
+    if not missing_binaries:
+        return
+
+    message = (
+        f"Unable to binarize the recording. The acquisition parameters declare two imaging channels, but "
+        f"{len(missing_binaries)} converted plane(s) hold no second channel binary: "
+        f"{natsorted(str(path) for path in missing_binaries)}. Enable 'file_io.repeat_binarization' to rebuild the "
+        f"recording from its source TIFF files, which writes both channels of every plane."
+    )
+    console.error(message=message, error=RuntimeError)
+
+
+def _validate_binary_sizes(contexts: list[RuntimeContext]) -> None:
+    """Verifies that every plane binary on disk is sized to the frame geometry recorded for its plane.
 
     Notes:
         The check compares file sizes rather than file contents. The registration stage rewrites a binary in place, so
@@ -400,10 +440,10 @@ def _resolve_malformed_binaries(contexts: list[RuntimeContext]) -> list[Path]:
         channel interleave cycles and therefore writes the two channels of one plane frame for frame.
 
     Args:
-        contexts: The loaded plane contexts to check the binaries of.
+        contexts: The plane contexts whose functional channel binary exists on disk.
 
-    Returns:
-        The paths of every binary whose size does not match its recorded geometry.
+    Raises:
+        RuntimeError: If a binary's size disagrees with the frame geometry recorded for its plane.
     """
     malformed: list[Path] = []
     for context in contexts:
@@ -412,15 +452,62 @@ def _resolve_malformed_binaries(contexts: list[RuntimeContext]) -> list[Path]:
         if frame_bytes <= 0:  # pragma: no cover - a persisted plane always records its frame dimensions
             continue
 
-        for path in (io_data.registered_binary_path, io_data.registered_binary_path_channel_2):
-            if path is None or not path.exists():
-                continue
+        expected_size = frame_bytes * io_data.frame_count
+        malformed.extend(
+            path for path in _resolve_existing_plane_binaries(context=context) if path.stat().st_size != expected_size
+        )
 
-            byte_number = path.stat().st_size
-            if byte_number % frame_bytes != 0 or byte_number // frame_bytes != io_data.frame_count:
-                malformed.append(path)
+    if not malformed:
+        return
 
-    return malformed
+    message = (
+        f"Unable to binarize the recording. The size of {len(malformed)} plane binary file(s) disagrees with the "
+        f"frame geometry recorded for their plane: {natsorted(str(path) for path in malformed)}. Every later stage "
+        f"derives its frame count by dividing the file size by the frame size, so such a binary is consumed as a "
+        f"silently truncated movie. Enable 'file_io.repeat_binarization' to rebuild the recording from its source "
+        f"TIFF files."
+    )
+    console.error(message=message, error=RuntimeError)
+
+
+def _resolve_existing_plane_binaries(context: RuntimeContext) -> tuple[Path, ...]:
+    """Returns the channel binaries one plane holds on disk.
+
+    Args:
+        context: The plane context whose binaries are resolved.
+
+    Returns:
+        The path of every channel binary of the plane that exists on disk.
+    """
+    io_data = context.runtime.io
+    candidates = (io_data.registered_binary_path, io_data.registered_binary_path_channel_2)
+    return tuple(path for path in candidates if path is not None and path.exists())
+
+
+def _resolve_second_channel_binary(context: RuntimeContext) -> Path | None:
+    """Returns the second channel binary the recording declares for one plane.
+
+    Notes:
+        The declared channel count is the authority rather than the path the plane's own runtime record carries, so a
+        recording re-declared as two-channel after its planes were persisted is held to the second binary as well. Such
+        a plane carries no second channel path of its own, so the layout name under the plane's output directory stands
+        in for it.
+
+    Args:
+        context: The plane context whose second channel binary is resolved.
+
+    Returns:
+        The path of the plane's second channel binary, or None when the recording declares a single channel.
+    """
+    if context.acquisition.channel_number <= 1:
+        return None
+
+    io_data = context.runtime.io
+    if io_data.registered_binary_path_channel_2 is not None:
+        return io_data.registered_binary_path_channel_2
+    if io_data.output_path is None:  # pragma: no cover - a persisted plane always records its output directory
+        return None
+    return io_data.output_path / CHANNEL_2_BINARY_FILENAME
 
 
 def _clear_downstream_data(output_root: Path) -> None:

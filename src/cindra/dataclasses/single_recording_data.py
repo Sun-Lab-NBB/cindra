@@ -1657,8 +1657,8 @@ class CombinedData:
     to them."""
 
     plane_frame_counts: NDArray[np.uint32] = field(default_factory=lambda: np.array([], dtype=np.uint32))
-    """The number of frames each plane's binaries hold, which binarization makes equal across the recording's planes.
-    Comparing an entry against frame_count reports whether the plane's trailing frames reached the combined traces."""
+    """The number of frames each plane's binaries hold, which binarization makes identical for every plane of the
+    recording."""
 
     combined_height: int = 0
     """The height of the combined field of view in pixels."""

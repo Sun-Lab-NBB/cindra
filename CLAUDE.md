@@ -282,9 +282,10 @@ outputs.
   `resolve_binarization_marker_path`, `create_registration_marker`, `clear_registration_marker`,
   `resolve_registration_marker_path`) alongside `resolve_active_binary_marker`, the one question every reader asks,
   which returns whichever marker sits beside a binary or None. `register_plane` refuses to run while either marker
-  exists, and `binarize_recording` treats a marked binary, or one whose size disagrees with its plane's recorded frame
-  geometry, as invalid and rebuilds it from the source TIFFs without requiring `repeat_binarization`. The conversion
-  drops the registration marker of the binary it unlinks, because that marker describes a file that no longer exists.
+  exists, and `binarize_recording` refuses a marked binary, a binary whose size disagrees with its plane's recorded
+  frame geometry, and a two-channel plane holding no second channel binary, naming `repeat_binarization` as the remedy
+  in each message. The conversion drops the registration marker of the binary it unlinks, because that marker
+  describes a file that no longer exists.
   `binarize_recording` resolves the conversion plan (`resolve_tiff_conversion_plan`) before it clears the outputs
   derived from the previous binaries, so a conversion that fails its input validation leaves the recording's results
   in place.
