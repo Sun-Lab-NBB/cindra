@@ -11,7 +11,7 @@ import numpy as np
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-_MINIMUM_KNOTS_FOR_FROZEN_EDGES: int = 6
+MINIMUM_KNOTS_FOR_FROZEN_EDGES: int = 6
 """The minimum number of knots required per dimension to freeze edges (2 on each side + 2 interior)."""
 
 
@@ -236,7 +236,7 @@ class SplineGrid:
         for dimension in range(self.dimension_count):
             knots = self._get_knots(dimension=dimension)
 
-            if knots.shape[dimension] < _MINIMUM_KNOTS_FOR_FROZEN_EDGES:
+            if knots.shape[dimension] < MINIMUM_KNOTS_FOR_FROZEN_EDGES:
                 return False
 
             # Determines where the field's trailing edge falls between grid knots, since the field does not perfectly
