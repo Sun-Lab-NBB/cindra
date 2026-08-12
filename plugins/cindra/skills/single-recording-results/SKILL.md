@@ -76,10 +76,8 @@ output root differs from the raw-data root, not the raw-data path itself. The to
 automatically.
 
 `query_single_recording_metadata_tool` reports the top-level `frame_count` from the combined traces and each
-`plane_timing` entry's `frame_count` from that plane's `runtime_data.yaml`. The counts agree for a recording converted
-in one run, because binarization gives every plane of such a recording the same frame count. A plane count above the
-top-level count marks a plane whose trailing frames were trimmed out of the combined traces, which happens when a
-shorter plane contributed traces alongside it.
+`plane_timing` entry's `frame_count` from that plane's `runtime_data.yaml`. The counts agree, because binarization
+gives every plane of the recording the same frame count.
 
 The ROI indices accepted by `query_traces_tool` and `query_roi_statistics_tool` are 0-based positional row indices into
 the per-recording arrays, not a tracking identity. Both tools silently drop individual out-of-range indices, so always
@@ -165,11 +163,10 @@ cindra/
 binarization ran. Phase 1 itself creates the per-plane `channel_1_data.bin` (and `channel_2_data.bin` if two-channel)
 and per-plane `detection_data/mean_image.npy` (plus `mean_image_channel_2.npy` if two-channel), then records
 `binarization_time` into each plane's `runtime_data.yaml`. Binarization consumes whole plane and channel interleave
-cycles, so every plane binary of a recording the current code converted holds the same frame count, and channel 2 holds
-exactly as many frames as channel 1 of the same plane. A recording converted by an earlier version can still hold
-planes, or the two channels of one plane, at unequal lengths, so read each plane's own `runtime_data.yaml` before
-comparing traces across planes. Binarization also rebuilds an existing binary whose size disagrees with its recorded
-plane geometry, or that an interrupted write left marked, without requiring `repeat_binarization`.
+cycles, so every plane binary of the recording holds the same frame count, and channel 2 holds exactly as many frames
+as channel 1 of the same plane. Binarization refuses an existing binary whose size disagrees with its recorded plane
+geometry, one that an interrupted write left marked, and a two-channel plane holding no channel 2 binary, naming
+`repeat_binarization` as the remedy in each message.
 
 **Phase 2 (registration, per-plane):** Creates `registration_data/`, rewrites the plane binary in place, refreshes
 `detection_data/mean_image.npy`, and updates `runtime_data.yaml` with the registration section,
@@ -177,8 +174,8 @@ plane geometry, or that an interrupted write left marked, without requiring `rep
 `{binary}.registering` marker sits beside the binary, the parallel of the `{binary}.binarizing` marker binarization
 writes while it fills that binary. Either marker left on disk means that phase's write was interrupted, so the binary
 holds finished frames up to an unknown point and unfinished frames after it. The suffix names the phase that died and
-nothing else, because registration refuses to run against a binary carrying either one, and re-running binarization
-rebuilds the binary and clears the marker in both cases.
+nothing else, because registration and binarization both refuse a binary carrying either one, and enabling
+`file_io.repeat_binarization` rebuilds the binary and clears the marker in both cases.
 
 **Phase 3 (processing, per-plane):** Creates the remaining `detection_data/` images (`enhanced_mean_image.npy`,
 `maximum_projection.npy`, `correlation_map.npy`), the ROI `.npz` files, the fluorescence `.npy` traces, and updates
@@ -288,7 +285,6 @@ Per-plane detection and extraction data (plane_N/):
 Multi-recording readiness (if multi-recording processing is planned):
 - [ ] `combined_metadata.npz` contains `registered_binary_paths` key
 - [ ] All registered binary files referenced in `registered_binary_paths` exist on disk
-- [ ] `combined_metadata.npz` `plane_frame_counts` entries are all equal, which binarization guarantees for a recording
-      converted in one run (multi-recording extraction opens the plane binaries as one combined view whose frame count
-      is that of the shortest plane, so unequal counts mean the trailing frames of the longer planes are not extracted)
+- [ ] `combined_metadata.npz` `plane_frame_counts` entries are all equal, which binarization guarantees by keeping
+      whole plane and channel interleave cycles
 ```

@@ -905,8 +905,9 @@ def _validate_registered_binaries(binary_paths: list[Path], recording_id: str) -
             message = (
                 f"Unable to extract multi-recording traces for recording {recording_id}. A previous write of the "
                 f"binary file '{binary_path}' was interrupted, so the file holds finished frames up to an unknown "
-                f"point and unfinished frames after it. Re-run the binarization and registration stages of the "
-                f"single-recording pipeline for that recording, which also clears the marker at '{marker_path}'."
+                f"point and unfinished frames after it. Enable 'file_io.repeat_binarization' in that recording's "
+                f"single-recording configuration and re-run its single-recording pipeline, which rebuilds the binary "
+                f"from its source TIFF files and clears the marker at '{marker_path}'."
             )
             console.error(message=message, error=RuntimeError)
 

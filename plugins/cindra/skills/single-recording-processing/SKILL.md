@@ -110,13 +110,12 @@ Phase 4: COMBINE (phase name combination, serial merge, 1 core per job)
 ```
 
 Phase 1 consumes whole plane-and-channel interleave cycles, so it discards the frames of an incomplete final cycle and
-warns with their count, and it fails a recording holding fewer frames than one whole cycle. Every plane and channel of a
-recording this phase converts therefore holds the same frame count, while one converted by an earlier version can hold
-them at unequal lengths.
+warns with their count, and it fails a recording holding fewer frames than one whole cycle. Every plane and channel of
+the recording therefore holds the same frame count.
 
-Phase 1 has two outcomes: it skips the conversion, or it rebuilds every plane binary. A rebuild discards the results of
-every plane directory the output root holds, including one the declared plane count no longer reaches, whose own binary
-the rebuild leaves in place.
+Phase 1 has three outcomes: it skips the conversion, it converts every plane binary, or it refuses the recording. A
+conversion discards the results of every plane directory the output root holds, including one the declared plane count
+no longer reaches, whose own binary the conversion leaves in place. A refusal deletes nothing.
 
 Batch processing across multiple recordings:
 
@@ -272,21 +271,14 @@ and every later registration of that plane fails with "Unable to register plane 
 file ... was interrupted". Cleaning or resetting `registration` does NOT clear either marker, because they sit beside
 the `.bin` rather than inside `registration_data`.
 
-Recover by resetting the `binarization` phase with `reset_processing_phases_tool` and re-dispatching. Binarization
-detects either marker, rebuilds the binary from the raw TIFFs, and clears the marker. You do NOT need to set
-`repeat_binarization`, and you do NOT need `clean_processing_output_tool`. Binarization also rebuilds automatically when
-a binary's size disagrees with the frame geometry recorded for its plane, which is what a binary truncated outside the
-pipeline leaves behind. `repeat_binarization` is needed to force a rebuild of binaries that are intact, and to restore
-a plane's missing channel 2 binary, whose absence leaves the recording valid.
-
-**Migrating a recording converted by an earlier version.** Such a recording can hold planes, or the two channels of one
-plane, at unequal lengths, because the frames of its final incomplete cycle reached some planes and channels and not
-others. A plane whose two channels received different counts holds one binary disagreeing with the frame count recorded
-for that plane, so the next binarization run reports it as malformed and rebuilds the whole recording without
-`repeat_binarization` being set. Every other such recording, including every single-channel one, is skipped instead and
-keeps its unequal plane lengths, so rebuilding it takes `repeat_binarization`. Either rebuild discards the recording's
-registration, detection, extraction, and combined results, which the later phases recompute. Warn the user before
-dispatching, and budget a full reprocessing run rather than a conversion alone.
+Binarization refuses a marked binary rather than rebuilding it, and the refusal names the affected files and
+`repeat_binarization` as the remedy. Recover by enabling `file_io.repeat_binarization` in the recording's
+configuration, resetting the `binarization` phase with `reset_processing_phases_tool`, and re-dispatching. The rebuild
+clears every marker, and you do NOT need `clean_processing_output_tool`. The same recovery applies to a binary whose
+size disagrees with the frame geometry recorded for its plane, which is what a truncation outside the pipeline leaves
+behind, and to a two-channel plane holding no channel 2 binary. Every rebuild discards the recording's registration,
+detection, extraction, and combined results, which the later phases recompute, so warn the user before dispatching and
+budget a full reprocessing run rather than a conversion alone.
 
 ---
 
@@ -378,15 +370,15 @@ job.
 
 When processing fails for some recordings, read the error messages and route to the appropriate skill:
 
-| Error pattern                                     | Skill to invoke                   |
-|---------------------------------------------------|-----------------------------------|
-| Missing `cindra_parameters.json`, TIFF read error | `/acquisition-data-preparation`   |
-| Invalid parameter values, wrong plane/channel     | `/acquisition-data-preparation`   |
-| TIFF files hold frames of differing shapes        | `/acquisition-data-preparation`   |
-| TIFF frames fall short of one interleave cycle    | `/acquisition-data-preparation`   |
-| Registration of the binary file was interrupted   | Reset `binarization`, re-dispatch |
-| Configuration parameter issues                    | `/single-recording-configuration` |
-| MCP tools unavailable, server connection errors   | `/cindra-mcp-environment-setup`   |
+| Error pattern                                     | Skill to invoke                                                 |
+|---------------------------------------------------|-----------------------------------------------------------------|
+| Missing `cindra_parameters.json`, TIFF read error | `/acquisition-data-preparation`                                 |
+| Invalid parameter values, wrong plane/channel     | `/acquisition-data-preparation`                                 |
+| TIFF files hold frames of differing shapes        | `/acquisition-data-preparation`                                 |
+| TIFF frames fall short of one interleave cycle    | `/acquisition-data-preparation`                                 |
+| Previous write of the binary file was interrupted | Enable `repeat_binarization`, reset `binarization`, re-dispatch |
+| Configuration parameter issues                    | `/single-recording-configuration`                               |
+| MCP tools unavailable, server connection errors   | `/cindra-mcp-environment-setup`                                 |
 
 Wait for the current execution session to complete before starting retries. `cancel_processing_jobs_tool` clears the
 admission pool and every resource class queue but does NOT stop already-dispatched worker processes, and it clears the

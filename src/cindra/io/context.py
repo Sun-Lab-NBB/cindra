@@ -101,7 +101,9 @@ def resolve_single_recording_contexts(
         prepare_single_recording_batch_tool was not run first.
 
         When loading previously processed data (e.g., data moved to a different machine), acquisition parameters are
-        loaded from the saved output directory if available, allowing the pipeline to work without raw TIFF data.
+        loaded from the saved output directory if available, allowing the pipeline to work without raw TIFF data. A
+        plane record written before the recording declared its second channel receives that channel's binary path
+        here, so the conversion the re-declaration calls for has a destination to write it into.
 
     Args:
         configuration: The single-recording pipeline configuration. Must have output_path configured in
@@ -182,6 +184,13 @@ def resolve_single_recording_contexts(
             # Loads existing runtime data (scalars only). Arrays are loaded on demand by each pipeline function.
             runtime_data = SingleRecordingRuntimeData.load(output_path=plane_output_path)
             console.echo(message=f"Loaded existing runtime data for plane {virtual_plane_index}.", level=LogLevel.INFO)
+
+            # Holds the loaded record to the channel count the recording currently declares. A plane persisted while
+            # the recording declared one channel carries no second channel path of its own. The conversion resolves
+            # every binary it writes from that record, so the rebuild a re-declaration calls for would otherwise have
+            # no destination for the second channel.
+            if has_two_channels and runtime_data.io.registered_binary_path_channel_2 is None:
+                runtime_data.io.registered_binary_path_channel_2 = plane_output_path / CHANNEL_2_BINARY_FILENAME
 
             context = RuntimeContext(
                 configuration=configuration,

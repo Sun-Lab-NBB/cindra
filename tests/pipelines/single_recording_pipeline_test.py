@@ -66,6 +66,9 @@ _MAXIMUM_PIXEL_VALUE: int = 32766
 _TEST_WORKERS: int = 1
 """The worker allocation every stage entry point receives in these tests, which keeps the synthetic runs serial."""
 
+_BINARY_ITEM_SIZE: int = 2
+"""The number of bytes one pixel occupies inside a cindra binary, which stores int16 samples."""
+
 
 def _build_flickering_movie(*, frame_count: int, seed: int) -> NDArray[np.int16]:
     """Builds a synthetic movie whose spatially fixed Gaussian blobs flicker independently across frames.
@@ -85,15 +88,21 @@ def _build_flickering_movie(*, frame_count: int, seed: int) -> NDArray[np.int16]
 
 
 def _write_raw_recording(
-    data_directory: Path, *, frame_count: int = _FRAME_COUNT, seed: int = 0, plane_number: int = 1
+    data_directory: Path,
+    *,
+    frame_count: int = _FRAME_COUNT,
+    seed: int = 0,
+    plane_number: int = 1,
+    channel_number: int = 1,
 ) -> None:
-    """Writes a multi-page TIFF and a raw acquisition parameters file describing a single-channel recording."""
+    """Writes a multi-page TIFF and a raw acquisition parameters file describing the recording."""
     ensure_directory_exists(data_directory)
-    movie = _build_flickering_movie(frame_count=frame_count, seed=seed)
+    source_frame_count = frame_count * channel_number
+    movie = _build_flickering_movie(frame_count=source_frame_count, seed=seed)
     with TiffWriter(data_directory / "recording.tif") as writer:
-        for frame_index in range(frame_count):
+        for frame_index in range(source_frame_count):
             writer.write(movie[frame_index])
-    parameters = {"frame_rate": 30.0, "plane_number": plane_number, "channel_number": 1}
+    parameters = {"frame_rate": 30.0, "plane_number": plane_number, "channel_number": channel_number}
     (data_directory / PARAMETERS_FILENAME).write_text(json.dumps(parameters))
 
 
@@ -107,6 +116,19 @@ def _declare_plane_count(root: Path, *, plane_count: int) -> None:
     saved_path = root / "output" / "cindra" / "acquisition_parameters.yaml"
     acquisition = AcquisitionParameters.from_yaml(file_path=saved_path)
     acquisition.plane_number = plane_count
+    acquisition.to_yaml(file_path=saved_path)
+
+
+def _declare_channel_count(root: Path, *, channel_number: int) -> None:
+    """Re-declares the imaging channel count in the recording's raw and saved acquisition parameter files."""
+    raw_path = root / "data" / PARAMETERS_FILENAME
+    parameters = json.loads(raw_path.read_text())
+    parameters["channel_number"] = channel_number
+    raw_path.write_text(json.dumps(parameters))
+
+    saved_path = root / "output" / "cindra" / "acquisition_parameters.yaml"
+    acquisition = AcquisitionParameters.from_yaml(file_path=saved_path)
+    acquisition.channel_number = channel_number
     acquisition.to_yaml(file_path=saved_path)
 
 
@@ -147,16 +169,32 @@ def _prepare_pipeline_inputs(
     return configuration_path, output_directory
 
 
-def _binarize_to_disk(
-    root: Path, *, frame_count: int = _FRAME_COUNT, seed: int = 0, plane_number: int = 1
+def _bootstrap_recording(
+    root: Path, *, frame_count: int = _FRAME_COUNT, seed: int = 0, plane_number: int = 1, channel_number: int = 1
 ) -> SingleRecordingConfiguration:
-    """Writes a raw recording and binarizes it, returning the configuration bound to the on-disk binary outputs."""
+    """Writes a raw recording and the filesystem bootstrap binarize_recording's load-only resolution depends on."""
     data_directory = root / "data"
     output_directory = root / "output"
-    _write_raw_recording(data_directory=data_directory, frame_count=frame_count, seed=seed, plane_number=plane_number)
+    _write_raw_recording(
+        data_directory=data_directory,
+        frame_count=frame_count,
+        seed=seed,
+        plane_number=plane_number,
+        channel_number=channel_number,
+    )
     configuration = _make_configuration(data_directory=data_directory, output_directory=output_directory)
-    # Writes the single-threaded filesystem bootstrap that binarize_recording's load-only resolution depends on.
+    configuration.main.two_channels = channel_number > 1
     resolve_single_recording_contexts(configuration=configuration, persist=True)
+    return configuration
+
+
+def _binarize_to_disk(
+    root: Path, *, frame_count: int = _FRAME_COUNT, seed: int = 0, plane_number: int = 1, channel_number: int = 1
+) -> SingleRecordingConfiguration:
+    """Writes a raw recording and binarizes it, returning the configuration bound to the on-disk binary outputs."""
+    configuration = _bootstrap_recording(
+        root=root, frame_count=frame_count, seed=seed, plane_number=plane_number, channel_number=channel_number
+    )
     binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
     return configuration
 
@@ -346,6 +384,16 @@ class TestBinarizeRecording:
         with pytest.raises(FileNotFoundError, match="bootstrap persistence"):
             binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
 
+    def test_first_run_converts_a_recording_holding_no_binary(self, tmp_path: Path) -> None:
+        """Verifies that a recording holding no binary at all converts rather than tripping one of the refusals."""
+        configuration = _bootstrap_recording(root=tmp_path)
+        binary_path = tmp_path / "output" / "cindra" / "plane_0" / "channel_1_data.bin"
+        assert not binary_path.exists()
+
+        binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
+
+        assert binary_path.stat().st_size == _FRAME_COUNT * _FRAME_HEIGHT * _FRAME_WIDTH * _BINARY_ITEM_SIZE
+
     def test_skips_existing_valid_binaries(self, tmp_path: Path) -> None:
         """Verifies that a second binarization is skipped when valid binaries already exist on disk."""
         configuration = _binarize_to_disk(tmp_path)
@@ -377,45 +425,138 @@ class TestBinarizeRecording:
 
         assert binary_path.exists()
 
-    def test_recreates_truncated_binaries(self, tmp_path: Path) -> None:
-        """Verifies that binarization rebuilds a binary whose size disagrees with its recorded frame geometry."""
+    def test_truncated_binary_raises(self, tmp_path: Path) -> None:
+        """Verifies that a binary whose size disagrees with its recorded frame geometry is refused."""
+        configuration = _binarize_to_disk(tmp_path)
+        binary_path = tmp_path / "output" / "cindra" / "plane_0" / "channel_1_data.bin"
+        truncated_size = binary_path.stat().st_size // 2
+
+        # Simulates a copy that died partway, which leaves a binary holding fewer frames than the plane's runtime
+        # data records.
+        with binary_path.open(mode="r+b") as binary_file:
+            binary_file.truncate(truncated_size)
+
+        with pytest.raises(RuntimeError, match=r"disagrees\s+with\s+the\s+frame\s+geometry"):
+            binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
+
+        # The refusal deletes nothing, so the caller decides what to do with the binary it left in place.
+        assert binary_path.stat().st_size == truncated_size
+
+    @pytest.mark.parametrize("create_marker", [create_binarization_marker, create_registration_marker])
+    def test_marked_binary_raises(self, tmp_path: Path, create_marker: Callable[..., None]) -> None:
+        """Verifies that a binary either phase left marked is refused and the failure names the interrupted phase."""
+        configuration = _binarize_to_disk(tmp_path)
+        binary_path = tmp_path / "output" / "cindra" / "plane_0" / "channel_1_data.bin"
+        original_bytes = binary_path.read_bytes()
+        create_marker(binary_path=binary_path)
+
+        with pytest.raises(RuntimeError, match=r"An\s+interrupted\s+write\s+left") as failure:
+            binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
+
+        marker_path = resolve_active_binary_marker(binary_path=binary_path)
+        assert marker_path is not None
+        assert marker_path.name in str(failure.value)
+
+        # The refusal deletes nothing, so both the marked binary and its marker survive it.
+        assert binary_path.read_bytes() == original_bytes
+
+    def test_missing_second_channel_binary_raises(self, tmp_path: Path) -> None:
+        """Verifies that a converted plane of a two-channel recording missing its second binary is refused."""
+        configuration = _binarize_to_disk(tmp_path, channel_number=2)
+        plane_directory = tmp_path / "output" / "cindra" / "plane_0"
+        channel_1_path = plane_directory / "channel_1_data.bin"
+        channel_2_path = plane_directory / "channel_2_data.bin"
+        channel_1_size = channel_1_path.stat().st_size
+        channel_2_path.unlink()
+
+        with pytest.raises(RuntimeError, match=r"hold\s+no\s+second\s+channel\s+binary"):
+            binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
+
+        # The refusal deletes nothing and creates nothing, so no stage gets to fill the absent binary with zeros.
+        assert not channel_2_path.exists()
+        assert channel_1_path.stat().st_size == channel_1_size
+
+    def test_second_channel_declared_after_conversion_raises(self, tmp_path: Path) -> None:
+        """Verifies that raising the declared channel count refuses the planes converted under the previous count."""
+        configuration = _binarize_to_disk(tmp_path)
+        _declare_channel_count(root=tmp_path, channel_number=2)
+
+        with pytest.raises(RuntimeError, match=r"channel_2_data\.bin"):
+            binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
+
+    def test_skips_a_complete_two_channel_recording(self, tmp_path: Path) -> None:
+        """Verifies that a two-channel recording holding both binaries of every plane is skipped."""
+        configuration = _binarize_to_disk(tmp_path, channel_number=2)
+        plane_directory = tmp_path / "output" / "cindra" / "plane_0"
+        sizes = {path.name: path.stat().st_size for path in plane_directory.glob("channel_*_data.bin")}
+        assert len(sizes) == 2
+
+        binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
+
+        assert {path.name: path.stat().st_size for path in plane_directory.glob("channel_*_data.bin")} == sizes
+
+    def test_single_channel_recording_holding_no_second_binary_is_skipped(self, tmp_path: Path) -> None:
+        """Verifies that the second channel refusal stays silent for a recording declaring a single channel."""
+        configuration = _binarize_to_disk(tmp_path)
+        plane_directory = tmp_path / "output" / "cindra" / "plane_0"
+        binary_size = (plane_directory / "channel_1_data.bin").stat().st_size
+        assert not (plane_directory / "channel_2_data.bin").exists()
+
+        binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
+
+        assert (plane_directory / "channel_1_data.bin").stat().st_size == binary_size
+
+    @pytest.mark.parametrize("refusal", ["truncated_binary", "binarization_marker", "registration_marker"])
+    def test_repeat_binarization_rebuilds_past_every_refusal(self, tmp_path: Path, refusal: str) -> None:
+        """Verifies that the caller-requested rebuild converts a recording each refusal would otherwise reject."""
         configuration = _binarize_to_disk(tmp_path)
         binary_path = tmp_path / "output" / "cindra" / "plane_0" / "channel_1_data.bin"
         full_size = binary_path.stat().st_size
 
-        # Simulates a conversion that died partway, which leaves a binary holding fewer frames than the plane's
-        # runtime data records.
-        with binary_path.open(mode="r+b") as binary_file:
-            binary_file.truncate(full_size // 2)
+        if refusal == "truncated_binary":
+            with binary_path.open(mode="r+b") as binary_file:
+                binary_file.truncate(full_size // 2)
+        elif refusal == "binarization_marker":
+            create_binarization_marker(binary_path=binary_path)
+        else:
+            create_registration_marker(binary_path=binary_path)
+        configuration.file_io.repeat_binarization = True
 
         binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
 
         assert binary_path.stat().st_size == full_size
+        assert resolve_active_binary_marker(binary_path=binary_path) is None
 
-    @pytest.mark.parametrize("create_marker", [create_binarization_marker, create_registration_marker])
-    def test_recreates_binaries_left_marked_by_either_phase(
-        self, tmp_path: Path, create_marker: Callable[..., None]
-    ) -> None:
-        """Verifies that binarization rebuilds a binary either phase left marked and clears every mark it carries."""
-        configuration = _binarize_to_disk(tmp_path)
-        binary_path = tmp_path / "output" / "cindra" / "plane_0" / "channel_1_data.bin"
-        create_marker(binary_path=binary_path)
+    def test_repeat_binarization_restores_a_deleted_second_channel_binary(self, tmp_path: Path) -> None:
+        """Verifies that the caller-requested rebuild writes back the second channel binary a refusal names."""
+        configuration = _binarize_to_disk(tmp_path, channel_number=2)
+        channel_2_path = tmp_path / "output" / "cindra" / "plane_0" / "channel_2_data.bin"
+        full_size = channel_2_path.stat().st_size
+        channel_2_path.unlink()
+        configuration.file_io.repeat_binarization = True
 
         binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
 
-        assert binary_path.exists()
-        assert resolve_active_binary_marker(binary_path=binary_path) is None
+        assert channel_2_path.stat().st_size == full_size
 
-    @pytest.mark.parametrize(
-        "trigger",
-        [
-            "repeat_binarization",
-            "missing_binary",
-            "truncated_binary",
-            "binarization_marker",
-            "registration_marker",
-        ],
-    )
+    def test_refusal_keeps_downstream_data(self, tmp_path: Path) -> None:
+        """Verifies that a refused recording keeps every result the previous run measured from its binaries."""
+        configuration = _process_to_disk(tmp_path)
+        root_directory = tmp_path / "output" / "cindra"
+        plane_directory = root_directory / "plane_0"
+        create_registration_marker(binary_path=plane_directory / "channel_1_data.bin")
+
+        with pytest.raises(RuntimeError, match=r"An\s+interrupted\s+write\s+left"):
+            binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
+
+        assert (plane_directory / "registration_data" / "reference_image.npy").exists()
+        assert (plane_directory / "roi_statistics.npz").exists()
+        assert (plane_directory / "cell_fluorescence.npy").exists()
+        assert (root_directory / "cell_fluorescence.npy").exists()
+        assert (root_directory / "detection_data" / "mean_image.npy").exists()
+        assert (root_directory / "combined_metadata.npz").exists()
+
+    @pytest.mark.parametrize("trigger", ["repeat_binarization", "missing_binary"])
     def test_rebuild_clears_downstream_data(self, tmp_path: Path, trigger: str) -> None:
         """Verifies that every trigger that rebuilds the plane binaries discards the data measured from them."""
         configuration = _process_to_disk(tmp_path)
@@ -433,15 +574,8 @@ class TestBinarizeRecording:
 
         if trigger == "repeat_binarization":
             configuration.file_io.repeat_binarization = True
-        elif trigger == "missing_binary":
-            binary_path.unlink()
-        elif trigger == "truncated_binary":
-            with binary_path.open(mode="r+b") as binary_file:
-                binary_file.truncate(full_size // 2)
-        elif trigger == "binarization_marker":
-            create_binarization_marker(binary_path=binary_path)
         else:
-            create_registration_marker(binary_path=binary_path)
+            binary_path.unlink()
 
         binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
 

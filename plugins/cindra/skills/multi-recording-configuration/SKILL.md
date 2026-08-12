@@ -91,8 +91,8 @@ No special single-recording configuration is required. The pipeline always gener
 registered binary files by default.
 
 Extraction opens each recording's plane binaries as one combined view whose frame count is that of the recording's
-shortest plane, so the trailing frames of any longer plane fall outside that view. Check that a recording's
-`combined_metadata.npz` `plane_frame_counts` entries are equal before relying on its full frame range.
+shortest plane. Binarization gives every plane of the recording the same frame count, so that view spans the
+recording's full frame range.
 
 ---
 

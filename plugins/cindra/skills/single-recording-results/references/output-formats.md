@@ -26,10 +26,8 @@ demand by `/single-recording-results`.
 | `registered_binary_paths_channel_2` | str     | (N,)  | Relative paths to channel 2 registered binaries (2-ch) |
 
 `frame_count` is the frame count of the shortest plane that contributed traces, which is what the combined traces were
-trimmed to. `plane_frame_counts` holds each plane's own count, which binarization makes identical across the planes of a
-recording converted in one run, so every entry equals `frame_count` once every plane has completed. A `frame_count` of 0
-with an empty `plane_frame_counts` means the archive predates these fields rather than that the recording holds no
-frames.
+trimmed to. `plane_frame_counts` holds each plane's own count, which binarization makes identical across the planes of
+the recording, so every entry equals `frame_count` once every plane has completed.
 
 ---
 
@@ -126,8 +124,7 @@ Saved at both the combined root and per-plane levels. All files are `.npy` forma
 At the combined root, `frames` is the frame count of the shortest plane that contributed traces, recorded as
 `frame_count` in `combined_metadata.npz`. Combination trims every plane's traces to that count rather than padding the
 shorter ones, and logs a warning naming the range. Planes that did not complete extraction contribute no rows and are
-excluded from the trim target. Compare `frame_count` against `plane_frame_counts` to see whether trimming occurred. At
-the per-plane level, `frames` is that plane's own `io.frame_count`.
+excluded from the trim target. At the per-plane level, `frames` is that plane's own `io.frame_count`.
 
 **Channel 1 (always present):**
 

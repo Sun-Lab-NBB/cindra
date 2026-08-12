@@ -178,9 +178,10 @@
 - Binarization and registration both write frames into a plane binary, each guarding its own write with its own marker,
   `<binary>.binarizing` and `<binary>.registering`. `cindra.io` exports a create, clear, and path helper per phase plus
   `resolve_active_binary_marker`, which reports whichever marker sits beside a binary and is what every reader calls.
-  `register_plane` refuses to run while either marker exists, and `binarize_recording` treats a marked binary, or one
-  whose size disagrees with its plane's recorded frame geometry, as invalid and rebuilds it from the source TIFFs.
-  Preserve this protocol when modifying either stage, because re-running binarization is the recovery path
+  `register_plane` refuses to run while either marker exists, and `binarize_recording` refuses a marked binary, a
+  binary whose size disagrees with its plane's recorded frame geometry, and a two-channel plane holding no second
+  channel binary. Preserve this protocol when modifying either stage, and keep `repeat_binarization` named as the
+  remedy every refusal states, because a caller-requested rebuild is the recovery path
 - Binarization consumes whole plane and channel interleave cycles, discarding the frames of an incomplete final cycle
   and rejecting a recording that holds fewer frames than one whole cycle. Keep both in `resolve_tiff_conversion_plan`,
   because the plan resolves before the conversion touches any binary or deletes any result the recording already holds

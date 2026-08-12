@@ -836,9 +836,8 @@ def _validate_binaries_are_not_mid_write(io_data: IOData, plane_index: int) -> N
             message = (
                 f"Unable to register plane {plane_index}. A previous write of the binary file "
                 f"'{binary_path}' was interrupted, so the file holds finished frames up to an unknown point and "
-                f"unfinished frames after it. Re-run the binarization stage to rebuild the binary from its source "
-                f"TIFF files, which also clears the marker at '{marker_path}'. Binarization rebuilds a marked binary "
-                f"on its own, so enabling 'repeat_binarization' is not required."
+                f"unfinished frames after it. Enable 'file_io.repeat_binarization' and re-run the binarization stage "
+                f"to rebuild the binary from its source TIFF files, which also clears the marker at '{marker_path}'."
             )
             console.error(message=message, error=RuntimeError)
 

@@ -25,14 +25,16 @@ _DEFAULT_BIN_BATCH_SIZE: int = 500
 _BINARIZATION_MARKER_CONTENTS: str = (
     "The binarization stage was writing converted frames into the binary this marker sits beside when it was "
     "interrupted. The binary therefore holds converted frames up to some unknown point and unwritten frames after it. "
-    "Re-run the binarization stage for this recording to rebuild the binary from its source TIFF files.\n"
+    "Enable 'file_io.repeat_binarization' and re-run the binarization stage for this recording to rebuild the binary "
+    "from its source TIFF files.\n"
 )
 """The text written into a binarization marker, so that the marker explains itself to whoever finds it on disk."""
 
 _REGISTRATION_MARKER_CONTENTS: str = (
     "The registration stage was writing motion-corrected frames into the binary this marker sits beside when it was "
     "interrupted. The binary therefore holds corrected frames up to some unknown point and raw frames after it. "
-    "Re-run the binarization stage for this recording to rebuild the binary from its source TIFF files.\n"
+    "Enable 'file_io.repeat_binarization' and re-run the binarization stage for this recording to rebuild the binary "
+    "from its source TIFF files.\n"
 )
 """The text written into a registration marker, so that the marker explains itself to whoever finds it on disk."""
 
