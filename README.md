@@ -145,17 +145,11 @@ the raw data directory must be prepared with the correct structure.
 
 #### TIFF Files
 
-Every page of every TIFF file in the directory must hold a frame of the same shape. Binarization checks each page
-before conversion and fails with an error naming the offending files if any differ, because a foreign file, most
-commonly an anatomical z-stack stored alongside the functional recording, would otherwise corrupt the interleave
-accounting. Exclude any such file with the `file_io.ignored_file_names` configuration parameter, which matches on the
-file stem without its extension.
-
-The check reaches every page whose own header its file stores. tifffile addresses the pages of a ScanImage classic
-file, meaning a non-BigTIFF one, past the two gigabyte offset ceiling arithmetically, and a frame built that way
-carries no header and reports the shape of the file's first frame. A differing frame among those is written into the
-binary as if it matched, which yields wrong data rather than a rejected recording. Splitting a ScanImage acquisition
-into files below that ceiling, which its frames-per-file setting does, keeps every frame under the check.
+Every TIFF file in the directory must hold frames of the same shape. Binarization checks this before conversion and
+fails with an error naming the offending files if any differ, because a foreign file, most commonly an anatomical
+z-stack stored alongside the functional recording, would otherwise corrupt the interleave accounting. Exclude any such
+file with the `file_io.ignored_file_names` configuration parameter, which matches on the file stem without its
+extension.
 
 The pipeline expects a flat directory containing one or more `.tif` / `.tiff` files. For multi-plane or multichannel
 acquisitions, frames must be interleaved in the following order within each TIFF file: plane0_channel1, plane0_channel2,
@@ -260,12 +254,15 @@ This section describes the key data files produced by the pipelines. All per-pla
 Registration writes corrected frames back to the same binary files created during binarization. There are no separate
 "registered" binary files. `channel_1_data.bin` is overwritten in place with motion-corrected data.
 
-Both stages that write frames into a binary guard the write with a `channel_1_data.bin.writing` marker file beside it,
-which they remove once every frame is in place. Binarization sizes the binary to its full frame count before writing
-its first frame, and registration rewrites the binary it reads. An interrupted run of either stage therefore leaves a
-correctly sized file whose contents are indeterminate, and the marker is the only record of that state. Registration
-refuses to run against a marked binary. Re-run the binarization phase to rebuild the binary from its source TIFF
-files, which also clears the marker.
+Each stage that writes frames into a binary guards the write with a marker file beside it, which it removes once every
+frame is in place. Binarization writes `channel_1_data.bin.binarizing` and registration writes
+`channel_1_data.bin.registering`, each suffix spelling the phase the way the reported job status spells it.
+Binarization sizes the binary to its full frame count before writing its first frame, and registration rewrites the
+binary it reads. An interrupted run of either stage therefore leaves a correctly sized file whose contents are
+indeterminate, and the marker is the only record of that state. Both markers mean the same thing to the pipeline, and
+the two names exist so that whoever finds one on disk reads which phase died. Registration refuses to run against a
+binary carrying either marker. Re-run the binarization phase to rebuild the binary from its source TIFF files, which
+also clears the marker.
 
 Binarization consumes whole plane-and-channel interleave cycles and discards any frame past the last whole cycle. Every
 plane binary of a recording the current code converted therefore holds the same number of frames, and the two channels
@@ -380,30 +377,23 @@ computed for each plane. TIFF files are slow to read frame-by-frame due to file 
 provides instant random access to any frame through memory mapping, which is essential for reading frames out of order
 or in parallel.
 
-Binarization has three outcomes: it skips the conversion, it rebuilds every plane binary from the source TIFFs, or it
-refuses the recording. The conversion is skipped when every plane holds a channel 1 binary whose size matches the
-geometry recorded for that plane. A rebuild follows a missing channel 1 binary, a `.writing` marker left beside either
-channel's binary by an interrupted conversion or registration, or a binary on disk whose size disagrees with its
-plane's recorded frame geometry. That last case is what a truncation outside the pipeline leaves behind. Enabling the
+Binarization has two outcomes: it skips the conversion, or it rebuilds every plane binary from the source TIFFs. The
+conversion is skipped when every plane holds a channel 1 binary whose size matches the geometry recorded for that plane.
+A rebuild follows a missing channel 1 binary, a `.binarizing` or `.registering` marker left beside either channel's
+binary by an interrupted conversion or registration, or a binary on disk whose size disagrees with its plane's recorded
+frame geometry. That last case is what a truncation outside the pipeline leaves behind. Enabling the
 `file_io.repeat_binarization` configuration parameter rebuilds an otherwise valid recording. Only channel 1 has to
 exist, so a recording whose channel 2 binaries were deleted is skipped rather than rebuilt, and that parameter is what
 restores them. Re-running this phase is therefore the recovery path for both an interrupted conversion and an
 interrupted registration, and it needs no configuration change.
 
-Binarization refuses a recording whose output directory holds a plane directory beyond the plane count the acquisition
-parameters declare, naming every surplus directory in the error. Only a conversion removes such a directory, because it
-rebuilds the recording at the count the removal was measured against, and the declared count comes from a user-editable
-file where a stale or mistyped value reads exactly like a deliberate re-declaration. Correct the declared count in
-`cindra_parameters.json`, which is `plane_number` multiplied by `roi_number`, or enable `file_io.repeat_binarization` to
-rebuild the recording at that count and discard the surplus planes. The refusal fails the binarization job, and the
-prerequisite graph then withholds the recording's registration, processing, and combination jobs.
-
 A rebuild replaces every plane binary of the recording, so it first discards everything the pipeline measured from the
 previous ones: each plane's registration and detection output, its extracted traces, and the recording's combined
-dataset. The rebuilt binaries hold raw frames again, so every plane has to be registered and processed once more before
-the recording can be combined. The discard follows the resolution of every source file and destination the conversion
-needs, so a rebuild that the source files reject, such as one whose TIFF files disagree about their frame shape,
-leaves the previous results in place.
+dataset. That discard covers every plane directory the output directory holds, including one the declared plane count no
+longer reaches, whose own binary the rebuild leaves alone. The rebuilt binaries hold raw frames again, so every plane
+has to be registered and processed once more before the recording can be combined. The discard follows the resolution of
+every source file and destination the conversion needs, so a rebuild that the source files reject, such as one whose
+TIFF files disagree about their frame shape, leaves the previous results in place.
 
 A recording converted by an earlier version can hold planes, or the two channels of one plane, at unequal lengths,
 because the frames of its final incomplete cycle reached some planes and channels and not others. A plane whose two
@@ -583,13 +573,6 @@ entire recording volume. The combined dataset is also the required input for the
 
 Plane images are tiled into combined images using computed spatial offsets, ROI coordinates are adjusted to the combined
 coordinate system, and fluorescence arrays are concatenated across planes.
-
-The combined dataset stands for the whole recording, so this phase refuses to run unless it receives exactly the planes
-the acquisition parameters declare, reporting both counts in the error. A recording whose declared plane count changed
-keeps the plane directories its earlier geometry wrote until a conversion rebuilds it, and merging one of those would
-fold a plane the recording no longer declares into the combined dataset. The two remedies are the ones the binarization
-phase names: correct the declared count in `cindra_parameters.json`, or enable `file_io.repeat_binarization` and re-run
-binarization to rebuild the recording at that count.
 
 Binarization gives every plane of a recording converted in one run the same frame count, so the `frame_count` and
 `plane_frame_counts` keys of `combined_metadata.npz` agree for a recording whose planes all completed. `frame_count` is

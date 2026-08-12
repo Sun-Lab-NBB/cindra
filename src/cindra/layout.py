@@ -83,13 +83,24 @@ CHANNEL_1_BINARY_FILENAME: str = "channel_1_data.bin"
 CHANNEL_2_BINARY_FILENAME: str = "channel_2_data.bin"
 """The name of the binary holding the second channel frames of one imaging plane."""
 
-BINARY_WRITE_MARKER_SUFFIX: str = ".writing"
-"""The suffix appended to a plane binary's name while a stage writes frames into that binary.
+BINARIZATION_MARKER_SUFFIX: str = ".binarizing"
+"""The suffix appended to a plane binary's name while the binarization stage fills that binary with converted frames.
 
 Notes:
-    Binarization sizes a binary to its full frame count before writing its first frame, and registration rewrites that
-    binary in place. A binary carrying this marker therefore holds an indeterminate mixture of finished and unfinished
-    frames, which the binarization stage treats as invalid and rebuilds from the source images.
+    Binarization sizes a binary to its full frame count before writing its first frame, so an interrupted run leaves a
+    correctly sized binary whose tail was never written. The pipeline rebuilds a binary carrying either phase marker,
+    and the two suffixes differ so that whoever finds one on disk reads which phase died without opening the source.
+    Each suffix spells its phase the way the reported job status spells it.
+"""
+
+REGISTRATION_MARKER_SUFFIX: str = ".registering"
+"""The suffix appended to a plane binary's name while the registration stage rewrites that binary in place.
+
+Notes:
+    Registration rewrites its input binary rather than writing a second copy, so an interrupted run leaves a binary
+    holding corrected frames up to an unknown point and raw frames after it. The pipeline rebuilds a binary carrying
+    either phase marker, and the two suffixes differ so that whoever finds one on disk reads which phase died without
+    opening the source. Each suffix spells its phase the way the reported job status spells it.
 """
 
 CHANNEL_2_ARRAY_SUFFIX: str = "_channel_2"
@@ -284,16 +295,28 @@ def resolve_array_path(root_path: Path, array: PipelineArray, *, second_channel:
     return root_path.joinpath(resolve_array_name(array=array, second_channel=second_channel))
 
 
-def resolve_binary_write_marker_name(binary_name: str) -> str:
-    """Resolves the name of the marker written beside a plane binary while a stage writes frames into it.
+def resolve_binarization_marker_name(binary_name: str) -> str:
+    """Resolves the name of the marker written beside a plane binary while binarization fills it.
 
     Args:
-        binary_name: The name of the plane binary being written.
+        binary_name: The name of the plane binary being filled.
 
     Returns:
-        The name of the marker file guarding the write.
+        The name of the marker file guarding the conversion.
     """
-    return f"{binary_name}{BINARY_WRITE_MARKER_SUFFIX}"
+    return f"{binary_name}{BINARIZATION_MARKER_SUFFIX}"
+
+
+def resolve_registration_marker_name(binary_name: str) -> str:
+    """Resolves the name of the marker written beside a plane binary while registration rewrites it.
+
+    Args:
+        binary_name: The name of the plane binary being rewritten.
+
+    Returns:
+        The name of the marker file guarding the rewrite.
+    """
+    return f"{binary_name}{REGISTRATION_MARKER_SUFFIX}"
 
 
 def resolve_plane_specifier(plane_index: int) -> str:

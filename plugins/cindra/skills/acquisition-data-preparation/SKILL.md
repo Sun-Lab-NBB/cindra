@@ -380,10 +380,10 @@ later stage reads the geometry from this file, so a plane left at 0 fails regist
 
 With the bootstrap (Step 3) and valid binaries (Step 4) in place, run binarization normally. Cindra loads the existing
 plane contexts and skips TIFF conversion only when three checks pass for every plane: each `registered_binary_path`
-exists, no `<binary>.writing` marker sits beside it, and the binary's size matches the frame geometry recorded for
-its plane in Step 5. Any check failing, or `file_io.repeat_binarization` being True, makes cindra rebuild every plane's
-binary from the source TIFFs instead, which cannot succeed for adopted data because no raw TIFFs exist, so re-check
-Steps 3-5 and the format requirements above.
+exists, neither a `<binary>.binarizing` nor a `<binary>.registering` marker sits beside it, and the binary's size
+matches the frame geometry recorded for its plane in Step 5. Any check failing, or `file_io.repeat_binarization` being
+True, makes cindra rebuild every plane's binary from the source TIFFs instead, which cannot succeed for adopted data
+because no raw TIFFs exist, so re-check Steps 3-5 and the format requirements above.
 
 **Step 7: Run registration for every plane.**
 
@@ -415,13 +415,8 @@ registered before ROI detection...", so a binarize-then-process dispatch stops a
 
 ### Frame shape differs between TIFF files
 
-Binarization fails with `Unable to determine frame dimensions. Every page of every TIFF file in the data directory must
-hold a frame of the same shape...`, naming the differing files, their shape, and the first file's first frame shape.
-
-The check reads every page whose own header its file stores. tifffile addresses the pages of a ScanImage classic file,
-meaning a non-BigTIFF one, past the two gigabyte offset ceiling arithmetically, and those frames report the first
-frame's shape whatever their own header holds. A differing frame among them is converted as if it matched, which yields
-wrong data rather than this error, so keep a ScanImage acquisition in files below that ceiling.
+Binarization fails with `Unable to determine frame dimensions. Every TIFF file in the data directory must hold frames of
+the same shape...`, naming the differing files and both shapes.
 
 **Causes and fixes:**
 - **Anatomical z-stack in the data directory:** the usual cause. Add the file's stem to `file_io.ignored_file_names` and
@@ -430,24 +425,6 @@ wrong data rather than this error, so keep a ScanImage acquisition in files belo
   Separate them into one directory per recording.
 - **Genuinely ragged recording:** re-check the acquisition, because cindra cannot combine differently shaped frames into
   one plane binary.
-
-### Output directory holds more plane directories than the declared plane count
-
-Binarization fails with `Unable to binarize the recording. The acquisition parameters declare N imaging plane(s), but
-the output directory holds M plane directory(ies) beyond that count...`, naming every surplus directory. The combination
-phase fails on the same disagreement with `Unable to combine planes. The combination must receive exactly the N
-plane(s) the acquisition parameters declare...`. A binarization that already holds valid binaries skips its conversion
-and rebuilds nothing, so it reports the surplus rather than deleting a plane directory on the strength of a count read
-from a user-editable file.
-
-**Causes and fixes:**
-- **`plane_number` lowered by mistake:** the usual cause. Restore the value the recording was acquired at in
-  `cindra_parameters.json` and re-run binarization, which then finds no surplus.
-- **Deliberate re-declaration at fewer planes:** enable `file_io.repeat_binarization` and re-run binarization. The
-  conversion rebuilds the recording at the declared count and removes the surplus directories itself, which also
-  discards every registration, detection, extraction, and combined result the recording held.
-- **MROI geometry changed:** `roi_number` multiplies `plane_number` into the virtual plane count, so re-check both
-  fields together before choosing either fix above.
 
 ### MROI line index determination
 

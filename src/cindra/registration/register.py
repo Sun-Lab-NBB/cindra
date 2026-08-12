@@ -14,9 +14,9 @@ from ataraxis_base_utilities import LogLevel, console
 
 from ..io import (
     BinaryFile,
-    clear_binary_write_marker,
-    create_binary_write_marker,
-    resolve_binary_write_marker_path,
+    clear_registration_marker,
+    create_registration_marker,
+    resolve_active_binary_marker,
 )
 from .rigid import (
     translate_frame,
@@ -89,7 +89,7 @@ def register_plane(context: RuntimeContext, *, workers: int) -> None:
         the nonrigid warping kernels. The Numba mask is thread-local, so concurrently dispatched planes can hold
         different worker budgets inside a single process.
 
-        A '<binary>.writing' marker guards every one of the plane's channel binaries for the whole registration.
+        A '<binary>.registering' marker guards every one of the plane's channel binaries for the whole registration.
         Only the alignment channel is registered against a reference, and the secondary channel receives the offsets
         computed from that channel. The two binaries therefore agree about whether motion has been removed only once
         both rewrites have finished, so the markers are cleared after the registration outputs that describe those
@@ -258,7 +258,7 @@ def register_plane(context: RuntimeContext, *, workers: int) -> None:
         # Clears the markers that guarded the in-place rewrites. Both of the plane's binaries now carry the same
         # correction and the registration outputs that describe it are on disk, so the plane is consistent again.
         for binary_path in _resolve_plane_binary_paths(io_data=io_data):
-            clear_binary_write_marker(binary_path=binary_path)
+            clear_registration_marker(binary_path=binary_path)
 
         # Computes registration quality metrics if enabled and recording has enough frames.
         principal_component_count = config.registration.registration_metric_principal_components
@@ -820,7 +820,8 @@ def _validate_binaries_are_not_mid_write(io_data: IOData, plane_index: int) -> N
         two-channel plane registration can also leave one binary fully corrected while the other is untouched.
         Registering such a plane computes its offsets and its valid crop region from a movie whose frames disagree
         about what they hold, and both the resulting traces and the reported registration quality look ordinary.
-        Failing here converts that silent corruption into an actionable error.
+        Failing here converts that silent corruption into an actionable error. Either phase's marker fails the plane,
+        because both describe a binary whose contents are indeterminate.
 
     Args:
         io_data: The plane's IOData, which holds the paths of the binaries the registration stage rewrites.
@@ -830,8 +831,8 @@ def _validate_binaries_are_not_mid_write(io_data: IOData, plane_index: int) -> N
         RuntimeError: If a marker shows that a previous write of one of the plane's binaries was interrupted.
     """
     for binary_path in _resolve_plane_binary_paths(io_data=io_data):
-        marker_path = resolve_binary_write_marker_path(binary_path=binary_path)
-        if marker_path.exists():
+        marker_path = resolve_active_binary_marker(binary_path=binary_path)
+        if marker_path is not None:
             message = (
                 f"Unable to register plane {plane_index}. A previous write of the binary file "
                 f"'{binary_path}' was interrupted, so the file holds finished frames up to an unknown point and "
@@ -849,7 +850,7 @@ def _register_alignment_channel(context: RuntimeContext, *, workers: int) -> Non
     If False, channel 2 is used. This function computes the reference image, calculates rigid and optionally nonrigid
     registration offsets, and applies them to all frames. Results are stored in context.runtime.registration and the
     mean image is stored in the appropriate detection field. Every channel binary of the plane is marked with a
-    '<binary>.writing' file before the in-place rewrite begins, and register_plane clears those markers once the
+    '<binary>.registering' file before the in-place rewrite begins, and register_plane clears those markers once the
     registration outputs are on disk.
 
     Args:
@@ -1020,7 +1021,7 @@ def _register_alignment_channel(context: RuntimeContext, *, workers: int) -> Non
         # so it stays raw until _register_secondary_channel rewrites it. register_plane clears both markers once the
         # registration outputs that describe the rewrites are on disk.
         for plane_binary_path in _resolve_plane_binary_paths(io_data=io_data):
-            create_binary_write_marker(binary_path=plane_binary_path)
+            create_registration_marker(binary_path=plane_binary_path)
 
         for batch_start_np in console.track(
             np.arange(0, frame_count, batch_size),
@@ -1134,7 +1135,7 @@ def _register_secondary_channel(context: RuntimeContext, *, bidirectional_phase_
     The secondary channel is the opposite of the alignment channel. If align_by_first_channel is True, this function
     processes channel 2. If False, it processes channel 1. Registration offsets are read from
     context.runtime.registration (computed by _register_alignment_channel) and applied to all frames, which are
-    rewritten in place in the channel's binary under the '<binary>.writing' marker _register_alignment_channel
+    rewritten in place in the channel's binary under the '<binary>.registering' marker _register_alignment_channel
     created. The resulting mean image is stored in the matching detection field.
 
     Notes:

@@ -114,13 +114,9 @@ warns with their count, and it fails a recording holding fewer frames than one w
 recording this phase converts therefore holds the same frame count, while one converted by an earlier version can hold
 them at unequal lengths.
 
-Phase 1 has three outcomes: it skips the conversion, it rebuilds every plane binary, or it refuses the recording. It
-refuses when the output directory holds a plane directory beyond the plane count the acquisition parameters declare,
-naming every surplus directory. Only a conversion removes such a directory, so tell the user to correct the declared
-count in `cindra_parameters.json`, which is `plane_number` multiplied by `roi_number`, or to enable
-`file_io.repeat_binarization` and re-dispatch. Phase 4 refuses on the same disagreement, because it merges every plane
-directory the output root holds. Either refusal fails its job, and the prerequisite graph then withholds every job that
-depends on it, so a Phase 1 refusal stops the recording before any plane is registered.
+Phase 1 has two outcomes: it skips the conversion, or it rebuilds every plane binary. A rebuild discards the results of
+every plane directory the output root holds, including one the declared plane count no longer reaches, whose own binary
+the rebuild leaves in place.
 
 Batch processing across multiple recordings:
 
@@ -268,19 +264,20 @@ Cleaning `registration` deletes the plane's `registration_data` directory, which
 detection reads. Registration rewrites the plane binary in place, so clean `binarization` to rebuild that binary from
 the raw TIFFs.
 
-**Recovering an interrupted write.** Binarization fills the plane binary and registration rewrites it in place, and
-both hold a `<binary>.writing` marker for the duration. If the job is killed, the marker persists and every later
-registration of that plane fails with "Unable to register plane {index}. A previous write of the binary file ... was
-interrupted". Cleaning or resetting `registration` does NOT clear it, because the marker sits beside the `.bin` rather
-than inside `registration_data`.
+**Recovering an interrupted write.** Binarization fills the plane binary under a `<binary>.binarizing` marker and
+registration rewrites it in place under a `<binary>.registering` marker, each held for the duration of that phase's
+write. The suffix names the phase that died, matching the `binarizing` and `registering` statuses
+`get_recording_status_tool` reports, and the recovery is the same for both. If the job is killed, the marker persists
+and every later registration of that plane fails with "Unable to register plane {index}. A previous write of the binary
+file ... was interrupted". Cleaning or resetting `registration` does NOT clear either marker, because they sit beside
+the `.bin` rather than inside `registration_data`.
 
 Recover by resetting the `binarization` phase with `reset_processing_phases_tool` and re-dispatching. Binarization
-detects the marker, rebuilds the binary from the raw TIFFs, and clears the marker. You do NOT need to set
+detects either marker, rebuilds the binary from the raw TIFFs, and clears the marker. You do NOT need to set
 `repeat_binarization`, and you do NOT need `clean_processing_output_tool`. Binarization also rebuilds automatically when
 a binary's size disagrees with the frame geometry recorded for its plane, which is what a binary truncated outside the
-pipeline leaves behind. `repeat_binarization` is needed to force a rebuild of binaries that are intact, to clear a
-plane directory the declared plane count no longer covers, and to restore a plane's missing channel 2 binary, whose
-absence leaves the recording valid.
+pipeline leaves behind. `repeat_binarization` is needed to force a rebuild of binaries that are intact, and to restore
+a plane's missing channel 2 binary, whose absence leaves the recording valid.
 
 **Migrating a recording converted by an earlier version.** Such a recording can hold planes, or the two channels of one
 plane, at unequal lengths, because the frames of its final incomplete cycle reached some planes and channels and not
@@ -387,8 +384,6 @@ When processing fails for some recordings, read the error messages and route to 
 | Invalid parameter values, wrong plane/channel     | `/acquisition-data-preparation`   |
 | TIFF files hold frames of differing shapes        | `/acquisition-data-preparation`   |
 | TIFF frames fall short of one interleave cycle    | `/acquisition-data-preparation`   |
-| Plane directory beyond the declared plane count   | `/acquisition-data-preparation`   |
-| Combination received the wrong number of planes   | `/acquisition-data-preparation`   |
 | Registration of the binary file was interrupted   | Reset `binarization`, re-dispatch |
 | Configuration parameter issues                    | `/single-recording-configuration` |
 | MCP tools unavailable, server connection errors   | `/cindra-mcp-environment-setup`   |

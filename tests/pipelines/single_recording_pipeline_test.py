@@ -12,8 +12,9 @@ from ataraxis_base_utilities import ensure_directory_exists
 from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 
 from cindra.io import (
-    create_binary_write_marker,
-    resolve_binary_write_marker_path,
+    create_binarization_marker,
+    create_registration_marker,
+    resolve_active_binary_marker,
     resolve_single_recording_contexts,
 )
 from cindra.io.context import PARAMETERS_FILENAME
@@ -391,18 +392,30 @@ class TestBinarizeRecording:
 
         assert binary_path.stat().st_size == full_size
 
-    def test_recreates_binaries_left_mid_registration(self, tmp_path: Path) -> None:
-        """Verifies that binarization rebuilds a marked binary and clears its marker without a caller request."""
+    @pytest.mark.parametrize("create_marker", [create_binarization_marker, create_registration_marker])
+    def test_recreates_binaries_left_marked_by_either_phase(
+        self, tmp_path: Path, create_marker: Callable[..., None]
+    ) -> None:
+        """Verifies that binarization rebuilds a binary either phase left marked and clears every mark it carries."""
         configuration = _binarize_to_disk(tmp_path)
         binary_path = tmp_path / "output" / "cindra" / "plane_0" / "channel_1_data.bin"
-        create_binary_write_marker(binary_path=binary_path)
+        create_marker(binary_path=binary_path)
 
         binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
 
         assert binary_path.exists()
-        assert not resolve_binary_write_marker_path(binary_path=binary_path).exists()
+        assert resolve_active_binary_marker(binary_path=binary_path) is None
 
-    @pytest.mark.parametrize("trigger", ["repeat_binarization", "missing_binary", "truncated_binary", "write_marker"])
+    @pytest.mark.parametrize(
+        "trigger",
+        [
+            "repeat_binarization",
+            "missing_binary",
+            "truncated_binary",
+            "binarization_marker",
+            "registration_marker",
+        ],
+    )
     def test_rebuild_clears_downstream_data(self, tmp_path: Path, trigger: str) -> None:
         """Verifies that every trigger that rebuilds the plane binaries discards the data measured from them."""
         configuration = _process_to_disk(tmp_path)
@@ -425,13 +438,15 @@ class TestBinarizeRecording:
         elif trigger == "truncated_binary":
             with binary_path.open(mode="r+b") as binary_file:
                 binary_file.truncate(full_size // 2)
+        elif trigger == "binarization_marker":
+            create_binarization_marker(binary_path=binary_path)
         else:
-            create_binary_write_marker(binary_path=binary_path)
+            create_registration_marker(binary_path=binary_path)
 
         binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
 
         assert binary_path.stat().st_size == full_size
-        assert not resolve_binary_write_marker_path(binary_path=binary_path).exists()
+        assert resolve_active_binary_marker(binary_path=binary_path) is None
 
         # The registration outputs and everything measured from them are gone, at plane and recording scope alike.
         assert not (plane_directory / "registration_data" / "reference_image.npy").exists()
@@ -471,7 +486,7 @@ class TestBinarizeRecording:
 
         # The conversion never began, so the recording is still the fully processed recording it was.
         assert binary_path.stat().st_size == full_size
-        assert not resolve_binary_write_marker_path(binary_path=binary_path).exists()
+        assert resolve_active_binary_marker(binary_path=binary_path) is None
         assert (plane_directory / "registration_data" / "reference_image.npy").exists()
         assert (plane_directory / "roi_statistics.npz").exists()
         assert (plane_directory / "cell_fluorescence.npy").exists()
@@ -498,7 +513,7 @@ class TestBinarizeRecording:
 
         # The conversion never began, so the recording is still the fully processed recording it was.
         assert binary_path.stat().st_size == full_size
-        assert not resolve_binary_write_marker_path(binary_path=binary_path).exists()
+        assert resolve_active_binary_marker(binary_path=binary_path) is None
         assert (plane_directory / "registration_data" / "reference_image.npy").exists()
         assert (plane_directory / "roi_statistics.npz").exists()
         assert (plane_directory / "cell_fluorescence.npy").exists()
@@ -511,15 +526,17 @@ class TestBinarizeRecording:
         assert not isinstance(context, list)
         assert context.runtime.registration.is_registered(output_path=context.runtime.io.output_path)
 
-    def test_rebuild_removes_surplus_plane_directories(self, tmp_path: Path) -> None:
-        """Verifies that a rebuild deletes the plane directories the recording's reduced plane count leaves behind."""
+    def test_rebuild_clears_undeclared_plane_results(self, tmp_path: Path) -> None:
+        """Verifies that a rebuild clears the results of every plane directory the output root holds."""
         configuration = _binarize_to_disk(tmp_path, plane_number=2)
         root_directory = tmp_path / "output" / "cindra"
-        surplus_directory = root_directory / "plane_1"
+        undeclared_directory = root_directory / "plane_1"
+        undeclared_binary = undeclared_directory / "channel_1_data.bin"
+        undeclared_size = undeclared_binary.stat().st_size
 
         # Plants the registration output of the earlier two-plane run, which is the marker the registration stage
         # reads before skipping a plane and the kind of stale result a later reader would consume.
-        stale_reference = surplus_directory / "registration_data" / "reference_image.npy"
+        stale_reference = undeclared_directory / "registration_data" / "reference_image.npy"
         ensure_directory_exists(stale_reference.parent)
         np.save(stale_reference, np.zeros((_FRAME_HEIGHT, _FRAME_WIDTH), dtype=np.float32))
 
@@ -530,46 +547,11 @@ class TestBinarizeRecording:
 
         binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
 
-        assert not surplus_directory.exists()
+        # The sweep covers the plane directory the reduced count no longer declares, so its stale results are gone
+        # while the binary the conversion did not replace stays on disk.
+        assert not stale_reference.exists()
+        assert undeclared_binary.stat().st_size == undeclared_size
         assert (root_directory / "plane_0" / "channel_1_data.bin").exists()
-
-        # A reader enumerating the output root now finds the one plane the recording declares.
-        contexts = RuntimeContext.load(root_path=root_directory, plane_index=-1)
-        assert isinstance(contexts, list)
-        assert len(contexts) == 1
-        assert contexts[0].runtime.io.frame_count == _FRAME_COUNT
-
-    def test_skip_refuses_a_reduced_plane_count(self, tmp_path: Path) -> None:
-        """Verifies that a reduced plane count destroys nothing when no conversion runs to replace what it drops."""
-        configuration = _binarize_to_disk(tmp_path, plane_number=2)
-        root_directory = tmp_path / "output" / "cindra"
-        surplus_binary = root_directory / "plane_1" / "channel_1_data.bin"
-        surplus_size = surplus_binary.stat().st_size
-        binary_path = root_directory / "plane_0" / "channel_1_data.bin"
-        first_size = binary_path.stat().st_size
-
-        # Plants the combined dataset of the earlier two-plane run, which merged the plane the reduced count drops.
-        combined_metadata = root_directory / "combined_metadata.npz"
-        combined_metadata.write_bytes(b"combined")
-        combined_traces = root_directory / "cell_fluorescence.npy"
-        combined_traces.write_bytes(b"traces")
-
-        # Mistypes the plane count as one. Both binaries still match their own recorded geometry, so the conversion
-        # that would rebuild the recording at the declared count is skipped.
-        _declare_plane_count(root=tmp_path, plane_count=1)
-
-        with pytest.raises(ValueError, match=r"beyond\s+that\s+count"):
-            binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
-
-        # The declared count alone deleted nothing, so both plane binaries and the dataset merged from them remain.
-        assert surplus_binary.stat().st_size == surplus_size
-        assert binary_path.stat().st_size == first_size
-        assert combined_metadata.exists()
-        assert combined_traces.exists()
-
-        contexts = RuntimeContext.load(root_path=root_directory, plane_index=-1)
-        assert isinstance(contexts, list)
-        assert len(contexts) == 2
 
     def test_rebuilt_plane_registers_again(self, tmp_path: Path) -> None:
         """Verifies that a plane whose binary was rebuilt re-registers rather than skipping on the discarded output."""
@@ -751,15 +733,6 @@ class TestSaveCombinedData:
         """Verifies that combining an empty context list raises a ValueError."""
         with pytest.raises(ValueError, match="At least one RuntimeContext"):
             save_combined_data(contexts=[])
-
-    def test_surplus_plane_contexts_raise(
-        self, tmp_path: Path, single_recording_context: Callable[..., RuntimeContext]
-    ) -> None:
-        """Verifies that combining more plane contexts than the recording declares raises a ValueError."""
-        context = single_recording_context(tmp_path)
-
-        with pytest.raises(ValueError, match=r"acquisition\s+parameters\s+declare"):
-            save_combined_data(contexts=[context, context])
 
     def test_missing_output_path_raises(
         self, tmp_path: Path, single_recording_context: Callable[..., RuntimeContext]

@@ -8,17 +8,21 @@ from dataclasses import dataclass
 
 import numpy as np
 from natsort import natsorted
+from tifffile import TiffFile
 from ataraxis_base_utilities import LogLevel, console
-from tifffile import TiffFile, TiffFrame, TiffFileError
 
-from .binary import BinaryFile, clear_binary_write_marker, create_binary_write_marker
+from .binary import (
+    BinaryFile,
+    clear_binarization_marker,
+    clear_registration_marker,
+    create_binarization_marker,
+)
 from .context import find_data_directory
 from ..dataclasses import RuntimeContext, AcquisitionParameters  # noqa: TC001
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tifffile import TiffPage
     from numpy.typing import NDArray
 
 TIFF_EXTENSIONS: tuple[str, ...] = ("tif", "tiff", "TIF", "TIFF")
@@ -92,11 +96,6 @@ def resolve_tiff_conversion_plan(contexts: list[RuntimeContext], *, workers: int
         previous binaries resolves a plan first, which leaves that data untouched when the recording cannot be
         converted.
 
-        The frame shape check the resolution runs covers every page whose own header its file stores. tifffile builds
-        the pages of a ScanImage classic file past the two gigabyte offset ceiling arithmetically, and those frames
-        carry no header to read. A differing frame among them is converted as if it matched, which yields wrong data
-        rather than a rejected recording.
-
     Args:
         contexts: A list of RuntimeContext instances created by resolve_single_recording_contexts(). Each
             context must have valid configuration, acquisition parameters, and IOData with binary file paths
@@ -109,8 +108,8 @@ def resolve_tiff_conversion_plan(contexts: list[RuntimeContext], *, workers: int
 
     Raises:
         ValueError: If contexts is empty, if data_path is not configured, or if a plane carries no destination binary
-            path. Also raised if any page whose own header its file stores holds a differently shaped frame, or if the
-            frames those files hold do not fill one complete plane and channel interleave cycle.
+            path. Also raised if the discovered TIFF files do not all hold frames of the same shape, or if the frames
+            those files hold do not fill one complete plane and channel interleave cycle.
         FileNotFoundError: If no TIFF files are found in the data directory.
     """
     if not contexts:
@@ -147,7 +146,7 @@ def resolve_tiff_conversion_plan(contexts: list[RuntimeContext], *, workers: int
     batch_size = configuration.registration.batch_size
     batch_size = plane_number * channel_number * math.ceil(batch_size / (plane_number * channel_number))
 
-    # Counts the frames the source files hold across every plane and channel and reads the frame shape their pages
+    # Counts the frames the source files hold across every plane and channel and reads the frame shape those files
     # hold, in one pass over each file.
     total_frames, base_height, base_width = _scan_source_frames(tiff_files=tiff_files)
 
@@ -364,10 +363,10 @@ def convert_tiffs_to_binary(plan: TiffConversionPlan) -> None:
     # complete, which happens only after every frame has been written and the frame accounting above has agreed.
     for context_index, context in enumerate(contexts):
         channel_1_binaries[context_index].close()
-        clear_binary_write_marker(binary_path=channel_1_binaries[context_index].file_path)
+        clear_binarization_marker(binary_path=channel_1_binaries[context_index].file_path)
         if channel_number > 1:
             channel_2_binaries[context_index].close()
-            clear_binary_write_marker(binary_path=channel_2_binaries[context_index].file_path)
+            clear_binarization_marker(binary_path=channel_2_binaries[context_index].file_path)
 
         # Divides each channel's accumulator by the frames that channel received. Every context receives at least one
         # frame on every channel, so the guard against an unpopulated mean image or a zero divisor never fails for
@@ -540,26 +539,20 @@ def _write_interleave_selection(
 
 
 def _scan_source_frames(tiff_files: list[Path]) -> tuple[int, int, int]:
-    """Counts the frames the recording's TIFF files hold and resolves the frame shape their pages share.
+    """Counts the frames the recording's TIFF files hold and resolves the frame shape those files share.
 
-    Opens each discovered file once, adds its page count to the recording's frame total, and compares every page whose
-    header the file holds against the shape of the first file's first page.
+    Opens each discovered file once, adds its page count to the recording's frame total, and compares the first page
+    of every file against the shape of the first file's first page.
 
     Notes:
-        The conversion sizes every plane binary from the first file's frame shape and reads every page of every file
-        into a binary of that size. A data directory can also hold TIFF files that are not part of the recording, such
-        as an anatomical z-stack, and those are usually shaped differently. Such a file otherwise reaches the
-        conversion loop, where its frames fail to broadcast into a binary sized for the recording. The shape error that
-        follows names neither the file nor the reason, and it lands after the caller has discarded the results the
-        previous binaries produced.
+        The conversion sizes every plane binary from the first file's frame shape and assumes the remaining files match
+        it. A data directory can also hold TIFF files that are not part of the recording, such as an anatomical
+        z-stack, and those are usually shaped differently. Such a file otherwise reaches the conversion loop, where its
+        frames fail to broadcast into a binary sized for the recording. The shape error that follows names neither the
+        file nor the reason, and it lands after the caller has discarded the results the previous binaries produced.
 
-        Counting the frames and comparing their shape share one pass, because both read the header of every page and a
-        recording holding tens of thousands of frames pays for that walk twice when each check opens the files itself.
-
-        The shape comparison covers every page whose own header the file stores and tifffile can read. It leaves out
-        the frames tifffile builds arithmetically for a ScanImage classic file, meaning a non-BigTIFF one, past the two
-        gigabyte offset ceiling, because such a frame carries no header. A differing frame among those is written into
-        the binary as if it matched, which yields wrong data rather than a late failure.
+        Counting the frames and comparing their shape share one open of each source file, because both work off the
+        page-offset chain tifffile discovers the first time either one asks for it.
 
     Args:
         tiff_files: The discovered TIFF files, in conversion order.
@@ -568,8 +561,8 @@ def _scan_source_frames(tiff_files: list[Path]) -> tuple[int, int, int]:
         A tuple of the number of frames the files hold, the height of the first file's first frame, and its width.
 
     Raises:
-        ValueError: If the first TIFF file is empty, or if any page whose own header its file stores holds a frame of
-            a different shape.
+        ValueError: If the first TIFF file is empty, or if any file holds frames of a different shape than the first
+            file.
     """
     total_frames = 0
     base_height = 0
@@ -578,25 +571,20 @@ def _scan_source_frames(tiff_files: list[Path]) -> tuple[int, int, int]:
 
     for file_index, tiff_path in enumerate(tiff_files):
         with TiffFile(tiff_path) as tiff:
-            # Reads the count off the page-offset chain tifffile discovers here. The loop below discovers that chain
-            # one page at a time when nothing asks for it first, so the count costs no read that loop avoids.
             page_count = len(tiff.pages)
             total_frames += page_count
 
-            if file_index == 0:
-                if page_count == 0:
-                    message = f"Unable to determine frame dimensions. The first TIFF file is empty: {tiff_path}."
-                    console.error(message=message, error=ValueError)
-                base_shape = tiff.pages.first.shape
-                base_height, base_width = base_shape[-2], base_shape[-1]
+            if file_index == 0 and page_count == 0:
+                message = f"Unable to determine frame dimensions. The first TIFF file is empty: {tiff_path}."
+                console.error(message=message, error=ValueError)
 
-            # Reports one shape per file, because a file holding an unrelated stack differs on every page of it and
-            # naming each page would bury the file the operator has to exclude.
-            for page in tiff.pages:
-                page_shape = _resolve_page_frame_shape(page=page)
-                if page_shape is not None and page_shape != (base_height, base_width):
-                    mismatched.append(f"'{tiff_path.name}' {page_shape}")
-                    break
+            page_shape = tiff.pages.first.shape
+            frame_shape = (page_shape[-2], page_shape[-1])
+
+        if file_index == 0:
+            base_height, base_width = frame_shape
+        elif frame_shape != (base_height, base_width):
+            mismatched.append(f"'{tiff_path.name}' {frame_shape}")
 
     if mismatched:
         reported = ", ".join(mismatched[:_MISMATCH_REPORT_LIMIT])
@@ -604,47 +592,14 @@ def _scan_source_frames(tiff_files: list[Path]) -> tuple[int, int, int]:
         if remainder > 0:
             reported = f"{reported}, and {remainder} more"
         message = (
-            f"Unable to determine frame dimensions. Every page of every TIFF file in the data directory must hold a "
-            f"frame of the same shape, but {len(mismatched)} file(s) hold a page differing from the "
-            f"({base_height}, {base_width}) first frame of '{tiff_files[0].name}': {reported}. Exclude any file that "
-            f"is not part of the recording, such as an anatomical z-stack, through the "
-            f"'file_io.ignored_file_names' configuration parameter."
+            f"Unable to determine frame dimensions. Every TIFF file in the data directory must hold frames of the "
+            f"same shape, but {len(mismatched)} file(s) differ from the ({base_height}, {base_width}) frames of "
+            f"'{tiff_files[0].name}': {reported}. Exclude any file that is not part of the recording, such as an "
+            f"anatomical z-stack, through the 'file_io.ignored_file_names' configuration parameter."
         )
         console.error(message=message, error=ValueError)
 
     return total_frames, base_height, base_width
-
-
-def _resolve_page_frame_shape(page: TiffPage | TiffFrame) -> tuple[int, int] | None:
-    """Returns the height and width of the frame one page of a source TIFF file holds.
-
-    Notes:
-        tifffile hands back a keyframe backed frame rather than a page for every page of a ScanImage classic file past
-        the first. Such a frame reports the keyframe's shape whatever its own header holds, so re-reading it as a page
-        is what recovers the shape the file records for it.
-
-        tifffile addresses a ScanImage classic file past the two gigabyte offset ceiling arithmetically rather than
-        through page headers, and a frame it builds that way has no header to re-read. This resolution reports nothing
-        for such a frame, because its shape is unobtainable without decoding the frame.
-
-    Args:
-        page: The page tifffile exposes at one position of a source TIFF file.
-
-    Returns:
-        The height and width of the frame the page holds, or None if the file holds no readable header for it.
-    """
-    if not isinstance(page, TiffFrame):
-        return page.shape[-2], page.shape[-1]
-
-    # Reads the frame's own header. A frame the file addresses arithmetically has none, and a header the read does not
-    # recognize yields a shape too short to index, so neither outcome reports a differing frame.
-    try:
-        page_shape = page.aspage().shape
-        frame_shape = (page_shape[-2], page_shape[-1])
-    except (ValueError, IndexError, TiffFileError):
-        return None
-
-    return frame_shape
 
 
 def _resolve_plane_dimensions(
@@ -798,8 +753,8 @@ def _create_binary_files(plan: TiffConversionPlan) -> tuple[list[BinaryFile], li
     """Creates BinaryFile instances for writing converted TIFF data for each plane.
 
     Notes:
-        Removes each plane's previous binary and marks the replacement as being mid-write, which the caller clears
-        once every frame has landed. This is the first step of the conversion that changes anything on disk.
+        Removes each plane's previous binary and marks the replacement as being mid-binarization, which the caller
+        clears once every frame has landed. This is the first step of the conversion that changes anything on disk.
 
     Args:
         plan: The resolved conversion plan, which names every destination binary and the frames it receives.
@@ -821,12 +776,15 @@ def _create_binary_files(plan: TiffConversionPlan) -> tuple[list[BinaryFile], li
         # would otherwise inherit its wrong length instead of replacing it.
         channel_1_path.unlink(missing_ok=True)
 
+        # Drops the mark an interrupted registration left behind. That mark described the binary just unlinked, and
+        # the replacement built from the source TIFFs carries no motion correction for it to describe.
+        clear_registration_marker(binary_path=channel_1_path)
+
         # Marks the destination for the duration of the conversion, which convert_tiffs_to_binary clears once every
         # frame has landed. The memory map below sizes the file to its full frame count before the first frame is
         # written. An interrupted conversion therefore leaves a correctly sized binary whose tail is zeros, which no
-        # size check can tell apart from a finished one. The mark is the only record of that state, and it also
-        # replaces any mark an interrupted registration left behind, since the binary is rebuilt from its source TIFFs.
-        create_binary_write_marker(binary_path=channel_1_path)
+        # size check can tell apart from a finished one. The mark is the only record of that state.
+        create_binarization_marker(binary_path=channel_1_path)
 
         channel_1_binary_files.append(
             BinaryFile(
@@ -841,7 +799,8 @@ def _create_binary_files(plan: TiffConversionPlan) -> tuple[list[BinaryFile], li
         if plan.channel_2_paths:
             channel_2_path = plan.channel_2_paths[context_index]
             channel_2_path.unlink(missing_ok=True)
-            create_binary_write_marker(binary_path=channel_2_path)
+            clear_registration_marker(binary_path=channel_2_path)
+            create_binarization_marker(binary_path=channel_2_path)
 
             channel_2_binary_files.append(
                 BinaryFile(

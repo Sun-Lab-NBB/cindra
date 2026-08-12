@@ -13,7 +13,7 @@ from scipy import stats
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 
-from ..io import BinaryFile, BinaryFileCombined, resolve_binary_write_marker_path
+from ..io import BinaryFile, BinaryFileCombined, resolve_active_binary_marker
 from .masks import create_masks
 from .deconvolve import apply_oasis_deconvolution, compute_delta_fluorescence
 from ..dataclasses import RuntimeContext
@@ -887,10 +887,10 @@ def _validate_registered_binaries(binary_paths: list[Path], recording_id: str) -
 
     Notes:
         The binarization stage fills each plane binary and the registration stage rewrites it in place, and both mark
-        the binary for the duration of that write. A run that dies partway therefore leaves finished frames up to an
-        unknown point and unfinished frames after it. The multi-recording pipeline resolves those binaries through the
-        combined metadata rather than through the plane runtime data, so this is the only point at which it consults
-        the marker.
+        the binary for the duration of that write, each under its own phase name. A run that dies partway therefore
+        leaves finished frames up to an unknown point and unfinished frames after it. The multi-recording pipeline
+        resolves those binaries through the combined metadata rather than through the plane runtime data, so this is
+        the only point at which it consults the markers.
 
     Args:
         binary_paths: The paths of the plane binaries the extraction reads.
@@ -900,8 +900,8 @@ def _validate_registered_binaries(binary_paths: list[Path], recording_id: str) -
         RuntimeError: If a marker shows that a previous write of one of the binaries was interrupted.
     """
     for binary_path in binary_paths:
-        marker_path = resolve_binary_write_marker_path(binary_path=binary_path)
-        if marker_path.exists():
+        marker_path = resolve_active_binary_marker(binary_path=binary_path)
+        if marker_path is not None:
             message = (
                 f"Unable to extract multi-recording traces for recording {recording_id}. A previous write of the "
                 f"binary file '{binary_path}' was interrupted, so the file holds finished frames up to an unknown "
