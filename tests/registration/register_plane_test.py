@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from cindra.io import resolve_binary_write_marker_path
+from cindra.io import create_binarization_marker, resolve_registration_marker_path
 from cindra.registration import register_plane
 from cindra.registration.rigid import translate_frame
 from cindra.registration.register import _register_frames_batch, _register_secondary_channel
@@ -532,7 +532,7 @@ class TestRegisterPlane:
         assert context.runtime.registration.bidirectional_phase_offset != 0
         assert context.runtime.registration.bidirectional_phase_corrected
 
-    def test_leaves_no_write_marker(
+    def test_leaves_no_registration_marker(
         self,
         tmp_path: Path,
         single_recording_context: Callable[..., RuntimeContext],
@@ -548,7 +548,7 @@ class TestRegisterPlane:
         register_plane(context=context, workers=1)
 
         assert binary_path.exists()
-        assert not resolve_binary_write_marker_path(binary_path=binary_path).exists()
+        assert not resolve_registration_marker_path(binary_path=binary_path).exists()
 
     def test_interrupted_registration_leaves_a_marker(
         self,
@@ -571,7 +571,7 @@ class TestRegisterPlane:
 
         # The binary now holds corrected frames up to the failure point and raw frames after it, which only the
         # marker records.
-        assert resolve_binary_write_marker_path(binary_path=binary_path).exists()
+        assert resolve_registration_marker_path(binary_path=binary_path).exists()
 
     def test_marker_blocks_a_later_registration(
         self,
@@ -593,6 +593,22 @@ class TestRegisterPlane:
 
         # Restores the real batch function, so the retry fails on the marker rather than on the injected error.
         monkeypatch.setattr("cindra.registration.register._register_frames_batch", _register_frames_batch)
+
+        with pytest.raises(RuntimeError, match=r"was\s+interrupted"):
+            register_plane(context=context, workers=1)
+
+    def test_binarization_marker_blocks_a_registration(
+        self,
+        tmp_path: Path,
+        single_recording_context: Callable[..., RuntimeContext],
+        gaussian_blob_image: Callable[..., NDArray[np.float64]],
+    ) -> None:
+        """Verifies that a binary an interrupted conversion left marked refuses to register."""
+        movie = _build_static_blob_movie(gaussian_blob_image)
+        context = single_recording_context(
+            tmp_path=tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie
+        )
+        create_binarization_marker(binary_path=context.runtime.io.registered_binary_path)
 
         with pytest.raises(RuntimeError, match=r"was\s+interrupted"):
             register_plane(context=context, workers=1)
@@ -619,8 +635,8 @@ class TestRegisterPlane:
 
         # Channel 1 now holds motion-corrected frames while channel 2 is still raw, and only the markers record that
         # the two binaries disagree about whether motion has been removed.
-        assert resolve_binary_write_marker_path(binary_path=binary_path).exists()
-        assert resolve_binary_write_marker_path(binary_path=binary_path_channel_2).exists()
+        assert resolve_registration_marker_path(binary_path=binary_path).exists()
+        assert resolve_registration_marker_path(binary_path=binary_path_channel_2).exists()
 
     def test_interrupted_second_channel_blocks_a_later_registration(
         self,

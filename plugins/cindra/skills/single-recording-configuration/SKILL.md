@@ -135,8 +135,7 @@ into a contiguous binary file optimized for fast random access during processing
 skipped on subsequent runs unless `repeat_binarization` is enabled or the existing binaries are invalid (a missing
 channel 1 binary, a binary on disk sized inconsistently with the recorded plane geometry, or either channel's binary
 left marked by an interrupted conversion or registration). Only channel 1 has to exist, so a missing channel 2 binary
-leaves the recording valid and the conversion skipped. A skipped conversion still fails the recording when the output
-directory holds a plane directory beyond the declared plane count.
+leaves the recording valid and the conversion skipped.
 
 | Parameter             | Type         | Default | Description                                                 |
 |-----------------------|--------------|---------|-------------------------------------------------------------|
@@ -145,13 +144,11 @@ directory holds a plane directory beyond the declared plane count.
 | `ignored_file_names`  | tuple[str]   | ()      | File stems (no extension) of TIFFs to exclude.              |
 | `repeat_binarization` | bool         | False   | Force re-conversion even when binaries are intact.          |
 
-Every page of every TIFF the pipeline loads must hold a frame of the same shape. A differently shaped file in the data
-directory, most commonly an anatomical z-stack, fails binarization with `Unable to determine frame dimensions. Every
-page of every TIFF file in the data directory must hold a frame of the same shape...`, which names the file and this
-parameter and leaves any results the recording already holds in place. List its stem in `ignored_file_names` to exclude
-it, matching on the stem without the extension, so `zstack` rather than `zstack.tiff`. The check reads every page whose
-own header its file stores, and it leaves out the frames tifffile addresses arithmetically for a ScanImage classic
-file, meaning a non-BigTIFF one, past the two gigabyte offset ceiling. Such a frame is converted as if it matched.
+Every TIFF the pipeline loads must hold frames of the same shape. A differently shaped file in the data directory, most
+commonly an anatomical z-stack, fails binarization with `Unable to determine frame dimensions. Every TIFF file in the
+data directory must hold frames of the same shape...`, which names the file and this parameter and leaves any results
+the recording already holds in place. List its stem in `ignored_file_names` to exclude it, matching on the stem without
+the extension, so `zstack` rather than `zstack.tiff`.
 
 Binarization consumes whole plane-and-channel interleave cycles, where one cycle carries one frame of every plane on
 every channel. The frames of a final incomplete cycle reach some planes and channels and not others, so binarization
@@ -162,11 +159,8 @@ the count it holds, so advise the user to acquire a longer recording or correct 
 
 `repeat_binarization` forces a rebuild of binaries that are otherwise intact. It is not needed to recover a damaged
 recording: binarization already rebuilds a binary whose size disagrees with its plane geometry, or that an interrupted
-write left marked, on its own. It is needed when the output directory holds a plane directory beyond the declared plane
-count, because binarization fails such a recording instead of skipping it and only a conversion removes the surplus
-directory. The alternative remedy is to correct the declared count in `cindra_parameters.json`, which is `plane_number`
-multiplied by `roi_number`. It is also needed to restore a plane's missing channel 2 binary, which invalidates nothing
-on its own.
+write left marked, on its own. It is needed to restore a plane's missing channel 2 binary, which invalidates nothing on
+its own.
 
 ---
 

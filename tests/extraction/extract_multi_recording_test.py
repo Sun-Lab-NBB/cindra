@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from ataraxis_base_utilities import ensure_directory_exists
 
-from cindra.io.binary import resolve_binary_write_marker_path
+from cindra.io.binary import resolve_binarization_marker_path, resolve_registration_marker_path
 from cindra.dataclasses import (
     ROIMask,
     CombinedData,
@@ -346,8 +346,11 @@ class TestExtractMultiRecording:
         with pytest.raises(RuntimeError):
             extract_traces(context=context, workers=1)
 
-    def test_marked_plane_binary_raises(self, tmp_path: Path) -> None:
-        """Verifies that a plane binary left mid-registration is refused instead of read as a registered movie."""
+    @pytest.mark.parametrize(
+        "resolve_marker_path", [resolve_binarization_marker_path, resolve_registration_marker_path]
+    )
+    def test_marked_plane_binary_raises(self, tmp_path: Path, resolve_marker_path: Callable[..., Path]) -> None:
+        """Verifies that a plane binary either phase left marked is refused instead of read as a finished movie."""
         frame_height = frame_width = 16
         frame_count = 8
         movie = _constant_movie(
@@ -363,9 +366,9 @@ class TestExtractMultiRecording:
             centers=((8, 8),), frame_height=frame_height, frame_width=frame_width
         )
 
-        # An interrupted registration leaves this marker beside the binary it was rewriting.
+        # An interrupted conversion or rewrite leaves its own phase marker beside the binary it was writing.
         binary_path = context.runtime.combined_data.registered_binary_paths[0]
-        resolve_binary_write_marker_path(binary_path=binary_path).touch()
+        resolve_marker_path(binary_path=binary_path).touch()
 
         with pytest.raises(RuntimeError, match="was interrupted"):
             extract_traces(context=context, workers=1)

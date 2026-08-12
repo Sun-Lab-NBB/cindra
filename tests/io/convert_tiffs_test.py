@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
-from tifffile import TiffFile, TiffFrame, TiffWriter
+from tifffile import TiffFile, TiffWriter
 
 from cindra.io.tiff import (
     _MISMATCH_REPORT_LIMIT,
@@ -19,7 +19,12 @@ from cindra.io.tiff import (
     convert_tiffs_to_binary,
     resolve_tiff_conversion_plan,
 )
-from cindra.io.binary import create_binary_write_marker, resolve_binary_write_marker_path
+from cindra.io.binary import (
+    create_registration_marker,
+    resolve_active_binary_marker,
+    resolve_binarization_marker_path,
+    resolve_registration_marker_path,
+)
 from cindra.io.context import PARAMETERS_FILENAME
 from cindra.dataclasses import (
     IOData,
@@ -54,19 +59,6 @@ def _write_constant_tiff(file_path: Path, frame_values: list[int], height: int, 
     with TiffWriter(file_path) as writer:
         for value in frame_values:
             writer.write(np.full((height, width), fill_value=value, dtype=np.int16))
-
-
-def _write_scanimage_tiff(file_path: Path, page_shapes: list[tuple[int, int]]) -> None:
-    """Writes a non-BigTIFF file carrying the ScanImage software tag, whose pages hold the requested shapes."""
-    # tifffile routes the pages of such a file through TiffPages._load_virtual_frames(), which hands back frames that
-    # report the shape of the file's first page instead of their own.
-    with TiffWriter(file_path, bigtiff=False) as writer:
-        for page_index, (height, width) in enumerate(page_shapes):
-            writer.write(
-                np.full((height, width), fill_value=page_index, dtype=np.int16),
-                software="SI.5.6",
-                contiguous=False,
-            )
 
 
 def _constant_stack(frame_values: list[int], height: int, width: int) -> NDArray[np.int16]:
@@ -838,8 +830,8 @@ class TestConvertTiffsToBinary:
         convert_tiffs_to_binary(plan=resolve_tiff_conversion_plan(contexts=[context], workers=1))
 
         io_data = context.runtime.io
-        assert not resolve_binary_write_marker_path(binary_path=io_data.registered_binary_path).exists()
-        assert not resolve_binary_write_marker_path(binary_path=io_data.registered_binary_path_channel_2).exists()
+        assert resolve_active_binary_marker(binary_path=io_data.registered_binary_path) is None
+        assert resolve_active_binary_marker(binary_path=io_data.registered_binary_path_channel_2) is None
 
     def test_interrupted_conversion_leaves_the_binary_marked(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -875,7 +867,7 @@ class TestConvertTiffsToBinary:
         # The abandoned binary holds the exact byte count a finished conversion would leave behind, with every frame
         # still zero, so the mark beside it is the only record that its contents are incomplete.
         assert binary_path.stat().st_size == len(frame_values) * _FRAME_HEIGHT * _FRAME_WIDTH * 2
-        assert resolve_binary_write_marker_path(binary_path=binary_path).exists()
+        assert resolve_binarization_marker_path(binary_path=binary_path).exists()
 
 
 class TestResolveTiffConversionPlan:
@@ -922,7 +914,7 @@ class TestResolveTiffConversionPlan:
         assert plan.channel_1_paths == (binary_path,)
         assert plan.channel_2_paths == ()
         assert binary_path.read_bytes() == b"previous binary"
-        assert not resolve_binary_write_marker_path(binary_path=binary_path).exists()
+        assert resolve_active_binary_marker(binary_path=binary_path) is None
 
     def test_recording_without_a_complete_cycle_raises(self, tmp_path: Path) -> None:
         """Verifies that a recording too short to fill one interleave cycle is rejected before a plan is returned."""
@@ -1012,47 +1004,6 @@ class TestScanSourceFrames:
         with pytest.raises(ValueError, match=r"ignored_file_names"):
             _scan_source_frames(tiff_files=[recording_tiff, zstack_tiff])
 
-    def test_scanimage_page_shape_is_read_from_its_own_header(self, tmp_path: Path) -> None:
-        """Verifies that a ScanImage classic file holding a differently shaped page is rejected."""
-        data_path = tmp_path / "data"
-        data_path.mkdir(parents=True, exist_ok=True)
-
-        recording_tiff = data_path / "mesoscope_000001.tif"
-        page_shapes = [(_FRAME_HEIGHT, _FRAME_WIDTH)] * 8
-        page_shapes[5] = (_FRAME_HEIGHT * 2, _FRAME_WIDTH * 2)
-        _write_scanimage_tiff(file_path=recording_tiff, page_shapes=page_shapes)
-
-        # Every page of such a file past the first inherits the shape tifffile read from the first, so the differing
-        # page is invisible to any check reading the shape the page itself reports.
-        with TiffFile(recording_tiff) as tiff:
-            assert {page.shape for page in tiff.pages} == {(_FRAME_HEIGHT, _FRAME_WIDTH)}
-
-        with pytest.raises(ValueError, match=r"mesoscope_000001\.tif"):
-            _scan_source_frames(tiff_files=[recording_tiff])
-
-    def test_page_without_a_readable_header_is_accepted(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Verifies that a page the file holds no readable header for is accepted rather than reported."""
-        data_path = tmp_path / "data"
-        data_path.mkdir(parents=True, exist_ok=True)
-
-        recording_tiff = data_path / "mesoscope_000001.tif"
-        _write_scanimage_tiff(file_path=recording_tiff, page_shapes=[(_FRAME_HEIGHT, _FRAME_WIDTH)] * 8)
-
-        # Reproduces a ScanImage classic file addressing its pages arithmetically past the two gigabyte offset
-        # ceiling, whose frames carry no header of their own to read.
-        def _unreadable_header(frame: TiffFrame) -> None:
-            """Fails every attempt to read a frame's own header, as a frame without one does."""
-            raise ValueError("cannot return virtual frame as page")
-
-        monkeypatch.setattr(TiffFrame, "aspage", _unreadable_header)
-
-        total_frames, base_height, base_width = _scan_source_frames(tiff_files=[recording_tiff])
-
-        assert total_frames > 0
-        assert (base_height, base_width) == (_FRAME_HEIGHT, _FRAME_WIDTH)
-
     def test_counts_every_frame_and_opens_each_file_once(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1081,28 +1032,6 @@ class TestScanSourceFrames:
         assert opened == tiff_files
         assert total_frames == 6
         assert (base_height, base_width) == (_FRAME_HEIGHT, _FRAME_WIDTH)
-
-    def test_file_with_differently_shaped_pages_raises(self, tmp_path: Path) -> None:
-        """Verifies that a page shaped unlike its own file's first page is rejected before the conversion runs."""
-        data_path = tmp_path / "data"
-        output_path = tmp_path / "output"
-        _write_parameters_json(directory=data_path, plane_number=1, channel_number=1)
-
-        # Reproduces a recording file whose trailing page holds a differently shaped frame, which every check reading
-        # the first page of each file alone accepts and the conversion loop then fails to broadcast.
-        recording_tiff = data_path / "mesoscope_000001.tif"
-        with TiffWriter(recording_tiff) as writer:
-            writer.write(np.full((_FRAME_HEIGHT, _FRAME_WIDTH), fill_value=1, dtype=np.int16))
-            writer.write(np.full((_FRAME_HEIGHT * 2, _FRAME_WIDTH * 2), fill_value=2, dtype=np.int16))
-
-        configuration = _build_configuration(data_path=data_path, output_path=output_path)
-        acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=1, channel_number=1)
-        context = _build_context(
-            output_path=output_path, configuration=configuration, acquisition=acquisition, plane_index=0
-        )
-
-        with pytest.raises(ValueError, match=r"mesoscope_000001\.tif"):
-            resolve_tiff_conversion_plan(contexts=[context], workers=1)
 
     def test_many_differently_shaped_tiffs_truncate_the_report(self, tmp_path: Path) -> None:
         """Verifies that more mismatched files than the report limit are summarized with a remainder count."""
@@ -1150,7 +1079,7 @@ class TestCreateBinaryFiles:
     """Tests _create_binary_files."""
 
     def test_marks_the_binary_it_opens(self, tmp_path: Path) -> None:
-        """Verifies that a freshly opened binary carries the mark that flags its contents as incomplete."""
+        """Verifies that a freshly opened binary carries the binarization mark and drops any registration mark."""
         output_path = tmp_path / "output"
         configuration = _build_configuration(data_path=tmp_path / "data", output_path=output_path)
         acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=1, channel_number=1)
@@ -1158,14 +1087,18 @@ class TestCreateBinaryFiles:
             output_path=output_path, configuration=configuration, acquisition=acquisition, plane_index=0
         )
         binary_path = context.runtime.io.registered_binary_path
-        create_binary_write_marker(binary_path=binary_path)
+
+        # An interrupted registration marked the binary this conversion is about to replace.
+        create_registration_marker(binary_path=binary_path)
 
         binaries, _ = _create_binary_files(plan=_build_plan(context=context))
         binaries[0].close()
 
         # The binary is sized to its full frame count the moment it is opened, so nothing but the mark separates it
-        # from a finished conversion until the caller writes every frame and clears the mark.
-        assert resolve_binary_write_marker_path(binary_path=binary_path).exists()
+        # from a finished conversion until the caller writes every frame and clears the mark. The registration mark
+        # described the binary just unlinked, so it goes with it.
+        assert resolve_binarization_marker_path(binary_path=binary_path).exists()
+        assert not resolve_registration_marker_path(binary_path=binary_path).exists()
 
     def test_marks_both_channel_binaries_it_opens(self, tmp_path: Path) -> None:
         """Verifies that a two-channel plane carries the mark on both of the binaries the conversion opens."""
@@ -1186,5 +1119,5 @@ class TestCreateBinaryFiles:
         channel_2_binaries[0].close()
 
         io_data = context.runtime.io
-        assert resolve_binary_write_marker_path(binary_path=io_data.registered_binary_path).exists()
-        assert resolve_binary_write_marker_path(binary_path=io_data.registered_binary_path_channel_2).exists()
+        assert resolve_binarization_marker_path(binary_path=io_data.registered_binary_path).exists()
+        assert resolve_binarization_marker_path(binary_path=io_data.registered_binary_path_channel_2).exists()

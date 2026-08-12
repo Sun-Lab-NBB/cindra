@@ -127,7 +127,8 @@ cindra/
 ├── plane_0/                                    # Per-plane processing results
 │   ├── runtime_data.yaml                       # Plane runtime metadata
 │   ├── channel_1_data.bin                      # Registered binary data
-│   ├── channel_1_data.bin.writing              # Present only while a stage writes frames into the binary
+│   ├── channel_1_data.bin.binarizing           # Present only while binarization fills the binary
+│   ├── channel_1_data.bin.registering          # Present only while registration rewrites the binary
 │   ├── registration_data/                      # Registration arrays
 │   │   ├── reference_image.npy
 │   │   ├── bad_frames.npy
@@ -173,10 +174,11 @@ plane geometry, or that an interrupted write left marked, without requiring `rep
 **Phase 2 (registration, per-plane):** Creates `registration_data/`, rewrites the plane binary in place, refreshes
 `detection_data/mean_image.npy`, and updates `runtime_data.yaml` with the registration section,
 `total_registration_time`, and `registration_workers`. For the duration of the in-place rewrite, a
-`{binary}.writing` marker sits beside the binary, which binarization also writes while it fills that binary. A marker
-left on disk means the write was interrupted, so the binary holds finished frames up to an unknown point and unfinished
-frames after it. Registration refuses to run against a marked binary, and re-running binarization rebuilds the binary
-and clears the marker.
+`{binary}.registering` marker sits beside the binary, the parallel of the `{binary}.binarizing` marker binarization
+writes while it fills that binary. Either marker left on disk means that phase's write was interrupted, so the binary
+holds finished frames up to an unknown point and unfinished frames after it. The suffix names the phase that died and
+nothing else, because registration refuses to run against a binary carrying either one, and re-running binarization
+rebuilds the binary and clears the marker in both cases.
 
 **Phase 3 (processing, per-plane):** Creates the remaining `detection_data/` images (`enhanced_mean_image.npy`,
 `maximum_projection.npy`, `correlation_map.npy`), the ROI `.npz` files, the fluorescence `.npy` traces, and updates
@@ -188,9 +190,7 @@ surviving file is not the whole-movie temporal mean registration wrote.
 **Phase 4 (combination):** Creates combined `detection_data/` and the combined ROI and trace files at the root level by
 merging all per-plane results, then writes `combined_metadata.npz` last, publishing it through an atomic write that
 renames it into place. The metadata file therefore doubles as an atomic completion marker: it never exists while the
-payload it describes is missing or partially written. This phase refuses to run unless it receives exactly the planes
-the acquisition parameters declare, so a recording whose output root holds a plane directory beyond that count produces
-no combined output until binarization rebuilds it at the declared count.
+payload it describes is missing or partially written.
 
 For every file, array shape, dtype, NPZ key, and data type convention the pipeline produces, see
 [references/output-formats.md](references/output-formats.md).
