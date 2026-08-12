@@ -466,7 +466,7 @@ class TestBinarizeRecording:
         _write_mismatched_tiff(data_directory=tmp_path / "data")
         configuration.file_io.repeat_binarization = True
 
-        with pytest.raises(ValueError, match="must hold frames of the same shape"):
+        with pytest.raises(ValueError, match=r"must\s+hold\s+a\s+frame\s+of\s+the\s+same\s+shape"):
             binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
 
         # The conversion never began, so the recording is still the fully processed recording it was.
@@ -479,7 +479,7 @@ class TestBinarizeRecording:
         assert (root_directory / "detection_data" / "mean_image.npy").exists()
         assert (root_directory / "combined_metadata.npz").exists()
 
-    def test_plane_without_frames_keeps_downstream_data(self, tmp_path: Path) -> None:
+    def test_recording_without_a_complete_volume_keeps_downstream_data(self, tmp_path: Path) -> None:
         """Verifies that a recording too short to fill one interleave cycle fails before any result is deleted."""
         configuration = _process_to_disk(tmp_path)
         root_directory = tmp_path / "output" / "cindra"
@@ -487,13 +487,13 @@ class TestBinarizeRecording:
         binary_path = plane_directory / "channel_1_data.bin"
         full_size = binary_path.stat().st_size
 
-        # Re-declares the recording as two planes and replaces its movie with a single frame, which leaves the second
-        # position of the interleave cycle with no frames of its own.
+        # Re-declares the recording as two planes and replaces its movie with a single frame, which leaves the
+        # recording holding fewer frames than one whole plane and channel interleave cycle.
         _write_raw_recording(data_directory=tmp_path / "data", frame_count=1)
         _declare_plane_count(root=tmp_path, plane_count=2)
         resolve_single_recording_contexts(configuration=configuration, persist=True)
 
-        with pytest.raises(ValueError, match=r"receives\s+no\s+channel\s+1\s+frames"):
+        with pytest.raises(ValueError, match=r"no\s+plane\s+receives\s+any\s+frames"):
             binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
 
         # The conversion never began, so the recording is still the fully processed recording it was.
@@ -538,6 +538,38 @@ class TestBinarizeRecording:
         assert isinstance(contexts, list)
         assert len(contexts) == 1
         assert contexts[0].runtime.io.frame_count == _FRAME_COUNT
+
+    def test_skip_refuses_a_reduced_plane_count(self, tmp_path: Path) -> None:
+        """Verifies that a reduced plane count destroys nothing when no conversion runs to replace what it drops."""
+        configuration = _binarize_to_disk(tmp_path, plane_number=2)
+        root_directory = tmp_path / "output" / "cindra"
+        surplus_binary = root_directory / "plane_1" / "channel_1_data.bin"
+        surplus_size = surplus_binary.stat().st_size
+        binary_path = root_directory / "plane_0" / "channel_1_data.bin"
+        first_size = binary_path.stat().st_size
+
+        # Plants the combined dataset of the earlier two-plane run, which merged the plane the reduced count drops.
+        combined_metadata = root_directory / "combined_metadata.npz"
+        combined_metadata.write_bytes(b"combined")
+        combined_traces = root_directory / "cell_fluorescence.npy"
+        combined_traces.write_bytes(b"traces")
+
+        # Mistypes the plane count as one. Both binaries still match their own recorded geometry, so the conversion
+        # that would rebuild the recording at the declared count is skipped.
+        _declare_plane_count(root=tmp_path, plane_count=1)
+
+        with pytest.raises(ValueError, match=r"beyond\s+that\s+count"):
+            binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
+
+        # The declared count alone deleted nothing, so both plane binaries and the dataset merged from them remain.
+        assert surplus_binary.stat().st_size == surplus_size
+        assert binary_path.stat().st_size == first_size
+        assert combined_metadata.exists()
+        assert combined_traces.exists()
+
+        contexts = RuntimeContext.load(root_path=root_directory, plane_index=-1)
+        assert isinstance(contexts, list)
+        assert len(contexts) == 2
 
     def test_rebuilt_plane_registers_again(self, tmp_path: Path) -> None:
         """Verifies that a plane whose binary was rebuilt re-registers rather than skipping on the discarded output."""
@@ -719,6 +751,15 @@ class TestSaveCombinedData:
         """Verifies that combining an empty context list raises a ValueError."""
         with pytest.raises(ValueError, match="At least one RuntimeContext"):
             save_combined_data(contexts=[])
+
+    def test_surplus_plane_contexts_raise(
+        self, tmp_path: Path, single_recording_context: Callable[..., RuntimeContext]
+    ) -> None:
+        """Verifies that combining more plane contexts than the recording declares raises a ValueError."""
+        context = single_recording_context(tmp_path)
+
+        with pytest.raises(ValueError, match=r"acquisition\s+parameters\s+declare"):
+            save_combined_data(contexts=[context, context])
 
     def test_missing_output_path_raises(
         self, tmp_path: Path, single_recording_context: Callable[..., RuntimeContext]

@@ -451,10 +451,8 @@ class BinaryFileCombined:
     functionality to handle multiple planes.
 
     Notes:
-        The managed binaries may hold different frame counts, which happens when an acquisition stopped partway
-        through a volume and delivered one extra frame to the leading planes. The combined view is capped at the
-        shortest file's frame count and a warning is emitted, because a frame count mismatch is an expected outcome
-        of a partial final volume.
+        The combined view is capped at the shortest managed file's frame count and a warning is emitted whenever the
+        binaries disagree, which keeps every combined frame backed by real data on every plane.
 
     Args:
         height: The height of the combined ROI, in pixels, obtained by combining all managed planes (BinaryFiles).
@@ -506,10 +504,9 @@ class BinaryFileCombined:
             for height, width, file_path in zip(self.plane_heights, self.plane_widths, self.file_paths, strict=False)
         ]
 
-        # Resolves the combined frame count as that of the shortest managed file. A recording whose acquisition stopped
-        # partway through a volume delivers one frame more to its leading planes than to its trailing ones, so the plane
-        # binaries can legitimately differ in length. Capping the combined view at the shortest file keeps every
-        # combined frame backed by real data on every plane, which matches how the combination stage trims its traces.
+        # Resolves the combined frame count as that of the shortest managed file. Capping the combined view there keeps
+        # every combined frame backed by real data on every plane, which matches how the combination stage trims its
+        # traces.
         frame_numbers = [file.frame_number for file in self.files]
         self._frame_number: int = min(frame_numbers)
         if len(set(frame_numbers)) > 1:
@@ -517,7 +514,7 @@ class BinaryFileCombined:
                 message=(
                     f"Capping the combined view of the plane binaries stored under root {self.file_paths[0].parent} at "
                     f"{self._frame_number} frames. The binaries hold between {self._frame_number} and "
-                    f"{max(frame_numbers)} frames, which happens when an acquisition stopped partway through a volume."
+                    f"{max(frame_numbers)} frames, so every frame past that count is backed by some planes alone."
                 ),
                 level=LogLevel.WARNING,
             )

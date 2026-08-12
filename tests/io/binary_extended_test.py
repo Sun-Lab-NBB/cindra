@@ -141,8 +141,7 @@ class TestBinaryFileCombined:
         """Verifies that planes of unequal length combine into a view spanning the shortest plane's frames."""
         plane_extent = 4
 
-        # Reproduces a recording whose acquisition stopped partway through a volume, which gives the leading plane one
-        # frame more than the trailing plane.
+        # Reproduces plane binaries of unequal length, which the combined view caps rather than reads past.
         long_path = tmp_path / "plane0.bin"
         short_path = tmp_path / "plane1.bin"
         _create_test_binary(file_path=long_path, frame_count=11, height=plane_extent, width=plane_extent)

@@ -1137,6 +1137,11 @@ def _register_secondary_channel(context: RuntimeContext, *, bidirectional_phase_
     rewritten in place in the channel's binary under the '<binary>.writing' marker _register_alignment_channel
     created. The resulting mean image is stored in the matching detection field.
 
+    Notes:
+        The offsets this applies were measured on the alignment channel and are indexed frame for frame against this
+        one. Binarization writes both channels of a plane over the same interleave cycles, so the count the plane
+        records bounds the rewrite, the mean image, and the offset arrays alike.
+
     Args:
         context: The RuntimeContext containing configuration, acquisition parameters, and runtime data.
         bidirectional_phase_corrected: Determines whether this channel's binary already carries the bidirectional

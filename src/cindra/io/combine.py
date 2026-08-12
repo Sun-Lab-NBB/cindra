@@ -112,7 +112,7 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
     detection images, extraction data for both channels, the per-plane geometry, the registered binary paths, tau, and
     the sampling rate. Planes that did not complete detection or extraction contribute nothing, and the combined traces
     are trimmed to the frame count of the shortest contributing plane, which is stored as CombinedData.frame_count
-    alongside the untrimmed per-plane counts in CombinedData.plane_frame_counts.
+    alongside each plane's own count in CombinedData.plane_frame_counts.
 
     Args:
         plane_contexts: A list of RuntimeContext instances, one for each plane being combined.
@@ -190,9 +190,8 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
     )
 
     # Resolves the frame count of the combined product. Planes that did not complete extraction contribute nothing, and
-    # the product is trimmed to the shortest plane that did. A recording whose acquisition stopped partway through a
-    # volume delivers one extra frame to its leading planes, so trimming keeps every combined column backed by real
-    # data on every plane rather than padding the shorter planes with fabricated zeros.
+    # the product is trimmed to the shortest plane that did, which keeps every combined column backed by real data on
+    # every plane rather than padding the shorter planes with fabricated zeros.
     contributing_frame_counts = [
         frame_count
         for frame_count in (_resolve_plane_frame_count(context=context) for context in plane_contexts)
@@ -203,8 +202,8 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         console.echo(
             message=(
                 f"Trimming the combined traces to {combined_frame_count} frames. The recording's planes hold between "
-                f"{combined_frame_count} and {max(contributing_frame_counts)} frames, which happens when its "
-                f"acquisition stopped partway through a volume."
+                f"{combined_frame_count} and {max(contributing_frame_counts)} frames, so every combined column past "
+                f"that count would carry the traces of some planes alone."
             ),
             level=LogLevel.WARNING,
         )

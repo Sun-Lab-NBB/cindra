@@ -26,9 +26,10 @@ demand by `/single-recording-results`.
 | `registered_binary_paths_channel_2` | str     | (N,)  | Relative paths to channel 2 registered binaries (2-ch) |
 
 `frame_count` is the frame count of the shortest plane that contributed traces, which is what the combined traces were
-trimmed to. `plane_frame_counts` holds each plane's untrimmed count, so a plane whose entry exceeds `frame_count` had
-trailing frames dropped from the combined product. A `frame_count` of 0 with an empty `plane_frame_counts` means the
-archive predates these fields rather than that the recording holds no frames.
+trimmed to. `plane_frame_counts` holds each plane's own count, which binarization makes identical across the planes of a
+recording converted in one run, so every entry equals `frame_count` once every plane has completed. A `frame_count` of 0
+with an empty `plane_frame_counts` means the archive predates these fields rather than that the recording holds no
+frames.
 
 ---
 
@@ -123,11 +124,10 @@ Channel 2 data uses identical keys in `roi_statistics_channel_2.npz`.
 Saved at both the combined root and per-plane levels. All files are `.npy` format, float32 dtype.
 
 At the combined root, `frames` is the frame count of the shortest plane that contributed traces, recorded as
-`frame_count` in `combined_metadata.npz`. When a recording's acquisition stopped partway through a volume, its leading
-planes hold one frame more than its trailing planes. Combination trims every plane's traces to the shortest contributing
-plane rather than padding the shorter ones, and logs a warning naming the range. Planes that did not complete extraction
-contribute no rows and are excluded from the trim target. Compare `frame_count` against `plane_frame_counts` to see
-whether trimming occurred. At the per-plane level, `frames` is that plane's own `io.frame_count`.
+`frame_count` in `combined_metadata.npz`. Combination trims every plane's traces to that count rather than padding the
+shorter ones, and logs a warning naming the range. Planes that did not complete extraction contribute no rows and are
+excluded from the trim target. Compare `frame_count` against `plane_frame_counts` to see whether trimming occurred. At
+the per-plane level, `frames` is that plane's own `io.frame_count`.
 
 **Channel 1 (always present):**
 
@@ -219,8 +219,8 @@ registration valid range rather than the full frame.
 
 Binary files store frames as contiguous int16 arrays. Each frame has `height × width` values. Read with
 `np.memmap(path, dtype=np.int16, mode='r', shape=(frame_count, height, width))` using dimensions from
-`runtime_data.yaml`. Read each plane's `frame_count` from its own `runtime_data.yaml`: planes of one recording can hold
-different frame counts, and a plane's channel 2 can hold one frame more or fewer than its channel 1.
+`runtime_data.yaml`. Read each plane's `frame_count` from its own `runtime_data.yaml`, which is the sole authority on
+how many frames its binaries hold, because binarization discards the frames of an incomplete final interleave cycle.
 
 ---
 

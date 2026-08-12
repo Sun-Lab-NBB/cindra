@@ -19,7 +19,7 @@ class TestAverageOffsetCurves:
         qt_application: QApplication,
         registration_recording_stub: Callable[..., object],
     ) -> None:
-        """Verifies that a recording stopped partway through a volume still opens and averages over combined frames."""
+        """Verifies that a plane longer than the combined movie still opens and averages over the combined frames."""
         data = registration_recording_stub(plane_frame_counts=(21, 20), combined_frame_count=20)
 
         viewer = BinaryPlayer(data=data)

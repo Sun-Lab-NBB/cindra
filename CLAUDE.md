@@ -166,8 +166,14 @@ outputs.
   results into a unified `combined_metadata.npz` dataset, trimming the combined traces to the shortest contributing
   plane and recording `frame_count` and `plane_frame_counts` alongside the geometry. That metadata file doubles as the
   pipeline-completion marker, so it is written after its payload arrays and published through `atomic_write`.
-  Phase 1 rejects a data directory whose TIFF files do not all hold frames of the same shape, naming
-  `file_io.ignored_file_names` as the exclusion mechanism. Phases 2 and 3 carry a `plane_{index}` tracker specifier.
+  Phase 1 rejects a data directory holding any page whose frame shape differs from the first file's, naming
+  `file_io.ignored_file_names` as the exclusion mechanism. It also consumes whole plane and channel interleave cycles,
+  so every plane and channel of a recording holds the same frame count, the frames of an incomplete final cycle are
+  discarded, and a recording short of one whole cycle is rejected. Only a conversion removes a plane directory the
+  recording's current plane count no longer covers, which pairs each removal with the rebuild that follows it. A
+  skipped conversion rebuilds nothing, so it names the surplus directories and fails instead of removing them. Phase 4
+  refuses on the same disagreement, because it merges every plane directory the output root holds. Phases 2 and 3 carry
+  a `plane_{index}` tracker specifier.
 - **Multi-recording pipeline**: Two-phase workflow (discover, extract). Phase 1 selects ROIs from each recording,
   performs diffeomorphic demons registration to a common space, clusters ROIs across recordings via spatial overlap, and
   projects template masks back to individual recordings. Phase 2 extracts fluorescence traces and applies OASIS
