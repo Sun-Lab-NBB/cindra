@@ -20,6 +20,7 @@ from cindra.dataclasses import (
     MultiRecordingRuntimeContext,
 )
 from cindra.registration.deformation import Deformation
+from cindra.registration.diffeomorphic import DiffeomorphicDemonsRegistration
 from cindra.registration.register_recordings import (
     register_recordings,
     _apply_forward_deformation,
@@ -255,6 +256,19 @@ def _read_deform_fields(context: MultiRecordingRuntimeContext) -> tuple[NDArray[
     return field_y, field_x
 
 
+def _capture_registrations(monkeypatch: pytest.MonkeyPatch) -> list[DiffeomorphicDemonsRegistration]:
+    """Wraps the registration algorithm so every instance register_recordings builds is captured for inspection."""
+    registrations: list[DiffeomorphicDemonsRegistration] = []
+
+    def _build(*arguments: object, **keyword_arguments: object) -> DiffeomorphicDemonsRegistration:
+        registration = DiffeomorphicDemonsRegistration(*arguments, **keyword_arguments)
+        registrations.append(registration)
+        return registration
+
+    monkeypatch.setattr("cindra.registration.register_recordings.DiffeomorphicDemonsRegistration", _build)
+    return registrations
+
+
 class TestRegisterRecordings:
     """Tests register_recordings."""
 
@@ -285,6 +299,32 @@ class TestRegisterRecordings:
 
             deformed_masks = ROIMask.load_list(file_path=output_path / "registration_deformed_masks.npz")
             assert len(deformed_masks) == len(_BASE_CENTERS)
+
+    def test_forwards_configured_registration_parameters(
+        self,
+        gaussian_blob_image: Callable[..., NDArray[np.float64]],
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verifies that the configured diffeomorphic registration parameters reach the registration algorithm."""
+        configuration = _make_configuration()
+        configuration.diffeomorphic_registration.final_grid_sampling = 8.0
+        configuration.diffeomorphic_registration.grid_sampling_factor = 0.5
+        configuration.diffeomorphic_registration.scale_sampling = 4
+        configuration.diffeomorphic_registration.speed_factor = 2.0
+        contexts = _build_recording_pair(tmp_path=tmp_path, builder=gaussian_blob_image, configuration=configuration)
+        registrations = _capture_registrations(monkeypatch=monkeypatch)
+
+        register_recordings(contexts=contexts, workers=1)
+
+        # Each configured value differs from the algorithm's own default for that parameter, so dropping any one of
+        # the forwarded arguments leaves the algorithm holding its default and fails the matching assertion.
+        assert len(registrations) == 1
+        registration = registrations[0]
+        assert registration._final_grid_sampling == 8.0
+        assert registration._grid_sampling_factor == 0.5
+        assert registration._scale_sampling == 4
+        assert registration._speed_factor == 2.0
 
     def test_identical_images_produce_near_zero_deformation(
         self, gaussian_blob_image: Callable[..., NDArray[np.float64]], tmp_path: Path

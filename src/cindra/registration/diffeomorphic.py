@@ -16,6 +16,9 @@ from .spline_grid import SplineGrid, MINIMUM_KNOTS_FOR_FROZEN_EDGES
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
+_MINIMUM_GROUP_SIZE: int = 2
+"""The minimum number of images a groupwise registration run requires."""
+
 
 class DiffeomorphicDemonsRegistration:
     """Provides the diffeomorphic Demons registration pipeline for groupwise alignment of 2D images.
@@ -58,6 +61,9 @@ class DiffeomorphicDemonsRegistration:
         _pyramids: Scale-space pyramids for each input image, initialized during registration.
         _cache: Internal cache for intermediate computation results.
         _interpolation_order: Current interpolation order used during registration (1 or 3).
+
+    Raises:
+        ValueError: If fewer than two images are supplied.
     """
 
     def __init__(
@@ -75,6 +81,16 @@ class DiffeomorphicDemonsRegistration:
         deformation_limit: float = 1.0,
         noise_factor: float = 1.0,
     ) -> None:
+        # Rejects a group that resolves no alignment. Each image's deformation is the average of its deformations to
+        # the other images, so an image that pairs with nothing has nothing to align to.
+        if len(images) < _MINIMUM_GROUP_SIZE:
+            message = (
+                "Unable to initialize the diffeomorphic demons registration. Groupwise registration aligns the "
+                f"images of a group to their common mean space, so it requires at least {_MINIMUM_GROUP_SIZE} "
+                f"images, but got {len(images)}."
+            )
+            console.error(message=message, error=ValueError)
+
         # Ensures that the input images use the fp32 precision, consistent with the rest of the cindra codebase.
         self._images: list[NDArray[np.float32]] = [
             image if image.dtype == np.float32 else image.astype(np.float32) for image in images
@@ -162,7 +178,8 @@ class DiffeomorphicDemonsRegistration:
                     f"Unable to register the {self._images[0].shape} images to their common mean space. Freezing the "
                     f"knot grid edges requires at least {MINIMUM_KNOTS_FOR_FROZEN_EDGES} knots along each dimension, "
                     f"but the finest scale level samples its {field_shape} working resolution every {grid_sampling} "
-                    f"pixels, which builds a {grid_shape} grid. Register larger images or lower final_grid_sampling."
+                    f"pixels, which builds a {grid_shape} grid. Register larger images or lower the "
+                    "'diffeomorphic_registration.final_grid_sampling' configuration parameter."
                 )
                 console.error(message=message, error=RuntimeError)
 
@@ -261,7 +278,6 @@ class DiffeomorphicDemonsRegistration:
         """
         scale = iteration_key[2]
         image_count = len(self._images)
-        image_height, image_width = self._images[0].shape
 
         # Returns None for every image when the knot grid the regularization would build holds too few knots to
         # freeze its edges, so the level contributes nothing instead of an unregularized deformation. The grid is
@@ -312,9 +328,12 @@ class DiffeomorphicDemonsRegistration:
 
         deformations: list[Deformation | None] = []
         for field_y, field_x in zip(accumulated_y, accumulated_x, strict=True):
-            if field_y is None or field_x is None:
-                deformations.append(Deformation.identity(height=image_height, width=image_width))
-                continue
+            if field_y is None or field_x is None:  # pragma: no cover, defensive guard, every image joins a pair
+                message = (
+                    "Unable to average the pairwise deformations of the group's images. Every image of the group "
+                    "pairs with each of the others exactly once, so each one holds at least one contribution here."
+                )
+                console.error(message=message, error=RuntimeError)
             if average_factor is not None:  # pragma: no cover, only reached with more than two images
                 np.multiply(field_y, average_factor, out=field_y)
                 np.multiply(field_x, average_factor, out=field_x)
@@ -443,9 +462,9 @@ class DiffeomorphicDemonsRegistration:
             image_index: Index of the image to update.
             incremental_deformation: The incremental deformation to apply, or None to skip.
         """
-        # A level whose knot grid cannot freeze its edges supplies None for every image, and an image that pairs with
-        # nothing accumulates an identity. Both leave the running total untouched.
-        if incremental_deformation is None or incremental_deformation.is_identity:
+        # A level whose knot grid cannot freeze its edges supplies None for every image, which leaves the running
+        # total untouched.
+        if incremental_deformation is None:
             return
 
         # Gets or creates the current accumulated deformation.

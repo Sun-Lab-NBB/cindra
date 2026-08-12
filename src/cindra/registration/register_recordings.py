@@ -118,6 +118,7 @@ def register_recordings(contexts: list[MultiRecordingRuntimeContext], *, workers
     # Performs groupwise diffeomorphic registration.
     registration = DiffeomorphicDemonsRegistration(
         images=reference_images,
+        final_grid_sampling=registration_config.final_grid_sampling,
         grid_sampling_factor=registration_config.grid_sampling_factor,
         scale_sampling=registration_config.scale_sampling,
         speed_factor=registration_config.speed_factor,

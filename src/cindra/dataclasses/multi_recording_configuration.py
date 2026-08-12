@@ -102,6 +102,12 @@ class DiffeomorphicRegistration:
     Must be between 0 and 1. Lower values produce a relatively finer grid at coarser scales, allowing for more
     detailed deformations at those scales."""
 
+    final_grid_sampling: float = 16.0
+    """The spacing, in pixels, between the B-spline control points of the grid used at the finest scale level of the
+    multi-scale registration. Registration requires the reference images to span more than twice this spacing along
+    both dimensions. Lowering the value therefore supports smaller reference images and resolves finer local
+    deformations, at the cost of a less constrained deformation field."""
+
     scale_sampling: int = 30
     """The number of registration iterations to perform at each scale level of the multi-scale pyramid. Values between
     20 and 30 are reasonable for most recordings, but higher values yield better alignment at the cost of proportionally
