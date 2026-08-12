@@ -11,15 +11,10 @@ from ataraxis_base_utilities import console
 
 from .pyramid import ScaleSpacePyramid
 from .deformation import Deformation
-from .spline_grid import SplineGrid
+from .spline_grid import SplineGrid, MINIMUM_KNOTS_FOR_FROZEN_EDGES
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
-
-_MINIMUM_GRID_DIMENSION: int = 4
-"""The B-spline grid dimension threshold used to pre-filter scale levels when freeze_edges is enabled. A level is
-skipped when every dimension of the proposed knot grid falls below this value. SplineGrid itself freezes edges only
-when every dimension holds at least 6 knots, so grids this coarse cannot constrain edge deformations."""
 
 
 class DiffeomorphicDemonsRegistration:
@@ -122,8 +117,19 @@ class DiffeomorphicDemonsRegistration:
 
         Returns:
             The deformation that aligns the specified image to the common mean space.
+
+        Raises:
+            RuntimeError: If the requested image carries no deformation resolved by a registration run.
         """
-        return self._deformations[image_index]
+        deformation = self._deformations.get(image_index, None)
+        if deformation is None:
+            message = (
+                f"Unable to retrieve the deformation for image {image_index}. The requested index must identify an "
+                f"image register() resolved a deformation for, and the resolved indices are "
+                f"{sorted(self._deformations)}."
+            )
+            console.error(message=message, error=RuntimeError)
+        return deformation
 
     def register(self, *, progress: bool = True) -> None:
         """Performs the multiscale registration process.
@@ -132,6 +138,10 @@ class DiffeomorphicDemonsRegistration:
 
         Args:
             progress: Determines whether to display a progress bar to report the registration progress.
+
+        Raises:
+            RuntimeError: If the finest scale level's knot grid holds too few knots to freeze its edges, which leaves
+                every level of the run unable to contribute a deformation.
         """
         # Starts with bilinear (order 1) interpolation for the coarse iterations.
         self._interpolation_order = 1
@@ -141,6 +151,20 @@ class DiffeomorphicDemonsRegistration:
 
         # Creates scale-space pyramids for each image.
         self._pyramids = [ScaleSpacePyramid(data=image, minimum_scale=self._final_scale) for image in self._images]
+
+        # Rejects a run whose finest level cannot freeze the edges of its knot grid. The grid sampling grows with the
+        # scale while the working resolution shrinks, so the finest level builds the largest grid of the run and a run
+        # that skips it skips every level, leaving every image without a deformation.
+        if self._freeze_edges:
+            field_shape, grid_sampling, grid_shape = self._resolve_level_grid(scale=self._final_scale)
+            if min(grid_shape) < MINIMUM_KNOTS_FOR_FROZEN_EDGES:
+                message = (
+                    f"Unable to register the {self._images[0].shape} images to their common mean space. Freezing the "
+                    f"knot grid edges requires at least {MINIMUM_KNOTS_FOR_FROZEN_EDGES} knots along each dimension, "
+                    f"but the finest scale level samples its {field_shape} working resolution every {grid_sampling} "
+                    f"pixels, which builds a {grid_shape} grid. Register larger images or lower final_grid_sampling."
+                )
+                console.error(message=message, error=RuntimeError)
 
         # Computes maximum scale from image dimensions (quarter of largest dimension).
         maximum_scale = max(self._images[0].shape) * 0.25
@@ -232,20 +256,20 @@ class DiffeomorphicDemonsRegistration:
             iteration_key: The (level, iteration, scale) identifier for the current iteration.
 
         Returns:
-            A list holding each image's averaged deformation, or a list of None values if the grid would be too small.
+            A list holding each image's averaged deformation, or a list of None values when the level's knot grid
+            holds too few knots along either dimension to freeze its edges.
         """
         scale = iteration_key[2]
         image_count = len(self._images)
         image_height, image_width = self._images[0].shape
 
-        # Returns None for every image if the B-spline grid would be too small for frozen edges. The check reads the
-        # shared image shape, so it holds for the whole group rather than for one image.
+        # Returns None for every image when the knot grid the regularization would build holds too few knots to
+        # freeze its edges, so the level contributes nothing instead of an unregularized deformation. The grid is
+        # measured at the working resolution the whole group shares at this scale, which is the grid
+        # _regularize_deformation builds from every pair's force field.
         if self._freeze_edges:
-            grid_sampling = self._compute_grid_sampling(scale=scale)
-            grid_shape = SplineGrid.compute_grid_shape(
-                field_height=image_height, field_width=image_width, grid_sampling=grid_sampling
-            )
-            if all(dimension < _MINIMUM_GRID_DIMENSION for dimension in grid_shape):  # pragma: no cover
+            grid_shape = self._resolve_level_grid(scale=scale)[2]
+            if any(knot_count < MINIMUM_KNOTS_FOR_FROZEN_EDGES for knot_count in grid_shape):
                 return [None] * image_count
 
         # Accumulates into raw field arrays rather than into Deformation instances, so each contribution after the
@@ -343,7 +367,7 @@ class DiffeomorphicDemonsRegistration:
 
         # Regularizes using B-spline grid to ensure diffeomorphism.
         force_deformation = Deformation(field_y=field_y, field_x=field_x)
-        return self._regularize_deformation(scale=scale, deformation=force_deformation, image_shape=source_image.shape)
+        return self._regularize_deformation(scale=scale, deformation=force_deformation)
 
     def _get_image_and_gradient(
         self, image_index: int, iteration_key: tuple[int, int, float]
@@ -419,7 +443,9 @@ class DiffeomorphicDemonsRegistration:
             image_index: Index of the image to update.
             incremental_deformation: The incremental deformation to apply, or None to skip.
         """
-        if incremental_deformation is None or incremental_deformation.is_identity:  # pragma: no cover, no-op skip
+        # A level whose knot grid cannot freeze its edges supplies None for every image, and an image that pairs with
+        # nothing accumulates an identity. Both leave the running total untouched.
+        if incremental_deformation is None or incremental_deformation.is_identity:
             return
 
         # Gets or creates the current accumulated deformation.
@@ -434,49 +460,37 @@ class DiffeomorphicDemonsRegistration:
         )
         self._deformations[image_index] = current_deformation.compose(other=incremental_deformation)
 
-    def _regularize_deformation(
-        self, scale: float, deformation: Deformation, image_shape: tuple[int, ...] | None = None
-    ) -> Deformation:
+    def _regularize_deformation(self, scale: float, deformation: Deformation) -> Deformation:
         """Regularizes a deformation to ensure diffeomorphism using B-spline constraints.
 
         Args:
             scale: The current scale level.
             deformation: The raw deformation to regularize.
-            image_shape: The shape of the image at the current working resolution. When provided and different from
-                the original image resolution, the grid sampling is scaled by the downsample ratio to maintain
-                correct regularization strength at reduced resolutions.
 
         Returns:
             The regularized deformation.
         """
-        grid_sampling = self._compute_grid_sampling(scale=scale)
+        # The injectivity constraint uses the original-pixel-unit grid sampling, since both scale and grid sampling
+        # must be in the same coordinate system.
+        original_grid_sampling = self._compute_grid_sampling(scale=scale)
 
-        # Scales grid_sampling to match the working resolution when images are downsampled. The injectivity constraint
-        # uses the original-pixel-unit grid_sampling since both scale and grid_sampling must be in the same coordinate
-        # system.
-        original_grid_sampling = grid_sampling
-        if image_shape is not None and self._images:
-            downsample_ratio = image_shape[0] / self._images[0].shape[0]
-            if downsample_ratio < 1.0:
-                grid_sampling = grid_sampling * downsample_ratio
+        # Scales the sampling by the working resolution the deformation itself carries, which is the resolution the
+        # level filter measures, so the grid the filter accepts is the grid this method builds.
+        grid_sampling = self._scale_grid_sampling(
+            grid_sampling=original_grid_sampling, field_height=deformation.field_shape[0]
+        )
 
         # Computes injectivity constraint factor based on scale and grid sampling in original-pixel units.
         injective_factor = 0.9
         if self._injective:
             injective_factor = min(self._deformation_limit * scale / original_grid_sampling, 0.9)
 
-        regularized = deformation.regularize(
+        return deformation.regularize(
             grid_sampling=grid_sampling,
             injective=self._injective,
             injective_factor=injective_factor,
             freeze_edges=self._freeze_edges,
         )
-
-        # Returns original deformation if regularization failed (grid too small).
-        if regularized is None:
-            return deformation
-
-        return regularized
 
     def _compute_grid_sampling(self, scale: float) -> float:
         """Computes the B-spline grid sampling for the given scale.
@@ -492,6 +506,63 @@ class DiffeomorphicDemonsRegistration:
         scale_difference = scale - self._final_scale
         scale_factor = self._grid_sampling_factor * self._final_grid_sampling
         return scale_difference * scale_factor + self._final_grid_sampling
+
+    def _scale_grid_sampling(self, grid_sampling: float, field_height: int) -> float:
+        """Converts a grid sampling expressed in original-image pixels to the working resolution of a field.
+
+        Notes:
+            Both the level pre-filter and the regularization itself measure the knot grid through this method, so
+            the grid the pre-filter rejects is the grid the regularization would have built.
+
+        Args:
+            grid_sampling: The grid sampling in original-image pixels.
+            field_height: The height of the deformation field at the current working resolution.
+
+        Returns:
+            The grid sampling in working-resolution pixels.
+        """
+        downsample_ratio = field_height / self._images[0].shape[0]
+        if downsample_ratio < 1.0:
+            return grid_sampling * downsample_ratio
+        return grid_sampling
+
+    def _resolve_field_shape(self, scale: float) -> tuple[int, int]:
+        """Returns the working resolution the group's images share at the given scale.
+
+        Args:
+            scale: The current scale value.
+
+        Returns:
+            The shape every image of the group holds at the requested scale, as (height, width).
+        """
+        if self._pyramids is None:  # pragma: no cover, defensive guard because register() always initializes pyramids
+            message = (
+                "Unable to resolve the field shape. The pyramids have not been initialized, call register() first."
+            )
+            console.error(message=message, error=RuntimeError)
+
+        # Every image of the group shares one shape, and the pyramids derive their level shapes from that shape alone,
+        # so the first pyramid reports the resolution every image works at.
+        return self._pyramids[0].get_scale_shape(scale=scale)
+
+    def _resolve_level_grid(self, scale: float) -> tuple[tuple[int, int], float, tuple[int, int]]:
+        """Returns the knot grid the regularization builds at the given scale, together with what it is measured from.
+
+        Args:
+            scale: The current scale value.
+
+        Returns:
+            A tuple storing the working resolution as (height, width), the grid sampling in working-resolution pixels,
+            and the shape of the knot grid that sampling produces.
+        """
+        field_height, field_width = self._resolve_field_shape(scale=scale)
+        grid_sampling = self._scale_grid_sampling(
+            grid_sampling=self._compute_grid_sampling(scale=scale), field_height=field_height
+        )
+        grid_shape = SplineGrid.compute_grid_shape(
+            field_height=field_height, field_width=field_width, grid_sampling=grid_sampling
+        )
+        return (field_height, field_width), grid_sampling, grid_shape
 
     def _get_cached(self, key: str, iteration_key: tuple[int, int, float]) -> Deformation | NDArray[np.float32] | None:
         """Retrieves cached data if the iteration key matches.

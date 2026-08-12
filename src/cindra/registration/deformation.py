@@ -9,8 +9,9 @@ import numba
 import numpy as np
 import scipy.ndimage
 import scipy.special
+from ataraxis_base_utilities import console
 
-from .spline_grid import SplineGrid, compute_cardinal_coefficients
+from .spline_grid import SplineGrid, compute_cardinal_coefficients, MINIMUM_KNOTS_FOR_FROZEN_EDGES
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -375,7 +376,7 @@ class Deformation:
         injective: bool = True,
         injective_factor: float = 0.9,
         freeze_edges: bool = True,
-    ) -> Deformation | None:
+    ) -> Deformation:
         """Regularizes the deformation using B-spline grid constraints.
 
         Fits the deformation to a B-spline grid representation, which enforces smoothness. Optionally applies
@@ -388,8 +389,10 @@ class Deformation:
             freeze_edges: Determines whether to freeze edges to zero deformation.
 
         Returns:
-            A new regularized Deformation instance, this same instance if it is an identity deformation, or None if
-            the grid is too small for the requested constraints.
+            A new regularized Deformation instance, or this same instance if it is an identity deformation.
+
+        Raises:
+            RuntimeError: If the knot grid the requested sampling produces is too coarse to freeze its edges.
         """
         if self.is_identity:
             return self
@@ -407,7 +410,12 @@ class Deformation:
             freeze_edges=freeze_edges,
         )
         if not success:
-            return None
+            message = (
+                f"Unable to regularize the deformation. Freezing the edges of the knot grid requires at least "
+                f"{MINIMUM_KNOTS_FOR_FROZEN_EDGES} knots along each dimension, but sampling the "
+                f"{self.field_shape} field every {grid_sampling} pixels produces a {grid.grid_shape} grid."
+            )
+            console.error(message=message, error=RuntimeError)
         regularized_y, regularized_x = grid.deformation_fields
         return Deformation(field_y=regularized_y, field_x=regularized_x)
 

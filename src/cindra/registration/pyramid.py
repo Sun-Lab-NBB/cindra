@@ -63,17 +63,7 @@ class ScaleSpacePyramid:
         Returns:
             The image smoothed to the requested scale.
         """
-        # Finds the appropriate pyramid level.
-        level = 0
-        while level < len(self._levels) - 1 and self._level_scales[level + 1] <= scale:
-            level += 1
-
-        # Adds new levels if the current highest level is still below the target scale.
-        while self._level_scales[level] < scale and level == len(self._levels) - 1:
-            self._add_level()
-            if self._level_scales[-1] <= scale:
-                level = len(self._levels) - 1
-
+        level = self._resolve_level(scale=scale)
         data = self._levels[level]
         current_scale = self._level_scales[level]
 
@@ -85,6 +75,22 @@ class ScaleSpacePyramid:
             data = diffuse(data=data, sigma=adjusted_sigma)
 
         return data
+
+    def get_scale_shape(self, scale: float) -> tuple[int, int]:
+        """Returns the shape of the image the pyramid holds at the specified scale.
+
+        Notes:
+            The additional smoothing get_scale applies to reach the exact target scale preserves the shape of the
+            pyramid level it starts from, so the shape is resolved without paying for that smoothing.
+
+        Args:
+            scale: The target scale in world coordinates. Must be >= minimum_scale.
+
+        Returns:
+            The shape of the image at the requested scale, as (height, width).
+        """
+        data = self._levels[self._resolve_level(scale=scale)]
+        return data.shape[0], data.shape[1]
 
     def _initialize_base_level(self, data: NDArray[np.float32], minimum_scale: float) -> None:
         """Initializes the base pyramid level by smoothing and optionally downsampling the image data.
@@ -108,6 +114,31 @@ class ScaleSpacePyramid:
         self._levels.append(data)
         self._level_scales.append(minimum_scale)
         self._level_downsample_factors.append(downsample_factor)
+
+    def _resolve_level(self, scale: float) -> int:
+        """Returns the index of the coarsest pyramid level whose scale does not exceed the requested scale.
+
+        Levels are built lazily, so this creates every level between the pyramid's current coarsest level and the
+        requested scale.
+
+        Args:
+            scale: The target scale in world coordinates.
+
+        Returns:
+            The index of the level the requested scale resolves to.
+        """
+        # Finds the appropriate pyramid level.
+        level = 0
+        while level < len(self._levels) - 1 and self._level_scales[level + 1] <= scale:
+            level += 1
+
+        # Adds new levels if the current highest level is still below the target scale.
+        while self._level_scales[level] < scale and level == len(self._levels) - 1:
+            self._add_level()
+            if self._level_scales[-1] <= scale:
+                level = len(self._levels) - 1
+
+        return level
 
     def _add_level(self) -> None:
         """Adds a new coarser level to the pyramid by smoothing and downsampling the underlying image's data."""
