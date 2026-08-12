@@ -128,6 +128,14 @@ class TestDiffeomorphicDemonsRegistration:
         registration = DiffeomorphicDemonsRegistration(images=[image, image])
         assert registration._images[0] is image
 
+    def test_constructor_rejects_an_undersized_group(self) -> None:
+        """Verifies that a group holding fewer than two images is rejected and reports the count supplied."""
+        image = np.random.default_rng(seed=7).standard_normal((32, 32)).astype(np.float32)
+
+        # The raised message is wrapped to the console's line width, so any space within it may hold a line break.
+        with pytest.raises(ValueError, match=r"requires\s+at\s+least\s+2\s+images,\s+but\s+got\s+1"):
+            DiffeomorphicDemonsRegistration(images=[image])
+
     def test_compute_grid_sampling(self) -> None:
         """Verifies the grid sampling calculation formula."""
         images = [np.ones((32, 32), dtype=np.float32)] * 2
@@ -178,18 +186,6 @@ class TestDiffeomorphicDemonsRegistration:
             # Deformations should be near-zero for identical images.
             assert np.max(np.abs(deformation[0])) < 2.0
             assert np.max(np.abs(deformation[1])) < 2.0
-
-    def test_single_image_group_accumulates_an_identity_deformation(self) -> None:
-        """Verifies that an image pairing with nothing accumulates no contribution and resolves to an identity."""
-        image = np.random.default_rng(seed=7).standard_normal((32, 32)).astype(np.float32)
-        registration = _prepare_level_registration(images=[image], final_grid_sampling=8.0)
-
-        deformations = registration._compute_groupwise_deformations(iteration_key=(0, 1, 1.0))
-
-        assert len(deformations) == 1
-        assert deformations[0] is not None
-        assert deformations[0].is_identity
-        assert deformations[0].field_shape == (32, 32)
 
     def test_coarse_level_contributes_nothing(self) -> None:
         """Verifies that a level whose knot grid cannot freeze its edges resolves to None for every image."""

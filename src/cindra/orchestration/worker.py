@@ -41,6 +41,9 @@ if TYPE_CHECKING:
 
     from ataraxis_data_structures import ProcessingTracker
 
+_MINIMUM_DATASET_RECORDINGS: int = 2
+"""The minimum number of recordings a multi-recording dataset requires."""
+
 
 def execute_single_recording_job(
     configuration_path: Path,
@@ -132,8 +135,8 @@ def execute_multi_recording_job(
     Raises:
         FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid multi-recording
             configuration.
-        ValueError: If the configuration specifies no recording directories or no dataset name, or if job_name is not a
-            recognized multi-recording job.
+        ValueError: If the configuration specifies fewer than two recording directories or no dataset name, or if
+            job_name is not a recognized multi-recording job.
     """
     configuration = load_multi_recording_configuration(configuration_path=configuration_path)
 
@@ -169,7 +172,7 @@ def load_single_recording_configuration(configuration_path: Path) -> tuple[Singl
     # Ensures the input configuration file is valid.
     if not configuration_path.exists() or configuration_path.suffix != ".yaml":
         message = (
-            f"Unable to run the single-recording cindra processing pipeline. Expected the configuration file to "
+            "Unable to run the single-recording cindra processing pipeline. Expected the configuration file to "
             f"end with a '.yaml' extension and exist at the specified path, but encountered: {configuration_path}."
         )
         console.error(message=message, error=FileNotFoundError)
@@ -221,13 +224,13 @@ def load_multi_recording_configuration(configuration_path: Path) -> MultiRecordi
     Raises:
         FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid multi-recording
             configuration.
-        ValueError: If the configuration specifies no recording directories or no dataset name.
+        ValueError: If the configuration specifies fewer than two recording directories or no dataset name.
     """
     # Ensures the input configuration file is valid.
     if not configuration_path.exists() or configuration_path.suffix != ".yaml":
         message = (
-            f"Unable to run the multi-recording cindra processing pipeline. "
-            f"Expected the configuration file to end with a '.yaml' extension and "
+            "Unable to run the multi-recording cindra processing pipeline. "
+            "Expected the configuration file to end with a '.yaml' extension and "
             f"exist at the specified path, but encountered: {configuration_path}."
         )
         console.error(message=message, error=FileNotFoundError)
@@ -244,13 +247,14 @@ def load_multi_recording_configuration(configuration_path: Path) -> MultiRecordi
         )
         console.error(message=message, error=FileNotFoundError)
 
-    # Validates that the configuration contains the required recording directories.
-    if not configuration.recording_io.recording_directories:
+    # Validates that the configuration names enough recordings to track ROIs across. Tracking compares each
+    # recording's ROIs against those of the other recordings, so a lone recording resolves nothing.
+    if len(configuration.recording_io.recording_directories) < _MINIMUM_DATASET_RECORDINGS:
         message = (
             "Unable to run the multi-recording cindra processing pipeline. The "
             "configuration file must specify at least two recording directories "
             "under 'recording_io.recording_directories'. The provided configuration "
-            "has no recording directories specified."
+            f"specifies {len(configuration.recording_io.recording_directories)}."
         )
         console.error(message=message, error=ValueError)
 
@@ -453,7 +457,7 @@ def prime_dataset(configuration_path: Path) -> DatasetRecordings:
     Raises:
         FileNotFoundError: If the configuration file is missing, is not a .yaml file, is not a valid multi-recording
             configuration, or if a recording holds no combined metadata archive.
-        ValueError: If the configuration names no recording directories or no dataset name.
+        ValueError: If the configuration names fewer than two recording directories or no dataset name.
         RuntimeError: If a recording directory holds several combined metadata archives, or if the recording paths
             carry no unique identifying component.
     """

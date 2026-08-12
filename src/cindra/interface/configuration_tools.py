@@ -778,6 +778,11 @@ def _validate_multi_recording(
             f"diffeomorphic_registration.grid_sampling_factor must be in (0, 1] "
             f"(current: {config.diffeomorphic_registration.grid_sampling_factor})."
         )
+    if config.diffeomorphic_registration.final_grid_sampling <= 0:
+        errors.append(
+            f"diffeomorphic_registration.final_grid_sampling must be positive "
+            f"(current: {config.diffeomorphic_registration.final_grid_sampling})."
+        )
     if config.diffeomorphic_registration.scale_sampling <= 0:
         errors.append(
             f"diffeomorphic_registration.scale_sampling must be positive "

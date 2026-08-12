@@ -203,9 +203,11 @@ class TestRunMultiRecordingPipeline:
         with pytest.raises(FileNotFoundError, match="is not a valid"):
             run_multi_recording_pipeline(configuration_path=configuration_path)
 
-    def test_empty_recording_directories_raises(self, tmp_path: Path) -> None:
-        """Verifies that a configuration without recording directories raises a ValueError."""
-        configuration = _make_multi_configuration(recording_directories=())
+    @pytest.mark.parametrize("recording_count", [0, 1])
+    def test_undersized_recording_set_raises(self, tmp_path: Path, recording_count: int) -> None:
+        """Verifies that a configuration naming fewer than two recording directories raises a ValueError."""
+        directories = tuple(tmp_path / f"rec{index}" for index in range(recording_count))
+        configuration = _make_multi_configuration(recording_directories=directories)
         configuration_path = tmp_path / "configuration.yaml"
         configuration.save(file_path=configuration_path)
 
