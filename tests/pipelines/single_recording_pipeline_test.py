@@ -615,7 +615,7 @@ class TestBinarizeRecording:
         _write_mismatched_tiff(data_directory=tmp_path / "data")
         configuration.file_io.repeat_binarization = True
 
-        with pytest.raises(ValueError, match=r"must\s+hold\s+a\s+frame\s+of\s+the\s+same\s+shape"):
+        with pytest.raises(ValueError, match=r"must\s+hold\s+frames\s+of\s+the\s+same\s+shape"):
             binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
 
         # The conversion never began, so the recording is still the fully processed recording it was.

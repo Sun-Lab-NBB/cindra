@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from click.testing import CliRunner, Result
+from click.testing import Result, CliRunner
 
 from cindra.interface.cli import cindra_cli
 

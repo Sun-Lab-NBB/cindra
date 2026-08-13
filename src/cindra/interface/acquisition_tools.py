@@ -8,6 +8,7 @@ with the recording's acquisition parameters.
 from __future__ import annotations
 
 import json
+from typing import TypeIs
 from pathlib import Path
 
 from natsort import natsorted
@@ -510,12 +511,15 @@ def _validate_acquisition_parameters(
     return errors, warnings
 
 
-def _is_integer_list(value: object) -> bool:
+def _is_integer_list(value: object) -> TypeIs[list[int]]:
     """Determines whether the value is a list holding integer elements alone.
 
     Notes:
         Booleans are rejected, because JSON deserializes 'true' into a subclass of int that the pipeline cannot use
         as a line or pixel index.
+
+        The return narrows the checked value to a list of integers, so a caller that measures or indexes the value
+        after this check works against the narrowed type rather than the deserialized object.
 
     Args:
         value: The deserialized JSON value to check.

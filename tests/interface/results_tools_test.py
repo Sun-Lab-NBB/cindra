@@ -18,8 +18,8 @@ from cindra.layout import (
     RegistrationArrays,
     resolve_plane_specifier,
 )
-from cindra.dataclasses import SingleRecordingConfiguration
 from cindra.interface import results_tools
+from cindra.dataclasses import SingleRecordingConfiguration
 from cindra.interface.results_tools import verify_single_recording_output_tool
 
 if TYPE_CHECKING:

@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import threading
 from typing import TYPE_CHECKING
+import threading
 
 import pytest
 
 from cindra.interface.gui_mcp_server import (
     _ViewerProcess,
     _viewer_registry,
-    list_viewers_tool,
     close_viewer_tool,
+    list_viewers_tool,
     launch_viewer_tool,
 )
 
@@ -43,7 +43,7 @@ class _StubProcess:
         """Marks the stub as exited."""
         self._alive = False
 
-    def wait(self, timeout: float | None = None) -> int:  # noqa: ARG002 - Mirrors the signature the tool calls.
+    def wait(self, timeout: float | None = None) -> int:
         """Returns the exit code without blocking."""
         return 0
 

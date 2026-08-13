@@ -99,9 +99,7 @@ def _make_interrupted_second_channel_context(
         The prepared context. Calling register_plane on it raises RuntimeError between the two channel rewrites.
     """
     movie = _build_static_blob_movie(gaussian_blob_image)
-    movie_channel_2 = _build_static_blob_movie(
-        gaussian_blob_image=gaussian_blob_image, centers=_SECONDARY_BLOB_CENTERS
-    )
+    movie_channel_2 = _build_static_blob_movie(gaussian_blob_image=gaussian_blob_image, centers=_SECONDARY_BLOB_CENTERS)
     context = single_recording_context(
         tmp_path=tmp_path,
         frame_height=128,

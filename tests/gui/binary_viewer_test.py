@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import pytest
-from PySide6.QtWidgets import QApplication
 
 from cindra.gui.binary_viewer import BinaryPlayer
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from PySide6.QtWidgets import QApplication
 
 
 @pytest.mark.xdist_group("gui_viewers")

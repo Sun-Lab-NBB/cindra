@@ -13,15 +13,18 @@ import os
 # assignment has to run before the PySide6 imports below, which is why they carry the E402 suppression.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from pathlib import Path  # noqa: E402
-from collections.abc import Callable  # noqa: E402
+from typing import TYPE_CHECKING
+from pathlib import Path
 
-import numpy as np  # noqa: E402
-import pytest  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+import numpy as np
+import pytest
+from PySide6.QtWidgets import QApplication
 
-from cindra.dataclasses import ROIMask, ROIStatistics  # noqa: E402
-from cindra.gui.viewer_context import ViewerData  # noqa: E402
+from cindra.dataclasses import ROIMask, ROIStatistics
+from cindra.gui.viewer_context import ViewerData
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _DATASET_RECORDING_ROOTS: tuple[Path, ...] = (
     Path("/data/recording_a/cindra"),

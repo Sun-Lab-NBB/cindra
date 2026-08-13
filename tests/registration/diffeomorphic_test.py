@@ -9,7 +9,7 @@ import pytest
 
 from cindra.registration.pyramid import ScaleSpacePyramid
 from cindra.registration.deformation import Deformation
-from cindra.registration.spline_grid import SplineGrid, MINIMUM_KNOTS_FOR_FROZEN_EDGES
+from cindra.registration.spline_grid import MINIMUM_KNOTS_FOR_FROZEN_EDGES, SplineGrid
 from cindra.registration.diffeomorphic import DiffeomorphicDemonsRegistration, _compute_demons_force
 
 if TYPE_CHECKING:

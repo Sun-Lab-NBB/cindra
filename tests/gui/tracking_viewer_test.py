@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from pathlib import Path
-from collections.abc import Callable
 
 import pytest
-from PySide6.QtWidgets import QApplication
 
 from cindra.gui.viewer_context import ViewerData
 from cindra.gui.tracking_viewer import TrackingViewer
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from PySide6.QtWidgets import QApplication
 
 
 @pytest.mark.xdist_group("gui_viewers")
