@@ -269,6 +269,15 @@ class Deformation:
     def resize_field(self, new_height: int, new_width: int) -> Deformation:
         """Creates a new Deformation with the field spatially resized without scaling displacement magnitudes.
 
+        Notes:
+            Leaving the magnitudes unscaled is deliberate. A displacement counts pixels of the field holding it, so
+            resizing the field discounts the displacement by the resolution ratio. The multiscale registration uses
+            that discount to weight each coarse level below the finer levels that follow it.
+
+            The recordings this pipeline registers are motion corrected and aligned to a shared reference, so the
+            drift left between them is small. Discounting the coarse levels suppresses their noise, which is what
+            that data needs, at the cost of the displacement range the registration resolves.
+
         Args:
             new_height: The target height in pixels.
             new_width: The target width in pixels.
