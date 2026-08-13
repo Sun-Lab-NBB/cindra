@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from pathlib import Path
-from collections.abc import Callable
 
-from cindra.gui.viewer_context import ViewerData
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from cindra.gui.viewer_context import ViewerData
 
 
 class TestDatasetActivation:

@@ -12,11 +12,11 @@ from tifffile import TiffFile, TiffWriter
 from cindra.io.tiff import (
     _MISMATCH_REPORT_LIMIT,
     TiffConversionPlan,
+    _scan_source_frames,
     _create_binary_files,
     _resolve_binary_paths,
-    _resolve_plane_dimensions,
-    _scan_source_frames,
     convert_tiffs_to_binary,
+    _resolve_plane_dimensions,
     resolve_tiff_conversion_plan,
 )
 from cindra.io.binary import (
@@ -1004,9 +1004,7 @@ class TestScanSourceFrames:
         with pytest.raises(ValueError, match=r"ignored_file_names"):
             _scan_source_frames(tiff_files=[recording_tiff, zstack_tiff])
 
-    def test_counts_every_frame_and_opens_each_file_once(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_counts_every_frame_and_opens_each_file_once(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Verifies that the frame count and the shape comparison share one open of each source file."""
         data_path = tmp_path / "data"
         data_path.mkdir(parents=True, exist_ok=True)

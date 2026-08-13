@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import pytest
 from PySide6 import QtGui, QtCore
-from PySide6.QtWidgets import QApplication
 
 from cindra.gui.pc_viewer import PCViewer
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from PySide6.QtWidgets import QApplication
 
 
 def _arrow_event(key: QtCore.Qt.Key) -> QtGui.QKeyEvent:

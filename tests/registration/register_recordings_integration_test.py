@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from importlib import import_module
 
 import numpy as np
 import pytest
@@ -265,7 +266,12 @@ def _capture_registrations(monkeypatch: pytest.MonkeyPatch) -> list[Diffeomorphi
         registrations.append(registration)
         return registration
 
-    monkeypatch.setattr("cindra.registration.register_recordings.DiffeomorphicDemonsRegistration", _build)
+    # Resolves the module through import_module rather than through a dotted string. The registration package binds
+    # the name 'register_recordings' to the function it re-exports, which shadows the module of the same name, so a
+    # dotted string reaches the function and finds no algorithm attribute on it.
+    monkeypatch.setattr(
+        import_module("cindra.registration.register_recordings"), "DiffeomorphicDemonsRegistration", _build
+    )
     return registrations
 
 

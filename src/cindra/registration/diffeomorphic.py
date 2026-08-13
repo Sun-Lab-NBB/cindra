@@ -11,7 +11,7 @@ from ataraxis_base_utilities import console
 
 from .pyramid import ScaleSpacePyramid
 from .deformation import Deformation
-from .spline_grid import SplineGrid, MINIMUM_KNOTS_FOR_FROZEN_EDGES
+from .spline_grid import MINIMUM_KNOTS_FOR_FROZEN_EDGES, SplineGrid
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray

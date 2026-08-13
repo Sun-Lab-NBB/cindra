@@ -11,7 +11,7 @@ import scipy.ndimage
 import scipy.special
 from ataraxis_base_utilities import console
 
-from .spline_grid import SplineGrid, compute_cardinal_coefficients, MINIMUM_KNOTS_FOR_FROZEN_EDGES
+from .spline_grid import MINIMUM_KNOTS_FOR_FROZEN_EDGES, SplineGrid, compute_cardinal_coefficients
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

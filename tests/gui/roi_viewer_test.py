@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import pytest
-from PySide6.QtWidgets import QApplication
 
 from cindra.gui.roi_viewer import ROIViewer
 from cindra.gui.viewer_context import ViewerData
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from PySide6.QtWidgets import QApplication
 
 _ROI_COUNT: int = 4
 """The ROI count of the synthetic recording the viewer fixtures build."""

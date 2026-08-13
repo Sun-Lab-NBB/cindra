@@ -863,8 +863,7 @@ def _extract_multi_recording_channel(
         deconvolution_time = int(timer.elapsed)
         console.echo(
             message=(
-                f"{channel_label.capitalize()} spike deconvolution: complete. Time taken: {deconvolution_time} "
-                f"seconds."
+                f"{channel_label.capitalize()} spike deconvolution: complete. Time taken: {deconvolution_time} seconds."
             ),
             level=LogLevel.SUCCESS,
         )
