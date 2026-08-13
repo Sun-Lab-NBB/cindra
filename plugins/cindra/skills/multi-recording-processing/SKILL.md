@@ -374,6 +374,7 @@ When processing fails for some datasets/recordings, read the error messages and 
 | Error pattern                                      | Skill to invoke                  |
 |----------------------------------------------------|----------------------------------|
 | Missing cindra output, incomplete single-recording | `/single-recording-processing`   |
+| Plane binary left marked by an interrupted write   | `/single-recording-processing`   |
 | Missing raw data, no `cindra_parameters.json`      | `/acquisition-data-preparation`  |
 | Configuration parameter issues, bad dataset name   | `/multi-recording-configuration` |
 | Registration tuning needed (too much/little drift) | `/multi-recording-configuration` |

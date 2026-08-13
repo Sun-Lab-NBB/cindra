@@ -590,9 +590,10 @@ def update_correlation_masks(
     if not selected_indices:
         return
 
-    # Averages the binned fluorescence traces of all selected ROIs into a single reference template.
+    # Averages the binned fluorescence traces of all selected ROIs into a single reference template. Reducing over the
+    # ROI axis keeps the bin axis even for a single-bin trace, which the reference template needs to stay a vector.
     selected_array = np.array(selected_indices, dtype=np.int32)
-    selected_mean = binned_fluorescence[selected_array].mean(axis=-2).squeeze()
+    selected_mean = binned_fluorescence[selected_array].mean(axis=0)
 
     # Computes the RMS of the reference template for Pearson-style normalization.
     selected_standard_deviation = float((selected_mean**2).mean() ** 0.5)

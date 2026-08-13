@@ -175,6 +175,54 @@ class TestLoadAcquisitionParameters:
         with pytest.raises(ValueError, match="Unable to extract the required field 'roi_y_coordinates'"):
             load_acquisition_parameters(json_path=json_path)
 
+    def test_raises_error_for_zero_frame_rate(self, tmp_path: Path) -> None:
+        """Verifies that a non-positive frame rate is rejected when the file is loaded."""
+        data = {"frame_rate": 0.0, "plane_number": 2, "channel_number": 1}
+        json_path = _write_parameters_json(directory=tmp_path, data=data)
+
+        with pytest.raises(ValueError, match=r"'frame_rate'\s+field\s+must\s+be\s+a\s+positive\s+number"):
+            load_acquisition_parameters(json_path=json_path)
+
+    def test_raises_error_for_zero_plane_number(self, tmp_path: Path) -> None:
+        """Verifies that a zero plane count is rejected instead of dividing the frame rate by zero downstream."""
+        data = {"frame_rate": 30.0, "plane_number": 0, "channel_number": 1}
+        json_path = _write_parameters_json(directory=tmp_path, data=data)
+
+        with pytest.raises(
+            ValueError, match=r"'plane_number'\s+field\s+must\s+be\s+a\s+positive\s+integer,\s+but\s+it\s+is\s+0"
+        ):
+            load_acquisition_parameters(json_path=json_path)
+
+    def test_raises_error_for_negative_channel_number(self, tmp_path: Path) -> None:
+        """Verifies that a negative channel count is rejected when the file is loaded."""
+        data = {"frame_rate": 30.0, "plane_number": 2, "channel_number": -1}
+        json_path = _write_parameters_json(directory=tmp_path, data=data)
+
+        with pytest.raises(
+            ValueError, match=r"'channel_number'\s+field\s+must\s+be\s+a\s+positive\s+integer,\s+but\s+it\s+is\s+-1"
+        ):
+            load_acquisition_parameters(json_path=json_path)
+
+    def test_raises_error_for_zero_roi_number(self, tmp_path: Path) -> None:
+        """Verifies that a zero ROI count is rejected when the file is loaded."""
+        data = {"frame_rate": 30.0, "plane_number": 2, "channel_number": 1, "roi_number": 0}
+        json_path = _write_parameters_json(directory=tmp_path, data=data)
+
+        with pytest.raises(
+            ValueError, match=r"'roi_number'\s+field\s+must\s+be\s+a\s+positive\s+integer,\s+but\s+it\s+is\s+0"
+        ):
+            load_acquisition_parameters(json_path=json_path)
+
+    def test_raises_error_for_non_numeric_plane_number(self, tmp_path: Path) -> None:
+        """Verifies that a plane count written as text is rejected when the file is loaded."""
+        data = {"frame_rate": 30.0, "plane_number": "two", "channel_number": 1}
+        json_path = _write_parameters_json(directory=tmp_path, data=data)
+
+        with pytest.raises(
+            ValueError, match=r"'plane_number'\s+field\s+must\s+be\s+a\s+positive\s+integer,\s+but\s+it\s+is\s+two"
+        ):
+            load_acquisition_parameters(json_path=json_path)
+
 
 class TestFindAcquisitionParameters:
     """Tests _find_acquisition_parameters."""
@@ -214,6 +262,15 @@ class TestExtractUniqueComponents:
         """Verifies that a RuntimeError is raised when paths share all components but are not identical."""
         # Both paths contain exactly the same set of components ("a" and "b"), so neither has a unique one.
         paths = [Path("/a/b"), Path("/b/a")]
+
+        with pytest.raises(RuntimeError, match="Unable to extract a unique component"):
+            extract_unique_components(paths=paths)
+
+    def test_raises_error_for_duplicate_paths(self) -> None:
+        """Verifies that the same directory listed twice is rejected rather than yielding two identical specifiers."""
+        # Each returned component becomes a tracker specifier, so two identical components would collapse the two
+        # extraction jobs of the dataset onto one tracker record.
+        paths = [Path("/data/day1"), Path("/data/day1")]
 
         with pytest.raises(RuntimeError, match="Unable to extract a unique component"):
             extract_unique_components(paths=paths)

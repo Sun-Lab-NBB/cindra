@@ -392,7 +392,8 @@ def _detect_channel(
         detected ROIs.
 
     Raises:
-        ValueError: If no ROIs are detected after the sparse detection step.
+        ValueError: If no ROIs are detected after the sparse detection step or if preclassification rejects every
+            detected ROI.
     """
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
@@ -503,6 +504,7 @@ def _detect_channel(
 
     # Applies optional preclassification filtering to remove unlikely ROI candidates early.
     if detection_config.preclassification_threshold > 0:
+        detected_roi_count = len(roi_statistics)
         roi_statistics = _apply_preclassification(
             roi_statistics=roi_statistics,
             frame_height=frame_height,
@@ -514,6 +516,17 @@ def _detect_channel(
             plane_index=plane_index,
             channel_label=channel_label,
         )
+
+        # Preclassification is allowed to reject every candidate, and the statistics computation below requires a
+        # non-empty list, so the emptied case is diagnosed here rather than through that helper's own guard.
+        if not roi_statistics:
+            message = (
+                f"Unable to complete ROI detection for plane {plane_index} {channel_label}. Preclassification "
+                f"removed all {detected_roi_count} detected ROIs at confidence threshold "
+                f"{detection_config.preclassification_threshold}. Consider lowering the "
+                f"preclassification_threshold parameter."
+            )
+            console.error(message=message, error=ValueError)
 
     # Computes final ROI shape statistics with overlap-based filtering.
     console.echo(

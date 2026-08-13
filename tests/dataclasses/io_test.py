@@ -898,14 +898,16 @@ class TestMultiRecordingRegistrationDataSaveLoad:
         assert len(mapped.deformed_roi_masks) == 1
 
     def test_is_registered_returns_true_after_save(self, tmp_path: Path) -> None:
-        """Verifies that is_registered returns True via disk check after save_arrays writes deformation fields."""
+        """Verifies that is_registered returns True via disk check after save_arrays writes the full array set."""
         data = MultiRecordingRegistrationData(
             deform_field_y=np.zeros(shape=(4, 4), dtype=np.float32),
             deform_field_x=np.zeros(shape=(4, 4), dtype=np.float32),
+            deformed_roi_masks=[_make_roi_mask(pixel_count=4)],
         )
-        assert not data.is_registered(output_path=tmp_path)
+        empty_data = MultiRecordingRegistrationData()
+        assert not empty_data.is_registered(output_path=tmp_path)
         data.save_arrays(output_path=tmp_path)
-        assert data.is_registered(output_path=tmp_path)
+        assert empty_data.is_registered(output_path=tmp_path)
 
 
 class TestMultiRecordingTrackingDataSaveLoad:
@@ -1401,6 +1403,37 @@ class TestCombinedDataSaveLoad:
         assert loaded.detection.mean_image is None
         assert loaded.extraction.roi_statistics is None
 
+    def test_save_stores_the_plane_count_as_uint32(self, tmp_path: Path) -> None:
+        """Verifies that the saved archive records the plane count at a width no legal recording overflows."""
+        combined = _make_marker_ordering_data(root_path=tmp_path)
+
+        combined.save(root_path=tmp_path)
+
+        metadata = np.load(tmp_path / "combined_metadata.npz", allow_pickle=False)
+        assert metadata["plane_count"].dtype == np.uint32
+
+    def test_save_load_round_trip_with_more_than_255_planes(self, tmp_path: Path) -> None:
+        """Verifies that a recording holding more than 255 virtual planes reports its true plane count."""
+        binary_path = tmp_path / "plane0" / "registered.bin"
+        binary_path.parent.mkdir(parents=True, exist_ok=True)
+        binary_path.touch()
+
+        original = CombinedData(
+            detection=DetectionData(),
+            extraction=ExtractionData(),
+            plane_count=300,
+            combined_height=32,
+            combined_width=32,
+            tau=1.0,
+            sampling_rate=10.0,
+            registered_binary_paths=(binary_path,),
+        )
+        original.save(root_path=tmp_path)
+
+        loaded = CombinedData.load(root_path=tmp_path)
+
+        assert loaded.plane_count == 300
+
     def test_save_leaves_no_staged_metadata_file(self, tmp_path: Path) -> None:
         """Verifies that the staged metadata file is moved into place rather than left beside the final marker."""
         combined = _make_marker_ordering_data(root_path=tmp_path)
@@ -1522,7 +1555,7 @@ class TestCombinedDataSaveLoad:
         np.savez(
             tmp_path / "combined_metadata.npz",
             allow_pickle=False,
-            plane_count=np.array([1], dtype=np.uint8),
+            plane_count=np.array([1], dtype=np.uint32),
             combined_height=np.array([32], dtype=np.uint32),
             combined_width=np.array([32], dtype=np.uint32),
             tau=np.array([1.5], dtype=np.float32),

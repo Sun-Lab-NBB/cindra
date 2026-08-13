@@ -11,6 +11,7 @@ import sys
 import uuid
 from typing import Any, Literal
 from pathlib import Path
+from threading import RLock
 import subprocess
 from dataclasses import dataclass
 
@@ -42,6 +43,15 @@ class _ViewerProcess:
 
 _viewer_registry: dict[str, _ViewerProcess] = {}
 """Tracks active viewer subprocesses keyed by viewer_id."""
+
+_registry_lock: RLock = RLock()
+"""Serializes every read and mutation of the viewer registry.
+
+Notes:
+    The MCP server runs each synchronous tool body in one of its own worker threads, so two overlapping viewer calls
+    reach the registry at once. The lock is reentrant, because the tools acquire it around compound sequences that
+    call the registry helpers, which acquire it in turn.
+"""
 
 
 def run_gui_server(transport: Literal["stdio", "sse", "streamable-http"] = "stdio") -> None:
@@ -89,6 +99,14 @@ def launch_viewer_tool(
     if not path.exists():
         return {"success": False, "error": f"Unable to launch viewer. Path does not exist: {recording_path}"}
 
+    # The spawned command accepts a directory alone, and its usage error is written to a stream this server discards,
+    # so the requirement is enforced here instead.
+    if not path.is_dir():
+        return {
+            "success": False,
+            "error": f"Unable to launch viewer. Path is not a cindra output directory: {recording_path}",
+        }
+
     viewer_id = uuid.uuid4().hex[:12]
     state_path = generate_state_path(viewer_id=viewer_id)
 
@@ -101,7 +119,7 @@ def launch_viewer_tool(
         process = subprocess.Popen(
             args=command,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             text=True,
         )
     except OSError as error:
@@ -115,7 +133,8 @@ def launch_viewer_tool(
         state_path=state_path,
         process=process,
     )
-    _viewer_registry[viewer_id] = entry
+    with _registry_lock:
+        _viewer_registry[viewer_id] = entry
 
     return {
         "success": True,
@@ -142,36 +161,39 @@ def list_viewers_tool() -> dict[str, Any]:
         'count' can exceed the number of live viewers on that one call.
     """
     viewers: list[dict[str, Any]] = []
-    dead_ids: list[str] = []
+    dead_entries: list[_ViewerProcess] = []
 
-    for viewer_id, entry in _viewer_registry.items():
-        alive = entry.process.poll() is None
-        if not alive:
-            dead_ids.append(viewer_id)
+    # Holds the lock across the whole sweep, so a viewer another thread launches or closes midway cannot invalidate
+    # the iteration or strand a reaped entry.
+    with _registry_lock:
+        for viewer_id, entry in _viewer_registry.items():
+            alive = entry.process.poll() is None
+            if not alive:
+                dead_entries.append(entry)
 
-        viewer_info: dict[str, Any] = {
-            "viewer_id": viewer_id,
-            "viewer_type": entry.viewer_type,
-            "recording_path": entry.recording_path,
-            "dataset": entry.dataset,
-            "alive": alive,
-            "active_dataset": None,
-        }
+            viewer_info: dict[str, Any] = {
+                "viewer_id": viewer_id,
+                "viewer_type": entry.viewer_type,
+                "recording_path": entry.recording_path,
+                "dataset": entry.dataset,
+                "alive": alive,
+                "active_dataset": None,
+            }
 
-        if alive:
-            state_file = Path(entry.state_path)
-            if state_file.exists():
-                try:
-                    state = read_viewer_state(state_path=state_file)
-                    viewer_info["active_dataset"] = state.get("active_dataset")
-                except Exception:  # noqa: S110 - Best-effort state read. The viewer list should not fail.
-                    pass
+            if alive:
+                state_file = Path(entry.state_path)
+                if state_file.exists():
+                    try:
+                        state = read_viewer_state(state_path=state_file)
+                        viewer_info["active_dataset"] = state.get("active_dataset")
+                    except Exception:  # noqa: S110 - Best-effort state read. The viewer list should not fail.
+                        pass
 
-        viewers.append(viewer_info)
+            viewers.append(viewer_info)
 
-    for dead_id in dead_ids:
-        cleanup_state_file(state_path=Path(_viewer_registry[dead_id].state_path))
-        del _viewer_registry[dead_id]
+        for dead_entry in dead_entries:
+            cleanup_state_file(state_path=Path(dead_entry.state_path))
+            _viewer_registry.pop(dead_entry.viewer_id, None)
 
     return {"success": True, "viewers": viewers, "count": len(viewers)}
 
@@ -190,9 +212,13 @@ def close_viewer_tool(viewer_id: str) -> dict[str, Any]:
         A JSON dictionary containing 'success' flag and 'viewer_id' on success. On failure, contains an 'error'
         message.
     """
-    entry = _get_viewer(viewer_id)
-    if entry is None:
-        return {"success": False, "error": f"Unable to find viewer with id '{viewer_id}'."}
+    # Claims the entry under the lock and drops it from the registry before the shutdown wait, so exactly one caller
+    # terminates a given viewer and the wait itself blocks no other tool.
+    with _registry_lock:
+        entry = _get_viewer(viewer_id)
+        if entry is None:
+            return {"success": False, "error": f"Unable to find viewer with id '{viewer_id}'."}
+        del _viewer_registry[viewer_id]
 
     entry.process.terminate()
     try:
@@ -201,7 +227,6 @@ def close_viewer_tool(viewer_id: str) -> dict[str, Any]:
         entry.process.kill()
 
     cleanup_state_file(state_path=Path(entry.state_path))
-    del _viewer_registry[viewer_id]
     return {"success": True, "viewer_id": viewer_id}
 
 
@@ -258,13 +283,14 @@ def _get_viewer(viewer_id: str) -> _ViewerProcess | None:
     Returns:
         The _ViewerProcess instance, or None if not found or the process has exited.
     """
-    entry = _viewer_registry.get(viewer_id)
-    if entry is None:
-        return None
+    with _registry_lock:
+        entry = _viewer_registry.get(viewer_id)
+        if entry is None:
+            return None
 
-    if entry.process.poll() is not None:
-        cleanup_state_file(state_path=Path(entry.state_path))
-        del _viewer_registry[viewer_id]
-        return None
+        if entry.process.poll() is not None:
+            cleanup_state_file(state_path=Path(entry.state_path))
+            del _viewer_registry[viewer_id]
+            return None
 
-    return entry
+        return entry

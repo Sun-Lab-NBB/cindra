@@ -217,12 +217,11 @@ class PCViewer(QMainWindow):
         Returns:
             A dictionary containing the current plane, principal component, and animation status.
         """
-        current_pc = int(self._pc_edit.text()) if self._pc_edit.text() else 1
         return {
             "current_plane": self._plane_selector.currentIndex(),
             "current_plane_label": self._plane_selector.currentText(),
             "plane_count": self.data.plane_count,
-            "current_pc": current_pc,
+            "current_pc": self._current_pc_number(),
             "pc_count": self._pc_count,
             "playing": self._update_timer.isActive(),
             "loaded": self._loaded,
@@ -238,14 +237,12 @@ class PCViewer(QMainWindow):
             # Left/right arrow keys step through principal components, pausing animation first.
             if event.key() == QtCore.Qt.Key.Key_Left:
                 self._pause_animation()
-                pc_number = int(self._pc_edit.text())
-                pc_number = max(pc_number - 1, 1)
+                pc_number = max(self._current_pc_number() - 1, 1)
                 self._pc_edit.setText(str(pc_number))
                 self._plot_frame()
             elif event.key() == QtCore.Qt.Key.Key_Right:
                 self._pause_animation()
-                pc_number = int(self._pc_edit.text())
-                pc_number = min(pc_number + 1, self._pc_count)
+                pc_number = min(self._current_pc_number() + 1, self._pc_count)
                 self._pc_edit.setText(str(pc_number))
                 self._plot_frame()
             # Up/down arrow keys cycle through imaging planes.
@@ -274,6 +271,20 @@ class PCViewer(QMainWindow):
         if escape_returns_focus(window=self, event=event):
             return True
         return super().eventFilter(source, event)
+
+    def _current_pc_number(self) -> int:
+        """Returns the principal component number held by the PC field, clamped to the range the loaded plane offers.
+
+        Substitutes the first principal component for an empty field, which is the state the field's validator leaves
+        behind while the user retypes the value.
+
+        Returns:
+            The one-based principal component number.
+        """
+        text = self._pc_edit.text()
+        if not text:
+            return 1
+        return max(1, min(int(text), self._pc_count))
 
     def _on_plane_changed(self, index: int) -> None:
         """Handles plane selector index changes by switching to the selected plane.
@@ -406,7 +417,7 @@ class PCViewer(QMainWindow):
             return
 
         # Extracts the high- and low-projection mean images for the currently selected PC.
-        pc_index = int(self._pc_edit.text()) - 1
+        pc_index = self._current_pc_number() - 1
         pc_high = np.asarray(self._pc_images[1, pc_index, :, :])
         pc_low = np.asarray(self._pc_images[0, pc_index, :, :])
 
@@ -431,8 +442,7 @@ class PCViewer(QMainWindow):
         # Extracts the high- and low-projection mean images for the selected PC.
         self._title_labels[0].setText("difference")
         self._title_labels[1].setText("merged")
-        self._title_labels[2].setText("top")
-        pc_index = int(self._pc_edit.text()) - 1
+        pc_index = self._current_pc_number() - 1
         pc_high = np.asarray(self._pc_images[1, pc_index, :, :])
         pc_low = np.asarray(self._pc_images[0, pc_index, :, :])
 
@@ -451,11 +461,15 @@ class PCViewer(QMainWindow):
         rgb[:, :, 2] = (pc_high - pc_high.min()) / (pc_high.max() - pc_high.min()) * 255
         self._merged_image.setImage(rgb)
 
-        # Animated image: shows whichever extreme the animation toggle is currently on.
+        # Animated image: shows whichever extreme the animation toggle is currently on and labels it the way the
+        # animation labels it, because a redraw that follows a pause on an odd tick shows the high-projection extreme.
         if self._current_frame == 0:
             self._animated_image.setImage(np.tile(pc_low[:, :, np.newaxis], (1, 1, 3)))
+            self._title_labels[2].setText("top")
         else:
             self._animated_image.setImage(np.tile(pc_high[:, :, np.newaxis], (1, 1, 3)))
+            self._title_labels[2].setText("bottom")
+        # Uses the low-projection range for both extremes so brightness stays consistent across toggles.
         self._animated_image.setLevels([pc_low.min(), pc_low.max()])
         self._zoom_plot()
 

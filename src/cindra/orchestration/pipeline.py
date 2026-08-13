@@ -225,8 +225,9 @@ def run_multi_recording_pipeline(
             recording directory holds no combined_metadata.npz file.
         RuntimeError: If a recording directory holds multiple combined_metadata.npz files, if the recording paths do
             not contain unique identifying components, or if a resolved identifying component contains a colon.
-        ValueError: If recording validation fails, recording_directories is empty, target_recording does not name a
-            resolved recording, or the specified job_id does not match any available jobs.
+        ValueError: If recording validation fails, recording_directories names fewer than two recordings,
+            target_recording does not name a resolved recording, or the specified job_id does not match any available
+            jobs.
     """
     # Every stage below reaches a parallelized kernel, so a host whose threading layer has no runtime to load fails
     # here rather than partway through a dataset.

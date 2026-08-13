@@ -44,6 +44,9 @@ _ACTIVE_FRAME_FRACTION: float = 0.25
 _CENTROID_TOLERANCE: float = 8.0
 """The maximum allowed distance in pixels between a detected centroid and its matching planted blob center."""
 
+_MAXIMUM_ROI_PIXELS: int = 576
+"""The largest pixel count a mask grown around a sigma-3 blob may report, which is a quarter of the 48x48 frame."""
+
 
 def _build_flickering_movie(
     blob_builder: Callable[..., NDArray[np.float64]],
@@ -123,6 +126,19 @@ class TestDetectPlaneRois:
         centroids = tuple(roi.mask.centroid for roi in roi_statistics)
         for center in _BLOB_CENTERS:
             assert _minimum_centroid_distance(centroid=center, centers=centroids) <= _CENTROID_TOLERANCE
+
+        # The mask geometry is what extraction integrates over, so each ROI carries a non-empty, in-frame pixel set
+        # whose three arrays agree in length and whose reported pixel count matches them.
+        for roi in roi_statistics:
+            pixel_count = roi.mask.y_pixels.size
+            assert roi.mask.x_pixels.size == pixel_count
+            assert roi.mask.pixel_weights.size == pixel_count
+            assert roi.pixel_count == pixel_count
+            assert 0 < pixel_count <= _MAXIMUM_ROI_PIXELS
+            assert int(roi.mask.y_pixels.min()) >= 0
+            assert int(roi.mask.y_pixels.max()) < _FRAME_HEIGHT
+            assert int(roi.mask.x_pixels.min()) >= 0
+            assert int(roi.mask.x_pixels.max()) < _FRAME_WIDTH
 
         assert context.runtime.detection.roi_diameter > 0
         detection_directory = tmp_path / "output" / "cindra" / "plane_0" / "detection_data"
@@ -251,6 +267,32 @@ class TestDetectPlaneRois:
 
         assert context.runtime.extraction.roi_statistics is not None
         assert context.runtime.extraction.roi_statistics
+
+    def test_preclassification_removing_every_roi_raises(
+        self,
+        tmp_path: Path,
+        single_recording_context: Callable[..., RuntimeContext],
+        gaussian_blob_image: Callable[..., NDArray[np.float64]],
+    ) -> None:
+        """Verifies detection names preclassification as the cause when the filter rejects every detected ROI."""
+        movie = _build_flickering_movie(
+            blob_builder=gaussian_blob_image, centers=_BLOB_CENTERS, frame_count=_FRAME_COUNT, seed=7
+        )
+
+        def configure(configuration: SingleRecordingConfiguration) -> None:
+            _permissive_detection(configuration)
+            # No classifier probability exceeds 1.0, so every detected ROI is rejected by the filter.
+            configuration.roi_detection.preclassification_threshold = 1.0
+
+        context = single_recording_context(
+            tmp_path=tmp_path, frame_count=_FRAME_COUNT, movie=movie, configure=configure
+        )
+        context.runtime.registration.valid_y_range = (0, _FRAME_HEIGHT)
+        context.runtime.registration.valid_x_range = (0, _FRAME_WIDTH)
+        context.runtime.registration.bad_frames = np.zeros(_FRAME_COUNT, dtype=np.bool_)
+
+        with pytest.raises(ValueError, match="Preclassification removed all"):
+            detect_plane_rois(context=context, workers=1)
 
     def test_no_rois_raises(
         self,

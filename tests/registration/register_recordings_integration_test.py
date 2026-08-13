@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from importlib import import_module
 
 import numpy as np
 import pytest
@@ -20,6 +21,7 @@ from cindra.dataclasses import (
     MultiRecordingRuntimeContext,
 )
 from cindra.registration.deformation import Deformation
+from cindra.registration.diffeomorphic import DiffeomorphicDemonsRegistration
 from cindra.registration.register_recordings import (
     register_recordings,
     _apply_forward_deformation,
@@ -255,6 +257,24 @@ def _read_deform_fields(context: MultiRecordingRuntimeContext) -> tuple[NDArray[
     return field_y, field_x
 
 
+def _capture_registrations(monkeypatch: pytest.MonkeyPatch) -> list[DiffeomorphicDemonsRegistration]:
+    """Wraps the registration algorithm so every instance register_recordings builds is captured for inspection."""
+    registrations: list[DiffeomorphicDemonsRegistration] = []
+
+    def _build(*arguments: object, **keyword_arguments: object) -> DiffeomorphicDemonsRegistration:
+        registration = DiffeomorphicDemonsRegistration(*arguments, **keyword_arguments)
+        registrations.append(registration)
+        return registration
+
+    # Resolves the module through import_module rather than through a dotted string. The registration package binds
+    # the name 'register_recordings' to the function it re-exports, which shadows the module of the same name, so a
+    # dotted string reaches the function and finds no algorithm attribute on it.
+    monkeypatch.setattr(
+        import_module("cindra.registration.register_recordings"), "DiffeomorphicDemonsRegistration", _build
+    )
+    return registrations
+
+
 class TestRegisterRecordings:
     """Tests register_recordings."""
 
@@ -285,6 +305,32 @@ class TestRegisterRecordings:
 
             deformed_masks = ROIMask.load_list(file_path=output_path / "registration_deformed_masks.npz")
             assert len(deformed_masks) == len(_BASE_CENTERS)
+
+    def test_forwards_configured_registration_parameters(
+        self,
+        gaussian_blob_image: Callable[..., NDArray[np.float64]],
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verifies that the configured diffeomorphic registration parameters reach the registration algorithm."""
+        configuration = _make_configuration()
+        configuration.diffeomorphic_registration.final_grid_sampling = 8.0
+        configuration.diffeomorphic_registration.grid_sampling_factor = 0.5
+        configuration.diffeomorphic_registration.scale_sampling = 4
+        configuration.diffeomorphic_registration.speed_factor = 2.0
+        contexts = _build_recording_pair(tmp_path=tmp_path, builder=gaussian_blob_image, configuration=configuration)
+        registrations = _capture_registrations(monkeypatch=monkeypatch)
+
+        register_recordings(contexts=contexts, workers=1)
+
+        # Each configured value differs from the algorithm's own default for that parameter, so dropping any one of
+        # the forwarded arguments leaves the algorithm holding its default and fails the matching assertion.
+        assert len(registrations) == 1
+        registration = registrations[0]
+        assert registration._final_grid_sampling == 8.0
+        assert registration._grid_sampling_factor == 0.5
+        assert registration._scale_sampling == 4
+        assert registration._speed_factor == 2.0
 
     def test_identical_images_produce_near_zero_deformation(
         self, gaussian_blob_image: Callable[..., NDArray[np.float64]], tmp_path: Path
@@ -555,6 +601,25 @@ class TestProjectTemplatesToRecordings:
             output_path = context.runtime.output_path
             assert output_path is not None
             assert (output_path / "roi_statistics.npz").exists()
+
+    def test_reprojects_when_a_later_output_is_missing(self, tmp_path: Path) -> None:
+        """Verifies that a projection missing one recording's output re-projects instead of reporting completion."""
+        configuration = _make_configuration()
+        contexts = [
+            _build_projection_context(tmp_path=tmp_path, configuration=configuration, recording_id="rec0"),
+            _build_projection_context(tmp_path=tmp_path, configuration=configuration, recording_id="rec1"),
+        ]
+        project_templates_to_recordings(contexts=contexts, workers=1)
+
+        # Reproduces the state a run killed between the two per-recording writes leaves behind, where the first
+        # recording carries its projected statistics and the second does not.
+        second_output = contexts[1].runtime.output_path
+        assert second_output is not None
+        (second_output / "roi_statistics.npz").unlink()
+
+        project_templates_to_recordings(contexts=contexts, workers=1)
+
+        assert (second_output / "roi_statistics.npz").exists()
 
 
 class TestApplyBackwardDeformation:

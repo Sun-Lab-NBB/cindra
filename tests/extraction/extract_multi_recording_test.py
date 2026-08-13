@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import yaml
 import numpy as np
 import pytest
 from ataraxis_base_utilities import ensure_directory_exists
 
+from cindra.io.binary import resolve_binarization_marker_path, resolve_registration_marker_path
 from cindra.dataclasses import (
     ROIMask,
     CombinedData,
@@ -31,6 +33,24 @@ _CONSTANT_PIXEL_VALUE: int = 500
 
 _CONSTANT_PIXEL_VALUE_CHANNEL_2: int = 300
 """The constant channel 2 pixel intensity used to build predictable synthetic movies for exact extraction oracles."""
+
+_FAKE_ELAPSED_SECONDS: int = 10
+"""The interval every timed section reports once the stub timer replaces PrecisionTimer."""
+
+
+class _ConstantTimer:
+    """Replaces PrecisionTimer with a stub reporting a fixed interval, so timing oracles do not depend on wall time."""
+
+    def __init__(self, precision=None) -> None:
+        self.precision = precision
+
+    def reset(self) -> None:
+        """Accepts the reset every timed section issues without changing the reported interval."""
+
+    @property
+    def elapsed(self) -> int:
+        """Returns the fixed interval every timed section reports."""
+        return _FAKE_ELAPSED_SECONDS
 
 
 def _make_roi(
@@ -325,3 +345,66 @@ class TestExtractMultiRecording:
 
         with pytest.raises(RuntimeError):
             extract_traces(context=context, workers=1)
+
+    @pytest.mark.parametrize(
+        "resolve_marker_path", [resolve_binarization_marker_path, resolve_registration_marker_path]
+    )
+    def test_marked_plane_binary_raises(self, tmp_path: Path, resolve_marker_path: Callable[..., Path]) -> None:
+        """Verifies that a plane binary either phase left marked is refused instead of read as a finished movie."""
+        frame_height = frame_width = 16
+        frame_count = 8
+        movie = _constant_movie(
+            value=_CONSTANT_PIXEL_VALUE,
+            frame_count=frame_count,
+            frame_height=frame_height,
+            frame_width=frame_width,
+        )
+        context = _build_multi_context(
+            tmp_path=tmp_path, frame_height=frame_height, frame_width=frame_width, movie=movie
+        )
+        context.runtime.extraction.roi_statistics = _make_roi_statistics(
+            centers=((8, 8),), frame_height=frame_height, frame_width=frame_width
+        )
+
+        # An interrupted conversion or rewrite leaves its own phase marker beside the binary it was writing.
+        binary_path = context.runtime.combined_data.registered_binary_paths[0]
+        resolve_marker_path(binary_path=binary_path).touch()
+
+        with pytest.raises(RuntimeError, match="was interrupted"):
+            extract_traces(context=context, workers=1)
+
+    def test_persists_disjoint_extraction_and_deconvolution_times(self, tmp_path: Path, monkeypatch) -> None:
+        """Verifies that both timing segments and their total reach the runtime data file on disk."""
+        frame_height = frame_width = 16
+        frame_count = 40
+        movie = _constant_movie(
+            value=_CONSTANT_PIXEL_VALUE,
+            frame_count=frame_count,
+            frame_height=frame_height,
+            frame_width=frame_width,
+        )
+
+        def configure(configuration: MultiRecordingConfiguration) -> None:
+            configuration.signal_extraction.extract_neuropil = False
+            configuration.spike_deconvolution.extract_spikes = True
+            configuration.spike_deconvolution.baseline_window = 1.0
+
+        context = _build_multi_context(
+            tmp_path=tmp_path, frame_height=frame_height, frame_width=frame_width, movie=movie, configure=configure
+        )
+        context.runtime.extraction.roi_statistics = _make_roi_statistics(
+            centers=((8, 8),), frame_height=frame_height, frame_width=frame_width
+        )
+
+        # Every timed section reports the same fixed interval, so the whole channel segment and the deconvolution
+        # segment nested inside it both measure _FAKE_ELAPSED_SECONDS and the extraction remainder is zero.
+        monkeypatch.setattr("cindra.extraction.extract.PrecisionTimer", _ConstantTimer)
+
+        extract_traces(context=context, workers=1)
+
+        timing = yaml.safe_load((context.runtime.output_path / "multi_recording_runtime_data.yaml").read_text())[
+            "timing"
+        ]
+        assert timing["deconvolution_time"] == _FAKE_ELAPSED_SECONDS
+        assert timing["extraction_time"] == 0
+        assert timing["total_extraction_time"] == _FAKE_ELAPSED_SECONDS

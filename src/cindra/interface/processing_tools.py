@@ -85,6 +85,9 @@ if TYPE_CHECKING:
 _MINIMUM_RECORDING_COUNT: int = 2
 """The minimum number of recordings required for multi-recording processing."""
 
+_SECONDS_PER_HOUR: float = 3600.0
+"""The number of seconds in one hour, which scales an elapsed second count into the reported job throughput."""
+
 
 def _resolve_job_identifiers(tracker: ProcessingTracker, jobs: list[tuple[str, str]]) -> dict[tuple[str, str], str]:
     """Initializes a tracker's jobs and keys every returned identifier by the job it belongs to.
@@ -391,7 +394,10 @@ def prepare_single_recording_batch_tool(
         <output_path>/cindra/configuration.yaml, so downstream verify, status, and clean tools need no re-derivation.
         Also includes 'total_recordings' and 'total_jobs' counts, plus 'migrated_recordings' listing any recording
         whose tracker gained the missing register jobs and 'invalid_paths' listing any provided path that is not an
-        existing directory. On failure, contains an 'error' describing the issue.
+        existing directory. A recording whose preparation fails, such as one holding no acquisition parameters file,
+        is reported with its reason under 'invalid_recordings' while every other recording keeps its manifest, so a
+        caller MUST read that key rather than treat the absence of an 'error' as full preparation. On failure,
+        contains an 'error' describing the issue.
     """
     if not recording_paths:
         return {"success": False, "error": "Unable to prepare batch. At least one recording path is required."}
@@ -444,6 +450,7 @@ def prepare_single_recording_batch_tool(
     # Builds the manifest for each recording.
     recordings_manifest: dict[str, dict[str, object]] = {}
     migrated_recordings: list[str] = []
+    invalid_recordings: list[str] = []
     total_jobs = 0
 
     for data_path, output_path in zip(valid_paths, resolved_output_paths, strict=True):
@@ -535,55 +542,63 @@ def prepare_single_recording_batch_tool(
                 "combine_job": combine_entry,
             }
         else:
-            # New recording: creates per-recording config, resolves planes, and initializes tracker.
-            recording_configuration = SingleRecordingConfiguration.from_yaml(file_path=template_path)
-            recording_configuration.file_io.data_path = data_path
-            recording_configuration.file_io.output_path = output_path
-            recording_configuration.runtime.display_progress_bars = False
+            # New recording: creates per-recording config, resolves planes, and initializes tracker. The bootstrap
+            # reads the recording's acquisition parameters, so a recording that carries none, or whose configuration
+            # the pipeline rejects, is reported through 'invalid_recordings' instead of aborting the batch and
+            # discarding the manifest of every recording prepared before it.
+            try:
+                recording_configuration = SingleRecordingConfiguration.from_yaml(file_path=template_path)
+                recording_configuration.file_io.data_path = data_path
+                recording_configuration.file_io.output_path = output_path
+                recording_configuration.runtime.display_progress_bars = False
 
-            cindra_root.mkdir(parents=True, exist_ok=True)
-            recording_configuration_path = cindra_root / SINGLE_RECORDING_CONFIGURATION_FILENAME
+                cindra_root.mkdir(parents=True, exist_ok=True)
+                recording_configuration_path = cindra_root / SINGLE_RECORDING_CONFIGURATION_FILENAME
 
-            # Saves the per-recording configuration. The execute tool passes the resolved worker allocation to each
-            # job as a dispatch argument, so this one file serves every job dispatched against it.
-            recording_configuration.save(file_path=recording_configuration_path)
+                # Saves the per-recording configuration. The execute tool passes the resolved worker allocation to
+                # each job as a dispatch argument, so this one file serves every job dispatched against it.
+                recording_configuration.save(file_path=recording_configuration_path)
 
-            # Writes the shared bootstrap every later job reads and reports the planes the recording holds.
-            plane_count = prime_recording(configuration_path=recording_configuration_path).plane_count
+                # Writes the shared bootstrap every later job reads and reports the planes the recording holds.
+                plane_count = prime_recording(configuration_path=recording_configuration_path).plane_count
 
-            # Builds the recording's job universe from the exported phase model, which orders the phases and expands
-            # the per-plane ones.
-            jobs: list[tuple[str, str]] = resolve_single_recording_jobs(plane_count=plane_count)
+                # Builds the recording's job universe from the exported phase model, which orders the phases and
+                # expands the per-plane ones.
+                jobs: list[tuple[str, str]] = resolve_single_recording_jobs(plane_count=plane_count)
 
-            tracker = ProcessingTracker(file_path=tracker_path)
-            identifiers = _resolve_job_identifiers(tracker=tracker, jobs=jobs)
+                tracker = ProcessingTracker(file_path=tracker_path)
+                identifiers = _resolve_job_identifiers(tracker=tracker, jobs=jobs)
+
+                binarize_entry = _manifest_entry(
+                    identifiers=identifiers, job_name=SingleRecordingJobNames.BINARIZE, specifier=""
+                )
+
+                register_entries = [
+                    _manifest_entry(
+                        identifiers=identifiers,
+                        job_name=SingleRecordingJobNames.REGISTER,
+                        specifier=resolve_plane_specifier(plane_index=plane_index),
+                    )
+                    for plane_index in range(plane_count)
+                ]
+
+                process_entries = [
+                    _manifest_entry(
+                        identifiers=identifiers,
+                        job_name=SingleRecordingJobNames.PROCESS,
+                        specifier=resolve_plane_specifier(plane_index=plane_index),
+                    )
+                    for plane_index in range(plane_count)
+                ]
+
+                combine_entry = _manifest_entry(
+                    identifiers=identifiers, job_name=SingleRecordingJobNames.COMBINE, specifier=""
+                )
+            except Exception as error:
+                invalid_recordings.append(f"{recording_key}: {error}")
+                continue
+
             total_jobs += len(jobs)
-
-            binarize_entry = _manifest_entry(
-                identifiers=identifiers, job_name=SingleRecordingJobNames.BINARIZE, specifier=""
-            )
-
-            register_entries = [
-                _manifest_entry(
-                    identifiers=identifiers,
-                    job_name=SingleRecordingJobNames.REGISTER,
-                    specifier=resolve_plane_specifier(plane_index=plane_index),
-                )
-                for plane_index in range(plane_count)
-            ]
-
-            process_entries = [
-                _manifest_entry(
-                    identifiers=identifiers,
-                    job_name=SingleRecordingJobNames.PROCESS,
-                    specifier=resolve_plane_specifier(plane_index=plane_index),
-                )
-                for plane_index in range(plane_count)
-            ]
-
-            combine_entry = _manifest_entry(
-                identifiers=identifiers, job_name=SingleRecordingJobNames.COMBINE, specifier=""
-            )
 
             recordings_manifest[recording_key] = {
                 "configuration_path": str(recording_configuration_path),
@@ -608,6 +623,9 @@ def prepare_single_recording_batch_tool(
 
     if invalid_paths:
         result["invalid_paths"] = invalid_paths
+
+    if invalid_recordings:
+        result["invalid_recordings"] = invalid_recordings
 
     return result
 
@@ -1010,6 +1028,12 @@ def clean_processing_output_tool(
 
         effective_set = set(effective_phases)
 
+        # Unlinks the completion marker ahead of every array it vouches for, inverting the order the combination
+        # stage writes them in. An interrupted clean then leaves an unmarked partial output, which the discovery and
+        # inventory paths already treat as unfinished, instead of a marker standing over deleted data.
+        if SingleRecordingJobNames.COMBINE in effective_set:
+            _delete_file(path=cindra_root / COMBINED_METADATA_FILENAME, deleted=deleted_files, errors=errors)
+
         # Cleans per-plane files, partitioning the shared detection_data directory by the phase that owns each array.
         plane_directories = natsorted(
             entry for entry in cindra_root.iterdir() if entry.is_dir() and entry.name.startswith(PLANE_SPECIFIER_PREFIX)
@@ -1069,7 +1093,6 @@ def clean_processing_output_tool(
         if SingleRecordingJobNames.COMBINE in effective_set:
             _delete_directory(path=cindra_root / DETECTION_DATA_DIRECTORY_NAME, deleted=deleted_dirs, errors=errors)
             for name in (
-                COMBINED_METADATA_FILENAME,
                 RecordingArrays.ROI_MASKS,
                 resolve_array_name(array=RecordingArrays.ROI_MASKS, second_channel=True),
                 RecordingArrays.ROI_STATISTICS,
@@ -1122,14 +1145,20 @@ def clean_processing_output_tool(
                 continue
 
             if MultiRecordingJobNames.DISCOVER in effective_set:
+                # Unlinks the discovery completion marker ahead of every array it vouches for, so an interruption
+                # leaves an unmarked partial output rather than a marker standing over deleted data.
+                for name in (
+                    TRACKING_TEMPLATE_MASKS_FILENAME,
+                    resolve_channel_2_name(name=TRACKING_TEMPLATE_MASKS_FILENAME),
+                ):
+                    _delete_file(path=output_path / name, deleted=deleted_files, errors=errors)
+
                 _delete_directory(
                     path=output_path / MULTI_RECORDING_ARRAYS_DIRECTORY_NAME, deleted=deleted_dirs, errors=errors
                 )
                 for name in (
                     DEFORMED_MASKS_FILENAME,
                     resolve_channel_2_name(name=DEFORMED_MASKS_FILENAME),
-                    TRACKING_TEMPLATE_MASKS_FILENAME,
-                    resolve_channel_2_name(name=TRACKING_TEMPLATE_MASKS_FILENAME),
                     # Backward-projected per-recording mask and statistics files are produced by the final
                     # discovery step (project_templates_to_recordings), not by extraction, and deleting them under
                     # EXTRACT strands the pipeline because extraction consumes them as inputs.
@@ -1274,6 +1303,21 @@ def execute_processing_jobs_tool(
             continue
 
         single_recording = pipeline_type == "single-recording"
+
+        # Sizing the job reads its configuration, which the descriptor names and which the pipeline rejects when it
+        # carries no output path, so a descriptor naming the wrong file joins the invalid list rather than aborting
+        # the whole submission.
+        try:
+            memory_megabytes = _estimate_pending_job_memory(
+                configuration_path=configuration_file,
+                job_name=job_info.job_name,
+                specifier=job_info.specifier,
+                single=single_recording,
+            )
+        except Exception as error:
+            invalid_jobs.append({"job_id": job_id, "reason": f"Unable to size the job from its configuration: {error}"})
+            continue
+
         candidate_jobs.append(
             PendingJob(
                 configuration_path=configuration_file,
@@ -1281,12 +1325,7 @@ def execute_processing_jobs_tool(
                 job_id=job_id,
                 single_recording=single_recording,
                 resource_class=resource_class,
-                memory_megabytes=_estimate_pending_job_memory(
-                    configuration_path=configuration_file,
-                    job_name=job_info.job_name,
-                    specifier=job_info.specifier,
-                    single=single_recording,
-                ),
+                memory_megabytes=memory_megabytes,
             )
         )
         submitted_by_tracker.setdefault(str(tracker_file), set()).add(job_id)
@@ -1537,11 +1576,9 @@ def get_active_execution_timing_tool() -> dict[str, object]:
     }
 
     if total_elapsed > 0 and completed_count > 0:
-        session["throughput_jobs_per_hour"] = round(
-            completed_count
-            / convert_time(time=total_elapsed, from_units=TimeUnits.SECOND, to_units=TimeUnits.HOUR, as_float=True),
-            ndigits=2,
-        )
+        # Scales the rate rather than the elapsed time, because the unit converter rounds every result to three
+        # decimals, which quantizes any sub-hour denominator and pins one below 1.8 seconds to zero.
+        session["throughput_jobs_per_hour"] = round(completed_count * _SECONDS_PER_HOUR / total_elapsed, ndigits=2)
 
     manager_alive = state.manager_thread is not None and state.manager_thread.is_alive()
 
@@ -1657,12 +1694,15 @@ def execute_full_pipeline_tool(
         'phases' with job counts and IDs, the session 'cpu_budget' that bounds the classes in aggregate, and a
         'resource_classes' mapping with the resolved allocation of every class in the session. When all phases are
         already complete, returns {success:True, started:False, message:"All pipeline phases are already completed.",
-        total_jobs:0, phase_count:0, phases:[]} plus a 'next_step' string. On failure, contains success:False and an
-        'error' describing the issue. Cascade-aborted downstream jobs are recorded in their trackers as FAILED with
-        the exact message "Unable to execute job. A preceding pipeline phase failed.", distinguishing them from
-        genuine per-job failures. A job aborted because its prerequisite phase is absent from the tracker instead
-        records a message naming that phase and asking for the prepare tool to be re-run, because no phase failed in
-        that case.
+        total_jobs:0, phase_count:0, phases:[]} plus a 'next_step' string. The rejection lists the preparation step
+        produces, 'invalid_paths', 'invalid_recordings', and 'invalid_configurations', are forwarded when non-empty
+        and name every recording or dataset the session omits. A batch whose preparation accepted no input at all
+        returns success:False alongside those lists, because it holds no phase to report as complete. On failure,
+        contains success:False and an 'error' describing the issue. Cascade-aborted downstream jobs are recorded in
+        their trackers as FAILED with the exact message "Unable to execute job. A preceding pipeline phase failed.",
+        distinguishing them from genuine per-job failures. A job aborted because its prerequisite phase is absent from
+        the tracker instead records a message naming that phase and asking for the prepare tool to be re-run, because no
+        phase failed in that case.
     """
     if pipeline_type not in ("single-recording", "multi-recording"):
         return {
@@ -1714,6 +1754,14 @@ def execute_full_pipeline_tool(
 
     if not manifest.get("success"):
         return manifest
+
+    # Carries the rejection lists the preparation step produces into every outcome below, so that no response accounts
+    # for the batch without naming the recordings or datasets it leaves out.
+    rejection_fields: dict[str, object] = {
+        key: manifest[key]
+        for key in ("invalid_paths", "invalid_recordings", "invalid_configurations")
+        if key in manifest
+    }
 
     # Parses the manifest into phase groups. The groups order the admission pool and shape the response summary, while
     # the actual execution order follows each job's own prerequisites.
@@ -1866,6 +1914,23 @@ def execute_full_pipeline_tool(
             phase_groups.append((MultiRecordingJobNames.EXTRACT.value, extract_phase_jobs))
 
     if not phase_groups:
+        prepared_entries = manifest.get("recordings" if pipeline_type == "single-recording" else "datasets", {})
+
+        # Reports the rejections rather than a completion message when the preparation step accepted no input at all,
+        # because a batch holding no prepared entry has no phase whose absence means completion.
+        if not prepared_entries:
+            return {
+                "success": False,
+                "started": False,
+                "error": (
+                    "Unable to execute full pipeline. The preparation step accepted none of the provided inputs, so "
+                    "the session holds no jobs."
+                ),
+                "pipeline_type": pipeline_type,
+                "total_jobs": 0,
+                **rejection_fields,
+            }
+
         return {
             "success": True,
             "started": False,
@@ -1877,6 +1942,7 @@ def execute_full_pipeline_tool(
             "next_step": (
                 "All phases complete; call reset_processing_phases_tool to force a re-run of a specific phase."
             ),
+            **rejection_fields,
         }
 
     # Collects all jobs across all phases for the execution state, preserving the phase order so that the admission
@@ -1900,11 +1966,8 @@ def execute_full_pipeline_tool(
         "pipeline_type": pipeline_type,
         "phase_count": len(phase_groups),
         "phases": phases_summary,
+        **rejection_fields,
     }
-    if "invalid_paths" in manifest:
-        extra_fields["invalid_paths"] = manifest["invalid_paths"]
-    if "invalid_configurations" in manifest:
-        extra_fields["invalid_configurations"] = manifest["invalid_configurations"]
 
     return _start_session(
         all_jobs=all_jobs_map,

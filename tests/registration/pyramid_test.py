@@ -47,6 +47,14 @@ class TestScaleSpacePyramid:
         result = pyramid.get_scale(scale=4.0)
         assert np.isfinite(result).all()
 
+    def test_get_scale_shape_matches_the_retrieved_image(self) -> None:
+        """Verifies that the shape query reports the shape of the image the same scale retrieves."""
+        generator = np.random.default_rng(seed=42)
+        data = generator.standard_normal((64, 64)).astype(np.float32)
+        pyramid = ScaleSpacePyramid(data=data, minimum_scale=1.0)
+        for scale in (1.0, 2.0, 4.0, 7.5):
+            assert pyramid.get_scale_shape(scale=scale) == pyramid.get_scale(scale=scale).shape
+
     def test_minimum_scale_with_downsampling(self) -> None:
         """Verifies that a large minimum_scale triggers downsampling of the base level."""
         data = np.ones((64, 64), dtype=np.float32)

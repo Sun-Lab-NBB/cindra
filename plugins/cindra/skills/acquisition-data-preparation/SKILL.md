@@ -58,7 +58,7 @@ introspection.
   `roi_x_coordinates`, `roi_y_coordinates`) are required when `roi_number > 1`.
 - `validate_recording_readiness_tool` requires `cindra_parameters.json` to be present. It validates the acquisition
   parameters, discovers and inspects all TIFF files (page count, dimensions, dtype) without loading frame data, and
-  cross-validates TIFF metadata against the acquisition parameters (interleave stride divisibility, frames-per-plane
+  cross-validates TIFF metadata against the acquisition parameters (interleave cycle remainder, frames-per-plane
   thresholds, MROI roi_lines bounds, dtype compatibility). Use this tool as the final verification step before
   committing compute resources to pipeline processing.
 - `generate_acquisition_parameters_file_tool` and `validate_acquisition_parameters_file_tool` do not inspect TIFF files.
@@ -129,12 +129,13 @@ Single plane, single channel:
   plane0-ch0, plane0-ch1, plane1-ch0, plane1-ch1, plane0-ch0, ...
 ```
 
-The total frame count across all TIFF files should be evenly divisible by `plane_number * channel_number`. If it is not,
-typically because the recording stopped partway through a volume, binarization does not discard the trailing frames.
-Each plane binary is sized to the frames that plane actually receives, so the leading planes hold one frame more than
-the trailing ones and per-plane outputs have slightly different lengths. The combination phase then trims the combined
-traces to the shortest contributing plane and logs a warning naming the range. Per-plane results keep every frame, so
-only the combined dataset is trimmed.
+Binarization keeps whole cycles of `plane_number * channel_number` frames and discards whatever the total frame count
+leaves past the last whole cycle, logging a warning that names the discarded count. Those trailing frames reach some
+planes and channels and not others, so every plane binary holds `total_frames // (plane_number * channel_number)`
+frames and the two channels of one plane stay aligned frame for frame. Stopping an acquisition on a volume boundary is
+what keeps every frame it collected. A recording holding fewer frames than one whole cycle fails binarization with an
+error naming the count it holds, which usually means `plane_number` or `channel_number` disagrees with the
+microscope's settings.
 
 For MROI data, all ROIs share the same raw frames. Each ROI is extracted as a horizontal slice using `roi_lines`.
 
@@ -196,8 +197,8 @@ When the user does not know their acquisition parameters, guide the interaction 
    user to look for log files, XML sidecars, ops files, or header files that contain acquisition parameters.
 4. **Use web searches**: If the user identifies their microscope or software but doesn't know how to extract metadata,
    search for documentation on that system's data format and metadata storage.
-5. **Verify consistency**: Confirm that the total frame count across TIFF files is divisible by
-   `plane_number * channel_number`. Ask the user to check the total number of frames if needed.
+5. **Verify consistency**: Compare the total frame count across TIFF files against `plane_number * channel_number`. Ask
+   the user to check the total if needed, and report any remainder as the trailing frames binarization discards.
 
 ---
 
@@ -208,7 +209,8 @@ When the user does not know their acquisition parameters, guide the interaction 
 When the user knows their acquisition metadata (frame rate, planes, channels):
 
 1. **Confirm TIFF files**. Ask the user to verify TIFF files are present in the data directory.
-2. **Verify divisibility**. Confirm `total_frames % (plane_number * channel_number) == 0`.
+2. **Verify the cycle count**. Confirm `total_frames >= plane_number * channel_number`, since a shorter recording is
+   rejected, and tell the user how many trailing frames `total_frames % (plane_number * channel_number)` discards.
 3. **Create parameters file**. Use `generate_acquisition_parameters_file_tool` with the known values.
 4. **Validate**. Use `validate_acquisition_parameters_file_tool` to confirm the file is correct.
 5. **Verify readiness**. Use `validate_recording_readiness_tool` to confirm the recording is ready for processing.
@@ -377,11 +379,13 @@ later stage reads the geometry from this file, so a plane left at 0 fails regist
 **Step 6: Run binarization.**
 
 With the bootstrap (Step 3) and valid binaries (Step 4) in place, run binarization normally. Cindra loads the existing
-plane contexts and skips TIFF conversion only when three checks pass for every plane: each `registered_binary_path`
-exists, no `<binary>.registering` marker sits beside it, and the binary's size matches the frame geometry recorded for
-its plane in Step 5. Any check failing, or `file_io.repeat_binarization` being True, makes cindra rebuild every plane's
-binary from the source TIFFs instead, which cannot succeed for adopted data because no raw TIFFs exist, so re-check
-Steps 3-5 and the format requirements above.
+plane contexts and skips TIFF conversion when every plane passes three checks: each `registered_binary_path` exists,
+neither a `<binary>.binarizing` nor a `<binary>.registering` marker sits beside it, and the binary's size matches the
+frame geometry recorded for its plane in Step 5. A two-channel recording is held to its `channel_2_data.bin` as well. A
+marker, a size mismatch, or an absent second channel binary fails the run with a RuntimeError naming the affected
+files. A missing `registered_binary_path`, or `file_io.repeat_binarization` being True, makes cindra convert from the
+source TIFFs instead, which cannot succeed for adopted data because no raw TIFFs exist. Re-check Steps 3-5 and the
+format requirements above in either case.
 
 **Step 7: Run registration for every plane.**
 
@@ -396,20 +400,25 @@ registered before ROI detection...", so a binarize-then-process dispatch stops a
 
 ## Common issues and troubleshooting
 
-### Frame count not divisible by plane_number * channel_number
+### Frame count leaves a remainder over plane_number * channel_number
 
 **Causes and fixes:**
 - **Incomplete final volume:** The recording was stopped mid-volume. This is not an error and needs no fix. Binarization
-  keeps those frames per-plane, and only the combined traces are trimmed to the shortest plane.
+  discards the trailing frames of that incomplete cycle and warns with their count, leaving every plane binary of the
+  recording the same length. Tell the user how many frames a run drops, since those frames hold real signal on the
+  planes they reached.
 - **Flyback frames included:** Some microscopes include flyback plane frames. Add these to `main.ignored_flyback_planes`
   in the pipeline configuration (the flyback planes are still part of the interleave pattern but are discarded during
   processing).
 - **Wrong plane/channel count:** Re-examine the experiment metadata to confirm the actual values.
+- **Fewer frames than one whole cycle:** Binarization rejects the recording with `Unable to resolve the TIFF conversion
+  plan for the recording stored in {path}. The N frame(s) ... do not fill one M frame plane and channel interleave
+  cycle, so no plane receives any frames.` Correct `plane_number` and `channel_number`, or acquire a longer recording.
 
 ### Frame shape differs between TIFF files
 
 Binarization fails with `Unable to determine frame dimensions. Every TIFF file in the data directory must hold frames of
-the same shape...`, naming the offending files and both shapes.
+the same shape...`, naming the differing files and both shapes.
 
 **Causes and fixes:**
 - **Anatomical z-stack in the data directory:** the usual cause. Add the file's stem to `file_io.ignored_file_names` and
@@ -448,7 +457,8 @@ You MUST verify data preparation against this checklist before proceeding to pip
 Acquisition Data Preparation Compliance:
 - [ ] cindra MCP server is connected (if not, invoke `/cindra-mcp-environment-setup`)
 - [ ] TIFF files present in the data directory (.tif or .tiff extension)
-- [ ] Total frame count is divisible by plane_number * channel_number
+- [ ] Total frame count holds at least one whole plane_number * channel_number cycle, with any remainder the run
+      discards reported to the user
 - [ ] `cindra_parameters.json` exists in the data directory (or a subdirectory)
 - [ ] `validate_acquisition_parameters_file_tool` reports no errors
 - [ ] `frame_rate` represents the volume rate (not per-plane rate)

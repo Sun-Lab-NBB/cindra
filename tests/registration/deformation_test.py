@@ -436,8 +436,15 @@ class TestDeformationRegularize:
         field_x = np.ones((30, 30), dtype=np.float32) * 0.5
         deformation = Deformation(field_y=field_y, field_x=field_x)
         result = deformation.regularize(grid_sampling=5.0)
-        assert result is not None
         assert result.field_shape == (30, 30)
+
+    def test_regularize_grid_too_coarse_to_freeze_edges(self) -> None:
+        """Verifies that a sampling producing fewer than six knots per dimension raises a RuntimeError."""
+        field_y = np.ones((16, 16), dtype=np.float32) * 0.5
+        field_x = np.ones((16, 16), dtype=np.float32) * 0.5
+        deformation = Deformation(field_y=field_y, field_x=field_x)
+        with pytest.raises(RuntimeError, match="Unable to regularize the deformation"):
+            deformation.regularize(grid_sampling=32.0)
 
 
 class TestDeformationCrop:

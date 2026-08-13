@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 
+from cindra.io import BinaryFile
 from cindra.dataclasses import ROIMask, ROIStatistics
-from cindra.extraction.extract import _create_and_unpack_masks
+from cindra.extraction.extract import _create_and_unpack_masks, _extract_fluorescence_traces
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _make_circular_roi(
@@ -115,3 +121,40 @@ class TestCreateAndUnpackMasks:
         )
 
         assert len(roi_masks) == roi_count
+
+
+class TestExtractFluorescenceTraces:
+    """Tests _extract_fluorescence_traces."""
+
+    def test_empty_neuropil_mask_yields_zero_trace(self, tmp_path: Path) -> None:
+        """Verifies that an ROI whose neuropil mask holds no pixels reports a finite zero neuropil trace."""
+        frame_height = frame_width = 8
+        frame_count = 4
+        pixel_value = 100
+        binary_path = tmp_path / "channel_1_data.bin"
+        np.full((frame_count, frame_height, frame_width), fill_value=pixel_value, dtype=np.int16).tofile(binary_path)
+
+        # The first ROI carries a populated neuropil mask and the second carries an empty one, so the two arms of the
+        # pixel count guard are exercised inside one kernel dispatch.
+        roi_masks = (
+            (np.array([0, 1], dtype=np.int32), np.array([0.5, 0.5], dtype=np.float32)),
+            (np.array([8, 9], dtype=np.int32), np.array([0.5, 0.5], dtype=np.float32)),
+        )
+        neuropil_masks = (np.array([16, 17, 18], dtype=np.int32), np.array([], dtype=np.int32))
+
+        with BinaryFile(
+            height=frame_height, width=frame_width, file_path=binary_path, frame_number=frame_count
+        ) as binary:
+            fluorescence, neuropil_fluorescence = _extract_fluorescence_traces(
+                frames=binary,
+                roi_masks=roi_masks,
+                neuropil_masks=neuropil_masks,
+                batch_size=frame_count,
+                channel_label="channel 1",
+            )
+
+        assert np.all(np.isfinite(neuropil_fluorescence))
+        # The populated mask averages the constant movie, while the empty mask reports zero rather than a NaN.
+        np.testing.assert_allclose(neuropil_fluorescence[0], float(pixel_value), rtol=1e-5)
+        np.testing.assert_array_equal(neuropil_fluorescence[1], np.zeros(frame_count, dtype=np.float32))
+        np.testing.assert_allclose(fluorescence, float(pixel_value), rtol=1e-5)
