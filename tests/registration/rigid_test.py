@@ -202,6 +202,26 @@ class TestComputeRigidOffsets:
         )
         assert np.all(correlation > 0)
 
+    def test_clamps_degenerate_search_radius(self) -> None:
+        """Verifies an offset fraction that rounds to a zero-pixel radius still returns bounded pixel offsets."""
+        generator = np.random.default_rng(seed=42)
+        reference = generator.standard_normal((64, 64)).astype(np.float32)
+        kernel = compute_phase_correlation_kernel(reference_image=reference)
+        frames = np.stack(
+            [np.roll(a=reference, shift=(3, -2), axis=(0, 1)), np.roll(a=reference, shift=(-5, 4), axis=(0, 1))]
+        ).astype(np.float32)
+        y_offsets, x_offsets, _correlation = compute_rigid_offsets(
+            frames=frames,
+            reference_kernel=kernel,
+            maximum_offset_fraction=0.001,
+            temporal_smoothing_sigma=0.0,
+            workers=1,
+        )
+        # 0.001 * 64 rounds to a radius of 0, which is clamped to 1, so every offset stays inside a one-pixel window.
+        assert y_offsets.shape == (2,)
+        assert np.all(np.abs(y_offsets) <= 1)
+        assert np.all(np.abs(x_offsets) <= 1)
+
 
 class TestTranslateFrame:
     """Tests translate_frame."""

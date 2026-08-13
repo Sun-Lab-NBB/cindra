@@ -116,8 +116,9 @@
 2. Understand the two-step registration refinement when enabled
 3. Rigid registration uses phase correlation (`rigid.py`), and nonrigid uses block-based deformation (`nonrigid.py`)
 4. Cross-recording registration uses diffeomorphic demons (`diffeomorphic.py`) with multiscale pyramid (`pyramid.py`)
-5. Registration rewrites its input binary in place under a `<binary>.registering` marker. Keep the create and clear pair
-   around any new rewrite loop, and confine BLAS fits with `threadpool_limits` as `metrics.py` does
+5. Registration rewrites its input binary in place under a `<binary>.registering` marker, the parallel of the
+   `<binary>.binarizing` marker binarization writes while it fills that binary. Keep the create and clear pair around
+   any new write loop, and confine BLAS fits with `threadpool_limits` as `metrics.py` does
 
 **Modifying detection:**
 
@@ -174,9 +175,18 @@
   expected (Numba is excluded via the `pyproject.toml` mypy override, and the tifffile and yaml imports carry no such
   comment, because both ship types)
 - The `# pragma: no cover` annotations on `@njit` function bodies are intentional
-- Registration rewrites the plane binary in place and guards the rewrite with a `<binary>.registering` marker
-  (`create_registration_marker`, `clear_registration_marker`, `resolve_registration_marker_path`, exported from
-  `cindra.io`). `register_plane` refuses to run while a marker exists, and `binarize_recording` treats a marked binary,
-  or one whose size disagrees with its plane's recorded frame geometry, as invalid and rebuilds it from the source
-  TIFFs. Preserve this protocol when modifying either stage, because re-running binarization is the recovery path
+- Binarization and registration both write frames into a plane binary, each guarding its own write with its own marker,
+  `<binary>.binarizing` and `<binary>.registering`. `cindra.io` exports a create, clear, and path helper per phase plus
+  `resolve_active_binary_marker`, which reports whichever marker sits beside a binary and is what every reader calls.
+  `register_plane` refuses to run while either marker exists, and `binarize_recording` refuses a marked binary, a
+  binary whose size disagrees with its plane's recorded frame geometry, and a two-channel plane holding no second
+  channel binary. Preserve this protocol when modifying either stage, and keep `repeat_binarization` named as the
+  remedy every refusal states, because a caller-requested rebuild is the recovery path
+- Binarization consumes whole plane and channel interleave cycles, discarding the frames of an incomplete final cycle
+  and rejecting a recording that holds fewer frames than one whole cycle. Keep both in `resolve_tiff_conversion_plan`,
+  because the plan resolves before the conversion touches any binary or deletes any result the recording already holds
+- `_clear_downstream_data` sweeps every plane directory the output root holds rather than the contiguous range the
+  declared plane count spans. A directory that count no longer covers therefore loses the results measured from the
+  frames the conversion replaces, while keeping the binary the conversion does not rewrite. Keep the sweep reading the
+  directories off disk, because the declared count comes from a user-editable file
 - Use `console.error()` from ataraxis-base-utilities for all error handling (no bare `raise`)

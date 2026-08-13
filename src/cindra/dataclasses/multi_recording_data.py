@@ -106,19 +106,27 @@ class MultiRecordingRegistrationData:
     def is_registered(self, output_path: Path | None = None) -> bool:
         """Checks whether registration data exists in memory or on disk.
 
+        Notes:
+            The on-disk check requires the deformed mask archive alongside the deformation field, which mirrors the
+            in-memory check. ``save_arrays`` writes the archive last and writes nothing for an empty mask list, so
+            both checks answer True only once at least one deformed mask has landed beside the field.
+
         Args:
             output_path: The directory containing the ``registration_arrays/`` subdirectory. When provided and arrays
                 are not loaded in memory, checks for deformation field files on disk. The calling context is responsible
                 for resolving the correct path.
 
         Returns:
-            True if both the deformation fields and the deformed ROI masks are loaded in memory, or if the deformation
-            field file exists on disk at the given output path, False otherwise.
+            True if the deformation field and at least one deformed ROI mask are held in memory or exist on disk at the
+            given output path, False otherwise.
         """
-        if self.deform_field_y is not None and self.deformed_roi_masks is not None:
+        if self.deform_field_y is not None and self.deformed_roi_masks:
             return True
         if output_path is not None:
-            return (output_path / MULTI_RECORDING_ARRAYS_DIRECTORY_NAME / MultiRecordingArrays.DEFORM_FIELD_Y).exists()
+            deform_field_path = (
+                output_path / MULTI_RECORDING_ARRAYS_DIRECTORY_NAME / MultiRecordingArrays.DEFORM_FIELD_Y
+            )
+            return deform_field_path.exists() and (output_path / DEFORMED_MASKS_FILENAME).exists()
         return False
 
     def clear(self) -> None:

@@ -251,6 +251,18 @@ class TestApplySpatialSmoothing:
         with pytest.raises(ValueError, match="Unable to apply spatial smoothing"):
             apply_spatial_smoothing(data=data, window=3)
 
+    def test_zero_window_raises_error(self) -> None:
+        """Verifies a zero window size raises ValueError instead of an array broadcasting failure."""
+        data = np.ones((1, 20, 20), dtype=np.float32)
+        with pytest.raises(ValueError, match="must be a positive even integer"):
+            apply_spatial_smoothing(data=data, window=0)
+
+    def test_negative_window_raises_error(self) -> None:
+        """Verifies a negative window size raises ValueError."""
+        data = np.ones((1, 20, 20), dtype=np.float32)
+        with pytest.raises(ValueError, match="must be a positive even integer"):
+            apply_spatial_smoothing(data=data, window=-4)
+
     def test_even_window_no_error(self) -> None:
         """Verifies that an even window size is accepted."""
         data = np.ones((1, 20, 20), dtype=np.float32)

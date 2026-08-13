@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import numpy as np
+import pytest
 
 from cindra.dataclasses import (
     ROIMask,
@@ -383,3 +384,54 @@ class TestTrackRoisAcrossRecordings:
         assert context_0.runtime.tracking.template_masks is not None
         assert len(context_0.runtime.tracking.template_masks) == 1
         assert context_1.runtime.tracking.template_masks is None
+
+    def test_asymmetric_step_sizes_raise(self, tmp_path: Path) -> None:
+        """Verifies that a step size pair whose height and width differ is rejected before any bin is processed."""
+        image_size = 400
+        configuration = MultiRecordingConfiguration()
+        configuration.roi_tracking.step_sizes = (100, 200)
+        masks = [_make_block_mask(y_origin=148, x_origin=48, size=6, frame_width=image_size)]
+
+        context_0 = _make_context(
+            output_path=tmp_path / "rec0",
+            configuration=configuration,
+            image_size=image_size,
+            deformed_masks=masks,
+        )
+        context_1 = _make_context(
+            output_path=tmp_path / "rec1",
+            configuration=configuration,
+            image_size=image_size,
+            deformed_masks=[_make_block_mask(y_origin=148, x_origin=48, size=6, frame_width=image_size)],
+        )
+
+        with pytest.raises(ValueError, match="Unable to track ROIs across recordings"):
+            track_rois_across_recordings(contexts=[context_0, context_1])
+
+    def test_uniform_non_default_step_owns_every_band(self, tmp_path: Path) -> None:
+        """Verifies that a uniform step smaller than the default still assigns every band of the space to a bin."""
+        image_size = 400
+        configuration = MultiRecordingConfiguration()
+        configuration.roi_tracking.step_sizes = (100, 100)
+
+        # The cluster centroid sits at y=150, which is the middle of the second row of bins. A grid whose cells are
+        # wider than the step would leave that band owned by no bin and drop the cluster.
+        context_0 = _make_context(
+            output_path=tmp_path / "rec0",
+            configuration=configuration,
+            image_size=image_size,
+            deformed_masks=[_make_block_mask(y_origin=148, x_origin=48, size=6, frame_width=image_size)],
+        )
+        context_1 = _make_context(
+            output_path=tmp_path / "rec1",
+            configuration=configuration,
+            image_size=image_size,
+            deformed_masks=[_make_block_mask(y_origin=148, x_origin=48, size=6, frame_width=image_size)],
+        )
+
+        track_rois_across_recordings(contexts=[context_0, context_1])
+
+        templates = context_0.runtime.tracking.template_masks
+        assert templates is not None
+        assert len(templates) == 1
+        assert templates[0].recording_count == 2

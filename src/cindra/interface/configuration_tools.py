@@ -212,7 +212,18 @@ def resolve_dataset_name_tool(
         if len(resolved_paths) == 1:
             specifier = resolved_paths[0].parent.name
         else:
-            common = Path(commonpath(paths=resolved_paths))
+            # The common-path resolver rejects a set of paths that share no root, which covers a list mixing absolute
+            # and relative entries and, on Windows, absolute paths on different drives.
+            try:
+                common = Path(commonpath(paths=resolved_paths))
+            except ValueError as error:
+                return {
+                    "success": False,
+                    "error": (
+                        f"Unable to resolve dataset name. The recording paths must share a common parent directory, "
+                        f"but deriving one from {list(recording_paths)} failed: {error}."
+                    ),
+                }
             specifier = common.name
 
         if not specifier:
@@ -555,10 +566,23 @@ def _validate_single_recording(
                 f"one_photon_registration.spatial_highpass_window must be positive when one-photon registration "
                 f"is enabled (current: {config.one_photon_registration.spatial_highpass_window})."
             )
+        elif config.one_photon_registration.spatial_highpass_window % 2:
+            # The spatial smoothing kernel the high-pass filter subtracts is a box filter centered on each pixel, so
+            # the registration stage rejects an odd window.
+            errors.append(
+                f"one_photon_registration.spatial_highpass_window must be an even integer when one-photon "
+                f"registration is enabled (current: {config.one_photon_registration.spatial_highpass_window})."
+            )
         if config.one_photon_registration.pre_smoothing_sigma < 0:
             errors.append(
                 f"one_photon_registration.pre_smoothing_sigma must be non-negative when one-photon registration "
                 f"is enabled (current: {config.one_photon_registration.pre_smoothing_sigma})."
+            )
+        elif int(config.one_photon_registration.pre_smoothing_sigma) % 2:
+            # The registration stage truncates this field to an integer box-filter window, which is rejected when odd.
+            errors.append(
+                f"one_photon_registration.pre_smoothing_sigma must truncate to an even filter window when one-photon "
+                f"registration is enabled (current: {config.one_photon_registration.pre_smoothing_sigma})."
             )
         if config.one_photon_registration.edge_taper_pixels < 0:
             errors.append(
@@ -753,6 +777,11 @@ def _validate_multi_recording(
         errors.append(
             f"diffeomorphic_registration.grid_sampling_factor must be in (0, 1] "
             f"(current: {config.diffeomorphic_registration.grid_sampling_factor})."
+        )
+    if config.diffeomorphic_registration.final_grid_sampling <= 0:
+        errors.append(
+            f"diffeomorphic_registration.final_grid_sampling must be positive "
+            f"(current: {config.diffeomorphic_registration.final_grid_sampling})."
         )
     if config.diffeomorphic_registration.scale_sampling <= 0:
         errors.append(

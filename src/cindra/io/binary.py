@@ -9,7 +9,7 @@ import numpy as np
 from tifffile import TiffWriter
 from ataraxis_base_utilities import LogLevel, console
 
-from ..layout import resolve_registration_marker_name
+from ..layout import resolve_binarization_marker_name, resolve_registration_marker_name
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -22,22 +22,59 @@ _INT16_MAX_VALUE: int = 2**15 - 2
 _DEFAULT_BIN_BATCH_SIZE: int = 500
 """The default maximum batch size for frame binning operations."""
 
+_BINARIZATION_MARKER_CONTENTS: str = (
+    "The binarization stage was writing converted frames into the binary this marker sits beside when it was "
+    "interrupted. The binary therefore holds converted frames up to some unknown point and unwritten frames after it. "
+    "Enable 'file_io.repeat_binarization' and re-run the binarization stage for this recording to rebuild the binary "
+    "from its source TIFF files.\n"
+)
+"""The text written into a binarization marker, so that the marker explains itself to whoever finds it on disk."""
+
 _REGISTRATION_MARKER_CONTENTS: str = (
     "The registration stage was writing motion-corrected frames into the binary this marker sits beside when it was "
     "interrupted. The binary therefore holds corrected frames up to some unknown point and raw frames after it. "
-    "Re-run the binarization stage for this recording to rebuild the binary from its source TIFF files.\n"
+    "Enable 'file_io.repeat_binarization' and re-run the binarization stage for this recording to rebuild the binary "
+    "from its source TIFF files.\n"
 )
 """The text written into a registration marker, so that the marker explains itself to whoever finds it on disk."""
 
 
-def resolve_registration_marker_path(binary_path: Path) -> Path:
-    """Returns the path of the marker that flags a binary as being mid-registration.
+def resolve_binarization_marker_path(binary_path: Path) -> Path:
+    """Returns the path of the marker that flags a binary as being mid-binarization.
+
+    Args:
+        binary_path: The path to the binary the marker guards.
+
+    Returns:
+        The marker path, which sits beside the binary it guards.
+    """
+    return binary_path.with_name(resolve_binarization_marker_name(binary_name=binary_path.name))
+
+
+def create_binarization_marker(binary_path: Path) -> None:
+    """Marks a binary as being mid-binarization, which declares its contents indeterminate until the mark is cleared.
+
+    Args:
+        binary_path: The path to the binary whose conversion is about to begin.
+    """
+    resolve_binarization_marker_path(binary_path=binary_path).write_text(_BINARIZATION_MARKER_CONTENTS)
+
+
+def clear_binarization_marker(binary_path: Path) -> None:
+    """Clears the mid-binarization mark from a binary, which declares its contents consistent again.
 
     Notes:
-        The registration stage rewrites a plane binary in place, so an interrupted run leaves the binary holding a
-        mixture of corrected and raw frames with nothing in the registration outputs recording that. The marker exists
-        for the duration of the rewrite and names the binary it guards, which lets a later run refuse to consume a
-        binary whose contents are indeterminate.
+        Clearing a marker that does not exist is not an error, so the binarization stage can call this for every binary
+        it finishes without first checking whether an earlier interrupted conversion left one behind.
+
+    Args:
+        binary_path: The path to the binary to clear the mark from.
+    """
+    resolve_binarization_marker_path(binary_path=binary_path).unlink(missing_ok=True)
+
+
+def resolve_registration_marker_path(binary_path: Path) -> Path:
+    """Returns the path of the marker that flags a binary as being mid-registration.
 
     Args:
         binary_path: The path to the binary the marker guards.
@@ -49,7 +86,7 @@ def resolve_registration_marker_path(binary_path: Path) -> Path:
 
 
 def create_registration_marker(binary_path: Path) -> None:
-    """Marks a binary as being mid-registration.
+    """Marks a binary as being mid-registration, which declares its contents indeterminate until the mark is cleared.
 
     Args:
         binary_path: The path to the binary whose rewrite is about to begin.
@@ -61,13 +98,37 @@ def clear_registration_marker(binary_path: Path) -> None:
     """Clears the mid-registration mark from a binary, which declares its contents consistent again.
 
     Notes:
-        Clearing a marker that does not exist is not an error, so the binarization stage can call this for every
-        binary it writes without first checking whether an interrupted registration left one behind.
+        Clearing a marker that does not exist is not an error, so the registration stage can call this for every binary
+        it finishes without first checking whether an earlier interrupted rewrite left one behind.
 
     Args:
         binary_path: The path to the binary to clear the mark from.
     """
     resolve_registration_marker_path(binary_path=binary_path).unlink(missing_ok=True)
+
+
+def resolve_active_binary_marker(binary_path: Path) -> Path | None:
+    """Returns the path of the phase marker sitting beside a plane binary, or None when the binary carries neither.
+
+    Notes:
+        Binarization sizes a plane binary to its full frame count the moment it opens it, and registration then
+        rewrites that binary in place. An interrupted run of either stage leaves a correctly sized binary holding an
+        indeterminate mixture of frames, which nothing but the marker records. Both markers carry the same meaning for
+        the pipeline, so every stage that consumes a binary asks this rather than testing one phase's marker.
+
+    Args:
+        binary_path: The path to the binary to look for a marker beside.
+
+    Returns:
+        The path of the marker guarding the binary, or None when no stage left one there.
+    """
+    for marker_path in (
+        resolve_binarization_marker_path(binary_path=binary_path),
+        resolve_registration_marker_path(binary_path=binary_path),
+    ):
+        if marker_path.exists():
+            return marker_path
+    return None
 
 
 class BinaryFile:
@@ -348,8 +409,9 @@ class BinaryFile:
         good_frames = ~bad_frames if bad_frames is not None else np.ones(self.frame_number, dtype=np.bool_)
 
         # Resolves the batch size. It is capped either to the total number of good frames or the default maximum batch
-        # size, whichever is smaller.
-        batch_size = min(int(np.sum(good_frames)), _DEFAULT_BIN_BATCH_SIZE)
+        # size, whichever is smaller. A movie whose every frame is marked bad has no good frames to count, so the batch
+        # floors at a single frame and the below-threshold branch bins the bad frames rather than discarding them.
+        batch_size = max(1, min(int(np.sum(good_frames)), _DEFAULT_BIN_BATCH_SIZE))
 
         # Bins the frames in batches to reduce memory consumption.
         batches: list[NDArray[np.float32]] = []
@@ -449,10 +511,8 @@ class BinaryFileCombined:
     functionality to handle multiple planes.
 
     Notes:
-        The managed binaries may hold different frame counts, which happens when an acquisition stopped partway
-        through a volume and delivered one extra frame to the leading planes. The combined view is capped at the
-        shortest file's frame count and a warning is emitted, because a frame count mismatch is an expected outcome
-        of a partial final volume.
+        The combined view is capped at the shortest managed file's frame count and a warning is emitted whenever the
+        binaries disagree, which keeps every combined frame backed by real data on every plane.
 
     Args:
         height: The height of the combined ROI, in pixels, obtained by combining all managed planes (BinaryFiles).
@@ -504,10 +564,9 @@ class BinaryFileCombined:
             for height, width, file_path in zip(self.plane_heights, self.plane_widths, self.file_paths, strict=False)
         ]
 
-        # Resolves the combined frame count as that of the shortest managed file. A recording whose acquisition stopped
-        # partway through a volume delivers one frame more to its leading planes than to its trailing ones, so the plane
-        # binaries can legitimately differ in length. Capping the combined view at the shortest file keeps every
-        # combined frame backed by real data on every plane, which matches how the combination stage trims its traces.
+        # Resolves the combined frame count as that of the shortest managed file. Capping the combined view there keeps
+        # every combined frame backed by real data on every plane, which matches how the combination stage trims its
+        # traces.
         frame_numbers = [file.frame_number for file in self.files]
         self._frame_number: int = min(frame_numbers)
         if len(set(frame_numbers)) > 1:
@@ -515,7 +574,7 @@ class BinaryFileCombined:
                 message=(
                     f"Capping the combined view of the plane binaries stored under root {self.file_paths[0].parent} at "
                     f"{self._frame_number} frames. The binaries hold between {self._frame_number} and "
-                    f"{max(frame_numbers)} frames, which happens when an acquisition stopped partway through a volume."
+                    f"{max(frame_numbers)} frames, so every frame past that count is backed by some planes alone."
                 ),
                 level=LogLevel.WARNING,
             )

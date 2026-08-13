@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
+from cindra.registration.pyramid import ScaleSpacePyramid
 from cindra.registration.deformation import Deformation
+from cindra.registration.spline_grid import MINIMUM_KNOTS_FOR_FROZEN_EDGES, SplineGrid
 from cindra.registration.diffeomorphic import DiffeomorphicDemonsRegistration, _compute_demons_force
 
 if TYPE_CHECKING:
@@ -44,10 +46,10 @@ edges, where the deformation is constrained and the warp samples outside the sou
 
 _ACCURACY_DISPLACEMENT_TOLERANCE: float = 0.75
 """The maximum accepted error in pixels between the recovered relative displacement and the imposed translation. The
-observed error stays at or below 0.35 pixels across the tested translation magnitudes."""
+observed error stays at or below 0.25 pixels along both axes of the tested translation."""
 
 _ACCURACY_MINIMUM_CORRELATION: float = 0.95
-"""The minimum accepted correlation between warped images after registration. The observed correlation reaches 0.974
+"""The minimum accepted correlation between warped images after registration. The observed correlation reaches 0.992
 or above for every tested configuration."""
 
 
@@ -126,6 +128,14 @@ class TestDiffeomorphicDemonsRegistration:
         registration = DiffeomorphicDemonsRegistration(images=[image, image])
         assert registration._images[0] is image
 
+    def test_constructor_rejects_an_undersized_group(self) -> None:
+        """Verifies that a group holding fewer than two images is rejected and reports the count supplied."""
+        image = np.random.default_rng(seed=7).standard_normal((32, 32)).astype(np.float32)
+
+        # The raised message is wrapped to the console's line width, so any space within it may hold a line break.
+        with pytest.raises(ValueError, match=r"requires\s+at\s+least\s+2\s+images,\s+but\s+got\s+1"):
+            DiffeomorphicDemonsRegistration(images=[image])
+
     def test_compute_grid_sampling(self) -> None:
         """Verifies the grid sampling calculation formula."""
         images = [np.ones((32, 32), dtype=np.float32)] * 2
@@ -177,19 +187,32 @@ class TestDiffeomorphicDemonsRegistration:
             assert np.max(np.abs(deformation[0])) < 2.0
             assert np.max(np.abs(deformation[1])) < 2.0
 
-    def test_single_image_group_accumulates_an_identity_deformation(self) -> None:
-        """Verifies that an image pairing with nothing accumulates no contribution and resolves to an identity."""
-        image = np.random.default_rng(seed=7).standard_normal((32, 32)).astype(np.float32)
-        registration = DiffeomorphicDemonsRegistration(
-            images=[image], scale_sampling=2, final_scale=1.0, final_grid_sampling=8.0
-        )
+    def test_coarse_level_contributes_nothing(self) -> None:
+        """Verifies that a level whose knot grid cannot freeze its edges resolves to None for every image."""
+        generator = np.random.default_rng(seed=13)
+        images = [generator.standard_normal((64, 64)).astype(np.float32) for _ in range(2)]
+        registration = _prepare_level_registration(images=images, final_grid_sampling=8.0)
 
-        deformations = registration._compute_groupwise_deformations(iteration_key=(0, 1, 1.0))
+        # At scale 8.0 the pyramid works at 8x8 pixels and the sampling resolves to 8.0 pixels, which produces a 4x4
+        # knot grid. Skipping the level is what keeps an unregularized deformation out of the running total.
+        deformations = registration._compute_groupwise_deformations(iteration_key=(3, 1, 8.0))
 
-        assert len(deformations) == 1
-        assert deformations[0] is not None
-        assert deformations[0].is_identity
-        assert deformations[0].field_shape == (32, 32)
+        assert deformations == [None, None]
+
+    def test_coarse_level_filter_measures_the_working_resolution(self) -> None:
+        """Verifies that the level filter rejects a grid the full-resolution image shape would have accepted."""
+        generator = np.random.default_rng(seed=17)
+        images = [generator.standard_normal((64, 64)).astype(np.float32) for _ in range(2)]
+        registration = _prepare_level_registration(images=images, final_grid_sampling=3.75)
+
+        # At scale 8.0 the sampling resolves to 30.0 pixels, which spans the full-resolution image with enough knots
+        # to freeze its edges. The level is skipped only because the pyramid works at 8x8 pixels there.
+        full_resolution_grid = SplineGrid.compute_grid_shape(field_height=64, field_width=64, grid_sampling=30.0)
+        assert min(full_resolution_grid) >= MINIMUM_KNOTS_FOR_FROZEN_EDGES
+
+        deformations = registration._compute_groupwise_deformations(iteration_key=(3, 1, 8.0))
+
+        assert deformations == [None, None]
 
     def test_register_produces_deformations(self) -> None:
         """Verifies that registration produces finite, full-resolution, non-trivial deformations for distinct images."""
@@ -248,12 +271,33 @@ class TestDiffeomorphicDemonsRegistration:
         assert 0 in registration._deformations
         assert 1 in registration._deformations
 
-    def test_regularize_deformation_without_image_shape(self) -> None:
-        """Verifies direct regularization with no image shape and injectivity disabled returns a Deformation."""
+    def test_register_reports_a_grid_no_level_can_freeze(self) -> None:
+        """Verifies that a run whose finest level cannot freeze its knot grid edges reports the grid it built."""
+        generator = np.random.default_rng(seed=23)
+        images = [generator.standard_normal((32, 32)).astype(np.float32) for _ in range(2)]
+        registration = DiffeomorphicDemonsRegistration(images=images, scale_sampling=5, final_scale=1.0)
+
+        # The default 16.0 pixel sampling spans the 32 pixel images with 5 knots, one short of the 6 that freezing the
+        # edges needs. Every coarser level builds a smaller grid, so the run would resolve no deformation at all.
+        with pytest.raises(RuntimeError, match="Unable to register the"):
+            registration.register(progress=False)
+
+        assert registration._deformations == {}
+
+    def test_get_deformation_reports_an_unresolved_image(self) -> None:
+        """Verifies that requesting a deformation no registration run resolved is reported."""
+        image = np.ones((64, 64), dtype=np.float32)
+        registration = DiffeomorphicDemonsRegistration(images=[image, image])
+
+        with pytest.raises(RuntimeError, match="Unable to retrieve the deformation"):
+            registration.get_deformation(image_index=0)
+
+    def test_regularize_deformation_without_injectivity(self) -> None:
+        """Verifies direct regularization with the injectivity constraint disabled returns a Deformation."""
         image = np.ones((32, 32), dtype=np.float32)
         registration = DiffeomorphicDemonsRegistration(images=[image, image], injective=False, final_grid_sampling=4.0)
         deformation = Deformation.identity(height=32, width=32)
-        result = registration._regularize_deformation(scale=1.0, deformation=deformation, image_shape=None)
+        result = registration._regularize_deformation(scale=1.0, deformation=deformation)
         assert isinstance(result, Deformation)
 
     def test_default_parameters(self) -> None:
@@ -359,6 +403,29 @@ class TestDiffeomorphicRegistrationAccuracy:
             second_deformation = second_run.get_deformation(image_index=image_index)
             np.testing.assert_array_equal(first_deformation[0], second_deformation[0])
             np.testing.assert_array_equal(first_deformation[1], second_deformation[1])
+
+
+def _prepare_level_registration(
+    images: list[NDArray[np.float32]], final_grid_sampling: float
+) -> DiffeomorphicDemonsRegistration:
+    """Builds a registration instance carrying the scale-space pyramids register() would have created.
+
+    Notes:
+        The level filter reads the working resolution of a scale from the pyramids, so a test that queries a single
+        level directly has to stand them up itself.
+
+    Args:
+        images: The images to register against their common mean.
+        final_grid_sampling: The B-spline grid spacing at the finest scale level.
+
+    Returns:
+        The registration instance, with its pyramids initialized and no deformation resolved yet.
+    """
+    registration = DiffeomorphicDemonsRegistration(
+        images=images, final_scale=1.0, final_grid_sampling=final_grid_sampling
+    )
+    registration._pyramids = [ScaleSpacePyramid(data=image, minimum_scale=1.0) for image in registration._images]
+    return registration
 
 
 def _build_blob_image(builder: Callable[..., NDArray[np.float64]], translation: tuple[int, int]) -> NDArray[np.float32]:

@@ -141,8 +141,7 @@ class TestBinaryFileCombined:
         """Verifies that planes of unequal length combine into a view spanning the shortest plane's frames."""
         plane_extent = 4
 
-        # Reproduces a recording whose acquisition stopped partway through a volume, which gives the leading plane one
-        # frame more than the trailing plane.
+        # Reproduces plane binaries of unequal length, which the combined view caps rather than reads past.
         long_path = tmp_path / "plane0.bin"
         short_path = tmp_path / "plane1.bin"
         _create_test_binary(file_path=long_path, frame_count=11, height=plane_extent, width=plane_extent)
@@ -201,6 +200,39 @@ class TestBinaryFileCombined:
         np.testing.assert_array_equal(result[:, :plane_height, :], 10)
         # The bottom half holds plane 1 data (20s).
         np.testing.assert_array_equal(result[:, plane_height:, :], 20)
+
+    def test_reads_combined_frames_from_horizontally_tiled_planes(self, tmp_path: Path) -> None:
+        """Verifies that a plane offset along x is pasted into its own column range of the combined frame."""
+        plane_height = 4
+        plane_width = 4
+        frame_count = 3
+
+        plane_0_path = tmp_path / "plane0.bin"
+        (np.ones((frame_count, plane_height, plane_width), dtype=np.int16) * 10).tofile(plane_0_path)
+
+        plane_1_path = tmp_path / "plane1.bin"
+        (np.ones((frame_count, plane_height, plane_width), dtype=np.int16) * 20).tofile(plane_1_path)
+
+        # The combination stage lays planes out in a roughly square grid, which gives a two-plane recording the
+        # x-offsets [0, plane_width] that the multi-recording extraction feeds back into this class.
+        combined = BinaryFileCombined(
+            height=plane_height,
+            width=plane_width * 2,
+            plane_heights=np.array([plane_height, plane_height], dtype=np.uint16),
+            plane_widths=np.array([plane_width, plane_width], dtype=np.uint16),
+            plane_y_coordinates=np.array([0, 0], dtype=np.int32),
+            plane_x_coordinates=np.array([0, plane_width], dtype=np.int32),
+            file_paths=[plane_0_path, plane_1_path],
+        )
+
+        result = combined[slice(0, frame_count)]
+        combined.close()
+
+        assert result.shape == (frame_count, plane_height, plane_width * 2)
+        # The left tile holds plane 0 data (10s).
+        np.testing.assert_array_equal(result[:, :, :plane_width], 10)
+        # The right tile holds plane 1 data (20s).
+        np.testing.assert_array_equal(result[:, :, plane_width:], 20)
 
     def test_context_manager_opens_and_closes(self, tmp_path: Path) -> None:
         """Verifies that the context manager protocol correctly opens and closes file handles."""

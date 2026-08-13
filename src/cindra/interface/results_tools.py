@@ -39,8 +39,10 @@ from ..layout import (
     RegistrationArrays,
     MultiRecordingArrays,
     resolve_array_name,
+    parse_plane_specifier,
     resolve_channel_2_name,
 )
+from ..dataclasses import SingleRecordingConfiguration
 from .mcp_instance import mcp
 
 if TYPE_CHECKING:
@@ -98,7 +100,9 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
         means the tool ran. Callers MUST gate downstream steps on the 'complete' field, which is False whenever
         'missing' is non-empty. Each 'missing' entry is a bare filename for an absent file or 'file[key]' for an
         absent NPZ key. The 'warnings' list holds non-fatal issues such as a registered-binary path that does not
-        resolve on disk.
+        resolve on disk. A recording whose configuration names flyback planes also carries 'flyback_planes' with
+        their indices. Those planes are binarized and never processed, so only their binarization output is required
+        and their registration, projection, and extraction files count as optional.
     """
     cindra_root, error = _find_cindra_root(recording_path)
     if cindra_root is None:
@@ -196,11 +200,14 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
         ):
             _check_file_exists(label=name, path=cindra_root / name, state=state, required=False)
 
-    # Per-plane directories.
+    # Per-plane directories. A flyback plane is binarized and never registered or processed, so only the files
+    # binarization writes are required of it.
+    flyback_planes = _resolve_flyback_planes(cindra_root=cindra_root)
     planes = _list_plane_directories(cindra_root)
     plane_count = len(planes)
     for plane_directory in planes:
         plane_name = plane_directory.name
+        processed = parse_plane_specifier(specifier=plane_name) not in flyback_planes
         _check_file_exists(
             label=f"{plane_name}/runtime_data.yaml",
             path=plane_directory / SINGLE_RECORDING_RUNTIME_DATA_FILENAME,
@@ -227,7 +234,10 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
             RegistrationArrays.RIGID_CORRELATIONS,
         ):
             _check_file_exists(
-                label=f"{plane_name}/registration_data/{name}", path=registration_directory / name, state=state
+                label=f"{plane_name}/registration_data/{name}",
+                path=registration_directory / name,
+                state=state,
+                required=processed,
             )
         for name in (
             RegistrationArrays.NONRIGID_Y_OFFSETS,
@@ -252,22 +262,36 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
                 required=False,
             )
 
-        # Per-plane detection and extraction data.
+        # Per-plane detection and extraction data. Binarization writes the mean image for every plane, while the
+        # remaining projections and every extraction array come from the processing stage.
         plane_detection_directory = plane_directory / DETECTION_DATA_DIRECTORY_NAME
+        _check_file_exists(
+            label=f"{plane_name}/detection_data/{DetectionImages.MEAN_IMAGE}",
+            path=plane_detection_directory / DetectionImages.MEAN_IMAGE,
+            state=state,
+        )
         for name in (
-            DetectionImages.MEAN_IMAGE,
             DetectionImages.ENHANCED_MEAN_IMAGE,
             DetectionImages.MAXIMUM_PROJECTION,
             DetectionImages.CORRELATION_MAP,
         ):
             _check_file_exists(
-                label=f"{plane_name}/detection_data/{name}", path=plane_detection_directory / name, state=state
+                label=f"{plane_name}/detection_data/{name}",
+                path=plane_detection_directory / name,
+                state=state,
+                required=processed,
             )
         _check_file_exists(
-            label=f"{plane_name}/roi_masks.npz", path=plane_directory / RecordingArrays.ROI_MASKS, state=state
+            label=f"{plane_name}/roi_masks.npz",
+            path=plane_directory / RecordingArrays.ROI_MASKS,
+            state=state,
+            required=processed,
         )
         _check_file_exists(
-            label=f"{plane_name}/roi_statistics.npz", path=plane_directory / RecordingArrays.ROI_STATISTICS, state=state
+            label=f"{plane_name}/roi_statistics.npz",
+            path=plane_directory / RecordingArrays.ROI_STATISTICS,
+            state=state,
+            required=processed,
         )
         for name in (
             RecordingArrays.CELL_FLUORESCENCE,
@@ -276,7 +300,9 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
             RecordingArrays.SPIKES,
             RecordingArrays.CELL_CLASSIFICATION,
         ):
-            _check_file_exists(label=f"{plane_name}/{name}", path=plane_directory / name, state=state)
+            _check_file_exists(
+                label=f"{plane_name}/{name}", path=plane_directory / name, state=state, required=processed
+            )
 
     # Multi-recording readiness: validates that registered binary paths exist on disk.
     if combined_metadata_path.exists():
@@ -290,7 +316,7 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
                     if not binary_path.exists():
                         state.warnings.append(f"Registered binary path not found: {binary_path}")
 
-    return {
+    result: dict[str, object] = {
         "success": True,
         "complete": not state.missing,
         "recording_path": recording_path,
@@ -303,6 +329,11 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
         "missing": state.missing,
         "warnings": state.warnings,
     }
+
+    if flyback_planes:
+        result["flyback_planes"] = sorted(flyback_planes)
+
+    return result
 
 
 @mcp.tool()
@@ -1775,6 +1806,12 @@ def _sort_and_cap_entries(
 def _find_cindra_root(recording_path: str) -> tuple[Path | None, str | None]:
     """Resolves the cindra output directory from a recording path.
 
+    Notes:
+        The ataraxis marker discoverer refuses a subtree it cannot read rather than narrowing its result to the
+        readable part, which is the wrong answer for a root the caller chose. A denial therefore falls back to the
+        tolerant recursive glob, so an unreadable sibling directory lowers the match count instead of failing the
+        whole query.
+
     Args:
         recording_path: Absolute path to the recording data directory.
 
@@ -1790,7 +1827,10 @@ def _find_cindra_root(recording_path: str) -> tuple[Path | None, str | None]:
         return cindra_path, None
 
     # Falls back to recursive search for configuration.yaml (handles non-standard nesting).
-    matches = discover_marker_files(directory=recording, marker_name=SINGLE_RECORDING_CONFIGURATION_FILENAME)
+    try:
+        matches = discover_marker_files(directory=recording, marker_name=SINGLE_RECORDING_CONFIGURATION_FILENAME)
+    except OSError:
+        matches = natsorted(recording.rglob(SINGLE_RECORDING_CONFIGURATION_FILENAME))
     if matches:
         return matches[0].parent, None
 
@@ -1905,6 +1945,22 @@ def _load_yaml(file_path: Path) -> dict[str, Any] | None:
             return yaml.safe_load(yaml_file)
     except Exception:
         return None
+
+
+def _resolve_flyback_planes(cindra_root: Path) -> frozenset[int]:
+    """Reads the indices of the planes the recording's configuration excludes from processing.
+
+    Args:
+        cindra_root: The cindra output directory holding the recording's configuration file.
+
+    Returns:
+        The index of every flyback plane, or an empty set when the configuration is absent or unreadable.
+    """
+    configuration_path = cindra_root / SINGLE_RECORDING_CONFIGURATION_FILENAME
+    with contextlib.suppress(Exception):
+        configuration = SingleRecordingConfiguration.load(file_path=configuration_path)
+        return frozenset(configuration.main.ignored_flyback_planes)
+    return frozenset()
 
 
 def _list_plane_directories(cindra_root: Path) -> list[Path]:

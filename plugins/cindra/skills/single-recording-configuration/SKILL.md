@@ -132,8 +132,11 @@ independent ROI detection on both channels.
 Controls input data ingestion and output directory paths. During binarization (the first processing step), the pipeline
 reads raw multipage TIFF files from the data directory, splits them by imaging plane, and writes each plane's frames
 into a contiguous binary file optimized for fast random access during processing. This TIFF-to-binary conversion is
-skipped on subsequent runs unless `repeat_binarization` is enabled or the existing binaries are invalid (missing, sized
-inconsistently with the recorded plane geometry, or left marked by an interrupted registration).
+skipped on subsequent runs when every converted plane holds the channel binaries the recording declares, each unmarked
+and sized to the recorded plane geometry. A plane holding no channel 1 binary converts, and `repeat_binarization`
+converts any recording. A binary either phase left marked, a binary sized inconsistently with the recorded plane
+geometry, or a two-channel plane holding no channel 2 binary fails the run with a RuntimeError naming the affected
+files and `repeat_binarization` as the remedy.
 
 | Parameter             | Type         | Default | Description                                                 |
 |-----------------------|--------------|---------|-------------------------------------------------------------|
@@ -143,12 +146,21 @@ inconsistently with the recorded plane geometry, or left marked by an interrupte
 | `repeat_binarization` | bool         | False   | Force re-conversion even when binaries are intact.          |
 
 Every TIFF the pipeline loads must hold frames of the same shape. A differently shaped file in the data directory, most
-commonly an anatomical z-stack, fails binarization with an error naming the file and this parameter, so list its stem in
-`ignored_file_names` to exclude it. Match on the stem without the extension, so `zstack` rather than `zstack.tiff`.
+commonly an anatomical z-stack, fails binarization with `Unable to determine frame dimensions. Every TIFF file in the
+data directory must hold frames of the same shape...`, which names the file and this parameter and leaves any results
+the recording already holds in place. List its stem in `ignored_file_names` to exclude it, matching on the stem without
+the extension, so `zstack` rather than `zstack.tiff`.
 
-`repeat_binarization` forces a rebuild of binaries that are otherwise intact. It is not needed to recover a damaged
-recording: binarization already rebuilds a binary whose size disagrees with its plane geometry, or that an interrupted
-registration left marked, on its own.
+Binarization consumes whole plane-and-channel interleave cycles, where one cycle carries one frame of every plane on
+every channel. The frames of a final incomplete cycle reach some planes and channels and not others, so binarization
+discards them and warns with their count, leaving every plane binary holding `total_frames // (plane_number *
+channel_number)` frames. A recording holding fewer frames than one whole cycle fails binarization with an error naming
+the count it holds, so advise the user to acquire a longer recording or correct `plane_number` and `channel_number` in
+`cindra_parameters.json`.
+
+`repeat_binarization` forces a rebuild of binaries that are otherwise intact, and it is the remedy every binarization
+refusal names. Enable it to recover a recording whose binary an interrupted write left marked, whose binary disagrees
+with its plane geometry, or whose two-channel plane lost its channel 2 binary.
 
 ---
 

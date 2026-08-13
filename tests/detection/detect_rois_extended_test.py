@@ -129,6 +129,51 @@ class TestExtendIteratively:
         assert np.all(np.abs(extended_y - center_y) <= 5)
         assert np.all(np.abs(extended_x - center_x) <= 5)
 
+    def test_retained_pixel_set_matches_the_weight_fraction(self) -> None:
+        """Verifies that growth retains exactly the pixels whose activity clears the mask retention fraction."""
+        height = 16
+        width = 16
+        frame_count = 20
+        center_y, center_x = 8, 8
+        blob_radius = 3
+
+        # Every pixel of the 7x7 block carries the activity 5.0 minus its Euclidean distance from the center, so the
+        # retention fraction alone decides how far the grown mask reaches. The four block corners sit 4.24 pixels out
+        # and carry 0.76, which falls under the 0.2 fraction of the 5.0 peak, while every other block pixel clears it.
+        frames_2d = np.zeros((frame_count, height, width), dtype=np.float32)
+        for delta_y in range(-blob_radius, blob_radius + 1):
+            for delta_x in range(-blob_radius, blob_radius + 1):
+                distance = float(np.sqrt(delta_y**2 + delta_x**2))
+                frames_2d[:, center_y + delta_y, center_x + delta_x] = max(0.0, 5.0 - distance)
+        frames = frames_2d.reshape(frame_count, height * width)
+
+        extended_y, extended_x, extended_weights = _extend_iteratively(
+            y_pixels=np.array([center_y], dtype=np.int32),
+            x_pixels=np.array([center_x], dtype=np.int32),
+            frames=frames,
+            height=height,
+            width=width,
+            active_frame_indices=np.arange(frame_count, dtype=np.intp),
+        )
+
+        block = {
+            (center_y + delta_y, center_x + delta_x)
+            for delta_y in range(-blob_radius, blob_radius + 1)
+            for delta_x in range(-blob_radius, blob_radius + 1)
+        }
+        corners = {
+            (center_y + delta_y, center_x + delta_x)
+            for delta_y in (-blob_radius, blob_radius)
+            for delta_x in (-blob_radius, blob_radius)
+        }
+        assert len(extended_y) == 45
+        assert set(zip(extended_y.tolist(), extended_x.tolist(), strict=True)) == block - corners
+
+        # The brightest retained pixel is the seed center, and the weights stay unit-normalized after the trim.
+        peak_index = int(extended_weights.argmax())
+        assert (int(extended_y[peak_index]), int(extended_x[peak_index])) == (center_y, center_x)
+        assert np.isclose(norm(extended_weights), 1.0, atol=1e-5)
+
     def test_returns_normalized_weights(self) -> None:
         """Verifies that the returned weights are unit-normalized."""
         height = 12

@@ -1052,12 +1052,16 @@ class ROIViewer(QMainWindow):
             color_arrays=self._color_arrays,
         )
 
-        # Selects the first classified cell as the initial selection.
-        first_cell = int(np.nonzero(self._cell_classification[:, 0])[0][0]) if self._roi_count > 0 else 0
+        # Selects the first classified cell as the initial selection. Falls back to the first ROI when the classifier
+        # labeled every ROI as a non-cell, which happens for any recording whose probabilities all land below the
+        # configured classification threshold.
+        first_cell = 0
+        if self._roi_count > 0:
+            cell_indices = np.nonzero(self._cell_classification[:, 0])[0]
+            first_cell = int(cell_indices[0]) if cell_indices.size > 0 else 0
         self._selected_roi_index = first_cell
         self._selected_roi_indices = [first_cell]
         self._update_selected_roi_statistics()
-        self._recompute_binned_fluorescence()
 
         # Draws the colorbar and initial mask overlays.
         self._colorbar_image = draw_colorbar(colormap=self._roi_colormap)
@@ -1112,6 +1116,11 @@ class ROIViewer(QMainWindow):
         self._view_box.setAspectLocked(lock=True, ratio=single_recording.aspect_ratio)
 
         self._recording_loaded = True
+
+        # Fills the correlation cache after the load flag is raised, because the recomputation returns early while the
+        # flag is unset. Materializing it here is what allows the activity correlation color mode to paint as soon as
+        # the user selects it.
+        self._recompute_binned_fluorescence()
 
         self._update_plot()
         self.show()
@@ -1360,10 +1369,11 @@ class ROIViewer(QMainWindow):
     def _on_number_chosen(self) -> None:
         """Jumps to the ROI number entered in the ROI edit field."""
         if self._recording_loaded and self._context_data is not None:
-            self._selected_roi_index = int(self._roi_index_edit.text())
+            # Clamps the entered index to the range the ROI list addresses. The field carries no validator, so a
+            # negative entry would otherwise index the list from its end or past its start.
             roi_count = len(self._roi_statistics)
-            if self._selected_roi_index >= roi_count:
-                self._selected_roi_index = roi_count - 1
+            entered_index = int(self._roi_index_edit.text())
+            self._selected_roi_index = max(0, min(entered_index, roi_count - 1))
             self._selected_roi_indices = [self._selected_roi_index]
             self._update_plot()
 
@@ -1660,16 +1670,18 @@ class ROIViewer(QMainWindow):
         if self._color_arrays is None:
             return
         count = int(self._ranked_count_edit.text() or str(ROI_CONFIG.top_selection_count))
-        count = min(count, ROI_CONFIG.top_selection_count)
+        count = max(0, min(count, ROI_CONFIG.top_selection_count))
         values = self._color_arrays.normalized_statistics[self._roi_color_mode]
         ranked = np.argsort(values)
-        selected = ranked[-count:][::-1] if top else ranked[:count]
+        # Slices the top-ranked entries by an absolute start offset, because a negative offset of zero addresses the
+        # whole array instead of an empty one.
+        selected = ranked[len(ranked) - count :][::-1] if top else ranked[:count]
         self._selected_roi_indices = selected.tolist()
         if self._selected_roi_indices:
             self._selected_roi_index = self._selected_roi_indices[0]
             if len(self._selected_roi_indices) > 1:
                 self._enforce_exclusive_trace()
-            self._update_plot()
+        self._update_plot()
 
     def _on_dataset_source_changed(self, index: int) -> None:
         """Handles ROI Source dropdown changes to switch between single-recording and multi-recording data.

@@ -118,6 +118,7 @@ def register_recordings(contexts: list[MultiRecordingRuntimeContext], *, workers
     # Performs groupwise diffeomorphic registration.
     registration = DiffeomorphicDemonsRegistration(
         images=reference_images,
+        final_grid_sampling=registration_config.final_grid_sampling,
         grid_sampling_factor=registration_config.grid_sampling_factor,
         scale_sampling=registration_config.scale_sampling,
         speed_factor=registration_config.speed_factor,
@@ -189,8 +190,10 @@ def project_templates_to_recordings(contexts: list[MultiRecordingRuntimeContext]
     using the original registered binary data.
 
     Notes:
-        When the first recording's output directory already contains roi_statistics.npz and repeat_registration is
-        False (default), the function echoes a skip message and returns without re-projecting the templates.
+        When every recording's output directory already contains roi_statistics.npz and repeat_registration is
+        False (default), the function echoes a skip message and returns without re-projecting the templates. The stage
+        writes one archive per recording, so a run interrupted partway through the write loop leaves the recordings it
+        never reached without an archive, and the next run re-projects them.
 
         The worker budget is split between the thread pool width and each pool thread's own Numba mask, since the
         Numba mask is thread-local and pool threads do not inherit the mask held by the submitting thread.
@@ -201,18 +204,20 @@ def project_templates_to_recordings(contexts: list[MultiRecordingRuntimeContext]
             template masks set in runtime.tracking from ROI tracking.
         workers: The number of parallel workers allocated to this discovery job. Must be a positive integer.
     """
-    # Skips projection when the backward-transformed ROI statistics already exist and registration was not repeated.
-    # Checks for roi_statistics.npz (the file this function produces) rather than tracking_template_masks.npz (which
-    # is produced by the tracking phase).
-    first_output = contexts[0].runtime.output_path
+    # Skips projection when every recording carries the backward-transformed ROI statistics and registration was not
+    # repeated. The extraction stage reads each recording's own archive, and the write loop below persists the
+    # contexts in order, so the skip is keyed on all of the archives rather than on the first one that loop writes.
+    # Checks roi_statistics.npz (the file this function produces) rather than tracking_template_masks.npz (which is
+    # produced by the tracking phase).
     repeat_registration = contexts[0].configuration.diffeomorphic_registration.repeat_registration
-    if (
-        not repeat_registration
-        and first_output is not None
-        and (first_output / RecordingArrays.ROI_STATISTICS).exists()
-    ):
+    projection_complete = all(
+        context.runtime.output_path is not None
+        and (context.runtime.output_path / RecordingArrays.ROI_STATISTICS).exists()
+        for context in contexts
+    )
+    if not repeat_registration and projection_complete:
         console.echo(
-            message="Template projection: skipped. Projection output already exists and re-registration is disabled.",
+            message="Template projection: skipped. Every projection output exists and re-registration is disabled.",
             level=LogLevel.INFO,
         )
         return

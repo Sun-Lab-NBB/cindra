@@ -46,9 +46,22 @@ def track_rois_across_recordings(contexts: list[MultiRecordingRuntimeContext]) -
         contexts: The list of MultiRecordingRuntimeContext instances, one per recording. Each context must have
             completed diffeomorphic registration with deformed ROI masks available in
             ``runtime.registration.deformed_roi_masks`` (and optionally ``deformed_roi_masks_channel_2``).
+
+    Raises:
+        ValueError: If the configured spatial binning step sizes are not uniform across both axes.
     """
     if not contexts:
         return
+
+    # The spatial bins tile the shared visual space with a single cell size, so an asymmetric step pair would leave
+    # bands of that space owned by no bin and silently drop every ROI cluster centered inside them.
+    step_sizes = contexts[0].configuration.roi_tracking.step_sizes
+    if step_sizes[0] != step_sizes[1]:
+        message = (
+            f"Unable to track ROIs across recordings. The roi_tracking step_sizes must use the same value for the "
+            f"height and the width of each spatial bin, but got {step_sizes}."
+        )
+        console.error(message=message, error=ValueError)
 
     # Skips tracking when template masks already exist on disk and registration was not repeated. Re-running
     # registration produces fresh deformed masks with reset cluster IDs, which requires re-tracking. When
@@ -482,9 +495,9 @@ def _track_channel_rois(contexts: list[MultiRecordingRuntimeContext], *, channel
     # Extracts tracking configuration parameters. All contexts share the same configuration, so the first is used.
     config = contexts[0].configuration.roi_tracking
 
-    # Spatial binning parameters control how the image is partitioned for parallel-friendly processing.
-    step_y = config.step_sizes[0]
-    step_x = config.step_sizes[1]
+    # Spatial binning parameters control how the image is partitioned for parallel-friendly processing. The entry
+    # point rejects an asymmetric step pair, so both members hold the same value and either one sizes every bin.
+    step_size = config.step_sizes[0]
     bin_size = config.bin_size
 
     # Clustering parameters control which ROIs are grouped together as the same ROI across recordings.
@@ -514,33 +527,31 @@ def _track_channel_rois(contexts: list[MultiRecordingRuntimeContext], *, channel
     image_width = combined_data.combined_width
     image_shape = (image_height, image_width)
 
-    # Builds a spatial grid index for O(1) lookup of ROIs by approximate location. The grid cell size is set to
-    # the larger step dimension to ensure each ROI maps to exactly one cell.
-    grid_size = max(step_x, step_y)
-    roi_grid = _build_roi_grid(rois=all_rois, recordings=all_recordings, grid_size=grid_size)
+    # Builds a spatial grid index for O(1) lookup of ROIs by approximate location. The grid cell size matches the
+    # binning step, so each ROI maps to exactly one cell and each cell is the core of exactly one bin.
+    roi_grid = _build_roi_grid(rois=all_rois, recordings=all_recordings, grid_size=step_size)
 
-    # Generates the set of unique grid positions that tile the image. Using a set prevents duplicate processing
-    # when step sizes don't evenly divide the image dimensions.
-    grid_positions = set()
-    for pixel_y in range(0, image_height, step_y):
-        for pixel_x in range(0, image_width, step_x):
-            grid_y = pixel_y // grid_size
-            grid_x = pixel_x // grid_size
-            grid_positions.add((grid_y, grid_x))
+    # Generates the grid positions that tile the image. Each position is the cell coordinate of one spatial bin, and
+    # the step equals the grid cell size, so consecutive bins neither overlap nor leave gaps between their cores.
+    grid_positions = [
+        (pixel_y // step_size, pixel_x // step_size)
+        for pixel_y in range(0, image_height, step_size)
+        for pixel_x in range(0, image_width, step_size)
+    ]
 
     template_masks: list[ROIMask] = []
     cluster_counter = 0
 
-    # Processes each spatial bin independently. Sorting ensures deterministic ordering across runs.
+    # Processes each spatial bin independently. Row-major enumeration keeps the ordering deterministic across runs.
     for grid_position in console.track(
-        sorted(grid_positions),
+        grid_positions,
         description=f"Tracking {'channel 2' if channel_2 else 'channel 1'} ROIs across recordings",
         unit="bins",
     ):
         # Converts grid indices back to pixel coordinates for boundary calculations.
         grid_y, grid_x = grid_position
-        y_position = grid_y * grid_size
-        x_position = grid_x * grid_size
+        y_position = grid_y * step_size
+        x_position = grid_x * step_size
 
         # Collects ROIs within the current bin plus overlap margins. The margins ensure ROIs near bin edges are
         # clustered with their true neighbors, which may fall in adjacent bins.
@@ -548,10 +559,10 @@ def _track_channel_rois(contexts: list[MultiRecordingRuntimeContext], *, channel
             roi_grid=roi_grid,
             bin_origin_y=y_position,
             bin_origin_x=x_position,
-            bin_height=step_y,
-            bin_width=step_x,
+            bin_height=step_size,
+            bin_width=step_size,
             overlap_margin=bin_size,
-            grid_roi_size=grid_size,
+            grid_roi_size=step_size,
         )
 
         if not bin_rois:
@@ -582,8 +593,8 @@ def _track_channel_rois(contexts: list[MultiRecordingRuntimeContext], *, channel
             # Only the bin containing the cluster center "owns" the cluster. Other bins that see this cluster
             # in their overlap margins will skip it.
             if not (
-                y_position <= cluster_center[0] < y_position + step_y
-                and x_position <= cluster_center[1] < x_position + step_x
+                y_position <= cluster_center[0] < y_position + step_size
+                and x_position <= cluster_center[1] < x_position + step_size
             ):
                 continue
 

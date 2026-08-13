@@ -167,7 +167,11 @@ outputs.
   plane and recording `frame_count` and `plane_frame_counts` alongside the geometry. That metadata file doubles as the
   pipeline-completion marker, so it is written after its payload arrays and published through `atomic_write`.
   Phase 1 rejects a data directory whose TIFF files do not all hold frames of the same shape, naming
-  `file_io.ignored_file_names` as the exclusion mechanism. Phases 2 and 3 carry a `plane_{index}` tracker specifier.
+  `file_io.ignored_file_names` as the exclusion mechanism. It also consumes whole plane and channel interleave cycles,
+  so every plane and channel of a recording holds the same frame count, the frames of an incomplete final cycle are
+  discarded, and a recording short of one whole cycle is rejected. A conversion clears the results of every plane
+  directory the output root holds, including one the recording's current plane count no longer covers. Phases 2 and 3
+  carry a `plane_{index}` tracker specifier.
 - **Multi-recording pipeline**: Two-phase workflow (discover, extract). Phase 1 selects ROIs from each recording,
   performs diffeomorphic demons registration to a common space, clusters ROIs across recordings via spatial overlap, and
   projects template masks back to individual recordings. Phase 2 extracts fluorescence traces and applies OASIS
@@ -270,11 +274,21 @@ outputs.
   `detection/denoise.py` limits to 1 because its own block pool already spends the budget. The BLAS width these set
   is a property of the process rather than of the thread that asked for it, which is why the engine gives each job
   its own process.
-- **Registration integrity**: Registration rewrites the plane binary in place and guards the rewrite with a
-  `<binary>.registering` marker (`create_registration_marker`, `clear_registration_marker`,
-  `resolve_registration_marker_path`, exported from `cindra.io`). `register_plane` refuses to run while a marker exists,
-  and `binarize_recording` treats a marked binary, or one whose size disagrees with its plane's recorded frame geometry,
-  as invalid and rebuilds it from the source TIFFs without requiring `repeat_binarization`.
+- **Binary write integrity**: Binarization fills a plane binary sized to its full frame count, and registration
+  rewrites that binary in place. Each phase guards its own write with its own marker, `<binary>.binarizing` and
+  `<binary>.registering`, whose suffixes match the `binarizing` and `registering` job statuses the interface reports.
+  Both markers mean the same thing to the pipeline, so the names serve the user who finds one on disk. `cindra.io`
+  exports a create, clear, and path helper per phase (`create_binarization_marker`, `clear_binarization_marker`,
+  `resolve_binarization_marker_path`, `create_registration_marker`, `clear_registration_marker`,
+  `resolve_registration_marker_path`) alongside `resolve_active_binary_marker`, the one question every reader asks,
+  which returns whichever marker sits beside a binary or None. `register_plane` refuses to run while either marker
+  exists, and `binarize_recording` refuses a marked binary, a binary whose size disagrees with its plane's recorded
+  frame geometry, and a two-channel plane holding no second channel binary, naming `repeat_binarization` as the remedy
+  in each message. The conversion drops the registration marker of the binary it unlinks, because that marker
+  describes a file that no longer exists.
+  `binarize_recording` resolves the conversion plan (`resolve_tiff_conversion_plan`) before it clears the outputs
+  derived from the previous binaries, so a conversion that fails its input validation leaves the recording's results
+  in place.
 - **Memory efficiency**: Pre-allocates arrays with `np.empty` when overwritten immediately. Uses flattened mask arrays
   with offset indices to reduce per-ROI allocations. Memory maps registration arrays on demand via
   `memory_map_arrays()`. Results tools use lightweight NumPy/YAML reads for targeted queries without full data loading.

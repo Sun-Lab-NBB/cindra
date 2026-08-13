@@ -202,6 +202,7 @@ convention = "google"
     "ANN",     # Test functions and mock helpers do not need annotations
 
     # Project-specific
+    "ARG002",  # Pytest injects fixtures that individual test methods may not reference
     "ARG005",  # Monkeypatch lambdas mirror the signatures of the callables they replace
     "EM101",   # Mock failure messages are clearer inline than as named variables
     "TRY003",  # Mock failure messages are defined at the raise site by design

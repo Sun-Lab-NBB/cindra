@@ -8,6 +8,7 @@ with the recording's acquisition parameters.
 from __future__ import annotations
 
 import json
+from typing import TypeIs
 from pathlib import Path
 
 from natsort import natsorted
@@ -344,10 +345,9 @@ def validate_recording_readiness_tool(recording_directory: str) -> dict[str, obj
             warnings.append(
                 f"Total frames ({total_frames}) do not divide evenly by the interleave stride "
                 f"({interleave_stride} = {plane_number} planes x {channel_number} channels), which happens when an "
-                f"acquisition stops partway through a volume. Binarization keeps the {remainder} trailing frames by "
-                f"sizing each plane binary to the frames its own interleave position receives, so the leading planes "
-                f"hold one frame more than the trailing ones. The combination stage then trims the combined traces to "
-                f"the shortest contributing plane, so only the combined dataset loses those frames."
+                f"acquisition stops partway through a volume. Binarization discards the {remainder} trailing frames "
+                f"of that incomplete cycle, because they reach some planes and channels of the recording and not "
+                f"others. Every plane binary then holds the {frames_per_plane} frames reported below."
             )
 
         if frames_per_plane < _MINIMUM_RECOMMENDED_FRAMES_PER_PLANE:
@@ -356,10 +356,11 @@ def validate_recording_readiness_tool(recording_directory: str) -> dict[str, obj
                 f"{_MINIMUM_RECOMMENDED_FRAMES_PER_PLANE} for reliable processing."
             )
 
-    # Validates MROI roi_lines against actual frame height.
-    if isinstance(roi_number, int) and roi_number > 1 and roi_lines and reference_height is not None:
+    # Validates MROI roi_lines against actual frame height. A malformed entry is reported by the shared validator
+    # above, so the height comparison is confined to the entries that hold integer line indices.
+    if isinstance(roi_number, int) and roi_number > 1 and isinstance(roi_lines, list) and reference_height is not None:
         for roi_index, lines in enumerate(roi_lines):
-            if isinstance(lines, list) and lines:
+            if _is_integer_list(value=lines) and lines:
                 maximum_line = max(lines)
                 if maximum_line >= reference_height:
                     errors.append(
@@ -458,14 +459,14 @@ def _validate_acquisition_parameters(
 
         if roi_lines is None:
             errors.append("Missing required field 'roi_lines' (required when roi_number > 1).")
-        elif not isinstance(roi_lines, list) or not all(isinstance(lines, list) for lines in roi_lines):
+        elif not isinstance(roi_lines, list) or not all(_is_integer_list(value=lines) for lines in roi_lines):
             errors.append("'roi_lines' must be a list of lists of integers.")
         elif len(roi_lines) != roi_number:
             errors.append(f"'roi_lines' length ({len(roi_lines)}) must equal 'roi_number' ({roi_number}).")
 
         if roi_x_coordinates is None:
             errors.append("Missing required field 'roi_x_coordinates' (required when roi_number > 1).")
-        elif not isinstance(roi_x_coordinates, list):
+        elif not _is_integer_list(value=roi_x_coordinates):
             errors.append("'roi_x_coordinates' must be a list of integers.")
         elif len(roi_x_coordinates) != roi_number:
             errors.append(
@@ -474,7 +475,7 @@ def _validate_acquisition_parameters(
 
         if roi_y_coordinates is None:
             errors.append("Missing required field 'roi_y_coordinates' (required when roi_number > 1).")
-        elif not isinstance(roi_y_coordinates, list):
+        elif not _is_integer_list(value=roi_y_coordinates):
             errors.append("'roi_y_coordinates' must be a list of integers.")
         elif len(roi_y_coordinates) != roi_number:
             errors.append(
@@ -508,3 +509,24 @@ def _validate_acquisition_parameters(
         warnings.append(f"Unrecognized fields will be ignored by the pipeline: {sorted(extra_fields)}.")
 
     return errors, warnings
+
+
+def _is_integer_list(value: object) -> TypeIs[list[int]]:
+    """Determines whether the value is a list holding integer elements alone.
+
+    Notes:
+        Booleans are rejected, because JSON deserializes 'true' into a subclass of int that the pipeline cannot use
+        as a line or pixel index.
+
+        The return narrows the checked value to a list of integers, so a caller that measures or indexes the value
+        after this check works against the narrowed type rather than the deserialized object.
+
+    Args:
+        value: The deserialized JSON value to check.
+
+    Returns:
+        True when the value is a list of integers, and False otherwise.
+    """
+    return isinstance(value, list) and all(
+        isinstance(element, int) and not isinstance(element, bool) for element in value
+    )

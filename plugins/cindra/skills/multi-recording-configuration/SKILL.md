@@ -91,9 +91,8 @@ No special single-recording configuration is required. The pipeline always gener
 registered binary files by default.
 
 Extraction opens each recording's plane binaries as one combined view whose frame count is that of the recording's
-shortest plane. A recording whose acquisition stopped partway through a volume keeps the extra frames per-plane, so its
-planes hold unequal counts and the trailing frames of the longer planes fall outside the combined view. Check that a
-recording's `combined_metadata.npz` `plane_frame_counts` entries are equal before relying on its full frame range.
+shortest plane. Binarization gives every plane of the recording the same frame count, so that view spans the
+recording's full frame range.
 
 ---
 
@@ -194,6 +193,7 @@ back to each recording's native space for signal extraction.
 |------------------------|-------|-----------------|-------------------------------------------------------------------------------|
 | `image_type`           | str   | "enhanced_mean" | Reference image type: "mean", "enhanced_mean", or "maximum_projection".       |
 | `grid_sampling_factor` | float | 1.0             | B-spline grid refinement per scale. 0-1. Lower = finer grid at coarse scales. |
+| `final_grid_sampling`  | float | 16.0            | Knot spacing (pixels) at the finest scale. Lower = supports smaller images.   |
 | `scale_sampling`       | int   | 30              | Iterations per scale level. 20-30 typical. Higher = better but slower.        |
 | `speed_factor`         | float | 3.0             | Deformation strength. **Most important tuning parameter.** 1-5 typical.       |
 | `repeat_registration`  | bool  | False           | Re-run registration even if existing data is found.                           |
@@ -210,6 +210,9 @@ back to each recording's native space for signal extraction.
   "maximum_projection" for sparse labeling where bright pixels are more informative.
 - **Finer spatial control**: Lower `grid_sampling_factor` (0.5-0.8) to use a denser B-spline grid at coarse scales,
   improving accuracy for spatially complex deformations at the cost of speed.
+- **Small reference images**: Lower `final_grid_sampling` (8.0) when registration reports a knot grid too small to
+  freeze its edges. The finest scale level needs the reference images to span more than twice this spacing along both
+  dimensions, so a 32 pixel field of view fails at the 16.0 default.
 
 ---
 
@@ -312,7 +315,7 @@ See `/single-recording-configuration` Section 9 for full tuning guidance. The sa
 
 ### Parameters typically left at default
 
-- `diffeomorphic_registration.image_type`, `grid_sampling_factor`, `scale_sampling`
+- `diffeomorphic_registration.image_type`, `grid_sampling_factor`, `final_grid_sampling`, `scale_sampling`
 - `roi_tracking.step_sizes`, `bin_size`, `minimum_size`
 - All signal_extraction parameters
 - All spike_deconvolution parameters
@@ -370,6 +373,7 @@ roi_selection:
 diffeomorphic_registration:
   image_type: "enhanced_mean"
   grid_sampling_factor: 1.0
+  final_grid_sampling: 16.0
   scale_sampling: 30
   speed_factor: 3.0
 

@@ -18,6 +18,17 @@ from cindra.dataclasses.multi_recording_configuration import RecordingIO
 from cindra.dataclasses.single_recording_configuration import AcquisitionParameters
 
 
+def _make_roi_mask() -> ROIMask:
+    """Creates a minimal ROIMask instance."""
+    return ROIMask(
+        y_pixels=np.array([0, 1, 2], dtype=np.int32),
+        x_pixels=np.array([3, 4, 5], dtype=np.int32),
+        pixel_weights=np.ones(3, dtype=np.float32),
+        centroid=(1, 4),
+        frame_width=10,
+    )
+
+
 class TestIsMemoryMapped:
     """Tests the is_memory_mapped() function."""
 
@@ -69,6 +80,17 @@ class TestRegistrationDataIsRegistered:
 
         empty_data = RegistrationData()
         assert empty_data.is_registered(output_path=tmp_path)
+
+    def test_returns_false_when_only_some_registration_files_exist_on_disk(self, tmp_path: Path) -> None:
+        """Verifies that a partially written array set on disk does not indicate registration."""
+        # save_arrays writes one file per array, so a worker killed partway through it leaves exactly this state. The
+        # plane must re-register rather than admit the missing offsets to the processing stage.
+        data = RegistrationData()
+        data.reference_image = np.zeros((64, 64), dtype=np.float32)
+        data.save_arrays(output_path=tmp_path)
+
+        empty_data = RegistrationData()
+        assert not empty_data.is_registered(output_path=tmp_path)
 
 
 class TestRegistrationDataClear:
@@ -559,7 +581,7 @@ class TestMultiRecordingRegistrationDataIsRegistered:
         """Verifies that registration is detected when deformation fields and ROI masks are set."""
         data = MultiRecordingRegistrationData()
         data.deform_field_y = np.zeros((64, 64), dtype=np.float32)
-        data.deformed_roi_masks = []
+        data.deformed_roi_masks = [_make_roi_mask()]
         assert data.is_registered()
 
     def test_returns_false_when_only_deform_field_present(self) -> None:
@@ -568,16 +590,41 @@ class TestMultiRecordingRegistrationDataIsRegistered:
         data.deform_field_y = np.zeros((64, 64), dtype=np.float32)
         assert not data.is_registered()
 
-    def test_returns_true_when_registration_files_exist_on_disk(self, tmp_path: Path) -> None:
-        """Verifies that is_registered detects registration files on disk even without arrays in memory."""
+    def test_returns_false_for_an_empty_deformed_mask_list(self, tmp_path: Path) -> None:
+        """Verifies that an empty deformed mask list indicates registration neither in memory nor on disk."""
+        # save_arrays writes no archive for an empty mask list, so the in-memory answer matches the on-disk one only
+        # while both treat that list as a registration that produced nothing to track against.
         data = MultiRecordingRegistrationData()
         data.deform_field_y = np.zeros((64, 64), dtype=np.float32)
         data.deform_field_x = np.zeros((64, 64), dtype=np.float32)
         data.deformed_roi_masks = []
         data.save_arrays(output_path=tmp_path)
 
+        assert not data.is_registered()
+        assert not data.is_registered(output_path=tmp_path)
+
+    def test_returns_true_when_registration_files_exist_on_disk(self, tmp_path: Path) -> None:
+        """Verifies that is_registered detects registration files on disk even without arrays in memory."""
+        data = MultiRecordingRegistrationData()
+        data.deform_field_y = np.zeros((64, 64), dtype=np.float32)
+        data.deform_field_x = np.zeros((64, 64), dtype=np.float32)
+        data.deformed_roi_masks = [_make_roi_mask()]
+        data.save_arrays(output_path=tmp_path)
+
         empty_data = MultiRecordingRegistrationData()
         assert empty_data.is_registered(output_path=tmp_path)
+
+    def test_returns_false_when_only_the_deformation_fields_exist_on_disk(self, tmp_path: Path) -> None:
+        """Verifies that deformation fields without the deformed mask archive do not indicate registration."""
+        # save_arrays writes the deformed mask archive last, so a save interrupted before it leaves exactly this
+        # state and the recording must register again rather than extract against masks that were never written.
+        data = MultiRecordingRegistrationData()
+        data.deform_field_y = np.zeros((64, 64), dtype=np.float32)
+        data.deform_field_x = np.zeros((64, 64), dtype=np.float32)
+        data.save_arrays(output_path=tmp_path)
+
+        empty_data = MultiRecordingRegistrationData()
+        assert not empty_data.is_registered(output_path=tmp_path)
 
 
 class TestMultiRecordingRegistrationDataClear:
@@ -675,7 +722,7 @@ class TestMultiRecordingRegistrationDataReleaseArrays:
         data = MultiRecordingRegistrationData()
         data.deform_field_y = np.zeros((64, 64), dtype=np.float32)
         data.deform_field_x = np.zeros((64, 64), dtype=np.float32)
-        data.deformed_roi_masks = []
+        data.deformed_roi_masks = [_make_roi_mask()]
         data.save_arrays(output_path=tmp_path)
 
         data.release_arrays()
