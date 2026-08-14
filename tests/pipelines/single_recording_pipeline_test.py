@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+import yaml
 import numpy as np
 import pytest
 from tifffile import TiffWriter
-from ataraxis_base_utilities import ensure_directory_exists
+from ataraxis_base_utilities import error_format, ensure_directory_exists
 from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 
 from cindra.io import (
@@ -27,6 +28,7 @@ from cindra.orchestration.worker import (
 )
 from cindra.orchestration.pipeline import run_single_recording_pipeline
 from cindra.pipelines.single_recording import (
+    _MINIMUM_PROCESSING_FRAMES,
     process_plane,
     binarize_recording,
     save_combined_data,
@@ -280,7 +282,11 @@ class TestRunSingleRecordingPipeline:
         configuration_path, output_directory = _prepare_pipeline_inputs(tmp_path)
 
         # The synthetic recording holds a single plane, so index 1 falls outside the resolved plane range.
-        with pytest.raises(ValueError, match="The requested 'target_plane' must be"):
+        expected_message = (
+            "Unable to run the single-recording cindra processing pipeline. The requested 'target_plane' must be an "
+            "index of one of the 1 plane(s) the recording holds, or -1 to process every plane, but encountered 1."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             run_single_recording_pipeline(configuration_path=configuration_path, register=True, target_plane=1)
 
         # The guard fires before align_jobs, so the pipeline leaves no tracker file behind.
@@ -314,30 +320,62 @@ class TestRunSingleRecordingPipeline:
 
         process_id = ProcessingTracker.generate_job_id(job_name=SingleRecordingJobNames.PROCESS, specifier="plane_0")
 
-        with pytest.raises(RuntimeError, match="must be registered before ROI detection"):
+        expected_message = (
+            "Unable to process plane 0. The plane must be registered before ROI detection, but no registration data "
+            "was found in memory or under the plane's output directory. Run the registration stage for this plane "
+            "before running the processing stage."
+        )
+        with pytest.raises(RuntimeError, match=error_format(expected_message)):
             run_single_recording_pipeline(configuration_path=configuration_path, job_id=process_id, process=True)
 
     def test_invalid_job_id_raises(self, tmp_path: Path) -> None:
         """Verifies that a job identifier outside the configuration's job universe raises a ValueError."""
-        configuration_path, _ = _prepare_pipeline_inputs(tmp_path)
+        configuration_path, output_directory = _prepare_pipeline_inputs(tmp_path)
 
         # Bootstraps the runtime data so that the remote resolution reaches the job identifier validation.
         run_single_recording_pipeline(configuration_path=configuration_path, binarize=True)
 
-        with pytest.raises(ValueError, match="must name a job the pipeline could produce"):
+        # The refusal names every job identifier the single-plane recording's universe holds, sorted the way the
+        # tracker sorts them.
+        tracker_path = output_directory / "cindra" / "single_recording_tracker.yaml"
+        universe = [
+            (SingleRecordingJobNames.BINARIZE, ""),
+            (SingleRecordingJobNames.REGISTER, "plane_0"),
+            (SingleRecordingJobNames.PROCESS, "plane_0"),
+            (SingleRecordingJobNames.COMBINE, ""),
+        ]
+        universe_ids = sorted(
+            ProcessingTracker.generate_job_id(job_name=job_name, specifier=specifier)
+            for job_name, specifier in universe
+        )
+        expected_message = (
+            f"Unable to resolve the job with ID 'deadbeefdeadbeef' against the job universe of the processing tracker "
+            f"at '{tracker_path}'. The identifier must name a job the pipeline could produce, but the universe holds "
+            f"only the jobs with IDs: {', '.join(universe_ids)}."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             run_single_recording_pipeline(configuration_path=configuration_path, job_id="deadbeefdeadbeef")
 
     def test_missing_configuration_file_raises(self, tmp_path: Path) -> None:
         """Verifies that a configuration path that does not exist raises a FileNotFoundError."""
-        with pytest.raises(FileNotFoundError, match="Expected the configuration file to"):
-            run_single_recording_pipeline(configuration_path=tmp_path / "missing.yaml")
+        configuration_path = tmp_path / "missing.yaml"
+        expected_message = (
+            f"Unable to run the single-recording cindra processing pipeline. Expected the configuration file to end "
+            f"with a '.yaml' extension and exist at the specified path, but encountered: {configuration_path}."
+        )
+        with pytest.raises(FileNotFoundError, match=error_format(expected_message)):
+            run_single_recording_pipeline(configuration_path=configuration_path)
 
     def test_non_yaml_configuration_raises(self, tmp_path: Path) -> None:
         """Verifies that an existing configuration file without a .yaml extension raises a FileNotFoundError."""
         configuration_path = tmp_path / "configuration.txt"
         configuration_path.write_text("placeholder")
 
-        with pytest.raises(FileNotFoundError, match="Expected the configuration file to"):
+        expected_message = (
+            f"Unable to run the single-recording cindra processing pipeline. Expected the configuration file to end "
+            f"with a '.yaml' extension and exist at the specified path, but encountered: {configuration_path}."
+        )
+        with pytest.raises(FileNotFoundError, match=error_format(expected_message)):
             run_single_recording_pipeline(configuration_path=configuration_path)
 
     def test_unparseable_configuration_raises(self, tmp_path: Path) -> None:
@@ -345,7 +383,13 @@ class TestRunSingleRecordingPipeline:
         configuration_path = tmp_path / "configuration.yaml"
         configuration_path.write_text("not a valid configuration: [unterminated\n  - {{{\n")
 
-        with pytest.raises(FileNotFoundError, match="is not a valid"):
+        expected_message = (
+            "Unable to run the single-recording cindra processing pipeline, as the input configuration file is not a "
+            "valid single-recording pipeline configuration file. Specifically, failed to load the file's data as a "
+            "SingleRecordingConfiguration dataclass instance. Ensure that the 'configuration_path' argument points to "
+            "a valid single-recording configuration .yaml file."
+        )
+        with pytest.raises(FileNotFoundError, match=error_format(expected_message)):
             run_single_recording_pipeline(configuration_path=configuration_path)
 
     def test_missing_output_path_raises(self, tmp_path: Path) -> None:
@@ -354,7 +398,11 @@ class TestRunSingleRecordingPipeline:
         configuration_path = tmp_path / "configuration.yaml"
         configuration.save(file_path=configuration_path)
 
-        with pytest.raises(ValueError, match="output_path must be configured"):
+        expected_message = (
+            "Unable to run the single-recording cindra processing pipeline. The output_path must be configured in the "
+            "FileIO section of the configuration, but it is currently None."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             run_single_recording_pipeline(configuration_path=configuration_path, binarize=True)
 
 
@@ -365,14 +413,22 @@ class TestBinarizeRecording:
         """Verifies that a configuration without a data path raises a ValueError."""
         configuration = _make_configuration(data_directory=None, output_directory=tmp_path / "output")
 
-        with pytest.raises(ValueError, match="data_path must be configured"):
+        expected_message = (
+            "Unable to binarize the recording. The data_path must be configured in the FileIO section of the "
+            "configuration, but it is currently None."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
 
     def test_missing_output_path_raises(self, tmp_path: Path) -> None:
         """Verifies that a configuration without an output path raises a ValueError."""
         configuration = _make_configuration(data_directory=tmp_path / "data", output_directory=None)
 
-        with pytest.raises(ValueError, match="output_path must be configured"):
+        expected_message = (
+            "Unable to binarize the recording. The output_path must be configured in the FileIO section of the "
+            "configuration, but it is currently None."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
 
     def test_without_bootstrap_raises(self, tmp_path: Path) -> None:
@@ -381,7 +437,13 @@ class TestBinarizeRecording:
         _write_raw_recording(data_directory)
         configuration = _make_configuration(data_directory=data_directory, output_directory=tmp_path / "output")
 
-        with pytest.raises(FileNotFoundError, match="bootstrap persistence"):
+        runtime_path = tmp_path / "output" / "cindra" / "plane_0" / "runtime_data.yaml"
+        expected_message = (
+            f"Unable to resolve single-recording contexts without bootstrap persistence. The runtime data file was "
+            f"not found at: {runtime_path}. Run prepare_single_recording_batch_tool before dispatching workers so "
+            f"the filesystem bootstrap is written exactly once in a single-threaded context."
+        )
+        with pytest.raises(FileNotFoundError, match=error_format(expected_message)):
             binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
 
     def test_first_run_converts_a_recording_holding_no_binary(self, tmp_path: Path) -> None:
@@ -442,6 +504,45 @@ class TestBinarizeRecording:
         # The refusal deletes nothing, so the caller decides what to do with the binary it left in place.
         assert binary_path.stat().st_size == truncated_size
 
+    def test_plane_without_recorded_geometry_skips_the_size_check(self, tmp_path: Path) -> None:
+        """Verifies that a plane whose runtime record carries no frame geometry is exempt from the size check."""
+        # A freshly bootstrapped plane records a zero frame height, width, and count, and the conversion clears the
+        # binarization marker before it saves the geometry it measured. A conversion killed between those two writes
+        # therefore leaves a binary beside a runtime record that states no geometry, which is the state built here.
+        configuration = _bootstrap_recording(root=tmp_path)
+        plane_directory = tmp_path / "output" / "cindra" / "plane_0"
+        binary_path = plane_directory / "channel_1_data.bin"
+        # Seven bytes cannot be a whole number of frames of any geometry, so the size check would reject the file if
+        # it ran against a recorded geometry at all.
+        planted_bytes = b"\x00" * 7
+        binary_path.write_bytes(planted_bytes)
+
+        binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
+
+        # The plane counts as converted, so the size check is the only thing that could refuse it. It skipped the
+        # plane, which lets binarization return early and leaves the planted binary exactly as it was found.
+        assert binary_path.read_bytes() == planted_bytes
+
+        # Recording a real geometry for the same plane is what arms the check, and the same planted binary is now
+        # refused by a message naming it and the size it should have had.
+        context = RuntimeContext.load(root_path=tmp_path / "output", plane_index=0)
+        assert isinstance(context, RuntimeContext)
+        context.runtime.io.frame_height = _FRAME_HEIGHT
+        context.runtime.io.frame_width = _FRAME_WIDTH
+        context.runtime.io.frame_count = _FRAME_COUNT
+        context.save_runtime()
+
+        expected_message = (
+            f"Unable to binarize the recording. The size of 1 plane binary file(s) disagrees with the frame geometry "
+            f"recorded for their plane: {[str(binary_path)]}. Every later stage derives its frame count by dividing "
+            f"the file size by the frame size, so such a binary is consumed as a silently truncated movie. Enable "
+            f"'file_io.repeat_binarization' to rebuild the recording from its source TIFF files."
+        )
+        with pytest.raises(RuntimeError, match=error_format(expected_message)):
+            binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
+
+        assert binary_path.read_bytes() == planted_bytes
+
     @pytest.mark.parametrize("create_marker", [create_binarization_marker, create_registration_marker])
     def test_marked_binary_raises(self, tmp_path: Path, create_marker: Callable[..., None]) -> None:
         """Verifies that a binary either phase left marked is refused and the failure names the interrupted phase."""
@@ -475,6 +576,43 @@ class TestBinarizeRecording:
         # The refusal deletes nothing and creates nothing, so no stage gets to fill the absent binary with zeros.
         assert not channel_2_path.exists()
         assert channel_1_path.stat().st_size == channel_1_size
+
+    def test_plane_without_a_recorded_output_directory_holds_no_second_channel(self, tmp_path: Path) -> None:
+        """Verifies that a plane naming neither a second binary nor an output directory escapes the channel check."""
+        configuration = _binarize_to_disk(tmp_path, channel_number=2)
+        plane_directory = tmp_path / "output" / "cindra" / "plane_0"
+        channel_2_path = plane_directory / "channel_2_data.bin"
+        channel_2_path.unlink()
+
+        # The second channel binary is resolved from the plane's own record, and the layout name under the plane's
+        # output directory stands in when that record names no path of its own. Clearing both leaves the recording
+        # declaring two channels with nowhere to look for the second one.
+        runtime_path = plane_directory / "runtime_data.yaml"
+        payload = yaml.safe_load(runtime_path.read_text())
+        payload["io"]["registered_binary_path_channel_2"] = None
+        payload["io"]["output_path"] = None
+        runtime_path.write_text(yaml.safe_dump(payload))
+
+        binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
+
+        # The plane counts as converted through its first channel binary, so the recording is accepted and returns
+        # early rather than being refused for the second binary it no longer names.
+        assert not channel_2_path.exists()
+
+        # Restoring the output directory alone, with the plane still naming no second channel path of its own, arms
+        # the same check against the layout name under that directory. The refusal names exactly the binary the
+        # nulled record made unnameable, which is what proves the acceptance above came from the missing directory.
+        payload["io"]["output_path"] = str(plane_directory)
+        runtime_path.write_text(yaml.safe_dump(payload))
+
+        expected_message = (
+            f"Unable to binarize the recording. The acquisition parameters declare two imaging channels, but 1 "
+            f"converted plane(s) hold no second channel binary: {[str(channel_2_path)]}. Enable "
+            f"'file_io.repeat_binarization' to rebuild the recording from its source TIFF files, which writes both "
+            f"channels of every plane."
+        )
+        with pytest.raises(RuntimeError, match=error_format(expected_message)):
+            binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
 
     def test_second_channel_declared_after_conversion_raises(self, tmp_path: Path) -> None:
         """Verifies that raising the declared channel count refuses the planes converted under the previous count."""
@@ -737,7 +875,11 @@ class TestRegisterRecordingPlane:
         """Verifies that a configuration without an output path raises a ValueError before loading runtime data."""
         configuration = _make_configuration(data_directory=None, output_directory=None)
 
-        with pytest.raises(ValueError, match="output_path must be configured"):
+        expected_message = (
+            "Unable to register the target plane. The output_path must be configured in the FileIO section of the "
+            "configuration, but it is currently None."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             register_recording_plane(configuration=configuration, plane_index=0, workers=_TEST_WORKERS)
 
     def test_loaded_context_list_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -750,14 +892,22 @@ class TestRegisterRecordingPlane:
 
         monkeypatch.setattr(RuntimeContext, "load", _fake_load)
 
-        with pytest.raises(TypeError, match="Expected a single RuntimeContext"):
+        expected_message = (
+            "Unable to register the target plane. Expected a single RuntimeContext for plane 0, but received a list "
+            "of 2 contexts."
+        )
+        with pytest.raises(TypeError, match=error_format(expected_message)):
             register_recording_plane(configuration=configuration, plane_index=0, workers=_TEST_WORKERS)
 
     def test_frame_count_below_minimum_raises(self, tmp_path: Path) -> None:
         """Verifies that a plane with fewer than the minimum required frames raises a ValueError."""
         configuration = _binarize_to_disk(root=tmp_path, frame_count=40)
 
-        with pytest.raises(ValueError, match="at least"):
+        expected_message = (
+            f"Unable to register plane 0. A plane must contain at least {_MINIMUM_PROCESSING_FRAMES} frames to be "
+            f"processed, but the input plane contains only 40 frames."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             register_recording_plane(configuration=configuration, plane_index=0, workers=_TEST_WORKERS)
 
     def test_registers_plane_and_records_allocation(self, tmp_path: Path) -> None:
@@ -790,7 +940,11 @@ class TestProcessPlane:
         """Verifies that a configuration without an output path raises a ValueError before loading runtime data."""
         configuration = _make_configuration(data_directory=None, output_directory=None)
 
-        with pytest.raises(ValueError, match="output_path must be configured"):
+        expected_message = (
+            "Unable to process the target plane. The output_path must be configured in the FileIO section of the "
+            "configuration, but it is currently None."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             process_plane(configuration=configuration, plane_index=0, workers=_TEST_WORKERS)
 
     def test_loaded_context_list_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -803,21 +957,34 @@ class TestProcessPlane:
 
         monkeypatch.setattr(RuntimeContext, "load", _fake_load)
 
-        with pytest.raises(TypeError, match="Expected a single RuntimeContext"):
+        expected_message = (
+            "Unable to process the target plane. Expected a single RuntimeContext for plane 0, but received a list "
+            "of 2 contexts."
+        )
+        with pytest.raises(TypeError, match=error_format(expected_message)):
             process_plane(configuration=configuration, plane_index=0, workers=_TEST_WORKERS)
 
     def test_frame_count_below_minimum_raises(self, tmp_path: Path) -> None:
         """Verifies that a plane with fewer than the minimum required frames raises a ValueError."""
         configuration = _binarize_to_disk(root=tmp_path, frame_count=40)
 
-        with pytest.raises(ValueError, match="at least"):
+        expected_message = (
+            f"Unable to process plane 0. A plane must contain at least {_MINIMUM_PROCESSING_FRAMES} frames to be "
+            f"processed, but the input plane contains only 40 frames."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             process_plane(configuration=configuration, plane_index=0, workers=_TEST_WORKERS)
 
     def test_unregistered_plane_raises(self, tmp_path: Path) -> None:
         """Verifies that processing a binarized but unregistered plane raises from the registration guard."""
         configuration = _binarize_to_disk(tmp_path)
 
-        with pytest.raises(RuntimeError, match="must be registered before ROI detection"):
+        expected_message = (
+            "Unable to process plane 0. The plane must be registered before ROI detection, but no registration data "
+            "was found in memory or under the plane's output directory. Run the registration stage for this plane "
+            "before running the processing stage."
+        )
+        with pytest.raises(RuntimeError, match=error_format(expected_message)):
             process_plane(configuration=configuration, plane_index=0, workers=_TEST_WORKERS)
 
         # The guard fires before any detection output is written, so the plane holds no extraction results.
@@ -865,7 +1032,8 @@ class TestSaveCombinedData:
 
     def test_empty_contexts_raises(self) -> None:
         """Verifies that combining an empty context list raises a ValueError."""
-        with pytest.raises(ValueError, match="At least one RuntimeContext"):
+        expected_message = "Unable to combine planes. At least one RuntimeContext must be provided."
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             save_combined_data(contexts=[])
 
     def test_missing_output_path_raises(
@@ -875,7 +1043,11 @@ class TestSaveCombinedData:
         context = single_recording_context(tmp_path)
         context.configuration.file_io.output_path = None
 
-        with pytest.raises(ValueError, match="output_path must be configured"):
+        expected_message = (
+            "Unable to save combined plane data. The output_path must be configured in the FileIO section of the "
+            "configuration, but it is currently None."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             save_combined_data(contexts=[context])
 
 
@@ -940,7 +1112,11 @@ class TestExecuteSingleRecordingJob:
         job_id = ProcessingTracker.generate_job_id(job_name="unrecognized_job", specifier="")
         configuration = _make_configuration(data_directory=None, output_directory=tmp_path / "output")
 
-        with pytest.raises(ValueError, match="not recognized"):
+        expected_message = (
+            f"Unable to execute the requested job 'unrecognized_job' with ID '{job_id}'. The input job name is not "
+            f"recognized. Use one of the valid Job names: {list(SingleRecordingJobNames)}."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             dispatch_single_recording_job(
                 configuration=configuration,
                 job_name="unrecognized_job",  # type: ignore[arg-type]
@@ -959,7 +1135,11 @@ class TestExecuteSingleRecordingJob:
         job_id = ProcessingTracker.generate_job_id(job_name=SingleRecordingJobNames.COMBINE, specifier="")
         configuration = _make_configuration(data_directory=None, output_directory=None)
 
-        with pytest.raises(ValueError, match="output_path must be configured"):
+        expected_message = (
+            "Unable to execute the combination job. The output_path must be configured in the FileIO section of the "
+            "configuration, but it is currently None."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             dispatch_single_recording_job(
                 configuration=configuration,
                 job_name=SingleRecordingJobNames.COMBINE,
@@ -978,7 +1158,12 @@ class TestExecuteSingleRecordingJob:
         job_id = ProcessingTracker.generate_job_id(job_name=SingleRecordingJobNames.REGISTER, specifier="plane_0")
         configuration = _make_configuration(data_directory=None, output_directory=tmp_path / "output")
 
-        with pytest.raises(ValueError, match="but encountered 0"):
+        expected_message = (
+            f"Unable to resolve the worker count for the '{SingleRecordingJobNames.REGISTER}' processing stage. The "
+            f"requested worker count must be a positive integer, -1 to request every available core, or None to "
+            f"accept the measured stage default, but encountered 0."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             dispatch_single_recording_job(
                 configuration=configuration,
                 job_name=SingleRecordingJobNames.REGISTER,
@@ -1085,7 +1270,12 @@ class TestExecuteSingleRecordingJobInjection:
             tracker=tracker,
         )
 
-        with pytest.raises(RuntimeError, match="must be registered before ROI detection"):
+        expected_message = (
+            "Unable to process plane 0. The plane must be registered before ROI detection, but no registration data "
+            "was found in memory or under the plane's output directory. Run the registration stage for this plane "
+            "before running the processing stage."
+        )
+        with pytest.raises(RuntimeError, match=error_format(expected_message)):
             execute_single_recording_job(
                 configuration_path=configuration_path,
                 job_name=SingleRecordingJobNames.PROCESS,
@@ -1101,9 +1291,14 @@ class TestExecuteSingleRecordingJobInjection:
         """Verifies that a missing configuration path raises a FileNotFoundError through the injected executor."""
         tracker = ProcessingTracker(file_path=tmp_path / "owner_tracker.yaml")
 
-        with pytest.raises(FileNotFoundError, match="Expected the configuration file to"):
+        configuration_path = tmp_path / "missing.yaml"
+        expected_message = (
+            f"Unable to run the single-recording cindra processing pipeline. Expected the configuration file to end "
+            f"with a '.yaml' extension and exist at the specified path, but encountered: {configuration_path}."
+        )
+        with pytest.raises(FileNotFoundError, match=error_format(expected_message)):
             execute_single_recording_job(
-                configuration_path=tmp_path / "missing.yaml",
+                configuration_path=configuration_path,
                 job_name=SingleRecordingJobNames.BINARIZE,
                 specifier="",
                 job_id="deadbeefdeadbeef",

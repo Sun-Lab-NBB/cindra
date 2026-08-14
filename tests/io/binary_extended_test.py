@@ -165,6 +165,36 @@ class TestBinaryFileCombined:
 
         combined.close()
 
+    def test_representation_reports_the_capped_frame_count_and_the_plane_total(self, tmp_path: Path) -> None:
+        """Verifies that the representation reports the derived combined geometry rather than any single plane's."""
+        plane_extent = 4
+
+        # The three planes hold different frame counts, so a representation reporting any one plane's count, or the
+        # longest count, prints a number the combined view cannot read.
+        first_path = tmp_path / "plane0.bin"
+        second_path = tmp_path / "plane1.bin"
+        third_path = tmp_path / "plane2.bin"
+        _create_test_binary(file_path=first_path, frame_count=11, height=plane_extent, width=plane_extent)
+        _create_test_binary(file_path=second_path, frame_count=6, height=plane_extent, width=plane_extent)
+        _create_test_binary(file_path=third_path, frame_count=9, height=plane_extent, width=plane_extent)
+
+        with BinaryFileCombined(
+            height=plane_extent * 3,
+            width=plane_extent,
+            plane_heights=np.array([plane_extent] * 3, dtype=np.uint16),
+            plane_widths=np.array([plane_extent] * 3, dtype=np.uint16),
+            plane_y_coordinates=np.array([0, plane_extent, plane_extent * 2], dtype=np.int32),
+            plane_x_coordinates=np.array([0, 0, 0], dtype=np.int32),
+            file_paths=[first_path, second_path, third_path],
+        ) as combined:
+            representation = repr(combined)
+            assert combined.frame_number == 6
+
+        # The frame count is the shortest of 11, 6, and 9, and the plane count is the number of managed files.
+        assert representation == (
+            f"BinaryFileCombined(height={plane_extent * 3}, width={plane_extent}, plane_count=3, frame_number=6)"
+        )
+
     def test_reads_combined_frames_from_two_planes(self, tmp_path: Path) -> None:
         """Verifies that frames from two planes are correctly assembled into a combined array."""
         plane_height = 4

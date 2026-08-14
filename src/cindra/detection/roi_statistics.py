@@ -382,7 +382,7 @@ class _ROI:
         points = np.column_stack((self.soma_y_pixels, self.soma_x_pixels))
         try:
             area = ConvexHull(points).volume
-        except ValueError, QhullError:  # pragma: no cover, degenerate geometry fallback
+        except ValueError, QhullError:
             area = default_area
 
         return pixel_count / area
@@ -564,7 +564,7 @@ class _ROI:
 
         # Computes radial gradient of cumulative weights. A sharp drop indicates the soma boundary.
         weight_gradient = np.diff(cumulative_weights)
-        if weight_gradient.size == 0 or weight_gradient.max() == 0:  # pragma: no cover, degenerate weight distribution
+        if weight_gradient.size == 0 or weight_gradient.max() == 0:
             return np.ones(self.y_pixels.size, dtype=np.bool_)
 
         # Finds the radius where gradient first drops below 1/3 of its peak after rising above threshold.
@@ -579,9 +579,7 @@ class _ROI:
             if below_threshold_after.size:
                 crop_radius = radii[below_threshold_after[0] + first_above_index]
 
-        # Returns mask of pixels within the computed crop radius.
-        crop_mask = distances < crop_radius
-        if crop_mask.sum() == 0:  # pragma: no cover, degenerate crop radius
-            return np.ones(self.y_pixels.size, dtype=np.bool_)
-
-        return crop_mask
+        # Returns mask of pixels within the computed crop radius. The radius is drawn from the same distance array
+        # the mask is measured against, and the gradient that selects it is non-zero only where a pixel sits inside
+        # that distance, so at least one pixel always survives the comparison.
+        return distances < crop_radius

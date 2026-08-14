@@ -183,9 +183,7 @@ def register_plane(context: RuntimeContext, *, workers: int) -> None:
             # Re-applies offsets to the secondary channel if present. The step-1 pass above already applied the
             # bidirectional correction to that binary, so this pass carries the rigid offsets alone.
             if has_second_channel:
-                _register_secondary_channel(  # pragma: no cover, duplicates the step-1 secondary path
-                    context=context, bidirectional_phase_corrected=True
-                )
+                _register_secondary_channel(context=context, bidirectional_phase_corrected=True)
 
             context.runtime.timing.two_step_registration_time = int(timer.elapsed)
             console.echo(
@@ -263,7 +261,7 @@ def register_plane(context: RuntimeContext, *, workers: int) -> None:
         # Computes registration quality metrics if enabled and recording has enough frames.
         principal_component_count = config.registration.registration_metric_principal_components
         # The >=1500-frame metrics path is impractical on synthetic data, and compute_pc_metrics is covered directly.
-        if principal_component_count > 0 and frame_count >= _MINIMUM_REGISTRATION_METRIC_FRAMES:  # pragma: no cover
+        if principal_component_count > 0 and frame_count >= _MINIMUM_REGISTRATION_METRIC_FRAMES:
             timer.reset()
             compute_pc_metrics(context=context, workers=workers)
             context.runtime.timing.registration_metrics_time = int(timer.elapsed)
@@ -402,7 +400,7 @@ def _compute_crop(
     if bad_frames.mean() < _BAD_FRAME_FRACTION_THRESHOLD:
         y_min = np.ceil(np.abs(y_offsets[~bad_frames]).max())
         x_min = np.ceil(np.abs(x_offsets[~bad_frames]).max())
-    else:  # pragma: no cover, catastrophic registration failure with >50% bad frames
+    else:
         console.echo(
             message=(
                 "WARNING: >50% of frames have large movements, suggesting that registration has failed to correct "
@@ -1191,7 +1189,7 @@ def _register_secondary_channel(context: RuntimeContext, *, bidirectional_phase_
         binary_path = io_data.registered_binary_path
         channel_label = "channel 1"
 
-    if binary_path is None:  # pragma: no cover, unreachable because the opposite-channel path is always set here
+    if binary_path is None:
         message = (
             f"Unable to register {channel_label} frames for plane {plane_index}. The plane's RuntimeContext "
             f"instance does not contain the path to the plane's {channel_label} binary file."

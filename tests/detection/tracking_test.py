@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
+from ataraxis_base_utilities import error_format
 
 from cindra.dataclasses import ROIMask
 from cindra.detection.tracking import (
@@ -45,6 +46,17 @@ def _make_mask(
         frame_width=frame_width,
         radius=radius,
         cluster_id=cluster_id,
+    )
+
+
+def _make_block_mask(first_row: int, first_column: int, height: int, width: int, frame_width: int = 40) -> ROIMask:
+    """Creates a solid rectangular ROIMask whose pixel count and overlaps are exactly known."""
+    rows, columns = np.mgrid[first_row : first_row + height, first_column : first_column + width]
+    return _make_mask(
+        y_pixels=rows.ravel().tolist(),
+        x_pixels=columns.ravel().tolist(),
+        weights=[1.0] * (height * width),
+        frame_width=frame_width,
     )
 
 
@@ -100,7 +112,8 @@ class TestComputeCondensedIndex:
 
     def test_diagonal_raises(self) -> None:
         """Verifies that diagonal elements raise ValueError."""
-        with pytest.raises(ValueError, match="Unable to convert matrix indices"):
+        expected_message = "Unable to convert matrix indices to condensed form. Diagonal elements are not allowed."
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             _compute_condensed_index(row_index=2, column_index=2, matrix_size=5)
 
 
@@ -178,11 +191,36 @@ class TestCountSharedPixels:
     def test_matches_the_set_intersection_over_unique_inputs(self) -> None:
         """Verifies the merge count equals the set intersection size for ascending, duplicate-free inputs."""
         generator = np.random.default_rng(seed=7)
-        for size in (0, 1, 5, 50, 400):
-            first = np.unique(generator.integers(0, 4000, size=size)).astype(np.int32)
-            second = np.unique(generator.integers(0, 4000, size=size)).astype(np.int32)
+
+        # The two arrays are drawn at deliberately unequal sizes from an index range narrow enough that they must
+        # share pixels. A kernel that advanced only one cursor, or that returned a constant, would agree with the
+        # oracle on sparse disjoint draws, so every case below is checked to carry a non-empty intersection.
+        for first_size, second_size in ((7, 31), (31, 7), (12, 12), (5, 40), (40, 5)):
+            first = np.unique(generator.integers(0, 24, size=first_size)).astype(np.int32)
+            second = np.unique(generator.integers(0, 24, size=second_size)).astype(np.int32)
             expected = np.intersect1d(first, second, assume_unique=True).shape[0]
+            assert expected > 0
             assert _count_shared_pixels(first_pixels=first, second_pixels=second) == expected
+
+    def test_mismatched_cursors_reach_the_exact_shared_count(self) -> None:
+        """Verifies that lists matching only after a long mismatch run report the exact shared count."""
+        # The two lists interleave without ever matching, so the merge must advance each cursor in turn and end at
+        # zero rather than stalling on the first pair or counting a mismatch.
+        assert (
+            _count_shared_pixels(
+                first_pixels=np.arange(0, 200, 2, dtype=np.int32),
+                second_pixels=np.arange(1, 200, 2, dtype=np.int32),
+            )
+            == 0
+        )
+
+        # The single shared index sits at the end of the longer list, so reaching it takes 99 advances of the
+        # cursor standing on the smaller value. Advancing the other cursor on a mismatch instead runs the short
+        # list out immediately and reports 0, which the zero case above cannot distinguish.
+        ascending_range = np.arange(100, dtype=np.int32)
+        final_index = np.array([99], dtype=np.int32)
+        assert _count_shared_pixels(first_pixels=ascending_range, second_pixels=final_index) == 1
+        assert _count_shared_pixels(first_pixels=final_index, second_pixels=ascending_range) == 1
 
     def test_empty_input_shares_nothing(self) -> None:
         """Verifies that an empty pixel list yields a zero count rather than raising."""
@@ -222,6 +260,42 @@ class TestClusterRoisInBin:
         result = _cluster_rois_in_bin(rois=[roi1, roi2], roi_recordings=[0, 1], threshold=0.5, maximum_distance=10)
         # No candidates within distance threshold.
         assert result == []
+
+    @pytest.mark.parametrize(("threshold", "expected_cluster_sizes"), [(0.7, [2]), (0.6, [1, 1])])
+    def test_threshold_brackets_a_two_thirds_jaccard_distance(
+        self, threshold: float, expected_cluster_sizes: list[int]
+    ) -> None:
+        """Verifies that the clustering threshold decides a pair sitting at a Jaccard distance of two thirds."""
+        # Two 6x6 blocks offset by three rows share their three middle rows: the intersection is 3 * 6 = 18 pixels
+        # and the union is 36 + 36 - 18 = 54, so the Jaccard distance is exactly 1 - 18 / 54 = 2 / 3. A threshold
+        # just above that value must merge the pair and one just below must keep it apart. The overlap is
+        # deliberately not one half of the union: at exactly one half the similarity and the distance coincide, so
+        # a kernel reporting the similarity in place of the distance would decide both thresholds identically.
+        first = _make_block_mask(first_row=10, first_column=10, height=6, width=6)
+        second = _make_block_mask(first_row=13, first_column=10, height=6, width=6)
+
+        result = _cluster_rois_in_bin(
+            rois=[first, second], roi_recordings=[0, 1], threshold=threshold, maximum_distance=50
+        )
+
+        assert sorted(len(cluster_rois) for cluster_rois, _ in result) == expected_cluster_sizes
+
+    @pytest.mark.parametrize(("threshold", "expected_cluster_sizes"), [(0.8, [2]), (0.7, [1, 1])])
+    def test_contained_roi_distance_uses_the_union_denominator(
+        self, threshold: float, expected_cluster_sizes: list[int]
+    ) -> None:
+        """Verifies that a fully contained ROI is scored against the union rather than the smaller pixel count."""
+        # The 3x3 block sits wholly inside the 6x6 block, so the intersection is 9 and the union is 36 + 9 - 9 = 36.
+        # The Jaccard distance is therefore 1 - 9 / 36 = 0.75, and a threshold of 0.7 separates the pair. Dividing
+        # by the smaller count instead would yield a distance of 0.0 and merge the pair at every threshold.
+        container = _make_block_mask(first_row=10, first_column=10, height=6, width=6)
+        contained = _make_block_mask(first_row=11, first_column=11, height=3, width=3)
+
+        result = _cluster_rois_in_bin(
+            rois=[container, contained], roi_recordings=[0, 1], threshold=threshold, maximum_distance=50
+        )
+
+        assert sorted(len(cluster_rois) for cluster_rois, _ in result) == expected_cluster_sizes
 
     def test_same_recording_not_clustered(self) -> None:
         """Verifies that ROIs from the same recording are not clustered."""

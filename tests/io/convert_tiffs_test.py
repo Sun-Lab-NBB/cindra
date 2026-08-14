@@ -8,7 +8,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 from tifffile import TiffFile, TiffWriter
+from ataraxis_base_utilities import error_format
 
+from cindra.layout import SINGLE_RECORDING_RUNTIME_DATA_FILENAME
 from cindra.io.tiff import (
     _MISMATCH_REPORT_LIMIT,
     TiffConversionPlan,
@@ -20,6 +22,7 @@ from cindra.io.tiff import (
     resolve_tiff_conversion_plan,
 )
 from cindra.io.binary import (
+    clear_binarization_marker,
     create_registration_marker,
     resolve_active_binary_marker,
     resolve_binarization_marker_path,
@@ -116,6 +119,28 @@ def _build_plan(*, context: RuntimeContext) -> TiffConversionPlan:
         channel_1_frame_counts=(1,),
         channel_2_frame_counts=() if channel_2_path is None else (1,),
     )
+
+
+def _record_geometry_at_marker_clear(
+    monkeypatch: pytest.MonkeyPatch, *, plane_directories: tuple[Path, ...]
+) -> list[tuple[Path, tuple[tuple[int, int, int], ...]]]:
+    """Wraps the marker clear so that every call records the frame geometry every plane has persisted to disk."""
+    records: list[tuple[Path, tuple[tuple[int, int, int], ...]]] = []
+
+    def _persisted_geometry(plane_directory: Path) -> tuple[int, int, int]:
+        """Reads one plane's durable frame geometry, reporting a geometry no finished plane can hold when absent."""
+        if not (plane_directory / SINGLE_RECORDING_RUNTIME_DATA_FILENAME).exists():
+            return (-1, -1, -1)
+        persisted = SingleRecordingRuntimeData.load(output_path=plane_directory).io
+        return (persisted.frame_count, persisted.frame_height, persisted.frame_width)
+
+    def _recording_clear(binary_path: Path) -> None:
+        """Reads every plane's runtime data file off disk before delegating to the real marker clear."""
+        records.append((binary_path, tuple(_persisted_geometry(directory) for directory in plane_directories)))
+        clear_binarization_marker(binary_path=binary_path)
+
+    monkeypatch.setattr("cindra.io.tiff.clear_binarization_marker", _recording_clear)
+    return records
 
 
 class TestConvertTiffsToBinary:
@@ -801,7 +826,12 @@ class TestConvertTiffsToBinary:
             output_path=output_path, configuration=configuration, acquisition=acquisition, plane_index=0
         )
 
-        with pytest.raises(RuntimeError, match=r"binary file\s+was sized for 4 frames"):
+        expected_message = (
+            f"Unable to convert the recording's TIFF files to binary format. Plane "
+            f"{context.runtime.io.plane_index} received 3 channel 1 frames, but its "
+            f"binary file was sized for 4 frames."
+        )
+        with pytest.raises(RuntimeError, match=error_format(expected_message)):
             convert_tiffs_to_binary(plan=resolve_tiff_conversion_plan(contexts=[context], workers=1))
 
     def test_completed_conversion_clears_the_binary_marks(self, tmp_path: Path) -> None:
@@ -832,6 +862,93 @@ class TestConvertTiffsToBinary:
         io_data = context.runtime.io
         assert resolve_active_binary_marker(binary_path=io_data.registered_binary_path) is None
         assert resolve_active_binary_marker(binary_path=io_data.registered_binary_path_channel_2) is None
+
+    def test_marks_clear_only_after_every_plane_geometry_is_durable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verifies that each plane's frame geometry is on disk before any binarization mark is cleared."""
+        data_path = tmp_path / "data"
+        output_path = tmp_path / "output"
+        _write_parameters_json(directory=data_path, plane_number=2, channel_number=1)
+        _write_constant_tiff(
+            file_path=data_path / "recording.tif",
+            frame_values=[0, 1, 2, 3, 4, 5, 6, 7],
+            height=_FRAME_HEIGHT,
+            width=_FRAME_WIDTH,
+        )
+
+        configuration = _build_configuration(data_path=data_path, output_path=output_path)
+        acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=2, channel_number=1)
+        context_0 = _build_context(
+            output_path=output_path, configuration=configuration, acquisition=acquisition, plane_index=0
+        )
+        context_1 = _build_context(
+            output_path=output_path, configuration=configuration, acquisition=acquisition, plane_index=1
+        )
+        plane_directories = (context_0.runtime.io.output_path, context_1.runtime.io.output_path)
+        records = _record_geometry_at_marker_clear(monkeypatch=monkeypatch, plane_directories=plane_directories)
+
+        convert_tiffs_to_binary(plan=resolve_tiff_conversion_plan(contexts=[context_0, context_1], workers=1))
+
+        # Eight frames deinterleave into four frames per plane, and the frames are 8 rows by 6 columns, so a geometry
+        # recorded transposed reads differently from one recorded correctly. No mark comes off until every plane of
+        # the recording holds that geometry durably, so a run killed at any clear leaves no binary sized against
+        # zeros and none whose plane has yet to record what it was written against.
+        geometry = (4, _FRAME_HEIGHT, _FRAME_WIDTH)
+        assert records == [
+            (context_0.runtime.io.registered_binary_path, (geometry, geometry)),
+            (context_1.runtime.io.registered_binary_path, (geometry, geometry)),
+        ]
+
+    def test_two_channel_marks_clear_only_after_the_geometry_is_durable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verifies that both channel marks of a plane clear only after that plane's geometry reaches the disk."""
+        data_path = tmp_path / "data"
+        output_path = tmp_path / "output"
+        _write_parameters_json(directory=data_path, plane_number=1, channel_number=2)
+        tiff_path = data_path / "recording.tif"
+        _write_constant_tiff(file_path=tiff_path, frame_values=[0, 1, 2], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+
+        configuration = _build_configuration(data_path=data_path, output_path=output_path)
+        configuration.main.two_channels = True
+        acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=1, channel_number=2)
+        context = _build_context(
+            output_path=output_path,
+            configuration=configuration,
+            acquisition=acquisition,
+            plane_index=0,
+            two_channels=True,
+        )
+
+        # Budgets three frames of a two-frame interleave cycle, which hands channel 1 two frames and channel 2 one.
+        # The two counts differ so that the geometry a plane persists cannot be confused with channel 2's count.
+        plan = TiffConversionPlan(
+            contexts=(context,),
+            tiff_files=(tiff_path,),
+            total_frames=3,
+            converted_frames=3,
+            batch_size=4,
+            decode_workers=1,
+            frame_heights=(_FRAME_HEIGHT,),
+            frame_widths=(_FRAME_WIDTH,),
+            channel_1_paths=(context.runtime.io.registered_binary_path,),
+            channel_2_paths=(context.runtime.io.registered_binary_path_channel_2,),
+            channel_1_frame_counts=(2,),
+            channel_2_frame_counts=(1,),
+        )
+        io_data = context.runtime.io
+        records = _record_geometry_at_marker_clear(monkeypatch=monkeypatch, plane_directories=(io_data.output_path,))
+
+        convert_tiffs_to_binary(plan=plan)
+
+        # Both channel binaries answer to the one plane geometry, which counts the frames channel 1 received. Neither
+        # mark comes off until that geometry is durable, so an interrupted run leaves no unmarked binary unsized.
+        geometry = (2, _FRAME_HEIGHT, _FRAME_WIDTH)
+        assert records == [
+            (io_data.registered_binary_path, (geometry,)),
+            (io_data.registered_binary_path_channel_2, (geometry,)),
+        ]
 
     def test_interrupted_conversion_leaves_the_binary_marked(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -875,7 +992,8 @@ class TestResolveTiffConversionPlan:
 
     def test_empty_contexts_raises(self) -> None:
         """Verifies that providing no contexts raises a ValueError."""
-        with pytest.raises(ValueError, match="At least one RuntimeContext"):
+        expected_message = "Unable to resolve the TIFF conversion plan. At least one RuntimeContext must be provided."
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             resolve_tiff_conversion_plan(contexts=[], workers=1)
 
     def test_missing_data_path_raises(self, tmp_path: Path) -> None:
@@ -887,7 +1005,11 @@ class TestResolveTiffConversionPlan:
             output_path=output_path, configuration=configuration, acquisition=acquisition, plane_index=0
         )
 
-        with pytest.raises(ValueError, match="data_path must be configured"):
+        expected_message = (
+            "Unable to resolve the TIFF conversion plan. The data_path must be configured in the FileIO section of "
+            "the configuration, but it is currently None."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             resolve_tiff_conversion_plan(contexts=[context], workers=1)
 
     def test_resolution_leaves_the_previous_binary_in_place(self, tmp_path: Path) -> None:
@@ -936,7 +1058,12 @@ class TestResolveTiffConversionPlan:
             for plane_index in range(2)
         ]
 
-        with pytest.raises(ValueError, match=r"do\s+not\s+fill\s+one\s+2\s+frame\s+plane\s+and\s+channel"):
+        expected_message = (
+            f"Unable to resolve the TIFF conversion plan for the recording stored in {data_path}. The "
+            f"1 frame(s) the recording's TIFF files hold do not fill one 2 frame "
+            f"plane and channel interleave cycle, so no plane receives any frames."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             resolve_tiff_conversion_plan(contexts=contexts, workers=1)
 
 
@@ -953,7 +1080,11 @@ class TestResolveBinaryPaths:
         )
         context.runtime.io.registered_binary_path = None
 
-        with pytest.raises(ValueError, match="registered_binary_path is not"):
+        expected_message = (
+            f"Unable to resolve the binary file of plane {context.runtime.io.plane_index}. The registered_binary_path "
+            f"is not configured in IOData."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             _resolve_binary_paths(contexts=[context])
 
     def test_missing_channel_2_path_raises(self, tmp_path: Path) -> None:
@@ -971,7 +1102,11 @@ class TestResolveBinaryPaths:
         )
         context.runtime.io.registered_binary_path_channel_2 = None
 
-        with pytest.raises(ValueError, match="registered_binary_path_channel_2 is not"):
+        expected_message = (
+            f"Unable to resolve the channel 2 binary file of plane {context.runtime.io.plane_index}. The "
+            f"registered_binary_path_channel_2 is not configured in IOData."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             _resolve_binary_paths(contexts=[context])
 
 
@@ -986,7 +1121,8 @@ class TestScanSourceFrames:
         with TiffWriter(empty_tiff):
             pass
 
-        with pytest.raises(ValueError, match="first TIFF file is empty"):
+        expected_message = f"Unable to determine frame dimensions. The first TIFF file is empty: {empty_tiff}."
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             _scan_source_frames(tiff_files=[empty_tiff])
 
     def test_differently_shaped_tiff_raises(self, tmp_path: Path) -> None:
@@ -1049,7 +1185,17 @@ class TestScanSourceFrames:
             )
             mismatched_tiffs.append(mismatched_tiff)
 
-        with pytest.raises(ValueError, match=r"and 1 more"):
+        reported = ", ".join(
+            f"'{tiff_path.name}' {(_FRAME_HEIGHT * 2, _FRAME_WIDTH * 2)}"
+            for tiff_path in mismatched_tiffs[:_MISMATCH_REPORT_LIMIT]
+        )
+        expected_message = (
+            f"Unable to determine frame dimensions. Every TIFF file in the data directory must hold frames of the "
+            f"same shape, but {mismatched_count} file(s) differ from the ({_FRAME_HEIGHT}, {_FRAME_WIDTH}) frames of "
+            f"'{recording_tiff.name}': {reported}, and 1 more. Exclude any file that is not part of the recording, "
+            f"such as an anatomical z-stack, through the 'file_io.ignored_file_names' configuration parameter."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             _scan_source_frames(tiff_files=[recording_tiff, *mismatched_tiffs])
 
 

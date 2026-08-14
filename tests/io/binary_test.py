@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import tifffile
+from ataraxis_base_utilities import error_format
 
 from cindra.io.binary import BinaryFile
 
@@ -79,13 +80,22 @@ class TestBinaryFileInit:
     def test_raises_error_for_nonexistent_file_without_frame_number(self, tmp_path: Path) -> None:
         """Verifies that opening a nonexistent file without specifying frame_number raises a ValueError."""
         file_path = tmp_path / "nonexistent.bin"
-        with pytest.raises(ValueError, match="Unable to"):
+        expected_message = (
+            f"Unable to create a new cindra binary {file_path}, as the number of frames to be "
+            f"written to the file is not specified (is 0). Provide a non-zero 'frame_number' argument "
+            f"value to create a new BinaryFile."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             BinaryFile(height=_FRAME_HEIGHT, width=_FRAME_WIDTH, file_path=file_path)
 
     def test_raises_error_for_read_only_nonexistent_file(self, tmp_path: Path) -> None:
         """Verifies that read_only=True raises a ValueError when the file does not exist."""
         file_path = tmp_path / "nonexistent.bin"
-        with pytest.raises(ValueError, match="Unable to"):
+        expected_message = (
+            f"Unable to open the BinaryFile {file_path} in read-only mode, as the file does not exist. "
+            f"Read-only mode is only supported for existing files."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             BinaryFile(height=_FRAME_HEIGHT, width=_FRAME_WIDTH, file_path=file_path, read_only=True)
 
     def test_stores_file_path_as_path_object(self, tmp_path: Path) -> None:
@@ -97,6 +107,48 @@ class TestBinaryFileInit:
         assert isinstance(binary_file.file_path, Path)
         assert binary_file.file_path == file_path
         binary_file.close()
+
+
+class TestBinaryFileRepresentation:
+    """Tests BinaryFile.__repr__."""
+
+    def test_representation_reports_the_resolved_path_and_the_open_mode(self, tmp_path: Path) -> None:
+        """Verifies that the representation reports every geometry field the instance holds separately."""
+        file_path = tmp_path / "test.bin"
+        _create_test_binary(file_path=file_path)
+
+        # The 8x8x10 int16 file is reopened as 4x16 frames, which holds the byte count the file already has while
+        # making the height and the width distinct. A representation that swaps the two therefore prints a geometry
+        # the instance does not hold, which an 8x8 open could never expose.
+        reopened_height = 4
+        reopened_width = 16
+
+        # The instance is constructed from a string, so a representation echoing the constructor argument would print
+        # a bare string rather than the Path the instance actually holds.
+        read_only_file = BinaryFile(
+            height=reopened_height, width=reopened_width, file_path=str(file_path), read_only=True
+        )
+        writable_file = BinaryFile(height=reopened_height, width=reopened_width, file_path=file_path)
+        # The same bytes read as uint8 make the dtype field the one field that differs, so a hardcoded 'int16' is
+        # visible rather than absorbed by the default.
+        narrow_file = BinaryFile(height=reopened_height, width=reopened_width, file_path=file_path, dtype="uint8")
+
+        read_only_representation = repr(read_only_file)
+        writable_representation = repr(writable_file)
+        narrow_representation = repr(narrow_file)
+        read_only_file.close()
+        writable_file.close()
+        narrow_file.close()
+
+        assert read_only_representation == (
+            f"BinaryFile(file_path={file_path}, height={reopened_height}, width={reopened_width}, dtype=int16, "
+            f"read_only=True)"
+        )
+        # The three instances differ from the first in one field each, so each field must move on its own.
+        assert writable_representation == read_only_representation.replace("read_only=True", "read_only=False")
+        assert narrow_representation == read_only_representation.replace("dtype=int16", "dtype=uint8").replace(
+            "read_only=True", "read_only=False"
+        )
 
 
 class TestBinaryFileProperties:

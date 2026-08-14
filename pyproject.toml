@@ -289,12 +289,14 @@ directory = "reports/coverage_html"
 [tool.coverage.report]
 fail_under = 100     # Requires the test suite to cover every measured statement
 show_missing = true  # Lists the statements missed by the test suite, so a failed check names the lines to cover
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "def __del__",
-    "if TYPE_CHECKING:",
-    "raise NotImplementedError",
-    "if __name__ == .__main__.:",
-    "pass",
+
+# Every entry is an unanchored regular expression matched against each source line, and a match on a 'def' or on any
+# other clause header excludes the whole block beneath it. An entry naming a common word therefore reaches far past
+# the statement it was written for, so each one below is a construct no line can carry incidentally. The key is
+# 'exclude_also' rather than 'exclude_lines', which adds to the coverage defaults instead of replacing them. The
+# default already matches the '# pragma: no cover' comment, which is the per-site opt-out every exclusion below the
+# module level uses, so only the two whole-block constructs are named here.
+exclude_also = [
+    "if TYPE_CHECKING:",          # Import blocks that only a type checker executes
+    "if __name__ == .__main__.:", # Script entry points that an import never reaches
 ]

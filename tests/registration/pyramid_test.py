@@ -17,6 +17,22 @@ class TestScaleSpacePyramid:
         assert len(pyramid._levels) == 1
         assert len(pyramid._level_scales) == 1
 
+    def test_repr_tracks_the_levels_the_pyramid_holds(self) -> None:
+        """Verifies the representation reports the scale of every level, including the ones built on demand."""
+        data = np.ones((64, 64), dtype=np.float32)
+        pyramid = ScaleSpacePyramid(data=data, minimum_scale=1.0)
+
+        # A fresh pyramid holds only its base level, whose scale is the minimum scale it was built at.
+        assert repr(pyramid) == "ScaleSpacePyramid(level_count=1, level_scales=[1.0])"
+
+        pyramid.get_scale(scale=4.0)
+
+        # Each added level doubles the scale of the one below it, so reaching 4.0 from 1.0 adds exactly two levels.
+        assert repr(pyramid) == "ScaleSpacePyramid(level_count=3, level_scales=[1.0, 2.0, 4.0])"
+
+        # The added levels halve the resolution in step with the scale, which is what the scale conversions assume.
+        assert [level.shape for level in pyramid._levels] == [(64, 64), (32, 32), (16, 16)]
+
     def test_minimum_scale_zero_preserves_data(self) -> None:
         """Verifies that minimum_scale=0 does not smooth or downsample the data."""
         generator = np.random.default_rng(seed=42)
