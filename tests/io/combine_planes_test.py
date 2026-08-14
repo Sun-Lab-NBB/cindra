@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
+from ataraxis_base_utilities import error_format
 
 from cindra.io.combine import combine_planes
 from cindra.dataclasses import ROIMask, ROIStatistics
@@ -370,7 +371,11 @@ class TestCombinePlanes:
         # A None output_path on one plane exercises the directory-name filter during logging.
         plane_1.runtime.io.output_path = None
 
-        with pytest.raises(ValueError, match="Unable to combine plane data"):
+        expected_message = (
+            "Unable to combine plane data. No valid planes with ROI statistics were found. Ensure that at least one "
+            "plane has been processed successfully before attempting to combine the data."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             combine_planes(plane_contexts=[plane_0, plane_1])
 
     def test_missing_registered_binary_path_raises_runtime_error(
@@ -383,7 +388,11 @@ class TestCombinePlanes:
         _populate_channel_1(context=context, roi_specifications=(((1, 2), (1, 2)),), frame_count=8, fill=1.0, seed=13)
         context.runtime.io.registered_binary_path = None
 
-        with pytest.raises(RuntimeError, match="registered binary path is not set"):
+        expected_message = (
+            f"Unable to combine plane data. The registered binary path is not set for plane "
+            f"{context.runtime.io.plane_index}. Ensure registration completed successfully."
+        )
+        with pytest.raises(RuntimeError, match=error_format(expected_message)):
             combine_planes(plane_contexts=[context])
 
     def test_missing_channel_2_binary_path_raises_runtime_error(
@@ -403,7 +412,11 @@ class TestCombinePlanes:
         _populate_channel_2(context=context, roi_specifications=(((1, 2), (1, 2)),), frame_count=8, seed=16)
         context.runtime.io.registered_binary_path_channel_2 = None
 
-        with pytest.raises(RuntimeError, match="registered binary path for channel 2 is not set"):
+        expected_message = (
+            f"Unable to combine plane data. The registered binary path for channel 2 is not set for "
+            f"plane {context.runtime.io.plane_index}. Ensure registration completed successfully."
+        )
+        with pytest.raises(RuntimeError, match=error_format(expected_message)):
             combine_planes(plane_contexts=[context])
 
     def test_second_channel_functional_without_traces(

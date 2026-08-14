@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
+from ataraxis_base_utilities import console, error_format
 
 from cindra.registration.pyramid import ScaleSpacePyramid
 from cindra.registration.deformation import Deformation
@@ -132,8 +133,11 @@ class TestDiffeomorphicDemonsRegistration:
         """Verifies that a group holding fewer than two images is rejected and reports the count supplied."""
         image = np.random.default_rng(seed=7).standard_normal((32, 32)).astype(np.float32)
 
-        # The raised message is wrapped to the console's line width, so any space within it may hold a line break.
-        with pytest.raises(ValueError, match=r"requires\s+at\s+least\s+2\s+images,\s+but\s+got\s+1"):
+        expected_message = (
+            "Unable to initialize the diffeomorphic demons registration. Groupwise registration aligns the images "
+            "of a group to their common mean space, so it requires at least 2 images, but got 1."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             DiffeomorphicDemonsRegistration(images=[image])
 
     def test_compute_grid_sampling(self) -> None:
@@ -279,7 +283,13 @@ class TestDiffeomorphicDemonsRegistration:
 
         # The default 16.0 pixel sampling spans the 32 pixel images with 5 knots, one short of the 6 that freezing the
         # edges needs. Every coarser level builds a smaller grid, so the run would resolve no deformation at all.
-        with pytest.raises(RuntimeError, match="Unable to register the"):
+        expected_message = (
+            "Unable to register the (32, 32) images to their common mean space. Freezing the knot grid edges "
+            f"requires at least {MINIMUM_KNOTS_FOR_FROZEN_EDGES} knots along each dimension, but the finest scale "
+            "level samples its (32, 32) working resolution every 16.0 pixels, which builds a (5, 5) grid. Register "
+            "larger images or lower the 'diffeomorphic_registration.final_grid_sampling' configuration parameter."
+        )
+        with pytest.raises(RuntimeError, match=error_format(expected_message)):
             registration.register(progress=False)
 
         assert registration._deformations == {}
@@ -289,7 +299,11 @@ class TestDiffeomorphicDemonsRegistration:
         image = np.ones((64, 64), dtype=np.float32)
         registration = DiffeomorphicDemonsRegistration(images=[image, image])
 
-        with pytest.raises(RuntimeError, match="Unable to retrieve the deformation"):
+        expected_message = (
+            "Unable to retrieve the deformation for image 0. The requested index must identify an image register() "
+            "resolved a deformation for, and the resolved indices are []."
+        )
+        with pytest.raises(RuntimeError, match=error_format(expected_message)):
             registration.get_deformation(image_index=0)
 
     def test_regularize_deformation_without_injectivity(self) -> None:
@@ -299,6 +313,75 @@ class TestDiffeomorphicDemonsRegistration:
         deformation = Deformation.identity(height=32, width=32)
         result = registration._regularize_deformation(scale=1.0, deformation=deformation)
         assert isinstance(result, Deformation)
+
+    def test_repr_reports_the_group_and_its_tuning(self) -> None:
+        """Verifies the representation carries the group size and the three parameters that drive the run."""
+        images = [np.ones((32, 32), dtype=np.float32)] * 3
+        registration = DiffeomorphicDemonsRegistration(
+            images=images, speed_factor=2.5, scale_sampling=7, final_scale=1.5
+        )
+        assert repr(registration) == (
+            "DiffeomorphicDemonsRegistration(image_count=3, speed_factor=2.5, scale_sampling=7, final_scale=1.5)"
+        )
+
+    def test_resolve_field_shape_before_register_is_reported(self) -> None:
+        """Verifies that querying the working resolution before register() builds the pyramids is reported."""
+        generator = np.random.default_rng(seed=29)
+        images = [generator.standard_normal((64, 64)).astype(np.float32) for _ in range(2)]
+        registration = DiffeomorphicDemonsRegistration(
+            images=images, scale_sampling=5, final_grid_sampling=8.0, final_scale=1.0
+        )
+
+        expected_message = (
+            "Unable to resolve the field shape. The pyramids have not been initialized, call register() first."
+        )
+        with pytest.raises(RuntimeError, match=error_format(expected_message)):
+            registration._resolve_field_shape(scale=1.0)
+
+    def test_groupwise_deformation_averages_the_signed_pairwise_deformations(self) -> None:
+        """Verifies that a three-image group averages each image's signed pairwise deformations over its pairs."""
+        generator = np.random.default_rng(seed=101)
+        images = [generator.standard_normal((64, 64)).astype(np.float32) for _ in range(3)]
+        registration = _prepare_level_registration(images=images, final_grid_sampling=8.0)
+        iteration_key = (0, 1, 1.0)
+
+        groupwise = registration._compute_groupwise_deformations(iteration_key=iteration_key)
+
+        # Re-requests the three unordered pairs the groupwise pass visited. The per-iteration cache holds the
+        # deformed images and gradients under the same key, so these reproduce the exact fields it accumulated.
+        first_second = registration._compute_pairwise_deformation(
+            source_index=0, target_index=1, iteration_key=iteration_key
+        )
+        first_third = registration._compute_pairwise_deformation(
+            source_index=0, target_index=2, iteration_key=iteration_key
+        )
+        second_third = registration._compute_pairwise_deformation(
+            source_index=1, target_index=2, iteration_key=iteration_key
+        )
+
+        def _average(first: NDArray[np.float32], second: NDArray[np.float32]) -> NDArray[np.float32]:
+            """Sums two contributions and divides by the two pairs each image of a three-image group joins."""
+            accumulated = first.copy()
+            np.add(accumulated, second, out=accumulated)
+            np.multiply(accumulated, np.float32(1.0 / 2.0), out=accumulated)
+            return accumulated
+
+        # The Demons deformation is antisymmetric, so an image takes a pair's field with a positive sign when it is
+        # that pair's first member and with a negative sign when it is the second. Each image joins two of the three
+        # pairs, so the divisor is two rather than the group size.
+        for dimension in (0, 1):
+            np.testing.assert_array_equal(
+                groupwise[0][dimension], _average(first_second[dimension], first_third[dimension])
+            )
+            np.testing.assert_array_equal(
+                groupwise[1][dimension], _average(-first_second[dimension], second_third[dimension])
+            )
+            np.testing.assert_array_equal(
+                groupwise[2][dimension], _average(-first_third[dimension], -second_third[dimension])
+            )
+
+        # A trivially zero field would satisfy any divisor, so this pins the comparison to real deformation values.
+        assert float(np.max(np.abs(groupwise[0][0]))) > 0.01
 
     def test_default_parameters(self) -> None:
         """Verifies that the constructor stores default parameter values."""
@@ -403,6 +486,88 @@ class TestDiffeomorphicRegistrationAccuracy:
             second_deformation = second_run.get_deformation(image_index=image_index)
             np.testing.assert_array_equal(first_deformation[0], second_deformation[0])
             np.testing.assert_array_equal(first_deformation[1], second_deformation[1])
+
+
+@pytest.mark.xdist_group("console_progress_state")
+class TestRegisterProgressState:
+    """Tests that register() honors its progress argument without leaking the caller's console progress state.
+
+    Notes:
+        The batch engine reuses worker processes across jobs, so a progress flag left flipped by one registration
+        run would follow every later job in that process.
+    """
+
+    @staticmethod
+    def _build_registration() -> DiffeomorphicDemonsRegistration:
+        """Builds the smallest registration instance whose finest level can still freeze its knot grid edges."""
+        generator = np.random.default_rng(seed=71)
+        images = [generator.standard_normal((32, 32)).astype(np.float32) for _ in range(2)]
+        return DiffeomorphicDemonsRegistration(
+            images=images, scale_sampling=2, final_scale=1.0, final_grid_sampling=8.0
+        )
+
+    @pytest.mark.parametrize("previous_state", [True, False])
+    @pytest.mark.parametrize("progress", [True, False])
+    def test_applies_and_restores_the_progress_state(
+        self, previous_state: bool, progress: bool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verifies that every caller state and progress argument pair is applied during the run and undone after."""
+        restore_state = console.progress_enabled
+        try:
+            if previous_state:
+                console.enable_progress()
+            else:
+                console.disable_progress()
+
+            registration = self._build_registration()
+            observed_states: list[bool] = []
+            original_iteration = registration._perform_iteration
+
+            def _record(**keyword_arguments: object) -> None:
+                """Records the progress state the console holds while the scale loop is running."""
+                observed_states.append(console.progress_enabled)
+                original_iteration(**keyword_arguments)  # type: ignore[arg-type]
+
+            monkeypatch.setattr(registration, "_perform_iteration", _record)
+
+            registration.register(progress=progress)
+
+            # The argument governs the state the run itself works under, so the loop must see exactly what it asked
+            # for rather than whatever the caller happened to hold.
+            assert observed_states
+            assert set(observed_states) == {progress}
+
+            # Leaving the run restores the caller's own state, whichever way the argument moved it.
+            assert console.progress_enabled is previous_state
+        finally:
+            if restore_state:
+                console.enable_progress()
+            else:
+                console.disable_progress()
+
+    def test_restores_the_callers_progress_state_on_the_exception_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verifies that a run failing inside the scale loop still restores the caller's progress state."""
+        restore_state = console.progress_enabled
+        try:
+            console.enable_progress()
+            registration = self._build_registration()
+
+            def _fail(**_keyword_arguments: object) -> None:
+                """Stands in for the per-iteration step and fails on the first call the scale loop makes."""
+                raise ZeroDivisionError("iteration failed")
+
+            monkeypatch.setattr(registration, "_perform_iteration", _fail)
+
+            with pytest.raises(ZeroDivisionError):
+                registration.register(progress=False)
+
+            # register() disabled progress on the way in, so only the finally block can put it back.
+            assert console.progress_enabled is True
+        finally:
+            if restore_state:
+                console.enable_progress()
+            else:
+                console.disable_progress()
 
 
 def _prepare_level_registration(

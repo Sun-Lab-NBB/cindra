@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
-from ataraxis_base_utilities import ensure_directory_exists
+from ataraxis_base_utilities import error_format, ensure_directory_exists
 
 from cindra.io.select import select_recording_rois
 from cindra.dataclasses import (
@@ -307,7 +307,11 @@ class TestSelectRecordingRois:
             combined_data_none=True,
         )
 
-        with pytest.raises(ValueError, match="Unable to select ROIs"):
+        expected_message = (
+            f"Unable to select ROIs for recording {context.runtime.io.recording_id}. The combined_data is not "
+            f"available in the runtime. Ensure context resolution completed successfully before calling this function."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             select_recording_rois(contexts=[context])
 
     def test_processes_multiple_contexts(self, tmp_path: Path) -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from ataraxis_base_utilities import error_format
 
 from cindra.dataclasses.runtime_contexts import _compute_relocation_prefixes, _relocate_cross_recording_path
 
@@ -96,7 +97,11 @@ class TestRelocateCrossRecordingPath:
         old_prefix = Path("/old/root/deep")
         new_prefix = Path("/new/location/deep")
 
-        with pytest.raises(ValueError, match="Unable to relocate cross-recording path"):
+        expected_message = (
+            f"Unable to relocate cross-recording path {path}. The path has {len(path.parts)} segments but the entry "
+            f"recording prefix has {len(old_prefix.parts)} segments, indicating an incompatible directory structure."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             _relocate_cross_recording_path(path=path, old_prefix=old_prefix, new_prefix=new_prefix)
 
     def test_relocation_with_empty_suffix(self) -> None:

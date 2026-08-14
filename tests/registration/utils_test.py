@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from scipy.fft import rfft2, irfft2
+from ataraxis_base_utilities import error_format
 
 from cindra.registration.utils import (
     NORMALIZATION_EPSILON,
@@ -87,6 +88,31 @@ class TestApplyMask:
         result = apply_mask(frames, mask, offset)
         expected = 10.0 * 0.5 + 2.0
         np.testing.assert_allclose(result, expected)
+
+    def test_element_wise_arithmetic_with_varying_operands(self) -> None:
+        """Verifies each element is scaled by its own mask entry and shifted by its own offset entry."""
+        frames = np.arange(12, dtype=np.float32).reshape(2, 2, 3)
+        mask = np.array([[0.0, 0.5, 1.0], [2.0, -1.0, 0.25]], dtype=np.float32)
+        offset = np.array([[1.0, -2.0, 3.0], [0.0, 10.0, -0.5]], dtype=np.float32)
+
+        result = apply_mask(frames, mask, offset)
+
+        # Constant operands hide a transposed mask, a swapped mask and offset, and a broadcast over the wrong axis,
+        # so every operand here varies and the expectation is written out per element.
+        expected = np.array(
+            [
+                [
+                    [0.0 * 0.0 + 1.0, 1.0 * 0.5 - 2.0, 2.0 * 1.0 + 3.0],
+                    [3.0 * 2.0 + 0.0, 4.0 * -1.0 + 10.0, 5.0 * 0.25 - 0.5],
+                ],
+                [
+                    [6.0 * 0.0 + 1.0, 7.0 * 0.5 - 2.0, 8.0 * 1.0 + 3.0],
+                    [9.0 * 2.0 + 0.0, 10.0 * -1.0 + 10.0, 11.0 * 0.25 - 0.5],
+                ],
+            ],
+            dtype=np.float32,
+        )
+        np.testing.assert_array_equal(result, expected)
 
     def test_zero_mask(self) -> None:
         """Verifies zero mask returns only offset."""
@@ -248,19 +274,28 @@ class TestApplySpatialSmoothing:
     def test_odd_window_raises_error(self) -> None:
         """Verifies odd window size raises ValueError."""
         data = np.ones((1, 20, 20), dtype=np.float32)
-        with pytest.raises(ValueError, match="Unable to apply spatial smoothing"):
+        expected_message = (
+            "Unable to apply spatial smoothing. Filter window must be a positive even integer, but got 3."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             apply_spatial_smoothing(data=data, window=3)
 
     def test_zero_window_raises_error(self) -> None:
         """Verifies a zero window size raises ValueError instead of an array broadcasting failure."""
         data = np.ones((1, 20, 20), dtype=np.float32)
-        with pytest.raises(ValueError, match="must be a positive even integer"):
+        expected_message = (
+            "Unable to apply spatial smoothing. Filter window must be a positive even integer, but got 0."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             apply_spatial_smoothing(data=data, window=0)
 
     def test_negative_window_raises_error(self) -> None:
         """Verifies a negative window size raises ValueError."""
         data = np.ones((1, 20, 20), dtype=np.float32)
-        with pytest.raises(ValueError, match="must be a positive even integer"):
+        expected_message = (
+            "Unable to apply spatial smoothing. Filter window must be a positive even integer, but got -4."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             apply_spatial_smoothing(data=data, window=-4)
 
     def test_even_window_no_error(self) -> None:

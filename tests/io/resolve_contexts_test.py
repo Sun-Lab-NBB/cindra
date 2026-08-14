@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+import yaml
 import pytest
+from ataraxis_base_utilities import error_format
 
 from cindra.io.context import (
     PARAMETERS_FILENAME,
@@ -58,6 +60,22 @@ def _make_recording(parent: Path, name: str, acquisition: AcquisitionParameters)
 
     acquisition.to_yaml(file_path=cindra_root / "acquisition_parameters.yaml")
     return recording_root
+
+
+def _rewrite_plane_output_path(plane_directory: Path, recorded_path: str | None) -> None:
+    """Rewrites the output directory a persisted plane record names, leaving the file where the resolution finds it."""
+    runtime_path = plane_directory / "runtime_data.yaml"
+    payload = yaml.safe_load(runtime_path.read_text())
+    payload["io"]["output_path"] = recorded_path
+    runtime_path.write_text(yaml.safe_dump(payload))
+
+
+def _rewrite_recording_output_path(dataset_directory: Path, recorded_path: str | None) -> None:
+    """Rewrites the output directory a persisted recording record names, leaving the file where it is found."""
+    runtime_path = dataset_directory / "multi_recording_runtime_data.yaml"
+    payload = yaml.safe_load(runtime_path.read_text())
+    payload["output_path"] = recorded_path
+    runtime_path.write_text(yaml.safe_dump(payload))
 
 
 def _make_multi_configuration(
@@ -171,7 +189,11 @@ class TestResolveSingleRecordingContexts:
         _write_saved_acquisition(output_path=output_path, acquisition=acquisition)
         configuration = _make_single_configuration(output_path=output_path)
 
-        with pytest.raises(ValueError, match="supports at most"):
+        expected_message = (
+            "Unable to resolve single-recording contexts. The pipeline supports at most 2 channels, but the "
+            "acquisition parameters specify 3 channels."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             resolve_single_recording_contexts(configuration=configuration)
 
     def test_raises_without_output_path(self, tmp_path: Path) -> None:
@@ -179,14 +201,23 @@ class TestResolveSingleRecordingContexts:
         configuration = _make_single_configuration(output_path=tmp_path / "output")
         configuration.file_io.output_path = None
 
-        with pytest.raises(ValueError, match="output_path must be configured"):
+        expected_message = (
+            "Unable to resolve single-recording contexts. The output_path must be configured in the "
+            "FileIO section of the configuration, but it is currently None."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             resolve_single_recording_contexts(configuration=configuration)
 
     def test_raises_without_processed_or_raw_data(self, tmp_path: Path) -> None:
         """Verifies that a ValueError is raised when neither processed output nor a raw data path is available."""
         configuration = _make_single_configuration(output_path=tmp_path / "output", data_path=None)
 
-        with pytest.raises(ValueError, match="No processed data exists"):
+        expected_message = (
+            "Unable to resolve single-recording contexts. No processed data exists at the output_path "
+            "and data_path is not configured. Either provide processed data or configure data_path to "
+            "point to raw TIFF data."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             resolve_single_recording_contexts(configuration=configuration)
 
     def test_persist_false_round_trip_after_bootstrap(self, tmp_path: Path) -> None:
@@ -209,7 +240,70 @@ class TestResolveSingleRecordingContexts:
         _write_saved_acquisition(output_path=output_path, acquisition=acquisition)
         configuration = _make_single_configuration(output_path=output_path)
 
-        with pytest.raises(FileNotFoundError, match="without bootstrap persistence"):
+        runtime_path = output_path / "cindra" / "plane_0" / "runtime_data.yaml"
+        expected_message = (
+            f"Unable to resolve single-recording contexts without bootstrap persistence. The runtime data file was "
+            f"not found at: {runtime_path}. Run prepare_single_recording_batch_tool before dispatching workers so "
+            f"the filesystem bootstrap is written exactly once in a single-threaded context."
+        )
+        with pytest.raises(FileNotFoundError, match=error_format(expected_message)):
+            resolve_single_recording_contexts(configuration=configuration, persist=False)
+
+    def test_persist_false_checks_the_directory_the_plane_recorded(self, tmp_path: Path) -> None:
+        """Verifies that the bootstrap check reads the plane's own recorded directory rather than the plane path."""
+        output_path = tmp_path / "output"
+        acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=1, channel_number=1)
+        _write_saved_acquisition(output_path=output_path, acquisition=acquisition)
+        configuration = _make_single_configuration(output_path=output_path)
+        resolve_single_recording_contexts(configuration=configuration, persist=True)
+
+        # The plane keeps its runtime file where the resolution finds it, but that file now records a different
+        # directory. The check derives the path it looks for from the record rather than from the directory it read
+        # the record out of, so the resolution is refused with the recorded directory named.
+        stale_directory = tmp_path / "elsewhere" / "plane_0"
+        _rewrite_plane_output_path(
+            plane_directory=output_path / "cindra" / "plane_0", recorded_path=str(stale_directory)
+        )
+
+        expected_message = (
+            f"Unable to resolve single-recording contexts without bootstrap persistence. The runtime data file was "
+            f"not found at: {stale_directory / 'runtime_data.yaml'}. Run prepare_single_recording_batch_tool before "
+            f"dispatching workers so the filesystem bootstrap is written exactly once in a single-threaded context."
+        )
+        with pytest.raises(FileNotFoundError, match=error_format(expected_message)):
+            resolve_single_recording_contexts(configuration=configuration, persist=False)
+
+    def test_persist_false_skips_a_plane_that_recorded_no_output_directory(self, tmp_path: Path) -> None:
+        """Verifies that a plane whose record carries no output directory is exempt from the bootstrap check."""
+        output_path = tmp_path / "output"
+        acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=2, channel_number=1)
+        _write_saved_acquisition(output_path=output_path, acquisition=acquisition)
+        configuration = _make_single_configuration(output_path=output_path)
+        resolve_single_recording_contexts(configuration=configuration, persist=True)
+
+        # A record carrying no output directory names no file the check could look for, which leaves the plane
+        # resolved as it was loaded while its peer is still held to its own bootstrap file. The exempt plane is the
+        # FIRST of the two, so a guard that abandoned the loop instead of skipping the one plane would leave the
+        # peer unchecked.
+        _rewrite_plane_output_path(plane_directory=output_path / "cindra" / "plane_0", recorded_path=None)
+
+        contexts = resolve_single_recording_contexts(configuration=configuration, persist=False)
+
+        assert len(contexts) == 2
+        assert contexts[0].runtime.io.output_path is None
+        assert contexts[1].runtime.io.output_path == output_path / "cindra" / "plane_1"
+
+        # Removing the peer's bootstrap file arms the check for the plane behind the exempt one, which is refused by
+        # its own recorded path. The exempt plane is therefore skipped rather than ending the scan.
+        peer_runtime_path = output_path / "cindra" / "plane_1" / "runtime_data.yaml"
+        peer_runtime_path.unlink()
+
+        expected_message = (
+            f"Unable to resolve single-recording contexts without bootstrap persistence. The runtime data file was "
+            f"not found at: {peer_runtime_path}. Run prepare_single_recording_batch_tool before dispatching workers "
+            f"so the filesystem bootstrap is written exactly once in a single-threaded context."
+        )
+        with pytest.raises(FileNotFoundError, match=error_format(expected_message)):
             resolve_single_recording_contexts(configuration=configuration, persist=False)
 
 
@@ -263,7 +357,13 @@ class TestResolveMultiRecordingContexts:
             recording_directories=(recording_one, recording_two), dataset_name="test_dataset"
         )
 
-        with pytest.raises(ValueError, match="does not match any resolved"):
+        available_ids = ["rec1", "rec2"]
+        expected_message = (
+            f"Unable to resolve multi-recording context for recording 'missing'. The "
+            f"provided recording_id does not match any resolved recording identifier. Available "
+            f"recording IDs: {available_ids}."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             resolve_multi_recording_contexts(configuration=configuration, target_recording_id="missing")
 
     def test_persist_false_round_trip_after_bootstrap(self, tmp_path: Path) -> None:
@@ -281,6 +381,64 @@ class TestResolveMultiRecordingContexts:
         assert len(contexts) == 2
         assert contexts[0].runtime.combined_data is not None
 
+    def test_persist_false_checks_the_directory_the_recording_recorded(self, tmp_path: Path) -> None:
+        """Verifies that the bootstrap check reads the recording's own recorded directory rather than the dataset."""
+        acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=1, channel_number=1)
+        recording_one = _make_recording(parent=tmp_path, name="rec1", acquisition=acquisition)
+        configuration = _make_multi_configuration(recording_directories=(recording_one,), dataset_name="test_dataset")
+        resolve_multi_recording_contexts(configuration=configuration, persist=True)
+
+        dataset_directory = recording_one / "cindra" / "multi_recording" / "test_dataset"
+        stale_directory = tmp_path / "elsewhere" / "test_dataset"
+        _rewrite_recording_output_path(dataset_directory=dataset_directory, recorded_path=str(stale_directory))
+
+        expected_message = (
+            f"Unable to resolve multi-recording contexts without bootstrap persistence. The runtime data file was "
+            f"not found at: {stale_directory / 'multi_recording_runtime_data.yaml'}. Run "
+            f"prepare_multi_recording_batch_tool before dispatching workers so the filesystem bootstrap is written "
+            f"exactly once in a single-threaded context."
+        )
+        with pytest.raises(FileNotFoundError, match=error_format(expected_message)):
+            resolve_multi_recording_contexts(configuration=configuration, persist=False)
+
+    def test_persist_false_skips_a_recording_that_recorded_no_output_directory(self, tmp_path: Path) -> None:
+        """Verifies that a recording whose record carries no output directory is exempt from the bootstrap check."""
+        acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=1, channel_number=1)
+        recording_one = _make_recording(parent=tmp_path, name="rec1", acquisition=acquisition)
+        recording_two = _make_recording(parent=tmp_path, name="rec2", acquisition=acquisition)
+        configuration = _make_multi_configuration(
+            recording_directories=(recording_one, recording_two), dataset_name="test_dataset"
+        )
+        resolve_multi_recording_contexts(configuration=configuration, persist=True)
+
+        # The exempt recording is the FIRST of the two, so a guard that abandoned the scan instead of skipping the
+        # one recording would leave the peer unchecked.
+        dataset_directory = recording_one / "cindra" / "multi_recording" / "test_dataset"
+        _rewrite_recording_output_path(dataset_directory=dataset_directory, recorded_path=None)
+
+        contexts = resolve_multi_recording_contexts(configuration=configuration, persist=False)
+
+        # The record names no file the check could look for, so the recording resolves as it was loaded.
+        assert len(contexts) == 2
+        assert contexts[0].runtime.output_path is None
+        assert contexts[0].runtime.io.recording_id == "rec1"
+        assert contexts[1].runtime.output_path == recording_two / "cindra" / "multi_recording" / "test_dataset"
+
+        # Removing the peer's bootstrap file arms the check for the recording behind the exempt one, which is refused
+        # by its own recorded path. The exempt recording is therefore skipped rather than ending the scan.
+        peer_runtime_path = (
+            recording_two / "cindra" / "multi_recording" / "test_dataset" / "multi_recording_runtime_data.yaml"
+        )
+        peer_runtime_path.unlink()
+
+        expected_message = (
+            f"Unable to resolve multi-recording contexts without bootstrap persistence. The runtime data file was "
+            f"not found at: {peer_runtime_path}. Run prepare_multi_recording_batch_tool before dispatching workers "
+            f"so the filesystem bootstrap is written exactly once in a single-threaded context."
+        )
+        with pytest.raises(FileNotFoundError, match=error_format(expected_message)):
+            resolve_multi_recording_contexts(configuration=configuration, persist=False)
+
     def test_persist_false_raises_without_bootstrap(self, tmp_path: Path) -> None:
         """Verifies that a load-only resolution raises when no recording runtime data file was written first."""
         acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=1, channel_number=1)
@@ -290,5 +448,13 @@ class TestResolveMultiRecordingContexts:
             recording_directories=(recording_one, recording_two), dataset_name="test_dataset"
         )
 
-        with pytest.raises(FileNotFoundError, match="without bootstrap persistence"):
+        runtime_path = (
+            recording_one / "cindra" / "multi_recording" / "test_dataset" / "multi_recording_runtime_data.yaml"
+        )
+        expected_message = (
+            f"Unable to resolve multi-recording contexts without bootstrap persistence. The runtime data file was "
+            f"not found at: {runtime_path}. Run prepare_multi_recording_batch_tool before dispatching workers so the "
+            f"filesystem bootstrap is written exactly once in a single-threaded context."
+        )
+        with pytest.raises(FileNotFoundError, match=error_format(expected_message)):
             resolve_multi_recording_contexts(configuration=configuration, persist=False)

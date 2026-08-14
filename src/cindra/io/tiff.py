@@ -359,14 +359,11 @@ def convert_tiffs_to_binary(plan: TiffConversionPlan) -> None:
                 )
                 console.error(message=message, error=RuntimeError)
 
-    # Closes binary files and updates runtime data in each context. Clearing each binary's mark declares its contents
-    # complete, which happens only after every frame has been written and the frame accounting above has agreed.
+    # Closes binary files and updates runtime data in each context.
     for context_index, context in enumerate(contexts):
         channel_1_binaries[context_index].close()
-        clear_binarization_marker(binary_path=channel_1_binaries[context_index].file_path)
         if channel_number > 1:
             channel_2_binaries[context_index].close()
-            clear_binarization_marker(binary_path=channel_2_binaries[context_index].file_path)
 
         # Divides each channel's accumulator by the frames that channel received. Every context receives at least one
         # frame on every channel, so the guard against an unpopulated mean image or a zero divisor never fails for
@@ -395,6 +392,19 @@ def convert_tiffs_to_binary(plan: TiffConversionPlan) -> None:
         # Sets initial valid pixel ranges to full frame (registration will update these).
         context.runtime.registration.valid_y_range = (0, io_data.frame_height)
         context.runtime.registration.valid_x_range = (0, io_data.frame_width)
+
+        # Persists the frame geometry the binaries were written against before any mark comes off. A plane records a
+        # zero geometry until this save, and the mark is the only record that its binary is mid-write, so clearing
+        # the mark first would let an interrupted run leave a complete binary with nothing to size it against.
+        context.save_runtime()
+
+    # Clearing each binary's mark declares its contents complete. This happens only after every frame has been
+    # written, the frame accounting above has agreed, and the geometry describing the binary is durable on disk.
+    for binary in channel_1_binaries:
+        clear_binarization_marker(binary_path=binary.file_path)
+    if channel_number > 1:
+        for binary in channel_2_binaries:
+            clear_binarization_marker(binary_path=binary.file_path)
 
     message = f"Converted {converted_frames} frames across {len(tiff_files)} TIFF files to binary format."
     console.echo(message=message, level=LogLevel.SUCCESS)
@@ -485,7 +495,7 @@ def _read_tiff(tiff: TiffFile, start_index: int, batch_size: int, decode_workers
         if frames.dtype.type == np.int32:
             np.clip(halved, a_min=np.iinfo(np.int16).min, a_max=np.iinfo(np.int16).max, out=halved)
         frames = halved.astype(dtype=np.int16)
-    elif frames.dtype.type != np.int16:  # pragma: no cover, rare non-standard TIFF dtype such as float
+    elif frames.dtype.type != np.int16:
         frames = frames.astype(dtype=np.int16)
 
     return frames

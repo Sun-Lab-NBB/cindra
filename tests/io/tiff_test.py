@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 import pytest
 from tifffile import TiffFile, TiffWriter
+from ataraxis_base_utilities import error_format
 
 from cindra.io.tiff import _read_tiff, _discover_tiff_files
 
@@ -56,7 +57,8 @@ class TestDiscoverTiffFiles:
         file_path = tmp_path / "not_a_directory.txt"
         file_path.write_bytes(b"file content")
 
-        with pytest.raises(ValueError, match="Unable to"):
+        expected_message = f"Unable to discover TIFF files. The path is not a directory: {file_path}."
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             _discover_tiff_files(data_directory=file_path)
 
     def test_results_are_naturally_sorted(self, tmp_path: Path) -> None:
@@ -196,3 +198,51 @@ class TestReadTiff:
         assert result is not None
         assert result.dtype == np.int16
         np.testing.assert_array_equal(result, expected)
+
+    @pytest.mark.parametrize("dtype", [np.float32, np.float64])
+    def test_float_pages_are_truncated_toward_zero_without_rescaling(
+        self, tmp_path: Path, dtype: type[np.generic]
+    ) -> None:
+        """Verifies that float pages keep their magnitude and are truncated toward zero rather than rounded."""
+        # Every value is chosen so that truncation and rounding disagree, and so that halving the page would change
+        # the result. -0.9 truncates to 0 but rounds to -1, 5.999 truncates to 5 but rounds to 6, and 1200.7
+        # truncates to 1200 but would land on 600 if the float arm were folded into the uint16 halving branch.
+        page_values = (-0.9, 5.999, -3.5, 2.5, 1200.7, -1200.7, 0.0)
+        pages = [np.full((4, 5), fill_value=value, dtype=dtype) for value in page_values]
+
+        tiff_path = tmp_path / f"{np.dtype(dtype).name}.tif"
+        with TiffWriter(tiff_path) as writer:
+            for page in pages:
+                writer.write(page)
+
+        with TiffFile(tiff_path) as tiff:
+            result = _read_tiff(tiff=tiff, start_index=0, batch_size=len(pages), decode_workers=1)
+
+        assert result is not None
+        assert result.dtype == np.int16
+        # The expected values are the hand-derived truncations of the page values above, which is what the C cast the
+        # conversion performs produces. np.rint would instead give [-1, 6, -4, 2, 1201, -1201, 0].
+        expected_column = np.array([0, 5, -3, 2, 1200, -1200, 0], dtype=np.int16)
+        np.testing.assert_array_equal(result, np.tile(expected_column[:, None, None], (1, 4, 5)))
+        np.testing.assert_array_equal(result, np.trunc(np.stack(pages)).astype(np.int16))
+
+    @pytest.mark.parametrize("dtype", [np.uint8, np.int8])
+    def test_narrow_integer_pages_are_widened_without_rescaling(self, tmp_path: Path, dtype: type[np.generic]) -> None:
+        """Verifies that 8-bit pages are widened to int16 verbatim rather than halved like the wider dtypes."""
+        # Odd values expose a halving fold: 201 // 2 is 100, and 127 // 2 is 63, so neither survives a rescale.
+        page_values = (0, 3, 127, 201) if dtype is np.uint8 else (0, 3, 127, -128)
+        pages = [np.full((4, 5), fill_value=value, dtype=dtype) for value in page_values]
+        source = np.stack(pages)
+
+        tiff_path = tmp_path / f"{np.dtype(dtype).name}.tif"
+        with TiffWriter(tiff_path) as writer:
+            for page in pages:
+                writer.write(page)
+
+        with TiffFile(tiff_path) as tiff:
+            result = _read_tiff(tiff=tiff, start_index=0, batch_size=len(pages), decode_workers=1)
+
+        assert result is not None
+        assert result.dtype == np.int16
+        np.testing.assert_array_equal(result, source.astype(np.int16))
+        assert [int(value) for value in result[:, 0, 0]] == [int(value) for value in page_values]

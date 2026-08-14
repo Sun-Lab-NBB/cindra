@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
+from ataraxis_base_utilities import error_format
 
 from cindra.dataclasses import (
     ROIMask,
@@ -405,7 +406,11 @@ class TestTrackRoisAcrossRecordings:
             deformed_masks=[_make_block_mask(y_origin=148, x_origin=48, size=6, frame_width=image_size)],
         )
 
-        with pytest.raises(ValueError, match="Unable to track ROIs across recordings"):
+        expected_message = (
+            "Unable to track ROIs across recordings. The roi_tracking step_sizes must use the same value for the "
+            "height and the width of each spatial bin, but got (100, 200)."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             track_rois_across_recordings(contexts=[context_0, context_1])
 
     def test_uniform_non_default_step_owns_every_band(self, tmp_path: Path) -> None:

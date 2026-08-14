@@ -92,6 +92,36 @@ class TestPcaDenoise:
         pca_denoise(frames=frames, block_size=(32, 32), component_fraction=0.5)
         np.testing.assert_allclose(frames, 5.0, atol=1e-4)
 
+    def test_noiseless_low_rank_movie_survives_the_block_blend(self) -> None:
+        """Verifies that a movie whose rank the component budget covers is returned unchanged by the blend."""
+        frame_count = 20
+        height = 48
+        width = 48
+        rows, columns = np.mgrid[0:height, 0:width]
+
+        # Every frame is the same three smooth spatial patterns at frame-specific amplitudes, so the movie has rank
+        # 3 over its pixels and so does every block of it. The block budget here is int(16 * 0.5) = 8 components,
+        # which covers that rank, and PCA projects a matrix onto a basis spanning its own rows without loss.
+        patterns = np.stack(
+            (
+                np.sin(2 * np.pi * rows / height),
+                np.cos(2 * np.pi * columns / width),
+                np.sin(2 * np.pi * (rows + columns) / (height + width)),
+            )
+        ).astype(np.float32)
+        generator = np.random.default_rng(seed=3)
+        amplitudes = generator.standard_normal((frame_count, 3)).astype(np.float32)
+        movie = np.tensordot(amplitudes, patterns, axes=(1, 0)).astype(np.float32)
+        assert np.linalg.matrix_rank(movie.reshape(frame_count, -1)) == 3
+
+        denoised = movie.copy()
+        pca_denoise(frames=denoised, block_size=(16, 16), component_fraction=0.5)
+
+        # The 16x16 blocks overlap, so most pixels accumulate a taper-weighted sum over several reconstructions.
+        # Recovering the input to six digits requires the taper to be accumulated into the normalizer exactly as it
+        # is into the reconstruction, and requires the running total to be divided by that normalizer.
+        np.testing.assert_allclose(denoised, movie, atol=1e-4)
+
     def test_parallel_workers(self) -> None:
         """Verifies that parallel execution produces finite results."""
         generator = np.random.default_rng(seed=42)

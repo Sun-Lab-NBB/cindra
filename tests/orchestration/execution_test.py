@@ -693,6 +693,56 @@ class TestDispatchAdmittedJobs:
         assert len(state.active_futures[registrations[0].resource_class.name]) == 8
 
     @pytest.mark.xdist_group(name="execution_state")
+    def test_reserved_class_yields_the_scarce_budget_to_the_class_behind_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verifies that a reserved class stops at its reservation while a budget the whole cycle shares runs out."""
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        registrations = [
+            _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.REGISTER, specifier=f"plane_{index}")
+            for index in range(8)
+        ]
+        binarizations = [
+            _make_job(tracker_path=tmp_path / f"tracker_{index}.yaml", job_name=SingleRecordingJobNames.BINARIZE)
+            for index in range(2)
+        ]
+        registration_class = registrations[0].resource_class.name
+        binarization_class = binarizations[0].resource_class.name
+
+        # The queues are built explicitly so the reserved class is visited first, which is the ordering that lets it
+        # take the whole budget before the other class is offered any of it. A six-core budget is the scarcity that
+        # makes the reservation matter at all: the two classes together want ten cores and can have six.
+        jobs = [*registrations, *binarizations]
+        state = JobExecutionState(
+            all_jobs={job.dispatch_key: job for job in jobs},
+            pending_queues={registration_class: list(registrations), binarization_class: list(binarizations)},
+            active_futures={registration_class: {}, binarization_class: {}},
+            class_capacities={registration_class: 8, binarization_class: 2},
+            class_workers={registration_class: 1, binarization_class: 1},
+            class_reservations={registration_class: 4},
+            cpu_budget=6,
+        )
+        monkeypatch.setattr(execution, "_pipeline_worker", _make_recording_worker(observed=[]))
+
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            dispatched = _dispatch_admitted_jobs(state=state, pool=pool)
+
+        _drain_active_futures(state=state)
+
+        # The first pass holds the reserved class to its four jobs, which leaves two of the six cores for the class
+        # that waits on no other job. The second pass then finds the budget spent and releases nothing. A dispatcher
+        # that released the reservations first, or dropped the reservation clamp, would instead spend six cores on
+        # registration alone and leave both conversions queued behind it.
+        assert dispatched is True
+        assert len(state.active_futures[registration_class]) == 4
+        assert len(state.active_futures[binarization_class]) == 2
+
+        # The dispatched jobs are the heads of their queue, in order, and the rest keep their places behind them.
+        assert list(state.active_futures[registration_class]) == [job.dispatch_key for job in registrations[:4]]
+        assert state.pending_queues[registration_class] == registrations[4:]
+        assert state.pending_queues[binarization_class] == []
+
+    @pytest.mark.xdist_group(name="execution_state")
     def test_reservation_is_released_when_nothing_else_can_use_it(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
