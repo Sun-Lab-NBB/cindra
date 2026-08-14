@@ -127,11 +127,8 @@ def register_recordings(contexts: list[MultiRecordingRuntimeContext], *, workers
 
     # Applies deformation fields to each recording in parallel.
     if workers > 1:
-        # pragma: no cover, parallel ThreadPoolExecutor branch, integration tests run serially with workers=1.
-        pool_width, pool_numba_threads = _resolve_pool_allocation(  # pragma: no cover
-            workers=workers, task_count=len(contexts)
-        )
-        with ThreadPoolExecutor(  # pragma: no cover
+        pool_width, pool_numba_threads = _resolve_pool_allocation(workers=workers, task_count=len(contexts))
+        with ThreadPoolExecutor(
             max_workers=pool_width,
             initializer=numba.set_num_threads,
             initargs=(pool_numba_threads,),
@@ -238,11 +235,8 @@ def project_templates_to_recordings(contexts: list[MultiRecordingRuntimeContext]
             context.runtime.tracking.load_arrays(output_path)
 
     if workers > 1:
-        # pragma: no cover, parallel ThreadPoolExecutor branch, integration tests run serially with workers=1.
-        pool_width, pool_numba_threads = _resolve_pool_allocation(  # pragma: no cover
-            workers=workers, task_count=len(contexts)
-        )
-        with ThreadPoolExecutor(  # pragma: no cover
+        pool_width, pool_numba_threads = _resolve_pool_allocation(workers=workers, task_count=len(contexts))
+        with ThreadPoolExecutor(
             max_workers=pool_width,
             initializer=numba.set_num_threads,
             initargs=(pool_numba_threads,),

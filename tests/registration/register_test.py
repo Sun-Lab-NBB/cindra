@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import numpy as np
+import pytest
 
 from cindra.detection import compute_registration_blocks
 from cindra.registration.register import (
@@ -372,3 +373,53 @@ class TestApplyPrecomputedOffsetsBatch:
         # Nonrigid correction should modify the frames.
         assert result.shape == original.shape
         assert not np.array_equal(result, original)
+
+
+class TestComputeCropBadFrameFraction:
+    """Tests the bad-frame fraction branch of _compute_crop."""
+
+    @pytest.mark.parametrize(
+        ("bad_frame_count", "expected_y_range", "expected_x_range"),
+        [
+            (40, (4, 60), (2, 62)),
+            (49, (4, 60), (2, 62)),
+            (50, (9, 55), (7, 57)),
+            (60, (9, 55), (7, 57)),
+        ],
+    )
+    def test_selects_crop_source_by_bad_frame_fraction(
+        self,
+        bad_frame_count: int,
+        expected_y_range: tuple[int, int],
+        expected_x_range: tuple[int, int],
+    ) -> None:
+        """Verifies that the crop falls back to every frame only once at least half of the frames are bad."""
+        frame_count = 100
+        # Gives the frames marked bad the larger offsets, so the two arms of the fraction branch disagree about the
+        # crop. Below the threshold the crop follows the surviving 4 and 2 pixel offsets, and at or above it the crop
+        # follows the 9 and 7 pixel offsets of the whole set.
+        y_offsets = np.full(frame_count, fill_value=4, dtype=np.int32)
+        x_offsets = np.full(frame_count, fill_value=2, dtype=np.int32)
+        y_offsets[:bad_frame_count] = 9
+        x_offsets[:bad_frame_count] = 7
+        bad_frames = np.zeros(frame_count, dtype=np.bool_)
+        bad_frames[:bad_frame_count] = True
+        correlations = np.ones(frame_count, dtype=np.float32)
+
+        result_bad_frames, valid_y_range, valid_x_range = _compute_crop(
+            x_offsets=x_offsets,
+            y_offsets=y_offsets,
+            correlations=correlations,
+            # A threshold this large keeps the outlier metric from adding frames of its own, and an offset fraction
+            # this large keeps the 9 and 7 pixel offsets under the 30.4 pixel flagging threshold it produces. The
+            # bad-frame set is therefore exactly the one this test planted.
+            bad_frame_threshold=1e6,
+            bad_frames=bad_frames,
+            maximum_offset_fraction=0.5,
+            frame_height=64,
+            frame_width=64,
+        )
+
+        assert int(result_bad_frames.sum()) == bad_frame_count
+        assert valid_y_range == expected_y_range
+        assert valid_x_range == expected_x_range

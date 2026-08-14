@@ -9,12 +9,16 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 from tifffile import TiffWriter
-from ataraxis_base_utilities import ensure_directory_exists
+from ataraxis_base_utilities import error_format, ensure_directory_exists
 from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 
 from cindra.io.context import PARAMETERS_FILENAME
 from cindra.dataclasses import MultiRecordingConfiguration, SingleRecordingConfiguration
-from cindra.orchestration import MultiRecordingJobNames
+from cindra.orchestration import (
+    MULTI_RECORDING_TRACKER_FILENAME,
+    MultiRecordingJobNames,
+    resolve_multi_recording_jobs,
+)
 from cindra.orchestration.worker import (
     prime_dataset,
     execute_multi_recording_job,
@@ -157,12 +161,24 @@ class TestRunMultiRecordingPipeline:
 
     def test_invalid_job_id_raises(self, tmp_path: Path) -> None:
         """Verifies that a job identifier outside the configuration's job universe raises a ValueError."""
-        configuration_path, _, _ = _prepare_dataset(tmp_path)
+        configuration_path, first_output, _ = _prepare_dataset(tmp_path)
 
         # Bootstraps the multi-recording runtime data so that the remote resolution reaches job identifier validation.
         run_multi_recording_pipeline(configuration_path=configuration_path, discover=True)
 
-        with pytest.raises(ValueError, match="must name a job the pipeline could produce"):
+        tracker_path = _multi_output(first_output) / MULTI_RECORDING_TRACKER_FILENAME
+        universe = resolve_multi_recording_jobs(recording_ids=("rec1", "rec2"))
+        universe_ids = sorted(
+            ProcessingTracker.generate_job_id(job_name=job_name, specifier=specifier)
+            for job_name, specifier in universe
+        )
+        expected_message = (
+            f"Unable to resolve the job with ID 'deadbeefdeadbeef' against the job universe of the processing tracker "
+            f"at '{tracker_path}'. The identifier must name a job the pipeline could produce, but the universe "
+            f"holds only the jobs with IDs: {', '.join(universe_ids)}."
+        )
+
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             run_multi_recording_pipeline(configuration_path=configuration_path, job_id="deadbeefdeadbeef")
 
     def test_unknown_target_recording_raises(self, tmp_path: Path) -> None:
@@ -172,7 +188,13 @@ class TestRunMultiRecordingPipeline:
         # Bootstraps the multi-recording runtime data so that the local resolution reaches the target validation.
         run_multi_recording_pipeline(configuration_path=configuration_path, discover=True)
 
-        with pytest.raises(ValueError, match="The requested 'target_recording' must"):
+        expected_message = (
+            f"Unable to run the multi-recording cindra processing pipeline. The requested 'target_recording' must "
+            f"name one of the recordings the dataset spans, but encountered 'rec3'. Resolved "
+            f"recording identifiers: {['rec1', 'rec2']}."
+        )
+
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             run_multi_recording_pipeline(configuration_path=configuration_path, extract=True, target_recording="rec3")
 
     def test_extract_without_discovery_raises(self, tmp_path: Path) -> None:
@@ -184,23 +206,41 @@ class TestRunMultiRecordingPipeline:
 
     def test_missing_configuration_file_raises(self, tmp_path: Path) -> None:
         """Verifies that a configuration path that does not exist raises a FileNotFoundError."""
-        with pytest.raises(FileNotFoundError, match="Expected the configuration file to"):
-            run_multi_recording_pipeline(configuration_path=tmp_path / "missing.yaml")
+        configuration_path = tmp_path / "missing.yaml"
+        expected_message = (
+            "Unable to run the multi-recording cindra processing pipeline. "
+            "Expected the configuration file to end with a '.yaml' extension and "
+            f"exist at the specified path, but encountered: {configuration_path}."
+        )
+
+        with pytest.raises(FileNotFoundError, match=error_format(expected_message)):
+            run_multi_recording_pipeline(configuration_path=configuration_path)
 
     def test_non_yaml_configuration_raises(self, tmp_path: Path) -> None:
         """Verifies that an existing configuration file without a .yaml extension raises a FileNotFoundError."""
         configuration_path = tmp_path / "configuration.txt"
         configuration_path.write_text("placeholder")
+        expected_message = (
+            "Unable to run the multi-recording cindra processing pipeline. "
+            "Expected the configuration file to end with a '.yaml' extension and "
+            f"exist at the specified path, but encountered: {configuration_path}."
+        )
 
-        with pytest.raises(FileNotFoundError, match="Expected the configuration file to"):
+        with pytest.raises(FileNotFoundError, match=error_format(expected_message)):
             run_multi_recording_pipeline(configuration_path=configuration_path)
 
     def test_unparseable_configuration_raises(self, tmp_path: Path) -> None:
         """Verifies that a malformed configuration file raises a FileNotFoundError from the load guard."""
         configuration_path = tmp_path / "configuration.yaml"
         configuration_path.write_text("not a valid configuration: [unterminated\n  - {{{\n")
+        expected_message = (
+            "Unable to run the multi-recording cindra processing pipeline, as the input configuration file is not a "
+            "valid multi-recording pipeline configuration file. Specifically, failed to load the file's data as a "
+            "MultiRecordingConfiguration dataclass instance. Ensure that the 'configuration_path' argument points to a "
+            "valid multi-recording configuration .yaml file."
+        )
 
-        with pytest.raises(FileNotFoundError, match="is not a valid"):
+        with pytest.raises(FileNotFoundError, match=error_format(expected_message)):
             run_multi_recording_pipeline(configuration_path=configuration_path)
 
     @pytest.mark.parametrize("recording_count", [0, 1])
@@ -211,7 +251,14 @@ class TestRunMultiRecordingPipeline:
         configuration_path = tmp_path / "configuration.yaml"
         configuration.save(file_path=configuration_path)
 
-        with pytest.raises(ValueError, match="must specify at least two recording"):
+        expected_message = (
+            "Unable to run the multi-recording cindra processing pipeline. The "
+            "configuration file must specify at least two recording directories "
+            "under 'recording_io.recording_directories'. The provided configuration "
+            f"specifies {recording_count}."
+        )
+
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             run_multi_recording_pipeline(configuration_path=configuration_path)
 
     def test_empty_dataset_name_raises(self, tmp_path: Path) -> None:
@@ -222,7 +269,14 @@ class TestRunMultiRecordingPipeline:
         configuration_path = tmp_path / "configuration.yaml"
         configuration.save(file_path=configuration_path)
 
-        with pytest.raises(ValueError, match="must specify a dataset name"):
+        expected_message = (
+            "Unable to run the multi-recording cindra processing pipeline. The "
+            "configuration file must specify a dataset name under "
+            "'recording_io.dataset_name'. The provided configuration has no "
+            "dataset name specified."
+        )
+
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             run_multi_recording_pipeline(configuration_path=configuration_path)
 
     def test_missing_main_output_path_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -237,7 +291,12 @@ class TestRunMultiRecordingPipeline:
 
         monkeypatch.setattr("cindra.orchestration.pipeline.resolve_multi_recording_contexts", _fake_resolve)
 
-        with pytest.raises(ValueError, match="output path is not configured"):
+        expected_message = (
+            "Unable to run the multi-recording pipeline. The main recording's "
+            "output path is not configured in the resolved runtime context."
+        )
+
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             run_multi_recording_pipeline(configuration_path=configuration_path, discover=True)
 
 
@@ -251,7 +310,12 @@ class TestExecuteMultiRecordingJob:
         job_id = ProcessingTracker.generate_job_id(job_name="unrecognized_job", specifier="")
         configuration = _make_multi_configuration(recording_directories=(tmp_path / "rec1",))
 
-        with pytest.raises(ValueError, match="not recognized"):
+        expected_message = (
+            f"Unable to execute the requested job 'unrecognized_job' with ID '{job_id}'. The input job name is not "
+            f"recognized. Use one of the valid Job names: {list(MultiRecordingJobNames)}."
+        )
+
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             dispatch_multi_recording_job(
                 configuration=configuration,
                 job_name="unrecognized_job",  # type: ignore[arg-type]
@@ -324,10 +388,16 @@ class TestExecuteMultiRecordingJobInjection:
     def test_missing_configuration_file_raises(self, tmp_path: Path) -> None:
         """Verifies that a missing configuration path raises a FileNotFoundError through the injected executor."""
         tracker = ProcessingTracker(file_path=tmp_path / "forging_tracker.yaml")
+        configuration_path = tmp_path / "missing.yaml"
+        expected_message = (
+            "Unable to run the multi-recording cindra processing pipeline. "
+            "Expected the configuration file to end with a '.yaml' extension and "
+            f"exist at the specified path, but encountered: {configuration_path}."
+        )
 
-        with pytest.raises(FileNotFoundError, match="Expected the configuration file to"):
+        with pytest.raises(FileNotFoundError, match=error_format(expected_message)):
             execute_multi_recording_job(
-                configuration_path=tmp_path / "missing.yaml",
+                configuration_path=configuration_path,
                 job_name=MultiRecordingJobNames.DISCOVER,
                 specifier="",
                 job_id="deadbeefdeadbeef",

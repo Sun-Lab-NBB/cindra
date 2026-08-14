@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+from ataraxis_base_utilities import error_format
 
 from cindra.io.context import (
     PARAMETERS_FILENAME,
@@ -49,7 +50,12 @@ class TestFindDataDirectory:
 
     def test_raises_error_when_parameters_file_missing(self, tmp_path: Path) -> None:
         """Verifies that a FileNotFoundError is raised when no parameters file exists in the directory tree."""
-        with pytest.raises(FileNotFoundError, match="Unable to find"):
+        expected_message = (
+            f"Unable to find '{PARAMETERS_FILENAME}' in the data directory or its subdirectories: {tmp_path}. "
+            f"This file is required and must contain acquisition metadata."
+        )
+
+        with pytest.raises(FileNotFoundError, match=error_format(expected_message)):
             find_data_directory(data_path=tmp_path)
 
     def test_raises_error_for_non_directory_path(self, tmp_path: Path) -> None:
@@ -57,7 +63,9 @@ class TestFindDataDirectory:
         file_path = tmp_path / "not_a_directory.txt"
         file_path.write_text("content")
 
-        with pytest.raises(ValueError, match="Unable to find data directory"):
+        expected_message = f"Unable to find data directory. The data_path is not a directory: {file_path}"
+
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             find_data_directory(data_path=file_path)
 
 
@@ -104,14 +112,20 @@ class TestLoadAcquisitionParameters:
         data = {"frame_rate": 30.0, "plane_number": 2}
         json_path = _write_parameters_json(directory=tmp_path, data=data)
 
-        with pytest.raises(ValueError, match="Unable to extract the required field 'channel_number'"):
+        expected_message = (
+            f"Unable to extract the required field 'channel_number' from the acquisition parameters file "
+            f"located at {json_path}."
+        )
+
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             load_acquisition_parameters(json_path=json_path)
 
     def test_raises_error_for_nonexistent_file(self, tmp_path: Path) -> None:
         """Verifies that a FileNotFoundError is raised when the JSON file does not exist."""
         json_path = tmp_path / "nonexistent.json"
+        expected_message = f"Unable to load acquisition parameters. The file was not found: {json_path}."
 
-        with pytest.raises(FileNotFoundError, match="Unable to load acquisition parameters"):
+        with pytest.raises(FileNotFoundError, match=error_format(expected_message)):
             load_acquisition_parameters(json_path=json_path)
 
     def test_raises_error_for_mroi_missing_roi_lines(self, tmp_path: Path) -> None:
@@ -126,7 +140,12 @@ class TestLoadAcquisitionParameters:
         }
         json_path = _write_parameters_json(directory=tmp_path, data=data)
 
-        with pytest.raises(ValueError, match="Unable to extract the required field 'roi_lines'"):
+        expected_message = (
+            f"Unable to extract the required field 'roi_lines' from the acquisition parameters file "
+            f"located at {json_path}."
+        )
+
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             load_acquisition_parameters(json_path=json_path)
 
     def test_raises_error_for_missing_frame_rate(self, tmp_path: Path) -> None:
@@ -134,7 +153,12 @@ class TestLoadAcquisitionParameters:
         data = {"plane_number": 2, "channel_number": 1}
         json_path = _write_parameters_json(directory=tmp_path, data=data)
 
-        with pytest.raises(ValueError, match="Unable to extract the required field 'frame_rate'"):
+        expected_message = (
+            f"Unable to extract the required field 'frame_rate' from the acquisition parameters file "
+            f"located at {json_path}."
+        )
+
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             load_acquisition_parameters(json_path=json_path)
 
     def test_raises_error_for_missing_plane_number(self, tmp_path: Path) -> None:
@@ -142,7 +166,12 @@ class TestLoadAcquisitionParameters:
         data = {"frame_rate": 30.0, "channel_number": 1}
         json_path = _write_parameters_json(directory=tmp_path, data=data)
 
-        with pytest.raises(ValueError, match="Unable to extract the required field 'plane_number'"):
+        expected_message = (
+            f"Unable to extract the required field 'plane_number' from the acquisition parameters file "
+            f"located at {json_path}."
+        )
+
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             load_acquisition_parameters(json_path=json_path)
 
     def test_raises_error_for_mroi_missing_roi_x_coordinates(self, tmp_path: Path) -> None:
@@ -157,7 +186,12 @@ class TestLoadAcquisitionParameters:
         }
         json_path = _write_parameters_json(directory=tmp_path, data=data)
 
-        with pytest.raises(ValueError, match="Unable to extract the required field 'roi_x_coordinates'"):
+        expected_message = (
+            f"Unable to extract the required field 'roi_x_coordinates' from the acquisition parameters "
+            f"file located at {json_path}."
+        )
+
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             load_acquisition_parameters(json_path=json_path)
 
     def test_raises_error_for_mroi_missing_roi_y_coordinates(self, tmp_path: Path) -> None:
@@ -172,7 +206,12 @@ class TestLoadAcquisitionParameters:
         }
         json_path = _write_parameters_json(directory=tmp_path, data=data)
 
-        with pytest.raises(ValueError, match="Unable to extract the required field 'roi_y_coordinates'"):
+        expected_message = (
+            f"Unable to extract the required field 'roi_y_coordinates' from the acquisition parameters "
+            f"file located at {json_path}."
+        )
+
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             load_acquisition_parameters(json_path=json_path)
 
     def test_raises_error_for_zero_frame_rate(self, tmp_path: Path) -> None:
@@ -180,7 +219,12 @@ class TestLoadAcquisitionParameters:
         data = {"frame_rate": 0.0, "plane_number": 2, "channel_number": 1}
         json_path = _write_parameters_json(directory=tmp_path, data=data)
 
-        with pytest.raises(ValueError, match=r"'frame_rate'\s+field\s+must\s+be\s+a\s+positive\s+number"):
+        expected_message = (
+            f"Unable to load the acquisition parameters stored inside the file located at {json_path}. The "
+            f"'frame_rate' field must be a positive number, but it is 0.0."
+        )
+
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             load_acquisition_parameters(json_path=json_path)
 
     def test_raises_error_for_zero_plane_number(self, tmp_path: Path) -> None:
@@ -188,9 +232,12 @@ class TestLoadAcquisitionParameters:
         data = {"frame_rate": 30.0, "plane_number": 0, "channel_number": 1}
         json_path = _write_parameters_json(directory=tmp_path, data=data)
 
-        with pytest.raises(
-            ValueError, match=r"'plane_number'\s+field\s+must\s+be\s+a\s+positive\s+integer,\s+but\s+it\s+is\s+0"
-        ):
+        expected_message = (
+            f"Unable to load the acquisition parameters stored inside the file located at {json_path}. The "
+            f"'plane_number' field must be a positive integer, but it is 0."
+        )
+
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             load_acquisition_parameters(json_path=json_path)
 
     def test_raises_error_for_negative_channel_number(self, tmp_path: Path) -> None:
@@ -198,9 +245,12 @@ class TestLoadAcquisitionParameters:
         data = {"frame_rate": 30.0, "plane_number": 2, "channel_number": -1}
         json_path = _write_parameters_json(directory=tmp_path, data=data)
 
-        with pytest.raises(
-            ValueError, match=r"'channel_number'\s+field\s+must\s+be\s+a\s+positive\s+integer,\s+but\s+it\s+is\s+-1"
-        ):
+        expected_message = (
+            f"Unable to load the acquisition parameters stored inside the file located at {json_path}. The "
+            f"'channel_number' field must be a positive integer, but it is -1."
+        )
+
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             load_acquisition_parameters(json_path=json_path)
 
     def test_raises_error_for_zero_roi_number(self, tmp_path: Path) -> None:
@@ -208,9 +258,12 @@ class TestLoadAcquisitionParameters:
         data = {"frame_rate": 30.0, "plane_number": 2, "channel_number": 1, "roi_number": 0}
         json_path = _write_parameters_json(directory=tmp_path, data=data)
 
-        with pytest.raises(
-            ValueError, match=r"'roi_number'\s+field\s+must\s+be\s+a\s+positive\s+integer,\s+but\s+it\s+is\s+0"
-        ):
+        expected_message = (
+            f"Unable to load the acquisition parameters stored inside the file located at {json_path}. The "
+            f"'roi_number' field must be a positive integer, but it is 0."
+        )
+
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             load_acquisition_parameters(json_path=json_path)
 
     def test_raises_error_for_non_numeric_plane_number(self, tmp_path: Path) -> None:
@@ -218,9 +271,12 @@ class TestLoadAcquisitionParameters:
         data = {"frame_rate": 30.0, "plane_number": "two", "channel_number": 1}
         json_path = _write_parameters_json(directory=tmp_path, data=data)
 
-        with pytest.raises(
-            ValueError, match=r"'plane_number'\s+field\s+must\s+be\s+a\s+positive\s+integer,\s+but\s+it\s+is\s+two"
-        ):
+        expected_message = (
+            f"Unable to load the acquisition parameters stored inside the file located at {json_path}. The "
+            f"'plane_number' field must be a positive integer, but it is two."
+        )
+
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             load_acquisition_parameters(json_path=json_path)
 
 
@@ -262,8 +318,9 @@ class TestExtractUniqueComponents:
         """Verifies that a RuntimeError is raised when paths share all components but are not identical."""
         # Both paths contain exactly the same set of components ("a" and "b"), so neither has a unique one.
         paths = [Path("/a/b"), Path("/b/a")]
+        expected_message = f"Unable to extract a unique component from the given path: {paths[0]}."
 
-        with pytest.raises(RuntimeError, match="Unable to extract a unique component"):
+        with pytest.raises(RuntimeError, match=error_format(expected_message)):
             extract_unique_components(paths=paths)
 
     def test_raises_error_for_duplicate_paths(self) -> None:
@@ -271,16 +328,22 @@ class TestExtractUniqueComponents:
         # Each returned component becomes a tracker specifier, so two identical components would collapse the two
         # extraction jobs of the dataset onto one tracker record.
         paths = [Path("/data/day1"), Path("/data/day1")]
+        expected_message = f"Unable to extract a unique component from the given path: {paths[0]}."
 
-        with pytest.raises(RuntimeError, match="Unable to extract a unique component"):
+        with pytest.raises(RuntimeError, match=error_format(expected_message)):
             extract_unique_components(paths=paths)
 
     def test_raises_error_for_component_containing_a_colon(self) -> None:
         """Verifies that a RuntimeError is raised when the resolved unique component contains a colon."""
         # The tracker joins a job name to its specifier with a colon, so a component carrying one is rejected here.
         paths = [Path("/data/day:1/rec"), Path("/data/day2/rec")]
+        expected_message = (
+            f"Unable to extract a unique component from the given path: {paths[0]}. The resolved component "
+            f"'day:1' contains the ':' character, which the tracker reserves for joining a job "
+            f"name to its specifier. Rename the directory to remove the character."
+        )
 
-        with pytest.raises(RuntimeError, match=r"contains the\s':' character"):
+        with pytest.raises(RuntimeError, match=error_format(expected_message)):
             extract_unique_components(paths=paths)
 
     def test_three_paths_with_unique_components(self) -> None:
@@ -444,7 +507,14 @@ class TestFindCindraDirectory:
 
     def test_raises_error_when_no_combined_metadata_found(self, tmp_path: Path) -> None:
         """Verifies that a FileNotFoundError is raised when no combined_metadata.npz exists."""
-        with pytest.raises(FileNotFoundError, match="Unable to locate cindra output"):
+        expected_message = (
+            f"Unable to locate cindra output for recording {tmp_path}. No "
+            f"combined_metadata.npz file was found anywhere in the directory tree. Ensure the "
+            f"single-recording pipeline has completed successfully for this recording before running "
+            f"multi-recording processing."
+        )
+
+        with pytest.raises(FileNotFoundError, match=error_format(expected_message)):
             _find_cindra_directory(recording_directory=tmp_path)
 
     def test_raises_error_when_multiple_combined_metadata_found(self, tmp_path: Path) -> None:
@@ -454,7 +524,12 @@ class TestFindCindraDirectory:
             subdirectory.mkdir(parents=True)
             (subdirectory / "combined_metadata.npz").write_bytes(b"")
 
-        with pytest.raises(RuntimeError, match="Unable to locate cindra output"):
+        expected_message = (
+            f"Unable to locate cindra output for recording {tmp_path}. Found 2 "
+            f"combined_metadata.npz files, but expected exactly one unique match."
+        )
+
+        with pytest.raises(RuntimeError, match=error_format(expected_message)):
             _find_cindra_directory(recording_directory=tmp_path)
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from ataraxis_base_utilities import error_format
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -86,7 +87,11 @@ class TestDetectPipelineType:
         """Verifies that a FileNotFoundError is raised when the configuration file does not exist."""
         file_path = tmp_path / "nonexistent.yaml"
 
-        with pytest.raises(FileNotFoundError, match="Unable to detect the pipeline type"):
+        expected_message = (
+            f"Unable to detect the pipeline type from the specified configuration file. Expected an existing "
+            f"'.yaml' file, but received '{file_path}'."
+        )
+        with pytest.raises(FileNotFoundError, match=error_format(expected_message)):
             detect_pipeline_type(file_path=file_path)
 
     def test_raises_error_for_non_yaml_file(self, tmp_path: Path) -> None:
@@ -94,7 +99,11 @@ class TestDetectPipelineType:
         file_path = tmp_path / "config.txt"
         file_path.write_text("pipeline_type: single-recording")
 
-        with pytest.raises(FileNotFoundError, match="Unable to detect the pipeline type"):
+        expected_message = (
+            f"Unable to detect the pipeline type from the specified configuration file. Expected an existing "
+            f"'.yaml' file, but received '{file_path}'."
+        )
+        with pytest.raises(FileNotFoundError, match=error_format(expected_message)):
             detect_pipeline_type(file_path=file_path)
 
     def test_raises_error_for_unrecognized_pipeline_type(self, tmp_path: Path) -> None:
@@ -102,7 +111,13 @@ class TestDetectPipelineType:
         file_path = tmp_path / "bad_config.yaml"
         file_path.write_text("pipeline_type: invalid-pipeline-type\n")
 
-        with pytest.raises(ValueError, match="unrecognized value"):
+        expected_types = ", ".join(f"'{member.value}'" for member in PipelineType)
+        expected_message = (
+            f"Unable to detect the pipeline type from the configuration file at '{file_path}'. The 'pipeline_type' "
+            f"field is missing or has an unrecognized value 'invalid-pipeline-type'. Expected one of: "
+            f"{expected_types}."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             detect_pipeline_type(file_path=file_path)
 
     def test_raises_error_for_missing_pipeline_type_field(self, tmp_path: Path) -> None:
@@ -110,5 +125,10 @@ class TestDetectPipelineType:
         file_path = tmp_path / "no_type.yaml"
         file_path.write_text("some_other_field: 42\n")
 
-        with pytest.raises(ValueError, match="missing or has an unrecognized value"):
+        expected_types = ", ".join(f"'{member.value}'" for member in PipelineType)
+        expected_message = (
+            f"Unable to detect the pipeline type from the configuration file at '{file_path}'. The 'pipeline_type' "
+            f"field is missing or has an unrecognized value 'None'. Expected one of: {expected_types}."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             detect_pipeline_type(file_path=file_path)

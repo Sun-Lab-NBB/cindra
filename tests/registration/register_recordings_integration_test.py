@@ -7,7 +7,7 @@ from importlib import import_module
 
 import numpy as np
 import pytest
-from ataraxis_base_utilities import ensure_directory_exists
+from ataraxis_base_utilities import error_format, ensure_directory_exists
 
 from cindra.dataclasses import (
     ROIMask,
@@ -207,6 +207,7 @@ def _build_projection_context(
     recording_id: str,
     channel_1_templates: bool = True,
     channel_2_templates: bool = False,
+    displacement: tuple[float, float] = (0.0, 0.0),
 ) -> MultiRecordingRuntimeContext:
     """Builds a projection context with identity deformation fields on disk and in-memory template masks."""
     output_path = tmp_path / recording_id / "cindra" / "multi_recording" / "dataset"
@@ -225,9 +226,14 @@ def _build_projection_context(
         sampling_rate=30.0,
     )
 
-    # Persists identity (zero-displacement) deformation fields so backward projection preserves template positions.
-    runtime.registration.deform_field_y = np.zeros((_FRAME_SIZE, _FRAME_SIZE), dtype=np.float32)
-    runtime.registration.deform_field_x = np.zeros((_FRAME_SIZE, _FRAME_SIZE), dtype=np.float32)
+    # Persists uniform deformation fields, which default to zero displacement so backward projection preserves
+    # template positions. A non-zero displacement makes each recording's own field visible in its projected output.
+    runtime.registration.deform_field_y = np.full(
+        (_FRAME_SIZE, _FRAME_SIZE), fill_value=displacement[0], dtype=np.float32
+    )
+    runtime.registration.deform_field_x = np.full(
+        (_FRAME_SIZE, _FRAME_SIZE), fill_value=displacement[1], dtype=np.float32
+    )
     runtime.registration.save_arrays(output_path=output_path)
     runtime.registration.release_arrays()
 
@@ -464,7 +470,11 @@ class TestRegisterRecordings:
         contexts = _build_recording_pair(tmp_path=tmp_path, builder=gaussian_blob_image, configuration=configuration)
         contexts[0].runtime.combined_data = None
 
-        with pytest.raises(ValueError, match="combined_data must be loaded"):
+        expected_message = (
+            "Unable to register recording 'rec0' to shared visual space. The recording's combined_data must be "
+            "loaded before registration."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             register_recordings(contexts=contexts, workers=1)
 
     def test_missing_reference_image_raises(
@@ -479,8 +489,114 @@ class TestRegisterRecordings:
             image_kinds=("enhanced_mean",),
         )
 
-        with pytest.raises(ValueError, match="required reference image"):
+        expected_message = (
+            "Unable to register recording 'rec0' to shared visual space. The required reference image "
+            f"({ReferenceImageType.MEAN!s}) is not available in combined_data."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             register_recordings(contexts=contexts, workers=1)
+
+
+class TestRegisterRecordingsParallelPath:
+    """Tests the thread-pool branch register_recordings takes when it is allocated more than one worker."""
+
+    def test_matches_the_serial_path_and_keeps_each_deformation_with_its_recording(
+        self,
+        gaussian_blob_image: Callable[..., NDArray[np.float64]],
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verifies the parallel branch writes the same fields as the serial one, indexed to the same recordings."""
+        configuration = _make_configuration()
+        registrations = _capture_registrations(monkeypatch=monkeypatch)
+
+        serial_contexts = _build_recording_pair(
+            tmp_path=tmp_path / "serial", builder=gaussian_blob_image, configuration=configuration
+        )
+        parallel_contexts = _build_recording_pair(
+            tmp_path=tmp_path / "parallel", builder=gaussian_blob_image, configuration=configuration
+        )
+
+        register_recordings(contexts=serial_contexts, workers=1)
+        register_recordings(contexts=parallel_contexts, workers=4)
+
+        assert len(registrations) == 2
+        serial_registration, parallel_registration = registrations
+
+        for index in range(2):
+            serial_field_y, serial_field_x = _read_deform_fields(serial_contexts[index])
+            parallel_field_y, parallel_field_x = _read_deform_fields(parallel_contexts[index])
+
+            # The groupwise registration itself runs on the calling thread in both branches, so the fields the pool
+            # distributes are bit-identical to the ones the serial loop distributes.
+            np.testing.assert_array_equal(parallel_field_y, serial_field_y)
+            np.testing.assert_array_equal(parallel_field_x, serial_field_x)
+
+            # Equality alone cannot see a mapping error applied to both branches, so each recording's saved field is
+            # also matched against the deformation the algorithm resolved for that recording's own image index.
+            np.testing.assert_array_equal(
+                parallel_field_y, parallel_registration.get_deformation(image_index=index).get_field(dimension=0)
+            )
+            np.testing.assert_array_equal(
+                parallel_field_x, parallel_registration.get_deformation(image_index=index).get_field(dimension=1)
+            )
+            np.testing.assert_array_equal(
+                serial_field_y, serial_registration.get_deformation(image_index=index).get_field(dimension=0)
+            )
+
+        # The two recordings differ by an imposed shift, so their deformations differ. Without that, matching each
+        # recording against its own index would hold under a swapped mapping as well.
+        first_field_y, _ = _read_deform_fields(parallel_contexts[0])
+        second_field_y, _ = _read_deform_fields(parallel_contexts[1])
+        assert float(np.max(np.abs(first_field_y - second_field_y))) > 0.1
+
+
+class TestProjectTemplatesParallelPath:
+    """Tests the thread-pool branch project_templates_to_recordings takes when allocated more than one worker."""
+
+    @staticmethod
+    def _build_contexts(
+        tmp_path: Path, configuration: MultiRecordingConfiguration
+    ) -> list[MultiRecordingRuntimeContext]:
+        """Builds two projection contexts whose deformation fields displace their templates along different axes."""
+        return [
+            _build_projection_context(
+                tmp_path=tmp_path, configuration=configuration, recording_id="rec0", displacement=(4.0, 0.0)
+            ),
+            _build_projection_context(
+                tmp_path=tmp_path, configuration=configuration, recording_id="rec1", displacement=(0.0, -5.0)
+            ),
+        ]
+
+    @staticmethod
+    def _read_centroids(context: MultiRecordingRuntimeContext) -> list[tuple[int, int]]:
+        """Reads the projected ROI centroids a recording's output directory holds."""
+        output_path = context.runtime.output_path
+        assert output_path is not None
+        roi_statistics = ROIStatistics.load_list(
+            masks_path=output_path / "roi_masks.npz", statistics_path=output_path / "roi_statistics.npz"
+        )
+        return sorted(roi.mask.centroid for roi in roi_statistics)
+
+    def test_matches_the_serial_path_and_keeps_each_projection_with_its_recording(self, tmp_path: Path) -> None:
+        """Verifies the parallel branch projects the same centroids the serial branch does, per recording."""
+        configuration = _make_configuration()
+        serial_contexts = self._build_contexts(tmp_path=tmp_path / "serial", configuration=configuration)
+        parallel_contexts = self._build_contexts(tmp_path=tmp_path / "parallel", configuration=configuration)
+
+        project_templates_to_recordings(contexts=serial_contexts, workers=1)
+        project_templates_to_recordings(contexts=parallel_contexts, workers=4)
+
+        # The templates sit at (20, 20) and (42, 24) in the shared space. Backward projection applies the inverse of
+        # each recording's own uniform field, which moves them by that field: rec0 down four rows, rec1 five columns
+        # left. A pool that paired a recording with another one's context would report the other recording's shift.
+        assert self._read_centroids(context=parallel_contexts[0]) == [(24, 20), (46, 24)]
+        assert self._read_centroids(context=parallel_contexts[1]) == [(20, 15), (42, 19)]
+
+        for index in range(2):
+            assert self._read_centroids(context=parallel_contexts[index]) == self._read_centroids(
+                context=serial_contexts[index]
+            )
 
 
 class TestApplyForwardDeformation:
@@ -493,7 +609,11 @@ class TestApplyForwardDeformation:
         context = MultiRecordingRuntimeContext(configuration=MultiRecordingConfiguration(), runtime=runtime)
         deformation = Deformation.identity(height=_FRAME_SIZE, width=_FRAME_SIZE)
 
-        with pytest.raises(ValueError, match="combined_data must be loaded"):
+        expected_message = (
+            "Unable to register recording 'rec0' to shared visual space. The recording's combined_data must be "
+            "loaded before transforming images and ROI masks."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             _apply_forward_deformation(context=context, deformation=deformation)
 
 
@@ -631,7 +751,11 @@ class TestApplyBackwardDeformation:
         runtime.io.recording_id = "rec0"
         context = MultiRecordingRuntimeContext(configuration=MultiRecordingConfiguration(), runtime=runtime)
 
-        with pytest.raises(ValueError, match="combined_data must be loaded"):
+        expected_message = (
+            "Unable to project templates to recording 'rec0'. The recording's combined_data must be loaded before "
+            "transforming template masks."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             _apply_backward_deformation(context=context)
 
     def test_raises_without_deformation_fields(self) -> None:
@@ -649,5 +773,9 @@ class TestApplyBackwardDeformation:
         )
         context = MultiRecordingRuntimeContext(configuration=MultiRecordingConfiguration(), runtime=runtime)
 
-        with pytest.raises(ValueError, match="Deformation fields must be computed"):
+        expected_message = (
+            "Unable to project templates to recording 'rec0'. Deformation fields must be computed by "
+            "register_recordings() before applying backward transformation."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             _apply_backward_deformation(context=context)

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
+from ataraxis_base_utilities import error_format
 
 from cindra.registration.metrics import compute_pc_metrics
 
@@ -198,7 +199,11 @@ class TestComputePcMetrics:
         )
         context.runtime.io.registered_binary_path = None
 
-        with pytest.raises(ValueError, match="Unable to compute the registration quality metrics"):
+        expected_message = (
+            "Unable to compute the registration quality metrics. The input RuntimeContext instance does not contain "
+            "the path to the plane's registered binary file."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             compute_pc_metrics(context=context, workers=1)
 
     def test_raises_when_binary_file_missing(

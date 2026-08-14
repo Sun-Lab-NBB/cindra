@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
+from ataraxis_base_utilities import error_format
 
 from cindra.dataclasses import ROIMask, ROIStatistics
 from cindra.detection.roi_statistics import (
@@ -257,6 +258,70 @@ class TestROI:
         # A disk has solidity ~1.0 (all pixels inside the convex hull).
         assert roi.solidity > 0.8
 
+    @pytest.mark.parametrize("orientation", ["row", "diagonal"])
+    def test_collinear_roi_falls_back_to_the_default_hull_area(self, orientation: str) -> None:
+        """Verifies that a degenerate one-dimensional ROI reports its pixel count over the default hull area."""
+        # A collinear point set spans no area, so scipy's qhull refuses to build a hull for it and the solidity
+        # computation falls back to the default area of 10.0. Twelve pixels clear the ten-pixel small-ROI shortcut,
+        # so the fallback is the only path that can produce a value here.
+        span = list(range(4, 16))
+        if orientation == "row":
+            y_pixels, x_pixels = [5] * 12, span
+        else:
+            y_pixels, x_pixels = span, span
+
+        mask = _make_mask(y_pixels=y_pixels, x_pixels=x_pixels, weights=[1.0] * 12, frame_width=40)
+        roi = _ROI(data=ROIStatistics(mask=mask), diameter=10, crop=False)
+
+        assert roi.soma_pixel_count == 12
+        assert roi.solidity == 12 / 10.0
+
+    def test_rectangle_solidity_uses_the_measured_convex_hull_area(self) -> None:
+        """Verifies that a filled rectangle reports its pixel count over its true convex hull area."""
+        # The 4x5 rectangle's convex hull is the (4 - 1) by (5 - 1) box its corner pixels span, so its area is 12
+        # and its solidity is 20 / 12. This is the control for the degenerate fallback above: were the hull to
+        # raise here as well, the reported value would collapse to the default 20 / 10.
+        rows, columns = np.mgrid[0:4, 0:5]
+        mask = _make_mask(
+            y_pixels=(rows.ravel() + 5).tolist(),
+            x_pixels=(columns.ravel() + 5).tolist(),
+            weights=[1.0] * 20,
+            frame_width=40,
+        )
+        roi = _ROI(data=ROIStatistics(mask=mask), diameter=10, crop=False)
+
+        assert roi.soma_pixel_count == 20
+        assert roi.solidity == pytest.approx(20 / 12, abs=1e-9)
+
+    def test_flat_weight_gradient_keeps_every_pixel(self) -> None:
+        """Verifies that an ROI whose weights carry no radial gradient keeps all of its pixels in the soma."""
+        # A 3x4 block plus one distant outlier gives 13 pixels, clearing the ten-pixel crop shortcut. With every
+        # weight at zero, the cumulative radial weight never rises, so the gradient is flat and the crop radius is
+        # undefined. The soma must then fall back to the whole ROI rather than to an arbitrary radius.
+        block_y = [5, 5, 5, 6, 6, 6, 7, 7, 7, 8, 8, 8]
+        block_x = [5, 6, 7, 5, 6, 7, 5, 6, 7, 5, 6, 7]
+        zero_weight_roi = _ROI(
+            data=ROIStatistics(
+                mask=_make_mask(y_pixels=[*block_y, 12], x_pixels=[*block_x, 20], weights=[0.0] * 13, frame_width=40)
+            ),
+            diameter=10,
+        )
+
+        assert zero_weight_roi.soma_mask.all()
+        assert zero_weight_roi.soma_pixel_count == 13
+
+        # The same geometry with unit weights does produce a gradient, and the crop drops the distant outlier. This
+        # control shows the all-True mask above comes from the flat gradient rather than from the geometry.
+        unit_weight_roi = _ROI(
+            data=ROIStatistics(
+                mask=_make_mask(y_pixels=[*block_y, 12], x_pixels=[*block_x, 20], weights=[1.0] * 13, frame_width=40)
+            ),
+            diameter=10,
+        )
+
+        assert unit_weight_roi.soma_pixel_count == 12
+        assert not bool(unit_weight_roi.soma_mask[12])
+
     def test_fit_ellipse_returns_ellipse_data(self) -> None:
         """Verifies that fit_ellipse returns a valid _EllipseData instance."""
         roi_statistics = _make_circular_roi(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
@@ -345,7 +410,8 @@ class TestComputeRoiStatistics:
 
     def test_empty_list_raises(self) -> None:
         """Verifies that an empty ROI list raises ValueError."""
-        with pytest.raises(ValueError, match="Unable to compute ROI statistics"):
+        expected_message = "Unable to compute ROI statistics. The input rois list is empty."
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             compute_roi_statistics(rois=[], frame_height=50, frame_width=50)
 
     def test_updates_compactness_in_place(self) -> None:

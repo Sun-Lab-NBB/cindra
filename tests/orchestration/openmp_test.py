@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 
 import pytest
+from ataraxis_base_utilities import error_format
 
 from cindra.orchestration import (
     OpenMpStatus,
@@ -143,8 +144,12 @@ class TestRuntimeLinking:
             raise OSError("read-only file system")
 
         monkeypatch.setattr(Path, "mkdir", _raise)
-        message = "Unable to link the OpenMP runtime"
-        with pytest.raises(RuntimeError, match=message):
+        expected_message = (
+            f"Unable to link the OpenMP runtime into {tmp_path / 'lib'}. Writing the link requires permission to "
+            f"modify that directory, which usually means running the command through sudo. The loader reported: "
+            f"read-only file system."
+        )
+        with pytest.raises(RuntimeError, match=error_format(expected_message)):
             _link_openmp_runtime(runtime_path=runtime_path, link_path=tmp_path / "lib" / "libomp.dylib")
 
 
@@ -181,7 +186,12 @@ class TestRuntimeResolution:
     def test_resolution_refuses_every_platform_that_runs_tbb(self, monkeypatch, platform):
         """Verifies that the platforms running the TBB threading layer refuse to resolve an OpenMP runtime."""
         monkeypatch.setattr("cindra.orchestration.openmp.sys.platform", platform)
-        with pytest.raises(RuntimeError, match="Only macOS runs the OpenMP"):
+        expected_message = (
+            f"Unable to resolve an OpenMP runtime on the '{platform}' platform. Only macOS runs the OpenMP "
+            f"threading layer. Every other platform runs TBB, which carries lower overhead on the flat prange loops "
+            f"this library compiles, so an OpenMP runtime linked here would go unused."
+        )
+        with pytest.raises(RuntimeError, match=error_format(expected_message)):
             resolve_openmp_runtime()
 
     def test_resolution_leaves_a_host_whose_runtime_loads_alone(self, monkeypatch):
@@ -263,5 +273,12 @@ class TestMissingRuntimeVerification:
         monkeypatch.setattr("cindra.orchestration.openmp.sys.platform", "darwin")
         monkeypatch.setattr("cindra.orchestration.openmp._openmp_runtime_loadable", lambda: False)
 
-        with pytest.raises(RuntimeError, match="cindra omp"):
+        expected_message = (
+            f"Unable to locate the OpenMP runtime ({openmp_module._OPENMP_LIBRARY_NAME}) that the Numba threading "
+            f"layer loads on macOS. Processing fails once it reaches a parallelized stage until the runtime is "
+            f"loadable. Run 'cindra omp' to report the runtimes found on this host, and 'cindra omp --yes' to link "
+            f"one into {openmp_module._LINK_DIRECTORY}. Install one with 'brew install libomp' when the report finds "
+            f"none."
+        )
+        with pytest.raises(RuntimeError, match=error_format(expected_message)):
             verify_openmp_runtime()

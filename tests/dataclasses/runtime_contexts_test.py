@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from ataraxis_base_utilities import ensure_directory_exists
+from ataraxis_base_utilities import error_format, ensure_directory_exists
 
 from cindra.dataclasses import (
     ROIMask,
@@ -60,6 +60,33 @@ def _populate_single_runtime_arrays(
     runtime.registration.rigid_x_offsets = (np.arange(frame_count, dtype=np.int32) * 2).astype(np.int32)
     runtime.detection.mean_image = generator.random(size=(height, width)).astype(np.float32)
     runtime.extraction.roi_statistics = [_make_roi_statistics(frame_width=width)]
+
+
+def _build_multi_plane_recording(
+    context_factory: Callable[..., RuntimeContext], tmp_path: Path, *, plane_count: int
+) -> Path:
+    """Saves a recording carrying plane_count plane directories and returns the recording's output root.
+
+    Every plane carries a geometry derived from its index (height 8 + index, width 16 + index, frame count 10 + index),
+    so a context loaded out of order is detectable from its scalars alone. Plane 0 comes from the shared fixture, and
+    the remaining planes are written directly as runtime data files.
+    """
+    context = context_factory(tmp_path=tmp_path, frame_height=8, frame_width=16, frame_count=10)
+    context.save_shared()
+    context.save_runtime()
+
+    cindra_root = context.configuration.file_io.output_path / "cindra"
+    for index in range(1, plane_count):
+        runtime = SingleRecordingRuntimeData()
+        runtime.io.plane_index = index
+        runtime.io.frame_height = 8 + index
+        runtime.io.frame_width = 16 + index
+        runtime.io.frame_count = 10 + index
+        runtime.io.sampling_rate = 30.0
+        runtime.io.output_path = cindra_root / f"plane_{index}"
+        runtime.save(output_path=cindra_root / f"plane_{index}")
+
+    return context.configuration.file_io.output_path
 
 
 def _build_multi_dataset(
@@ -136,7 +163,11 @@ class TestRuntimeContextSaveShared:
         context = single_recording_context(tmp_path)
         context.configuration.file_io.output_path = None
 
-        with pytest.raises(ValueError, match="Unable to save shared configuration data"):
+        expected_message = (
+            "Unable to save shared configuration data. The output_path must be configured in the FileIO section "
+            "of the configuration, but it is currently None."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             context.save_shared()
 
 
@@ -159,7 +190,11 @@ class TestRuntimeContextSaveRuntime:
         context = single_recording_context(tmp_path)
         context.runtime.io.output_path = None
 
-        with pytest.raises(ValueError, match="Unable to save runtime data"):
+        expected_message = (
+            "Unable to save runtime data. The output_path must be set in the IOData section of the "
+            "runtime data, but it is currently None."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             context.save_runtime()
 
 
@@ -263,7 +298,11 @@ class TestRuntimeContextLoad:
 
     def test_load_raises_when_no_configuration_found(self, tmp_path: Path) -> None:
         """Verifies that load raises FileNotFoundError when no configuration.yaml exists under the root."""
-        with pytest.raises(FileNotFoundError, match="No configuration"):
+        expected_message = (
+            f"Unable to load RuntimeContext. No configuration.yaml file was found under {tmp_path}. "
+            f"Ensure the single-recording pipeline has been run for this recording."
+        )
+        with pytest.raises(FileNotFoundError, match=error_format(expected_message)):
             RuntimeContext.load(root_path=tmp_path)
 
     def test_load_raises_when_multiple_configurations_found(
@@ -273,7 +312,11 @@ class TestRuntimeContextLoad:
         single_recording_context(tmp_path / "r1").save_shared()
         single_recording_context(tmp_path / "r2").save_shared()
 
-        with pytest.raises(RuntimeError, match="expected exactly one"):
+        expected_message = (
+            f"Unable to load RuntimeContext. Found 2 configuration.yaml files under {tmp_path}, but expected "
+            f"exactly one."
+        )
+        with pytest.raises(RuntimeError, match=error_format(expected_message)):
             RuntimeContext.load(root_path=tmp_path)
 
     def test_load_raises_when_acquisition_missing(
@@ -282,9 +325,14 @@ class TestRuntimeContextLoad:
         """Verifies that load raises FileNotFoundError when the acquisition parameters file is absent."""
         context = single_recording_context(tmp_path)
         context.save_shared()
-        (context.configuration.file_io.output_path / "cindra" / "acquisition_parameters.yaml").unlink()
+        acquisition_path = context.configuration.file_io.output_path / "cindra" / "acquisition_parameters.yaml"
+        acquisition_path.unlink()
 
-        with pytest.raises(FileNotFoundError, match="Acquisition parameters file does not exist"):
+        expected_message = (
+            f"Unable to load RuntimeContext. Acquisition parameters file does not exist at the expected path: "
+            f"{acquisition_path}."
+        )
+        with pytest.raises(FileNotFoundError, match=error_format(expected_message)):
             RuntimeContext.load(root_path=context.configuration.file_io.output_path)
 
     def test_load_raises_when_plane_directory_missing(
@@ -295,7 +343,11 @@ class TestRuntimeContextLoad:
         context.save_shared()
         context.save_runtime()
 
-        with pytest.raises(FileNotFoundError, match="Plane directory does not exist"):
+        plane_path = context.configuration.file_io.output_path / "cindra" / "plane_3"
+        expected_message = (
+            f"Unable to load RuntimeContext. Plane directory does not exist at the specified path: {plane_path}."
+        )
+        with pytest.raises(FileNotFoundError, match=error_format(expected_message)):
             RuntimeContext.load(root_path=context.configuration.file_io.output_path, plane_index=3)
 
 
@@ -322,7 +374,10 @@ class TestMultiRecordingRuntimeContextSaveShared:
         runtime.io.dataset_output_paths = (tmp_path,)
         context = MultiRecordingRuntimeContext(configuration=MultiRecordingConfiguration(), runtime=runtime)
 
-        with pytest.raises(ValueError, match="Unable to save configuration"):
+        expected_message = (
+            "Unable to save configuration. The output_path must be set in the runtime data, but it is currently None."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             context.save_shared()
 
 
@@ -347,7 +402,10 @@ class TestMultiRecordingRuntimeContextSaveRuntime:
         runtime.output_path = None
         context = MultiRecordingRuntimeContext(configuration=MultiRecordingConfiguration(), runtime=runtime)
 
-        with pytest.raises(ValueError, match="Unable to save runtime data"):
+        expected_message = (
+            "Unable to save runtime data. The output_path must be set in the runtime data, but it is currently None."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             context.save_runtime()
 
 
@@ -454,14 +512,22 @@ class TestMultiRecordingRuntimeContextLoad:
 
     def test_load_raises_when_no_runtime_found(self, tmp_path: Path) -> None:
         """Verifies that load raises FileNotFoundError when no multi-recording runtime file exists under the root."""
-        with pytest.raises(FileNotFoundError, match="No multi_recording_runtime_data"):
+        expected_message = (
+            f"Unable to load MultiRecordingRuntimeContext. No multi_recording_runtime_data.yaml file was "
+            f"found under {tmp_path}. Ensure the multi-recording pipeline has been run for this recording."
+        )
+        with pytest.raises(FileNotFoundError, match=error_format(expected_message)):
             MultiRecordingRuntimeContext.load(root_path=tmp_path)
 
     def test_load_raises_when_multiple_runtimes_found(self, tmp_path: Path) -> None:
         """Verifies that load raises RuntimeError when more than one runtime file exists under the root."""
         _build_multi_dataset(base=tmp_path, recording_count=2)
 
-        with pytest.raises(RuntimeError, match="expected exactly one"):
+        expected_message = (
+            f"Unable to load MultiRecordingRuntimeContext. Found 2 multi_recording_runtime_data.yaml files under "
+            f"{tmp_path}, but expected exactly one."
+        )
+        with pytest.raises(RuntimeError, match=error_format(expected_message)):
             MultiRecordingRuntimeContext.load(root_path=tmp_path)
 
     def test_load_raises_when_dataset_output_paths_missing(self, tmp_path: Path) -> None:
@@ -479,14 +545,24 @@ class TestMultiRecordingRuntimeContextLoad:
         """Verifies that load raises FileNotFoundError when the configuration file is absent."""
         _build_multi_dataset(base=tmp_path, recording_count=1, write_config=False)
 
-        with pytest.raises(FileNotFoundError, match="Configuration file does not exist"):
+        configuration_path = (
+            tmp_path / "rec0" / "cindra" / "multi_recording" / "dataset" / "multi_recording_configuration.yaml"
+        )
+        expected_message = (
+            f"Unable to load MultiRecordingRuntimeContext. Configuration file does not exist at the expected "
+            f"path: {configuration_path}."
+        )
+        with pytest.raises(FileNotFoundError, match=error_format(expected_message)):
             MultiRecordingRuntimeContext.load(root_path=tmp_path / "rec0")
 
     def test_load_raises_when_recording_index_out_of_range(self, tmp_path: Path) -> None:
         """Verifies that load raises IndexError when the requested recording index is out of range."""
         _build_multi_dataset(base=tmp_path, recording_count=1)
 
-        with pytest.raises(IndexError, match="is out of range"):
+        expected_message = (
+            "Unable to load MultiRecordingRuntimeContext. Recording index 99 is out of range. Valid range is 0 to 0."
+        )
+        with pytest.raises(IndexError, match=error_format(expected_message)):
             MultiRecordingRuntimeContext.load(root_path=tmp_path / "rec0", recording_index=99)
 
 
