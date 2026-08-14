@@ -201,7 +201,7 @@ class DiffeomorphicDemonsRegistration:
         # state set by the pipeline entry point.
         previous_state = console.progress_enabled
         if progress:
-            console.enable_progress()  # pragma: no cover, only when the caller sets progress=True
+            console.enable_progress()
         else:
             console.disable_progress()
 
@@ -234,7 +234,7 @@ class DiffeomorphicDemonsRegistration:
                         if self._smooth_scale:
                             scale = max(self._final_scale, scale * iteration_factor)
         finally:
-            if previous_state:  # pragma: no cover, restores the caller's progress state
+            if previous_state:
                 console.enable_progress()
             else:
                 console.disable_progress()
@@ -334,7 +334,7 @@ class DiffeomorphicDemonsRegistration:
                     "pairs with each of the others exactly once, so each one holds at least one contribution here."
                 )
                 console.error(message=message, error=RuntimeError)
-            if average_factor is not None:  # pragma: no cover, only reached with more than two images
+            if average_factor is not None:
                 np.multiply(field_y, average_factor, out=field_y)
                 np.multiply(field_x, average_factor, out=field_x)
             deformations.append(Deformation(field_y=field_y, field_x=field_x))
@@ -554,7 +554,7 @@ class DiffeomorphicDemonsRegistration:
         Returns:
             The shape every image of the group holds at the requested scale, as (height, width).
         """
-        if self._pyramids is None:  # pragma: no cover, defensive guard because register() always initializes pyramids
+        if self._pyramids is None:
             message = (
                 "Unable to resolve the field shape. The pyramids have not been initialized, call register() first."
             )

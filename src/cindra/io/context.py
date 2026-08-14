@@ -247,7 +247,7 @@ def resolve_single_recording_contexts(
         # runtime_data.yaml as a hard error rather than silently persisting concurrently alongside peer workers.
         for context in contexts:
             # io.output_path is always populated during per-plane construction above, so the guard is defensive only.
-            if context.runtime.io.output_path is None:  # pragma: no cover
+            if context.runtime.io.output_path is None:
                 continue
             runtime_yaml = context.runtime.io.output_path / SINGLE_RECORDING_RUNTIME_DATA_FILENAME
             if not runtime_yaml.exists():
@@ -410,7 +410,7 @@ def resolve_multi_recording_contexts(
         for context in contexts:
             runtime_output_path = context.runtime.output_path
             # output_path is always populated during per-recording construction above, so the guard is defensive only.
-            if runtime_output_path is None:  # pragma: no cover
+            if runtime_output_path is None:
                 continue
             runtime_yaml = runtime_output_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME
             if not runtime_yaml.exists():

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
+from ataraxis_base_utilities import error_format
 
 from cindra.dataclasses import ROIMask, ROIStatistics
 from cindra.classification.classify import Classifier, classify
@@ -47,8 +48,116 @@ def _create_classifier_file(path: Path, sample_count: int = 200) -> None:
     )
 
 
+def _create_separable_classifier_file(path: Path, sample_count: int = 200) -> None:
+    """Creates a classifier file whose labels follow its features, so a fitted model can discriminate at all.
+
+    The cell half and the artifact half occupy disjoint ranges of every feature, which is what makes the fitted
+    probability grid, the log-odds transform, and the logistic fit observable in the predictions.
+    """
+    generator = np.random.default_rng(seed=11)
+    half = sample_count // 2
+    labels = np.concatenate([np.ones(half, dtype=np.bool_), np.zeros(half, dtype=np.bool_)])
+    np.savez(
+        path,
+        training_labels=labels,
+        normalized_pixel_count=np.concatenate(
+            [generator.normal(loc=2.0, scale=0.1, size=half), generator.normal(loc=0.3, scale=0.1, size=half)]
+        ).astype(np.float32),
+        compactness=np.concatenate(
+            [generator.normal(loc=1.0, scale=0.05, size=half), generator.normal(loc=2.5, scale=0.05, size=half)]
+        ).astype(np.float32),
+        skewness=np.concatenate(
+            [generator.normal(loc=2.0, scale=0.2, size=half), generator.normal(loc=-0.5, scale=0.2, size=half)]
+        ).astype(np.float32),
+    )
+
+
+class TestClassifierDiscrimination:
+    """Tests that the fitted model separates ROIs drawn from the two training populations."""
+
+    def test_separable_training_data_separates_the_predicted_probabilities(self, tmp_path: Path) -> None:
+        """Verifies that ROIs matching the cell and artifact populations receive opposite classifications."""
+        path = tmp_path / "separable.npz"
+        _create_separable_classifier_file(path=path)
+        classifier = Classifier(classifier_path=path)
+
+        # Each ROI sits at the center of one training population, so a model that learned anything from the labels
+        # must assign them opposite classifications. A model returning a constant fails this regardless of the
+        # constant it returns.
+        cell = _make_roi(compactness=1.0, normalized_pixel_count=2.0, skewness=2.0)
+        artifact = _make_roi(compactness=2.5, normalized_pixel_count=0.3, skewness=-0.5)
+
+        result = classifier.classify(roi_statistics=[cell, artifact])
+
+        assert result[0, 1] > 0.99
+        assert result[1, 1] < 0.01
+        assert result[0, 0] == 1.0
+        assert result[1, 0] == 0.0
+
+    def test_swapped_populations_swap_the_classifications(self, tmp_path: Path) -> None:
+        """Verifies that the classification follows the labels rather than the direction of the feature values."""
+        path = tmp_path / "separable.npz"
+        _create_separable_classifier_file(path=path)
+        # Inverting every label without touching the features must invert every prediction, which is what separates a
+        # model that learned from the labels from one that reads a fixed direction out of the feature values.
+        data = dict(np.load(path))
+        inverted_path = tmp_path / "inverted.npz"
+        np.savez(inverted_path, **{**data, "training_labels": ~data["training_labels"]})
+
+        cell = _make_roi(compactness=1.0, normalized_pixel_count=2.0, skewness=2.0)
+        artifact = _make_roi(compactness=2.5, normalized_pixel_count=0.3, skewness=-0.5)
+
+        original = Classifier(classifier_path=path).classify(roi_statistics=[cell, artifact])
+        inverted = Classifier(classifier_path=inverted_path).classify(roi_statistics=[cell, artifact])
+
+        assert original[0, 0] == 1.0
+        assert original[1, 0] == 0.0
+        assert inverted[0, 0] == 0.0
+        assert inverted[1, 0] == 1.0
+        assert inverted[0, 1] < 0.01
+        assert inverted[1, 1] > 0.99
+
+    def test_excluded_feature_cannot_change_a_prediction(self, tmp_path: Path) -> None:
+        """Verifies that preclassification ignores skewness while full classification is driven by it."""
+        path = tmp_path / "separable.npz"
+        _create_separable_classifier_file(path=path)
+
+        # The two ROIs share every morphological feature and differ in skewness alone, which is the one feature
+        # preclassification excludes because it requires extracted fluorescence traces.
+        high_skewness = _make_roi(compactness=1.5, normalized_pixel_count=1.0, skewness=5.0)
+        low_skewness = _make_roi(compactness=1.5, normalized_pixel_count=1.0, skewness=-5.0)
+
+        preclassified = classify(
+            roi_statistics=[high_skewness, low_skewness], custom_classifier_path=path, preclassification=True
+        )
+        fully_classified = classify(
+            roi_statistics=[high_skewness, low_skewness], custom_classifier_path=path, preclassification=False
+        )
+
+        # Excluding the only feature the two ROIs differ in must make them indistinguishable, exactly rather than
+        # approximately, because they reach the fitted model as the same feature vector.
+        assert preclassified[0, 1] == preclassified[1, 1]
+
+        # Including it separates them, which proves the identical pair above comes from the exclusion rather than from
+        # a model that ignores skewness anyway.
+        assert fully_classified[0, 1] > 0.99
+        assert fully_classified[1, 1] < 0.01
+
+
 class TestClassifier:
     """Tests the Classifier class."""
+
+    def test_representation_reports_the_loaded_file_and_its_fitted_feature_set(self, tmp_path: Path) -> None:
+        """Verifies that the representation reports the path, the features kept, and the training sample count."""
+        path = tmp_path / "test_classifier.npz"
+        # The file holds 200 samples and all three feature columns, but the instance is restricted to two of them, so
+        # the feature list is derived from the intersection rather than echoed from either input.
+        _create_classifier_file(path=path, sample_count=200)
+        classifier = Classifier(classifier_path=path, feature_names=("compactness", "skewness"))
+
+        assert repr(classifier) == (
+            f"Classifier(classifier_path={path}, features=['compactness', 'skewness'], training_samples=200)"
+        )
 
     def test_loads_and_fits(self, tmp_path: Path) -> None:
         """Verifies that the classifier loads training data and fits the model."""
@@ -67,14 +176,22 @@ class TestClassifier:
         """Verifies that a file without training_labels raises ValueError naming the missing column."""
         path = tmp_path / "bad_classifier.npz"
         np.savez(path, compactness=np.ones(200, dtype=np.float32))
-        with pytest.raises(ValueError, match=r"missing\s+the\s+'training_labels'\s+column"):
+        expected_message = (
+            f"Unable to load the classification training data. The classifier file at {path} is missing the "
+            f"'training_labels' column."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             Classifier(classifier_path=path)
 
     def test_no_valid_features_raises(self, tmp_path: Path) -> None:
         """Verifies that a file with labels but no valid features raises ValueError naming the expected columns."""
         path = tmp_path / "labels_only.npz"
         np.savez(path, training_labels=np.ones(200, dtype=np.bool_))
-        with pytest.raises(ValueError, match=r"does\s+not\s+contain\s+any\s+of\s+the\s+expected\s+feature\s+columns"):
+        expected_message = (
+            f"Unable to load the classification training data. The classifier file at {path} does not contain any "
+            f"of the expected feature columns: normalized_pixel_count, compactness, skewness."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             Classifier(classifier_path=path)
 
     def test_corrupted_file_raises(self, tmp_path: Path) -> None:
@@ -105,7 +222,11 @@ class TestClassifier:
         # The probability grid samples 100 positions across the sorted training values, so a 50-sample dataset would
         # otherwise produce zero-width bins, NaN bin probabilities, and a model fit that fails for an unrelated reason.
         _create_classifier_file(path=path, sample_count=50)
-        with pytest.raises(ValueError, match=r"holds\s+50\s+training\s+samples"):
+        expected_message = (
+            f"Unable to load the classification training data. The classifier file at {path} holds 50 training "
+            f"samples, but fitting the classification model requires at least 100 samples."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             Classifier(classifier_path=path)
 
     def test_classify_output_shape(self, tmp_path: Path) -> None:
@@ -163,7 +284,8 @@ class TestClassifier:
         path = tmp_path / "test_classifier.npz"
         _create_classifier_file(path=path)
         classifier = Classifier(classifier_path=path)
-        with pytest.raises(ValueError, match="Unable to classify ROIs"):
+        expected_message = "Unable to classify ROIs. The input roi_statistics list is empty."
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             classifier.classify(roi_statistics=[])
 
     def test_feature_subset(self, tmp_path: Path) -> None:
@@ -237,7 +359,11 @@ class TestCreateTrainingDataset:
     def test_mismatched_lengths_raises(self, tmp_path: Path) -> None:
         """Verifies that mismatched feature array lengths raise ValueError."""
         path = tmp_path / "bad_training.npz"
-        with pytest.raises(ValueError, match="Unable to create the classifier training dataset"):
+        expected_message = (
+            "Unable to create the classifier training dataset file. The feature 'compactness' has 5 samples, but "
+            "training_labels has 10 samples."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             Classifier.create_training_dataset(
                 file_path=path,
                 training_labels=np.ones(10, dtype=np.bool_),
@@ -273,7 +399,11 @@ class TestClassifyFunction:
 
     def test_empty_list_raises(self) -> None:
         """Verifies that an empty ROI list raises ValueError."""
-        with pytest.raises(ValueError, match="Unable to classify ROIs"):
+        expected_message = (
+            "Unable to classify ROIs. No ROIs appear to have been detected. Classification requires detection to "
+            "discover at least one valid ROI candidate."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             classify(roi_statistics=[])
 
     def test_threshold_respected(self) -> None:

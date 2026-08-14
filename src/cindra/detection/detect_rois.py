@@ -262,7 +262,24 @@ def detect_rois_in_frames(
             active_frame_indices = np.nonzero(time_projection > peak_threshold)[0]
             if active_frame_indices.size == 0:
                 break
+
+        # Suppresses the abandoned mask across every scale before moving on. The ROI contributed no active frames, so
+        # the subtraction below never runs and the variance maps still carry this peak as their maximum. Without the
+        # suppression the next iteration selects the same peak and reaches the same dead end, spending the whole
+        # iteration budget on one location and reporting the empty result as an iteration limit. The mask is mapped
+        # through the same multiscale projection the subtraction path uses, under unit weights, because that
+        # projection drops the pixels whose weight is zero and the weights that reached this point are degenerate.
+        # Only the coordinates are used here, so substituting the weights changes nothing the suppression reads.
         if active_frame_indices.size == 0:
+            dead_y, dead_x, _ = _compute_multiscale_masks(
+                y_pixels=y_pixels,
+                x_pixels=x_pixels,
+                weights=np.ones_like(pixel_weights),
+                scale_heights=scale_heights,
+                scale_widths=scale_widths,
+            )
+            for scale_index in range(scale_count):
+                variance_maps[scale_index][dead_y[scale_index], dead_x[scale_index]] = 0.0
             continue
 
         # Tests whether a two-component model explains significantly more variance than the single-component model. If
@@ -736,7 +753,7 @@ def _extend_iteratively(
         weights = frames[np.ix_(active_frame_indices, flat_indices)].mean(axis=0)
         active_mask = weights > max(0, weights.max() * _MINIMUM_WEIGHT_FRACTION)
         active_count = active_mask.sum()
-        if active_count == 0:  # pragma: no cover, degenerate case where all extension weights are zero
+        if active_count == 0:
             break
         y_pixels, x_pixels, weights = y_pixels[active_mask], x_pixels[active_mask], weights[active_mask]
 
@@ -746,7 +763,14 @@ def _extend_iteratively(
             break
         previous_count = y_pixels.size
 
-    weights = weights / norm(weights)
+    # The break above returns the weights measured before the retention mask is applied, so an extended mask whose
+    # residual is uniformly zero arrives here as a zero vector. Dividing that vector by its own zero norm yields NaN
+    # weights, which the caller cannot compare against its activity threshold. Leaving the zeros unnormalized keeps
+    # the caller's projection finite, so it rejects the ROI on the threshold it already applies.
+    weight_norm = norm(weights)
+    if weight_norm > 0:
+        weights = weights / weight_norm
+
     return y_pixels, x_pixels, weights
 
 

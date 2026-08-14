@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import yaml
 import numpy as np
 import pytest
-from ataraxis_base_utilities import ensure_directory_exists
+from ataraxis_base_utilities import error_format, ensure_directory_exists
 
 from cindra.io.binary import resolve_binarization_marker_path, resolve_registration_marker_path
 from cindra.dataclasses import (
@@ -368,9 +368,20 @@ class TestExtractMultiRecording:
 
         # An interrupted conversion or rewrite leaves its own phase marker beside the binary it was writing.
         binary_path = context.runtime.combined_data.registered_binary_paths[0]
-        resolve_marker_path(binary_path=binary_path).touch()
+        marker_path = resolve_marker_path(binary_path=binary_path)
+        marker_path.touch()
 
-        with pytest.raises(RuntimeError, match="was interrupted"):
+        # error_format wraps the message the way the console does, so the match survives the line break the console
+        # inserts between 'was' and 'interrupted' when the binary path is long enough to push it there.
+        expected_message = (
+            f"Unable to extract multi-recording traces for recording rec0. A previous write of the binary file "
+            f"'{binary_path}' was interrupted, so the file holds finished frames up to an unknown point and "
+            f"unfinished frames after it. Enable 'file_io.repeat_binarization' in that recording's single-recording "
+            f"configuration and re-run its single-recording pipeline, which rebuilds the binary from its source TIFF "
+            f"files and clears the marker at '{marker_path}'."
+        )
+
+        with pytest.raises(RuntimeError, match=error_format(expected_message)):
             extract_traces(context=context, workers=1)
 
     def test_persists_disjoint_extraction_and_deconvolution_times(self, tmp_path: Path, monkeypatch) -> None:

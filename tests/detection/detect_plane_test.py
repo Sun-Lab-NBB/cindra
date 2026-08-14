@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
+from ataraxis_base_utilities import error_format
 
 from cindra.detection import detect_plane_rois
 
@@ -15,7 +16,7 @@ if TYPE_CHECKING:
 
     from numpy.typing import NDArray
 
-    from cindra.dataclasses import RuntimeContext, SingleRecordingConfiguration
+    from cindra.dataclasses import ROIStatistics, RuntimeContext, SingleRecordingConfiguration
 
 _FRAME_HEIGHT: int = 48
 """The synthetic frame height in pixels used by the detection integration movies."""
@@ -46,6 +47,10 @@ _CENTROID_TOLERANCE: float = 8.0
 
 _MAXIMUM_ROI_PIXELS: int = 576
 """The largest pixel count a mask grown around a sigma-3 blob may report, which is a quarter of the 48x48 frame."""
+
+_CHANNEL_2_BLOB_CENTERS: tuple[tuple[int, int], ...] = ((12, 12), (36, 36))
+"""The channel 2 blob centroids, a strict subset of the channel 1 centers, so that a pass reading the channel 1
+binary for both channels reports centroids the channel 2 movie plants nowhere."""
 
 
 def _build_flickering_movie(
@@ -83,6 +88,23 @@ def _minimum_centroid_distance(centroid: tuple[int, int], centers: tuple[tuple[i
     return min(float(np.hypot(centroid[0] - center[0], centroid[1] - center[1])) for center in centers)
 
 
+def _assert_centroids_match_planted_centers(
+    roi_statistics: list[ROIStatistics],
+    centers: tuple[tuple[int, int], ...],
+) -> None:
+    """Asserts that the detected centroids and the planted blob centers cover each other in both directions."""
+    assert 1 <= len(roi_statistics) <= 2 * len(centers)
+
+    # Every detected ROI lands on a planted blob, so the pass produced no spurious centroids.
+    centroids = tuple(roi.mask.centroid for roi in roi_statistics)
+    for centroid in centroids:
+        assert _minimum_centroid_distance(centroid=centroid, centers=centers) <= _CENTROID_TOLERANCE
+
+    # Every planted blob is recovered by at least one detected ROI, so the pass dropped none of them.
+    for center in centers:
+        assert _minimum_centroid_distance(centroid=center, centers=centroids) <= _CENTROID_TOLERANCE
+
+
 def _permissive_detection(configuration: SingleRecordingConfiguration) -> None:
     """Configures a permissive, deterministic detection pass that keeps every blob it finds."""
     configuration.roi_detection.denoise = False
@@ -116,16 +138,7 @@ class TestDetectPlaneRois:
 
         roi_statistics = context.runtime.extraction.roi_statistics
         assert roi_statistics is not None
-        assert 1 <= len(roi_statistics) <= 2 * len(_BLOB_CENTERS)
-
-        # Every detected ROI lands on a planted blob, so detection produced no spurious centroids.
-        for roi in roi_statistics:
-            assert _minimum_centroid_distance(centroid=roi.mask.centroid, centers=_BLOB_CENTERS) <= _CENTROID_TOLERANCE
-
-        # Every planted blob is recovered by at least one detected ROI.
-        centroids = tuple(roi.mask.centroid for roi in roi_statistics)
-        for center in _BLOB_CENTERS:
-            assert _minimum_centroid_distance(centroid=center, centers=centroids) <= _CENTROID_TOLERANCE
+        _assert_centroids_match_planted_centers(roi_statistics=roi_statistics, centers=_BLOB_CENTERS)
 
         # The mask geometry is what extraction integrates over, so each ROI carries a non-empty, in-frame pixel set
         # whose three arrays agree in length and whose reported pixel count matches them.
@@ -185,7 +198,7 @@ class TestDetectPlaneRois:
             blob_builder=gaussian_blob_image, centers=_BLOB_CENTERS, frame_count=_FRAME_COUNT, seed=7
         )
         movie_channel_2 = _build_flickering_movie(
-            blob_builder=gaussian_blob_image, centers=_BLOB_CENTERS, frame_count=_FRAME_COUNT, seed=21
+            blob_builder=gaussian_blob_image, centers=_CHANNEL_2_BLOB_CENTERS, frame_count=_FRAME_COUNT, seed=21
         )
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
@@ -206,10 +219,18 @@ class TestDetectPlaneRois:
 
         detect_plane_rois(context=context, workers=1)
 
-        assert context.runtime.extraction.roi_statistics is not None
-        assert context.runtime.extraction.roi_statistics
-        assert context.runtime.extraction.roi_statistics_channel_2 is not None
-        assert context.runtime.extraction.roi_statistics_channel_2
+        # Each channel recovers the blobs planted in its own binary. Channel 2 carries only two of channel 1's four
+        # blobs, so a pass that read the channel 1 binary for both channels reports ROIs at the two centers channel
+        # 2 does not carry, which are farther from both channel 2 centers than the tolerance allows.
+        roi_statistics = context.runtime.extraction.roi_statistics
+        assert roi_statistics is not None
+        _assert_centroids_match_planted_centers(roi_statistics=roi_statistics, centers=_BLOB_CENTERS)
+
+        roi_statistics_channel_2 = context.runtime.extraction.roi_statistics_channel_2
+        assert roi_statistics_channel_2 is not None
+        _assert_centroids_match_planted_centers(
+            roi_statistics=roi_statistics_channel_2, centers=_CHANNEL_2_BLOB_CENTERS
+        )
 
         detection_directory = tmp_path / "output" / "cindra" / "plane_0" / "detection_data"
         assert (detection_directory / "mean_image_channel_2.npy").exists()
@@ -238,8 +259,11 @@ class TestDetectPlaneRois:
 
         detect_plane_rois(context=context, workers=1)
 
-        assert context.runtime.extraction.roi_statistics is not None
-        assert context.runtime.extraction.roi_statistics
+        # Denoising rewrites the binned movie before detection runs, so it must preserve the planted blobs rather
+        # than merely leave a non-empty ROI list behind.
+        roi_statistics = context.runtime.extraction.roi_statistics
+        assert roi_statistics is not None
+        _assert_centroids_match_planted_centers(roi_statistics=roi_statistics, centers=_BLOB_CENTERS)
 
     def test_preclassification_path(
         self,
@@ -265,8 +289,12 @@ class TestDetectPlaneRois:
 
         detect_plane_rois(context=context, workers=1)
 
-        assert context.runtime.extraction.roi_statistics is not None
-        assert context.runtime.extraction.roi_statistics
+        # A 0.5 confidence threshold filters the detected candidates, and the planted blobs are what a working
+        # classifier keeps. Asserting the surviving set still covers every blob rules out a filter that thinned the
+        # list down to an unrelated subset.
+        roi_statistics = context.runtime.extraction.roi_statistics
+        assert roi_statistics is not None
+        _assert_centroids_match_planted_centers(roi_statistics=roi_statistics, centers=_BLOB_CENTERS)
 
     def test_preclassification_removing_every_roi_raises(
         self,
@@ -291,7 +319,12 @@ class TestDetectPlaneRois:
         context.runtime.registration.valid_x_range = (0, _FRAME_WIDTH)
         context.runtime.registration.bad_frames = np.zeros(_FRAME_COUNT, dtype=np.bool_)
 
-        with pytest.raises(ValueError, match="Preclassification removed all"):
+        expected_message = (
+            f"Unable to complete ROI detection for plane 0 channel 1. Preclassification removed all "
+            f"{len(_BLOB_CENTERS)} detected ROIs at confidence threshold 1.0. Consider lowering the "
+            f"preclassification_threshold parameter."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             detect_plane_rois(context=context, workers=1)
 
     def test_no_rois_raises(
@@ -308,7 +341,11 @@ class TestDetectPlaneRois:
         context.runtime.registration.valid_x_range = (0, _FRAME_WIDTH)
         context.runtime.registration.bad_frames = np.zeros(_FRAME_COUNT, dtype=np.bool_)
 
-        with pytest.raises(ValueError, match="No ROIs found"):
+        expected_message = (
+            "Unable to complete ROI detection for plane 0 channel 1. No ROIs found. Check the binary file and "
+            "consider adjusting the threshold_scaling parameter."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             detect_plane_rois(context=context, workers=1)
 
     def test_missing_binary_path_raises(
@@ -329,5 +366,6 @@ class TestDetectPlaneRois:
         context.runtime.registration.bad_frames = np.zeros(_FRAME_COUNT, dtype=np.bool_)
         context.runtime.io.registered_binary_path = None
 
-        with pytest.raises(RuntimeError, match="registered binary file path is not set"):
+        expected_message = "Unable to run ROI detection. The registered binary file path is not set for channel 1."
+        with pytest.raises(RuntimeError, match=error_format(expected_message)):
             detect_plane_rois(context=context, workers=1)

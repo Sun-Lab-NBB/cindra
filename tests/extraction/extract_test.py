@@ -1,11 +1,17 @@
-"""Contains tests for the _update_roi_extraction_statistics function provided by the extract module."""
+"""Contains tests for the extraction kernels and the _update_roi_extraction_statistics function provided by the
+extract module.
+"""
 
 from __future__ import annotations
 
 import numpy as np
 from scipy import stats
 
-from cindra.extraction.extract import _update_roi_extraction_statistics
+from cindra.extraction.extract import (
+    _extract_cell_fluorescence,
+    _extract_neuropil_fluorescence,
+    _update_roi_extraction_statistics,
+)
 from cindra.dataclasses.single_recording_data import ROIMask, ROIStatistics
 
 
@@ -22,6 +28,135 @@ def _make_roi_statistics(count: int) -> list[ROIStatistics]:
         )
         roi_list.append(ROIStatistics(mask=mask))
     return roi_list
+
+
+class TestExtractCellFluorescence:
+    """Tests _extract_cell_fluorescence."""
+
+    def test_ragged_masks_with_non_uniform_weights(self) -> None:
+        """Verifies the weighted gather against a hand-written reference over ragged masks and uneven weights."""
+        generator = np.random.default_rng(seed=11)
+        frame_count = 7
+        pixel_count = 40
+        data = generator.standard_normal((frame_count, pixel_count)).astype(np.float32)
+
+        # Three ROIs holding 3, 7, and 5 mask pixels. The sizes differ, the pixel indices are scattered rather than
+        # contiguous, and no two ROIs share a weight, so reading the wrong offset or rebasing the weight index onto
+        # the mask start changes the result rather than cancelling out.
+        masks = (
+            np.array([3, 17, 28], dtype=np.int32),
+            np.array([0, 1, 2, 5, 9, 31, 39], dtype=np.int32),
+            np.array([12, 14, 20, 33, 34], dtype=np.int32),
+        )
+        weights = (
+            np.array([0.2, 0.5, 0.3], dtype=np.float32),
+            np.array([0.05, 0.1, 0.15, 0.2, 0.25, 0.15, 0.1], dtype=np.float32),
+            np.array([0.4, 0.05, 0.35, 0.1, 0.1], dtype=np.float32),
+        )
+        flat_roi_masks = np.concatenate(masks).astype(np.int32)
+        flat_lambda_weights = np.concatenate(weights).astype(np.float32)
+        mask_offsets = np.array([0, 3, 10, 15], dtype=np.int32)
+
+        output_prototype = np.zeros((3, frame_count), dtype=np.float32)
+        result = _extract_cell_fluorescence(
+            output_prototype=output_prototype,
+            data=data,
+            flat_roi_masks=flat_roi_masks,
+            flat_lambda_weights=flat_lambda_weights,
+            mask_offsets=mask_offsets,
+        )
+
+        # Independently accumulates the same weighted sums with an explicit Python loop over each ROI's own mask.
+        expected = np.zeros((3, frame_count), dtype=np.float32)
+        for cell_index in range(3):
+            for frame_index in range(frame_count):
+                accumulator = np.float32(0.0)
+                for pixel, weight in zip(masks[cell_index], weights[cell_index], strict=True):
+                    accumulator += data[frame_index, pixel] * weight
+                expected[cell_index, frame_index] = accumulator
+
+        np.testing.assert_allclose(result, expected, rtol=1e-6, atol=1e-7)
+        # The kernel fills and returns the caller's buffer rather than allocating a new one.
+        assert result is output_prototype
+
+    def test_empty_mask_yields_zero_trace(self) -> None:
+        """Verifies that an ROI whose mask holds no pixels reports a zero fluorescence trace."""
+        data = np.full((4, 10), 5.0, dtype=np.float32)
+        # The second ROI spans an empty offset range, while the first and third carry one pixel each.
+        flat_roi_masks = np.array([2, 7], dtype=np.int32)
+        flat_lambda_weights = np.array([1.0, 1.0], dtype=np.float32)
+        mask_offsets = np.array([0, 1, 1, 2], dtype=np.int32)
+
+        result = _extract_cell_fluorescence(
+            output_prototype=np.empty((3, 4), dtype=np.float32),
+            data=data,
+            flat_roi_masks=flat_roi_masks,
+            flat_lambda_weights=flat_lambda_weights,
+            mask_offsets=mask_offsets,
+        )
+
+        np.testing.assert_array_equal(result[0], np.full(4, 5.0, dtype=np.float32))
+        np.testing.assert_array_equal(result[1], np.zeros(4, dtype=np.float32))
+        np.testing.assert_array_equal(result[2], np.full(4, 5.0, dtype=np.float32))
+
+
+class TestExtractNeuropilFluorescence:
+    """Tests _extract_neuropil_fluorescence."""
+
+    def test_ragged_masks_average_against_reference(self) -> None:
+        """Verifies the neuropil average against a hand-written reference over ragged masks."""
+        generator = np.random.default_rng(seed=23)
+        frame_count = 6
+        pixel_count = 50
+        data = generator.standard_normal((frame_count, pixel_count)).astype(np.float32)
+
+        # Three neuropil masks of 4, 9, and 6 pixels. The sizes are deliberately not powers of two and differ per
+        # ROI, so dropping the per-ROI offset or reusing one pixel count for every ROI changes the averages.
+        masks = (
+            np.array([1, 4, 8, 11], dtype=np.int32),
+            np.array([13, 15, 16, 19, 22, 27, 31, 36, 41], dtype=np.int32),
+            np.array([2, 6, 24, 33, 45, 49], dtype=np.int32),
+        )
+        flat_neuropil_masks = np.concatenate(masks).astype(np.int32)
+        mask_offsets = np.array([0, 4, 13, 19], dtype=np.int32)
+        neuropil_pixel_count = np.array([4, 9, 6], dtype=np.int32)
+
+        output_prototype = np.zeros((3, frame_count), dtype=np.float32)
+        result = _extract_neuropil_fluorescence(
+            output_prototype=output_prototype,
+            data=data,
+            flat_neuropil_masks=flat_neuropil_masks,
+            mask_offsets=mask_offsets,
+            neuropil_pixel_count=neuropil_pixel_count,
+        )
+
+        expected = np.zeros((3, frame_count), dtype=np.float32)
+        for cell_index in range(3):
+            for frame_index in range(frame_count):
+                expected[cell_index, frame_index] = np.mean(data[frame_index, masks[cell_index]])
+
+        # The kernel accumulates sequentially and multiplies by a reciprocal, while np.mean sums pairwise and
+        # divides, so the two agree to about 1.5e-05 relative at these mask sizes.
+        np.testing.assert_allclose(result, expected, rtol=1e-4)
+        assert result is output_prototype
+
+    def test_empty_neuropil_mask_yields_zero_rather_than_nan(self) -> None:
+        """Verifies that an ROI whose neuropil mask holds no pixels reports zeros instead of NaN."""
+        data = np.full((5, 12), 3.0, dtype=np.float32)
+        flat_neuropil_masks = np.array([0, 1, 2], dtype=np.int32)
+        mask_offsets = np.array([0, 0, 3], dtype=np.int32)
+        neuropil_pixel_count = np.array([0, 3], dtype=np.int32)
+
+        result = _extract_neuropil_fluorescence(
+            output_prototype=np.empty((2, 5), dtype=np.float32),
+            data=data,
+            flat_neuropil_masks=flat_neuropil_masks,
+            mask_offsets=mask_offsets,
+            neuropil_pixel_count=neuropil_pixel_count,
+        )
+
+        np.testing.assert_array_equal(result[0], np.zeros(5, dtype=np.float32))
+        np.testing.assert_array_equal(result[1], np.full(5, 3.0, dtype=np.float32))
 
 
 class TestUpdateRoiExtractionStatistics:

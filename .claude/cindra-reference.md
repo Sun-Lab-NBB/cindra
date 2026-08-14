@@ -175,6 +175,16 @@
   expected (Numba is excluded via the `pyproject.toml` mypy override, and the tifffile and yaml imports carry no such
   comment, because both ship types)
 - The `# pragma: no cover` annotations on `@njit` function bodies are intentional
+- The multiscale diffeomorphic registration crosses the boundary between original-image pixels and the working
+  resolution of a pyramid level in three places, and it converts units at two of them. `ScaleSpacePyramid` scales
+  every smoothing sigma by the level's entry in `_level_downsample_factors`. `_scale_grid_sampling` converts the
+  knot spacing into working-resolution pixels, while `_regularize_deformation` keeps the injectivity factor on the
+  original-pixel spacing, because that factor divides by `scale`, which is an original-pixel quantity.
+  `Deformation.resize_field` leaves displacement magnitudes unscaled, which discounts each coarse level by its
+  resolution ratio and weights it below the finer levels that follow it. That third choice is deliberate, and the
+  method's `Notes` block records its reasoning. Do not report it as a unit-conversion defect, as an inconsistency
+  with the other two conversions, or as a regression, and do not add a scaling variant of `resize_field` unless the
+  user asks for one
 - Binarization and registration both write frames into a plane binary, each guarding its own write with its own marker,
   `<binary>.binarizing` and `<binary>.registering`. `cindra.io` exports a create, clear, and path helper per phase plus
   `resolve_active_binary_marker`, which reports whichever marker sits beside a binary and is what every reader calls.

@@ -240,10 +240,15 @@ class TestCreateNeuropilMasks:
         assert neuropil_masks[0].size >= minimum_size
 
     def test_cached_masks_returned(self) -> None:
-        """Verifies that cached neuropil masks are returned on second call."""
+        """Verifies that a cached neuropil mask is returned unchanged rather than recomputed."""
         roi = _make_circular_roi(center_y=25, center_x=25, radius=3, frame_height=50, frame_width=50)
-        # Primes the cached property so the second call returns the cached value.
-        masks_first = _create_neuropil_masks(
+
+        # Plants a sentinel mask no computation could produce. Mask computation is deterministic, so equality alone
+        # cannot tell the cached path from the recomputing path. Object identity can.
+        sentinel = np.array([7, 8, 9], dtype=np.int32)
+        roi.neuropil_mask = sentinel
+
+        masks = _create_neuropil_masks(
             roi_statistics=[roi],
             height=50,
             width=50,
@@ -251,28 +256,15 @@ class TestCreateNeuropilMasks:
             minimum_neuropil_pixels=50,
             cell_probability_percentile=0,
         )
-        masks_second = _create_neuropil_masks(
-            roi_statistics=[roi],
-            height=50,
-            width=50,
-            inner_neuropil_border_radius=2,
-            minimum_neuropil_pixels=50,
-            cell_probability_percentile=0,
-        )
-        np.testing.assert_array_equal(masks_first[0], masks_second[0])
+        assert masks[0] is sentinel
+        assert roi.neuropil_mask is sentinel
 
     def test_recompute_overrides_cache(self) -> None:
-        """Verifies that recompute=True reproduces the same deterministic mask even with a cached mask present."""
+        """Verifies that recompute=True discards the cached mask and writes the freshly computed one back."""
         roi = _make_circular_roi(center_y=25, center_x=25, radius=3, frame_height=50, frame_width=50)
-        # Primes the cached property so the recompute call has a cached value to override.
-        masks_first = _create_neuropil_masks(
-            roi_statistics=[roi],
-            height=50,
-            width=50,
-            inner_neuropil_border_radius=2,
-            minimum_neuropil_pixels=50,
-            cell_probability_percentile=0,
-        )
+        sentinel = np.array([7, 8, 9], dtype=np.int32)
+        roi.neuropil_mask = sentinel
+
         masks = _create_neuropil_masks(
             roi_statistics=[roi],
             height=50,
@@ -282,7 +274,44 @@ class TestCreateNeuropilMasks:
             cell_probability_percentile=0,
             recompute=True,
         )
-        np.testing.assert_array_equal(masks[0], masks_first[0])
+
+        # Computes the reference from an identical ROI carrying no cached mask at all.
+        reference_roi = _make_circular_roi(center_y=25, center_x=25, radius=3, frame_height=50, frame_width=50)
+        reference_masks = _create_neuropil_masks(
+            roi_statistics=[reference_roi],
+            height=50,
+            width=50,
+            inner_neuropil_border_radius=2,
+            minimum_neuropil_pixels=50,
+            cell_probability_percentile=0,
+        )
+
+        assert masks[0] is not sentinel
+        np.testing.assert_array_equal(masks[0], reference_masks[0])
+        # The recomputed mask replaces the cached one on the ROI itself, so a later cached read sees the new mask.
+        assert roi.neuropil_mask is masks[0]
+
+    def test_partially_cached_masks_are_recomputed(self) -> None:
+        """Verifies that one uncached ROI forces every mask in the batch to be recomputed."""
+        cached_roi = _make_circular_roi(center_y=15, center_x=15, radius=3, frame_height=50, frame_width=50)
+        uncached_roi = _make_circular_roi(center_y=35, center_x=35, radius=3, frame_height=50, frame_width=50)
+        sentinel = np.array([7, 8, 9], dtype=np.int32)
+        cached_roi.neuropil_mask = sentinel
+
+        masks = _create_neuropil_masks(
+            roi_statistics=[cached_roi, uncached_roi],
+            height=50,
+            width=50,
+            inner_neuropil_border_radius=2,
+            minimum_neuropil_pixels=50,
+            cell_probability_percentile=0,
+        )
+
+        # The all() guard fails because the second ROI has no cached mask, so the sentinel is discarded.
+        assert masks[0] is not sentinel
+        assert cached_roi.neuropil_mask is masks[0]
+        assert uncached_roi.neuropil_mask is masks[1]
+        assert masks[0].size > 3
 
     def test_expansion_runs_to_exhaustion(self) -> None:
         """Verifies that an unreachable minimum pixel count expands the neuropil mask to the full non-cell frame."""

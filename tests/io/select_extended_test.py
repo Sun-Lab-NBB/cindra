@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from ataraxis_base_utilities import error_format
 
 from cindra.io.select import _filter_rois
 from cindra.dataclasses import (
@@ -170,7 +171,11 @@ class TestFilterRois:
 
         configuration = MultiRecordingConfiguration()
 
-        with pytest.raises(ValueError, match="Unable to select ROIs"):
+        expected_message = (
+            f"Unable to select ROIs for recording {runtime.io.recording_id}. The combined_data is not available in "
+            f"the runtime. Ensure context resolution completed successfully before calling this function."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             _filter_rois(runtime=runtime, configuration=configuration)
 
     def test_raises_error_when_roi_statistics_is_none(self) -> None:
@@ -185,7 +190,12 @@ class TestFilterRois:
 
         configuration = MultiRecordingConfiguration()
 
-        with pytest.raises(ValueError, match="does not contain ROI statistics"):
+        expected_message = (
+            f"Unable to select ROIs for recording {runtime.io.recording_id}. The combined "
+            f"single-recording data does not contain ROI statistics. Ensure the single-recording "
+            f"pipeline completed successfully."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             _filter_rois(runtime=runtime, configuration=configuration)
 
     def test_raises_error_when_cell_classification_is_none(self) -> None:
@@ -201,7 +211,12 @@ class TestFilterRois:
 
         configuration = MultiRecordingConfiguration()
 
-        with pytest.raises(ValueError, match="does not contain cell"):
+        expected_message = (
+            f"Unable to select ROIs for recording {runtime.io.recording_id}. The combined "
+            f"single-recording data does not contain cell classification results. Multi-recording "
+            f"processing requires classification to filter ROIs."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             _filter_rois(runtime=runtime, configuration=configuration)
 
     def test_raises_error_when_channel_2_classification_missing(self) -> None:
@@ -218,5 +233,10 @@ class TestFilterRois:
         runtime.combined_data.extraction.roi_statistics_channel_2 = channel_2_rois
         runtime.combined_data.extraction.cell_classification_channel_2 = None
 
-        with pytest.raises(ValueError, match="Unable to select channel 2 ROIs"):
+        expected_message = (
+            f"Unable to select channel 2 ROIs for recording {runtime.io.recording_id}. The combined "
+            f"single-recording data contains channel 2 ROI statistics but no classification results. "
+            f"Multi-recording processing requires classification to filter ROIs."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             _filter_rois(runtime=runtime, configuration=configuration)

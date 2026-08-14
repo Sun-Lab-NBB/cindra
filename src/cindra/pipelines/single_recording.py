@@ -449,7 +449,11 @@ def _validate_binary_sizes(contexts: list[RuntimeContext]) -> None:
     for context in contexts:
         io_data = context.runtime.io
         frame_bytes = io_data.frame_height * io_data.frame_width * _BINARY_ITEM_SIZE
-        if frame_bytes <= 0:  # pragma: no cover - a persisted plane always records its frame dimensions
+
+        # A bootstrapped plane records a zero frame geometry until its conversion saves the measured values, and the
+        # conversion clears the binarization marker before that save. A run interrupted between the two therefore
+        # leaves a plane holding no geometry to size its binary against, which this skips rather than misreports.
+        if frame_bytes <= 0:
             continue
 
         expected_size = frame_bytes * io_data.frame_count
@@ -505,7 +509,7 @@ def _resolve_second_channel_binary(context: RuntimeContext) -> Path | None:
     io_data = context.runtime.io
     if io_data.registered_binary_path_channel_2 is not None:
         return io_data.registered_binary_path_channel_2
-    if io_data.output_path is None:  # pragma: no cover - a persisted plane always records its output directory
+    if io_data.output_path is None:
         return None
     return io_data.output_path / CHANNEL_2_BINARY_FILENAME
 
