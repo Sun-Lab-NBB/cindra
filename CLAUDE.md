@@ -187,16 +187,18 @@ outputs.
   `jobs.py` reads them from. `allocation.py` adds the measured stage worker defaults, the resource-class model, and the
   host core and memory budgets. `footprints.py` adds the per-stage memory models, the two estimators that report what
   one job holds, and the two sizers that pair each estimate with its stage's declared cores as a `JobSizing`, which is
-  the one thing it reads `allocation.py` for. `discovery.py` pairs the job model with the on-disk inventory to report
-  both the jobs a recording declares and the subset whose inputs exist. `worker.py` holds the per-job entry points every
-  scheduler dispatches, along with the two priming entry points that write the shared bootstrap. `execution.py` holds
-  the batch engine: `PendingJob`, `JobExecutionState`, the admission scan, the two-pass dispatcher, and the manager
-  thread. `pipeline.py` holds the two sequential entry points. `openmp.py` carries no module-level side effect and its
-  check runs only inside those two entry points, so importing the package writes nothing and a console message never
-  precedes the stdio MCP server's JSON-RPC stream. Nothing below `orchestration` imports it, and no module inside it
-  imports `interface`, so the MCP layer is a thin argument-validation and JSON-shaping wrapper over calls into the
-  package. This mirrors the orchestration package of `ataraxis-video-system` and `ataraxis-communication-interface`, and
-  its concurrency model follows `sollertia-forgery`.
+  the one thing it reads `allocation.py` for. A job is sized from the data that exists when the sizing happens, so a
+  single-recording model reads the acquisition alone while a multi-recording model reads the completed single-recording
+  output it runs on. `discovery.py` pairs the job model with the on-disk inventory to report both the jobs a recording
+  declares and the subset whose inputs exist. `worker.py` holds the per-job entry points every scheduler dispatches,
+  along with the two priming entry points that write the shared bootstrap. `execution.py` holds the batch engine:
+  `PendingJob`, `JobExecutionState`, the admission scan, the two-pass dispatcher, and the manager thread. `pipeline.py`
+  holds the two sequential entry points. `openmp.py` carries no module-level side effect and its check runs only inside
+  those two entry points, so importing the package writes nothing and a console message never precedes the stdio MCP
+  server's JSON-RPC stream. Nothing below `orchestration` imports it, and no module inside it imports `interface`, so
+  the MCP layer is a thin argument-validation and JSON-shaping wrapper over calls into the package. This mirrors the
+  orchestration package of `ataraxis-video-system` and `ataraxis-communication-interface`, and its concurrency model
+  follows `sollertia-forgery`.
 - **Tracker-driven job state**: The transitions of a job the pipeline runs belong to the tracker's `run_job()`
   context manager rather than to a hand-rolled `start_job`/`complete_job`/`fail_job` sequence. The engine's
   `_fail_pending_jobs` is the one exception, because it records a terminal outcome for a job that never ran and

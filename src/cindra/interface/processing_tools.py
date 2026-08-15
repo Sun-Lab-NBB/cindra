@@ -130,10 +130,6 @@ def _manifest_entry(identifiers: dict[tuple[str, str], str], job_name: str, spec
 def _estimate_pending_job_memory(configuration_path: Path, job_name: str, specifier: str, *, single: bool) -> int:
     """Estimates the memory one queued job holds, from the recording or dataset it will process.
 
-    Notes:
-        A job whose recording geometry cannot be read is charged the conservative allowance its stage carries rather
-        than a floor, because a job admitted against a floor overcommits its host and is killed.
-
     Args:
         configuration_path: The path to the job's pipeline configuration file.
         job_name: The name of the pipeline stage the job runs.
@@ -141,8 +137,11 @@ def _estimate_pending_job_memory(configuration_path: Path, job_name: str, specif
         single: Determines whether the job belongs to the single-recording or the multi-recording pipeline.
 
     Returns:
-        The memory the job holds in megabytes, which is its stage's allowance when the recording's geometry could not
-        be read.
+        The memory the job holds in megabytes.
+
+    Raises:
+        FileNotFoundError: If the recording or dataset the job runs on carries nothing its stage can be sized
+            against.
     """
     if single:
         configuration, output_path = load_single_recording_configuration(configuration_path=configuration_path)
@@ -159,7 +158,6 @@ def _estimate_pending_job_memory(configuration_path: Path, job_name: str, specif
         job_name=MultiRecordingJobNames(job_name),
         specifier=specifier,
         recording_directories=dataset_configuration.recording_io.recording_directories,
-        dataset_name=dataset_configuration.recording_io.dataset_name,
         configuration=dataset_configuration,
     )
 
