@@ -146,24 +146,22 @@ def _estimate_pending_job_memory(configuration_path: Path, job_name: str, specif
     """
     if single:
         configuration, output_path = load_single_recording_configuration(configuration_path=configuration_path)
-        memory_mb, _ = estimate_single_recording_job_memory_mb(
+        return estimate_single_recording_job_memory_mb(
             job_name=SingleRecordingJobNames(job_name),
             specifier=specifier,
             output_root=output_path,
             configuration=configuration,
             data_path=configuration.file_io.data_path,
         )
-        return memory_mb
 
     dataset_configuration = load_multi_recording_configuration(configuration_path=configuration_path)
-    memory_mb, _ = estimate_multi_recording_job_memory_mb(
+    return estimate_multi_recording_job_memory_mb(
         job_name=MultiRecordingJobNames(job_name),
         specifier=specifier,
-        recording_roots=dataset_configuration.recording_io.recording_directories,
+        recording_directories=dataset_configuration.recording_io.recording_directories,
         dataset_name=dataset_configuration.recording_io.dataset_name,
         configuration=dataset_configuration,
     )
-    return memory_mb
 
 
 @mcp.tool()
@@ -1238,7 +1236,7 @@ def execute_processing_jobs_tool(
             'multi-recording').
         workers_per_job: CPU cores per job, overriding the measured default of every class that carries no hard
         concurrency ceiling. Leave
-            as None to accept the measured defaults, which are 4 cores for binarization, 8 for registration, 10 for
+            as None to accept the measured defaults, which are 3 cores for binarization, 4 for registration, 10 for
             processing, 1 for combination, 30 for multi-recording discovery, and 16 for multi-recording extraction.
             Set to -1 to give every job the whole session core budget. The override is a single scalar applied to
             every non-fixed class alike.

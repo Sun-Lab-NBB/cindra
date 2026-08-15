@@ -25,10 +25,9 @@ BINARIZATION_WORKERS: int = 3
 while many recordings convert at once. The conversion waits on each batch reaching it rather than on the threads that
 consume the batch, so the stage settles below the decode ceiling it is permitted."""
 
-REGISTRATION_WORKERS: int = 12
-"""The number of workers allocated to the registration stage by default, measured as the processors the stage occupies
-while many planes register at once. The compiled kernels and the linear-algebra routines the phase correlation
-dispatches run concurrently rather than taking turns, so the stage occupies more than the kernels alone suggest."""
+REGISTRATION_WORKERS: int = 4
+"""The number of workers allocated to the registration stage by default, which is the knee of its measured scaling
+curve. The stage is largely serial, so wall time flattens close to this allocation."""
 
 PROCESSING_WORKERS: int = 10
 """The number of workers allocated to the processing stage by default, measured on a one-plane worker sweep. Detection
@@ -36,15 +35,15 @@ held at 114.0, 113.9, and 113.8 seconds for 10, 20, and 30 workers, bound by mov
 loop. Extraction scaled from 61.8 to 44.1 to 38.6 seconds over the same sweep, but running more planes concurrently
 outweighs that gain, which places the default at 10."""
 
-DISCOVERY_WORKERS: int = 30
-"""The number of workers allocated to the multi-recording discovery stage by default, which is the saturating
-allocation the stage is admitted at. The stage registers every recording of one animal against the others, so its cost
-grows with the square of the recording count."""
+DISCOVERY_WORKERS: int = 2
+"""The number of workers allocated to the multi-recording discovery stage by default. The stage has no parallel
+critical path, so quadrupling the allocation shortens a twenty-recording dataset by two percent, and the figure covers
+the deformation pool alone."""
 
 EXTRACTION_WORKERS: int = 16
-"""The number of workers allocated to the multi-recording extraction stage by default, measured as the point where the
-stage stops shortening. Every frame batch the extraction kernel consumes is read serially before the kernel runs, so
-the stage plateaus below the width it is given and further cores are spent waiting on batch reads."""
+"""The number of workers allocated to the multi-recording extraction stage by default. The stage keeps shortening well
+past this width, so the figure follows the concurrency a host sustains rather than a plateau: sixteen leaves room for
+the six to eight datasets a compute node extracts at once while still reaching a sevenfold single-job speedup."""
 
 COMBINATION_WORKERS: int = 1
 """The number of CPU cores one combination job holds. The combination stage merges the per-plane result files with
