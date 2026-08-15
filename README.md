@@ -822,9 +822,13 @@ subdirectories, whose names the same module exports. `resolve_plane_specifier()`
 
 `estimate_single_recording_job_memory_mb()` and `estimate_multi_recording_job_memory_mb()` project the memory one job
 holds from the shape of the data it will process, returning the figure in megabytes alongside a flag stating whether it
-followed from the recording's own geometry. A job whose geometry cannot be read is charged a conservative allowance for its
-stage rather than a floor, because understating is the failure that gets a job killed. Two of those allowances are
-measured peaks and four are flat figures the module documents individually.
+followed from the recording's own geometry. The single-recording estimates resolve from the raw acquisition data when a
+recording carries no output yet, so a caller that plans a whole job graph before dispatching anything receives modeled
+figures rather than allowances. The regions detection will find are the one input the acquisition does not determine,
+so they are read from the per-plane trace arrays once those exist and are budgeted against the `planned_roi_count`
+argument until then, which defaults to the ceiling `resolve_maximum_roi_count()` derives from the detection iteration
+bound. A recording carrying neither output nor readable raw data can run no stage at all, so sizing one raises rather
+than returning a figure, and the interface layer reports the job as unsizable instead of admitting it.
 
 `prime_recording()` and `prime_dataset()` write the shared bootstrap every job reads and report that same inventory, so
 a scheduler primes a recording and enumerates its jobs in one step.

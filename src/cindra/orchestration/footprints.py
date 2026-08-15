@@ -2,12 +2,11 @@
 peak anonymous working set from the shape of the data it processes.
 
 Most models here are read from the stage's own allocations, so a change to what a kernel holds is a change to the
-model beside it. Two terms are not: the cross-recording clustering allowance and the per-stage fallbacks are flat
-figures whose own documentation records what each is based on. The estimates cover anonymous memory alone, which is
-the term that forces a host to swap and a scheduler to kill a job, so the reclaimable pages a memory-mapping stage
-leaves resident are excluded. Each estimate carries a flag stating whether it follows from the recording's own
-geometry, so a caller holding an unprocessed recording reads a conservative allowance rather than handling an
-exception.
+model beside it. The single-recording estimates resolve from the raw acquisition data when a recording carries no
+output yet, which lets a caller size a whole job graph before dispatching any of it. The estimates cover anonymous
+memory alone, which is the term that forces a host to swap and a scheduler to kill a job, so the reclaimable pages a
+memory-mapping stage leaves resident are excluded. A recording carrying neither output nor readable raw data can run
+no stage at all, so sizing one is rejected rather than answered with a guess.
 """
 
 from __future__ import annotations
@@ -18,13 +17,23 @@ from dataclasses import dataclass
 
 import numpy as np
 from numpy.lib.format import read_magic, read_array_header_1_0, read_array_header_2_0
+from ataraxis_base_utilities import console
 
-from ..io import RecordingPlanes, resolve_recording_planes, resolve_acquisition_parameters
+from ..io import (
+    RecordingPlanes,
+    SourceFrameGeometry,
+    find_cindra_directory,
+    resolve_recording_planes,
+    extract_unique_components,
+    resolve_source_frame_geometry,
+    resolve_acquisition_parameters,
+)
 from .jobs import MultiRecordingJobNames, SingleRecordingJobNames
 from ..layout import (
     COMBINED_METADATA_FILENAME,
     RecordingArrays,
     resolve_array_path,
+    resolve_plane_path,
     resolve_output_path,
     resolve_dataset_path,
     parse_plane_specifier,
@@ -73,33 +82,29 @@ _MEGABYTES_PER_GIGABYTE: int = 1024
 _SINGLE_PRECISION_BYTES: int = 4
 """The width of one single-precision element, which is the type every modeled working array holds."""
 
-_BINARIZATION_BYTES_PER_PIXEL: int = 8
-"""The memory the conversion stage holds per pixel of the batch it reads.
+_BINARIZATION_LIVE_BATCHES: int = 2
+"""The decoded batches the conversion stage holds at once, because the caller keeps the previous batch bound across
+the whole of the next read."""
 
-Notes:
-    The stage decodes a batch, halves it, clips the halved copy, and casts the clipped copy to the internal width, so
-    four buffers are live at once. The figure is the unsigned 16-bit case, where each buffer is two bytes per pixel. A
-    32-bit source holds three four-byte buffers and one two-byte buffer instead, which is heavier, so the estimate
-    understates a recording acquired at that width.
-"""
+_INTERNAL_ELEMENT_BYTES: int = 2
+"""The width of one element of the internal binary format, which a wider source is halved and cast down to."""
 
-_DETECTION_ARRAY_COPIES: int = 3
-"""The copies of the binned movie the detection stage holds at its peak.
+_DETECTION_ARRAY_COPIES: float = 3.60
+"""The copies of the binned movie the detection stage holds at its peak, which is the scale-0 thresholded variance.
+Live at that moment are the binned frames, the five convolved scales, the comparison output, and the boolean
+predicate."""
 
-Notes:
-    The peak is the temporal standard deviation, which holds the binned frames, their successive differences, and the
-    squared differences at once. The reduction over the squared differences returns a two-dimensional image, so it
-    adds no further copy at movie scale.
-"""
+_DETECTION_DENOISE_ARRAY_COPIES: float = 4.7
+"""The copies of the binned movie the detection stage holds at its peak when PCA denoising runs, which adds the
+reconstruction and the block reconstructions the block pool retains."""
 
-_DETECTION_DENOISE_ARRAY_COPIES: int = 7
-"""The copies of the binned movie the detection stage holds when PCA denoising runs.
+_BIN_BATCH_SIZE: int = 500
+"""The frames the movie binning reads per batch. Binning happens inside each batch and each batch truncates its own
+remainder, so the binned frame count falls below a plain division."""
 
-Notes:
-    Denoising allocates a reconstruction the size of the movie and holds the centered blocks and their reconstructions
-    at once. The blocks overlap by half in each axis, so both block lists together hold roughly four and a half copies
-    of the movie beside the frames and the reconstruction.
-"""
+_DETECTION_ITERATION_MULTIPLIER: int = 250
+"""The multiplier the detection stage applies to the configured iteration limit to reach its actual loop bound. The
+sparse detection loop appends at most one region per iteration, so the product bounds what one plane can produce."""
 
 _REGISTRATION_METRIC_ARRAY_COPIES: int = 3
 """The copies of the sampled movie the registration quality metrics hold at once, which are the single-precision
@@ -154,51 +159,31 @@ _OASIS_WORKSPACE_BYTES: int = 16
 amplitude, weight, start frame, and length arrays."""
 
 _DISCOVERY_PLANES_PER_RECORDING: int = 12
-"""The single-precision planes a discovery job holds per recording.
+"""The single-precision planes a discovery job holds per recording, covering each recording's reference image, its
+scale-space pyramid, its accumulated and cached deformation fields, and its transformed reference images. The
+groupwise registration caches one image and one gradient per image rather than one deformation per unordered pair, so
+the term is linear in the recording count."""
 
-Notes:
-    The planes cover each recording's reference image, its scale-space pyramid, its accumulated and cached deformation
-    fields, and its transformed reference images. The count is linear in the recording count, because the groupwise
-    registration visits each unordered pair once and caches one image and one gradient per image rather than one
-    deformation per pair.
-"""
-
-_DISCOVERY_TRANSIENT_PLANES: int = 10
+_DISCOVERY_TRANSIENT_PLANES: int = 18
 """The single-precision planes one pairwise deformation holds while it is computed. The term is constant, because one
 pair is in flight at a time whatever the group size."""
 
 _TRACE_ARRAY_DIMENSIONS: int = 2
 """The axes a trace array carries, which are its regions and its samples."""
 
-_TRACKING_CLUSTERING_MEMORY_MB: int = 5632
-"""The memory the cross-recording clustering stage is charged.
+_TRACKING_PAIRWISE_BYTES_PER_SQUARED_REGION: float = 0.55
+"""The memory the cross-recording clustering stage holds per squared region it clusters.
 
 Notes:
-    The stage builds a pairwise matrix over the regions falling inside one spatial bin, so its size follows local
-    region crowding rather than any count the processed data reports. The allowance covers the crowding a dense
-    recording produces.
-"""
+    The stage clusters the regions of one spatial bin at a time, and each bin holds a condensed distance array, its
+    thresholded copy, that copy's square and upper triangle, a condensed Jaccard array, and the copy the linkage
+    makes of it. Every one of those scales with the square of the regions the bin holds, and bin occupancy scales
+    with the regions the dataset spans, so the term is quadratic in that count and independent of the combined frame.
+    The value covers the densest of four measured dataset sizes, over which the coefficient varied by a fifth.
 
-
-_STAGE_FALLBACK_MEGABYTES: dict[str, int] = {
-    SingleRecordingJobNames.BINARIZE: 4096,
-    SingleRecordingJobNames.REGISTER: 14848,
-    SingleRecordingJobNames.PROCESS: 15360,
-    SingleRecordingJobNames.COMBINE: 8192,
-    MultiRecordingJobNames.DISCOVER: 16384,
-    MultiRecordingJobNames.EXTRACT: 8192,
-}
-"""The memory each stage is charged when its own geometry cannot be read.
-
-Notes:
-    An estimate that cannot be derived falls back to a conservative allowance rather than to a floor, because
-    understating is the asymmetric failure. A job admitted against a floor overcommits its host and is killed, while a
-    job admitted against an allowance merely waits longer than it had to.
-
-    Every figure is a conservative allowance that sits above the projections its own model produces for the recordings
-    this corpus holds. The processing figure additionally covers a measured nine-plane peak of 10.5 gigabytes. The set
-    is confirmed against measured peaks before a release, so a figure that proves loose is narrowed there rather than
-    guessed at here.
+    The count it multiplies is the regions surviving ROI selection rather than the regions detection found, so the
+    coefficient is a property of the clustering alone and does not absorb whatever share a particular selection
+    threshold happens to keep.
 """
 
 
@@ -214,6 +199,14 @@ class PlaneGeometry:
     """The frames the plane holds."""
     sampling_rate: float
     """The rate at which the recording sampled this plane."""
+    valid_pixels: int = 0
+    """The pixels one frame holds after the registration crop, or zero before registration has resolved it. The
+    detection stage bins the cropped region alone, and the crop only ever shrinks it, so the uncropped extent is the
+    planning bound."""
+    region_count: int = 0
+    """The regions this plane's own trace array holds, which is zero until the plane has been processed."""
+    index: int = 0
+    """The position of the plane within the recording, which a per-plane job's specifier names."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,6 +217,8 @@ class RecordingGeometry:
     """The geometry of every virtual imaging plane, ordered by plane index."""
     raw_frame_pixels: int = 0
     """The pixels one unsliced acquisition frame holds, which the conversion stage reads a batch of at a time."""
+    source_element_bytes: int = _INTERNAL_ELEMENT_BYTES
+    """The width of one element of the recording's source files."""
     combined_pixels: int = 0
     """The pixels one combined multi-plane frame holds, which every multi-recording stage works at."""
     combined_frame_count: int = 0
@@ -233,28 +228,39 @@ class RecordingGeometry:
     extraction stages process alongside the first inside one job."""
     region_count: int = 0
     """The regions the combined trace array holds, which is zero until the combination stage has written it."""
+    selected_region_count: int = 0
+    """The regions that clear the dataset's ROI selection probability threshold, which bounds above what the
+    selection keeps and is zero when the classification is unreadable."""
     resolved: bool = False
     """Determines whether the geometry follows from the recording's own data rather than from its absence."""
 
 
-def resolve_recording_geometry(output_root: Path, data_path: Path | None = None) -> RecordingGeometry:
-    """Resolves the shape of one recording from the output its earlier stages wrote.
+def resolve_recording_geometry(
+    output_root: Path, data_path: Path | None = None, ignored_file_names: tuple[str, ...] = ()
+) -> RecordingGeometry:
+    """Resolves the shape of one recording from the output its earlier stages wrote, or from its raw acquisition.
 
     Notes:
-        Reads the per-plane runtime data, the combined metadata archive, and the header of the combined trace array.
-        No frame is decoded and no array is mapped, so the cost stays flat as a recording grows.
+        Prefers the per-plane runtime data the conversion stage writes and falls back to the acquisition metadata and
+        one source file header, which determine the same shapes before any job has run. That is what lets a caller
+        size a whole job graph up front. No frame is decoded and no array is mapped either way, so the cost stays
+        flat as a recording grows.
 
     Args:
         output_root: The output root the recording was configured with.
-        data_path: The raw imaging directory, consulted only for the plane count when the recording carries no
-            output yet.
+        data_path: The raw imaging directory, consulted when the recording carries no output yet.
+        ignored_file_names: The source file stems the recording excludes from conversion.
 
     Returns:
-        The recording's geometry, whose resolved flag is False when the recording carries no readable output.
+        The recording's geometry, whose resolved flag is False only when neither the output nor the raw acquisition
+        is readable.
     """
     inventory = resolve_recording_planes(output_root=output_root, data_path=data_path)
     acquisition = resolve_acquisition_parameters(output_root=output_root, data_path=data_path)
-    planes = _read_plane_geometries(inventory=inventory)
+    source = _read_source_geometry(data_path=data_path, ignored_file_names=ignored_file_names)
+    planes = _resolve_plane_geometries(
+        inventory=inventory, acquisition=acquisition, source=source, output_root=output_root
+    )
     combined_pixels, combined_frame_count, combined_two_channels = _read_combined_geometry(output_root=output_root)
     region_count = _read_region_count(
         array_path=resolve_array_path(
@@ -264,7 +270,8 @@ def resolve_recording_geometry(output_root: Path, data_path: Path | None = None)
 
     return RecordingGeometry(
         planes=planes,
-        raw_frame_pixels=_resolve_raw_frame_pixels(planes=planes, acquisition=acquisition),
+        raw_frame_pixels=_resolve_raw_frame_pixels(planes=planes, acquisition=acquisition, source=source),
+        source_element_bytes=source.element_bytes if source is not None else _INTERNAL_ELEMENT_BYTES,
         combined_pixels=combined_pixels,
         combined_frame_count=combined_frame_count,
         two_channels=combined_two_channels or (acquisition is not None and acquisition.channel_number > 1),
@@ -273,61 +280,139 @@ def resolve_recording_geometry(output_root: Path, data_path: Path | None = None)
     )
 
 
+def resolve_maximum_roi_count(plane_count: int, configuration: SingleRecordingConfiguration) -> int:
+    """Resolves the regions a recording can provably not exceed.
+
+    Notes:
+        The sparse detection loop runs a bounded number of iterations and appends at most one region per iteration,
+        and every step after the append can only remove regions, so the product of the iteration multiplier, the
+        configured iteration limit, and the plane count is a ceiling rather than an observed maximum. A second
+        functional channel is detected into its own arrays, which the trace models account for through their own
+        channel factor.
+
+    Args:
+        plane_count: The virtual imaging planes the recording holds.
+        configuration: The recording's processing configuration.
+
+    Returns:
+        The regions the recording can provably not exceed.
+    """
+    per_plane = _DETECTION_ITERATION_MULTIPLIER * configuration.roi_detection.maximum_iterations
+    return per_plane * max(1, plane_count)
+
+
 def estimate_single_recording_job_memory_mb(
     job_name: SingleRecordingJobNames,
     specifier: str,
     output_root: Path,
     configuration: SingleRecordingConfiguration,
     data_path: Path | None = None,
-) -> tuple[int, bool]:
+    *,
+    planned_roi_count: int | None = None,
+) -> int:
     """Estimates the memory one single-recording job occupies at its peak.
 
     Notes:
-        A per-plane job whose specifier names a plane is estimated from that plane alone, and is charged its stage's
-        allowance when that plane carries no readable runtime data. A per-plane job whose specifier does not resolve
-        is charged the largest per-plane estimate, so an unmatched job never understates.
+        Every figure but the region-scaled ones follows from the recording's acquisition geometry, which the raw data
+        determines before any job runs, so a caller sizing a whole job graph up front receives the same answer it
+        would receive once the outputs exist. A per-plane job whose specifier does not resolve is charged the largest
+        per-plane estimate, so an unmatched job never understates.
+
+        The regions detection will find are the one input the acquisition does not determine. They are read from the
+        per-plane trace arrays once those exist and are budgeted against planned_roi_count until then.
 
     Args:
         job_name: The pipeline stage the job runs.
         specifier: The job's tracker specifier, which names a plane for the per-plane stages and is empty otherwise.
         output_root: The output root the recording was configured with.
         configuration: The recording's processing configuration.
-        data_path: The raw imaging directory, consulted only when the recording carries no output yet.
+        data_path: The raw imaging directory, consulted when the recording carries no output yet.
+        planned_roi_count: The regions to plan for, counting every plane of the recording together. Use None to
+            accept the ceiling the detection iteration bound provides. Must be a positive integer when supplied.
 
     Returns:
-        The memory the job occupies in megabytes, and a flag that is True when the figure follows from the recording's
-        own geometry rather than from the worker baseline alone.
-    """
-    if job_name in (SingleRecordingJobNames.BINARIZE, SingleRecordingJobNames.COMBINE):
-        geometry = resolve_recording_geometry(output_root=output_root, data_path=data_path)
-        if not geometry.resolved:
-            return _resolve_stage_fallback(job_name=job_name), False
-        if job_name == SingleRecordingJobNames.BINARIZE:
-            return _apply_tolerance(
-                memory_mb=_estimate_binarization_mb(geometry=geometry, configuration=configuration)
-            ), True
-        return _apply_tolerance(memory_mb=_estimate_combination_mb(geometry=geometry)), True
+        The memory the job occupies in megabytes.
 
-    inventory = resolve_recording_planes(output_root=output_root, data_path=data_path)
-    planes = _read_plane_geometries(
-        inventory=inventory, plane_index=_resolve_specifier_index(specifier=specifier, count=inventory.plane_count)
+    Raises:
+        FileNotFoundError: If the recording carries neither pipeline output nor readable raw imaging data, in which
+            case no stage of it can run.
+        ValueError: If planned_roi_count is supplied and is not a positive integer, or if a per-plane job's specifier
+            names an imaging plane the recording does not hold.
+    """
+    if planned_roi_count is not None and planned_roi_count <= 0:
+        message = (
+            f"Unable to estimate the memory of the '{job_name}' job. The planned region count must be a positive "
+            f"integer counting every plane together, or None to accept the detection ceiling, but encountered "
+            f"{planned_roi_count}."
+        )
+        console.error(message=message, error=ValueError)
+
+    geometry = resolve_recording_geometry(
+        output_root=output_root,
+        data_path=data_path,
+        ignored_file_names=tuple(configuration.file_io.ignored_file_names),
+    )
+    if not geometry.planes and not geometry.combined_pixels:
+        message = (
+            f"Unable to estimate the memory of the '{job_name}' job. The recording configured with the output root "
+            f"{output_root} carries neither pipeline output nor readable raw imaging data, so no stage of it can "
+            f"run. Verify that the configured data path holds the recording's source files."
+        )
+        console.error(message=message, error=FileNotFoundError)
+
+    regions = _resolve_planned_regions(
+        geometry=geometry, configuration=configuration, planned_roi_count=planned_roi_count
+    )
+
+    if job_name == SingleRecordingJobNames.BINARIZE:
+        return _apply_tolerance(memory_mb=_estimate_binarization_mb(geometry=geometry, configuration=configuration))
+    if job_name == SingleRecordingJobNames.COMBINE:
+        return _apply_tolerance(memory_mb=_estimate_combination_mb(geometry=geometry, regions=regions))
+
+    plane_index = parse_plane_specifier(specifier=specifier)
+    planes = (
+        geometry.planes
+        if plane_index is None
+        else tuple(plane for plane in geometry.planes if plane.index == plane_index)
     )
     if not planes:
-        return _resolve_stage_fallback(job_name=job_name), False
+        message = (
+            f"Unable to estimate the memory of the '{job_name}' job. Its specifier names imaging plane "
+            f"'{specifier}', which the recording configured with the output root {output_root} does not hold. The "
+            f"recording holds {len(geometry.planes)} plane(s)."
+        )
+        console.error(message=message, error=ValueError)
 
-    estimator = _estimate_registration_mb if job_name == SingleRecordingJobNames.REGISTER else _estimate_processing_mb
+    if job_name == SingleRecordingJobNames.REGISTER:
+        return _apply_tolerance(
+            memory_mb=max(_estimate_registration_mb(plane=plane, configuration=configuration) for plane in planes)
+        )
+
+    # A per-plane job is charged as though every planned region fell on its own plane, because the planned figure
+    # counts the recording rather than any one plane and the planes of one recording rarely hold similar counts.
+    per_plane_ceiling = resolve_maximum_roi_count(plane_count=1, configuration=configuration)
     return _apply_tolerance(
-        memory_mb=max(estimator(plane=plane, configuration=configuration) for plane in planes)
-    ), True
+        memory_mb=max(
+            _estimate_processing_mb(
+                plane=plane,
+                configuration=configuration,
+                regions=plane.region_count or min(regions, per_plane_ceiling),
+                channels=2 if geometry.two_channels else 1,
+            )
+            for plane in planes
+        )
+    )
 
 
 def estimate_multi_recording_job_memory_mb(
     job_name: MultiRecordingJobNames,
     specifier: str,
-    recording_roots: Sequence[Path],
+    recording_directories: Sequence[Path],
     dataset_name: str,
     configuration: MultiRecordingConfiguration,
-) -> tuple[int, bool]:
+    *,
+    planned_roi_count: int | None = None,
+) -> int:
     """Estimates the memory one multi-recording job occupies at its peak.
 
     Notes:
@@ -337,45 +422,79 @@ def estimate_multi_recording_job_memory_mb(
     Args:
         job_name: The pipeline stage the job runs.
         specifier: The job's tracker specifier, which names a recording for the extraction stage.
-        recording_roots: The output root of every recording the dataset spans.
+        recording_directories: The root directory of every recording the dataset spans, as the configuration's
+            recording_directories field holds them. Each is either the recording's pipeline output directory or a
+            directory containing it, matching the latitude the context resolver allows.
         dataset_name: The name of the tracked dataset.
         configuration: The dataset's processing configuration.
+        planned_roi_count: The tracked templates to plan an extraction job for. Use None to accept the largest
+            selection any one recording of the dataset offers, which is the planning figure the tracked count has
+            stayed below across every measured dataset. Must be a positive integer when supplied.
 
     Returns:
-        The memory the job occupies in megabytes, and a flag that is True when the figure follows from the dataset's
-        own geometry rather than from the worker baseline alone.
+        The memory the job occupies in megabytes.
+
+    Raises:
+        FileNotFoundError: If no recording the dataset names carries a combined metadata archive, in which case
+            neither multi-recording stage can run.
+        ValueError: If planned_roi_count is supplied and is not a positive integer.
     """
+    if planned_roi_count is not None and planned_roi_count <= 0:
+        message = (
+            f"Unable to estimate the memory of the '{job_name}' job. The planned tracked template count must be a "
+            f"positive integer, or None to accept the dataset's own planning figure, but encountered "
+            f"{planned_roi_count}."
+        )
+        console.error(message=message, error=ValueError)
+    threshold = configuration.roi_selection.probability_threshold
+    cindra_roots = _resolve_cindra_directories(recording_directories=recording_directories)
     if job_name == MultiRecordingJobNames.DISCOVER:
-        geometries = [_read_tracked_recording_geometry(output_root=root) for root in recording_roots]
+        geometries = [
+            _read_tracked_recording_geometry(cindra_root=root, probability_threshold=threshold) for root in cindra_roots
+        ]
         resolved = [geometry for geometry in geometries if geometry.combined_pixels > 0]
         if not resolved:
-            return _resolve_stage_fallback(job_name=job_name), False
-        return _apply_tolerance(memory_mb=_estimate_discovery_mb(geometries=resolved)), True
+            message = (
+                f"Unable to estimate the memory of the '{job_name}' job. None of the {len(cindra_roots)} recording "
+                f"director(ies) the dataset names carries a combined metadata archive, so the dataset holds nothing "
+                f"to track ROIs across. Run the single-recording pipeline over each recording first."
+            )
+            console.error(message=message, error=FileNotFoundError)
+        return _apply_tolerance(memory_mb=_estimate_discovery_mb(geometries=resolved))
 
-    target = _resolve_target_geometry(recording_roots=recording_roots, specifier=specifier)
+    target = _resolve_target_geometry(cindra_roots=cindra_roots, specifier=specifier, probability_threshold=threshold)
     if target is None:
-        return _resolve_stage_fallback(job_name=job_name), False
+        message = (
+            f"Unable to estimate the memory of the '{job_name}' job. None of the {len(cindra_roots)} recording "
+            f"director(ies) the dataset names carries a combined metadata archive, so the recording its specifier "
+            f"'{specifier}' names holds nothing to extract. Run the single-recording pipeline over it first."
+        )
+        console.error(message=message, error=FileNotFoundError)
 
     target_root, geometry = target
-    regions = _read_region_count(
+    tracked = _read_region_count(
         array_path=resolve_array_path(
-            root_path=resolve_dataset_path(output_root=target_root, dataset_name=dataset_name),
+            root_path=resolve_dataset_path(output_root=target_root.parent, dataset_name=dataset_name),
             array=RecordingArrays.CELL_FLUORESCENCE,
         )
     )
-    return _apply_tolerance(
-        memory_mb=_estimate_extraction_mb(
-            geometry=geometry, tracked_regions=regions or geometry.region_count, configuration=configuration
+    if tracked == 0:
+        tracked = planned_roi_count or _resolve_planned_template_count(
+            cindra_roots=cindra_roots, probability_threshold=threshold, geometry=geometry
         )
-    ), True
+    return _apply_tolerance(
+        memory_mb=_estimate_extraction_mb(geometry=geometry, tracked_regions=tracked, configuration=configuration)
+    )
 
 
 def _estimate_binarization_mb(geometry: RecordingGeometry, configuration: SingleRecordingConfiguration) -> int:
-    """Estimates the memory the conversion stage holds, from the raw frame batch it decodes.
+    """Estimates the memory the conversion stage holds, from the raw frame batches it decodes.
 
     Notes:
-        The stage rounds its configured batch up to a whole interleave stride, which adds fewer frames than one
-        stride and therefore stays inside the margin every estimate carries.
+        Two decoded batches are live at once. A source wider than the internal format adds the halved copy and the
+        cast copy on top of them, while a source already at the internal width is written through untouched and adds
+        neither. The stage rounds its configured batch up to a whole interleave stride, which adds fewer frames than
+        one stride and therefore stays inside the margin every estimate carries.
 
     Args:
         geometry: The recording's geometry.
@@ -384,29 +503,41 @@ def _estimate_binarization_mb(geometry: RecordingGeometry, configuration: Single
     Returns:
         The memory the stage holds in megabytes, before the shared tolerance.
     """
-    batch_bytes = configuration.registration.batch_size * geometry.raw_frame_pixels * _BINARIZATION_BYTES_PER_PIXEL
-    return WORKER_MEMORY_MB + _bytes_to_megabytes(byte_count=batch_bytes)
+    source_bytes = geometry.source_element_bytes
+    conversion_bytes = 0 if source_bytes == _INTERNAL_ELEMENT_BYTES else source_bytes + _INTERNAL_ELEMENT_BYTES
+    batch_bytes = (
+        configuration.registration.batch_size
+        * geometry.raw_frame_pixels
+        * (_BINARIZATION_LIVE_BATCHES * source_bytes + conversion_bytes)
+    )
+    accumulator_bytes = sum(plane.height * plane.width for plane in geometry.planes) * _SINGLE_PRECISION_BYTES
+    return WORKER_MEMORY_MB + _bytes_to_megabytes(byte_count=batch_bytes + accumulator_bytes)
 
 
-def _resolve_raw_frame_pixels(planes: Sequence[PlaneGeometry], acquisition: AcquisitionParameters | None) -> int:
+def _resolve_raw_frame_pixels(
+    planes: Sequence[PlaneGeometry], acquisition: AcquisitionParameters | None, source: SourceFrameGeometry | None
+) -> int:
     """Resolves the pixels one unsliced acquisition frame holds.
 
     Notes:
-        A recording interleaving several regions into one frame holds every region in each acquisition frame, so its
-        raw frame spans the regions together. A recording imaging one region holds one plane per acquisition frame
-        however many planes it images, so its raw frame spans a single plane.
+        The source file header reports the whole acquisition page, which is what the decoder materializes. A recording
+        whose source files are unreadable falls back to the extent its planes span, which for a multi-region recording
+        omits the lines separating the regions and therefore sits slightly below the page.
 
     Args:
         planes: The geometry of every virtual plane.
         acquisition: The recording's acquisition parameters, or None when they were not readable.
+        source: The geometry the recording's source files hold, or None when they were not readable.
 
     Returns:
-        The pixels one raw acquisition frame holds, or zero when the recording holds no readable plane.
+        The pixels one raw acquisition frame holds, or zero when neither the source nor a plane is readable.
     """
+    if source is not None:
+        return source.frame_height * source.frame_width
     if not planes:
         return 0
     if acquisition is not None and acquisition.is_mroi:
-        return sum(plane.height * plane.width for plane in planes) // max(1, acquisition.plane_number)
+        return sum(plane.height * plane.width for plane in planes)
     return max(plane.height * plane.width for plane in planes)
 
 
@@ -449,39 +580,47 @@ def _estimate_registration_mb(plane: PlaneGeometry, configuration: SingleRecordi
     return WORKER_MEMORY_MB + _bytes_to_megabytes(byte_count=max(reference_bytes, metric_bytes))
 
 
-def _estimate_processing_mb(plane: PlaneGeometry, configuration: SingleRecordingConfiguration) -> int:
-    """Estimates the memory one plane processing job holds, from the binned movie detection materializes.
+def _estimate_processing_mb(
+    plane: PlaneGeometry, configuration: SingleRecordingConfiguration, regions: int, channels: int
+) -> int:
+    """Estimates the memory one plane processing job holds.
+
+    Notes:
+        The job runs detection and then extraction, and each releases its working set before the other allocates, so
+        the peak is the larger of the two rather than their sum. Detection dominates at every region count a normal
+        recording reaches, and the extraction term is carried so that a dense recording does not walk off the end of
+        the model.
 
     Args:
         plane: The plane's geometry.
         configuration: The recording's processing configuration.
+        regions: The regions this plane's extraction is sized for.
+        channels: The channels the recording carries.
 
     Returns:
         The memory the job holds in megabytes, before the shared tolerance.
     """
     binned_frames = _resolve_binned_frame_count(plane=plane, configuration=configuration)
     copies = _DETECTION_DENOISE_ARRAY_COPIES if configuration.roi_detection.denoise else _DETECTION_ARRAY_COPIES
-    peak_bytes = copies * binned_frames * plane.height * plane.width * _SINGLE_PRECISION_BYTES
-    return WORKER_MEMORY_MB + _bytes_to_megabytes(byte_count=peak_bytes)
+    frame_pixels = plane.valid_pixels or plane.height * plane.width
+    detection_bytes = copies * binned_frames * frame_pixels * _SINGLE_PRECISION_BYTES
+    extraction_bytes = _EXTRACTION_TRACE_COPIES * channels * regions * plane.frame_count * _SINGLE_PRECISION_BYTES
+    return WORKER_MEMORY_MB + _bytes_to_megabytes(byte_count=max(detection_bytes, extraction_bytes))
 
 
-def _estimate_combination_mb(geometry: RecordingGeometry) -> int:
+def _estimate_combination_mb(geometry: RecordingGeometry, regions: int) -> int:
     """Estimates the memory the combination stage holds, from the traces it concatenates.
 
     Args:
         geometry: The recording's geometry.
+        regions: The regions the combined trace arrays are sized for.
 
     Returns:
         The memory the stage holds in megabytes, before the shared tolerance.
     """
     channels = 2 if geometry.two_channels else 1
-    trace_bytes = (
-        _COMBINATION_TRACE_KINDS
-        * channels
-        * geometry.region_count
-        * geometry.combined_frame_count
-        * _SINGLE_PRECISION_BYTES
-    )
+    frame_count = geometry.combined_frame_count or min((plane.frame_count for plane in geometry.planes), default=0)
+    trace_bytes = _COMBINATION_TRACE_KINDS * channels * regions * frame_count * _SINGLE_PRECISION_BYTES
     return WORKER_MEMORY_MB + _bytes_to_megabytes(byte_count=trace_bytes)
 
 
@@ -489,10 +628,9 @@ def _estimate_discovery_mb(geometries: Sequence[RecordingGeometry]) -> int:
     """Estimates the memory one cross-recording discovery job holds for a whole dataset.
 
     Notes:
-        The registration term is linear in the recording count, because the groupwise registration caches one image
-        and one gradient per image rather than one deformation per unordered pair. The clustering term is a flat
-        allowance, because the pairwise matrix it builds follows local region crowding rather than any count the
-        processed data reports.
+        The registration term is linear in the recording count and scales with the combined frame, while the
+        clustering term is quadratic in the regions the dataset spans and does not scale with the frame at all. The
+        registration working set stays resident while the clustering runs, so the two terms add.
 
     Args:
         geometries: The geometry of every recording the dataset spans.
@@ -502,8 +640,11 @@ def _estimate_discovery_mb(geometries: Sequence[RecordingGeometry]) -> int:
     """
     widest_pixels = max(geometry.combined_pixels for geometry in geometries)
     planes = _DISCOVERY_PLANES_PER_RECORDING * len(geometries) + _DISCOVERY_TRANSIENT_PLANES
-    registration_bytes = planes * widest_pixels * _SINGLE_PRECISION_BYTES
-    return WORKER_MEMORY_MB + _bytes_to_megabytes(byte_count=registration_bytes) + _TRACKING_CLUSTERING_MEMORY_MB
+    registration_mb = _bytes_to_megabytes(byte_count=planes * widest_pixels * _SINGLE_PRECISION_BYTES)
+
+    regions = sum(geometry.selected_region_count or geometry.region_count for geometry in geometries)
+    clustering_mb = _bytes_to_megabytes(byte_count=_TRACKING_PAIRWISE_BYTES_PER_SQUARED_REGION * regions * regions)
+    return WORKER_MEMORY_MB + registration_mb + clustering_mb
 
 
 def _estimate_extraction_mb(
@@ -550,6 +691,11 @@ def _resolve_metric_sample_count(plane: PlaneGeometry) -> int:
 def _resolve_binned_frame_count(plane: PlaneGeometry, configuration: SingleRecordingConfiguration) -> int:
     """Resolves the frames the detection stage bins one plane's movie down to.
 
+    Notes:
+        Binning happens inside each read batch and each batch truncates its own remainder, so the movie loses up to
+        one bin per batch rather than one bin overall. Every frame is treated as good, which is the planning bound,
+        because a rejected frame only ever lowers the count.
+
     Args:
         plane: The plane's geometry.
         configuration: The recording's processing configuration.
@@ -564,65 +710,112 @@ def _resolve_binned_frame_count(plane: PlaneGeometry, configuration: SingleRecor
             round(configuration.main.tau * plane.sampling_rate),
         )
     )
-    return max(1, plane.frame_count // bin_size)
+    batch = max(1, min(plane.frame_count, _BIN_BATCH_SIZE))
+    binned = 0
+    for start in range(0, plane.frame_count, batch):
+        span = min(batch, plane.frame_count - start)
+        binned += (span // bin_size) if span > bin_size else 1
+    return max(1, binned)
 
 
-def _resolve_specifier_index(specifier: str, count: int) -> int | None:
-    """Resolves the index a per-plane specifier names, bounded by the planes the recording holds.
+def _resolve_planned_regions(
+    geometry: RecordingGeometry, configuration: SingleRecordingConfiguration, planned_roi_count: int | None
+) -> int:
+    """Resolves the regions the region-scaled estimates are sized for.
+
+    Notes:
+        Prefers what the recording has already produced, taking the combined count when the combination stage has
+        run and the sum of the per-plane counts once every plane has been processed, since the combined array holds
+        exactly the planes' regions together. Falls back to the planned figure while neither exists.
 
     Args:
-        specifier: The job's tracker specifier.
-        count: The planes the recording holds.
+        geometry: The recording's geometry.
+        configuration: The recording's processing configuration.
+        planned_roi_count: The regions the caller asked to plan for, or None to accept the detection ceiling.
 
     Returns:
-        The plane index, or None when the specifier names no plane the recording holds.
+        The regions to size the region-scaled estimates for.
     """
-    plane_index = parse_plane_specifier(specifier=specifier)
-    if plane_index is None or not 0 <= plane_index < count:
-        return None
-    return plane_index
+    if geometry.region_count > 0:
+        return geometry.region_count
+    plane_regions = sum(plane.region_count for plane in geometry.planes)
+    if plane_regions > 0:
+        return plane_regions
+    if planned_roi_count is not None:
+        return planned_roi_count
+    return resolve_maximum_roi_count(plane_count=len(geometry.planes), configuration=configuration)
 
 
-def _resolve_target_geometry(recording_roots: Sequence[Path], specifier: str) -> tuple[Path, RecordingGeometry] | None:
+def _resolve_planned_template_count(
+    cindra_roots: Sequence[Path], probability_threshold: float, geometry: RecordingGeometry
+) -> int:
+    """Resolves the tracked templates an extraction job is planned for before discovery has produced them.
+
+    Notes:
+        A template gathers regions that co-locate across recordings, so no recording contributes more than one region
+        to it and the dataset cannot hold more templates than half the regions its recordings select. That ceiling is
+        an order of magnitude above what any measured dataset produced, so the planning figure is the largest
+        selection a single recording offers instead, which every measured tracked count has stayed a fifth below. A
+        caller needing the ceiling rather than the planning figure passes it explicitly.
+
+    Args:
+        cindra_roots: The pipeline output directory of every recording the dataset spans.
+        probability_threshold: The minimum classifier probability a region must carry to be selected.
+        geometry: The target recording's geometry, used when no recording offers a readable classification.
+
+    Returns:
+        The tracked templates to plan for.
+    """
+    selections = [
+        _read_selected_region_count(cindra_root=root, probability_threshold=probability_threshold)
+        for root in cindra_roots
+    ]
+    return max([*selections, geometry.selected_region_count, geometry.region_count, 1])
+
+
+def _resolve_target_geometry(
+    cindra_roots: Sequence[Path], specifier: str, probability_threshold: float
+) -> tuple[Path, RecordingGeometry] | None:
     """Resolves the recording one extraction job runs on, together with the geometry the estimate reads from it.
 
     Notes:
-        Reads the combined archive of the recording the specifier names alone, and scans every recording only when the
-        specifier matches none of them, in which case the widest readable recording is charged so that an unmatched
-        job never understates. The channel count and the region count are read for the resolved recording alone.
+        The specifier carries the identifying component of the recording's path, which is what the dataset resolver
+        derives its recording identifiers from, so the match is made against that component rather than against the
+        directory's own name. Every recording is scanned only when the specifier matches none of them, in which case
+        the widest readable recording is charged so that an unmatched job never understates.
 
     Args:
-        recording_roots: The output root of every recording the dataset spans.
+        cindra_roots: The pipeline output directory of every recording the dataset spans.
         specifier: The specifier naming the target recording.
+        probability_threshold: The minimum classifier probability a region must carry to be selected.
 
     Returns:
-        The target recording's output root paired with its geometry, or None when no recording carries combined
+        The target recording's output directory paired with its geometry, or None when no recording carries combined
         output.
     """
     target_root: Path | None = None
     target = RecordingGeometry()
-    for root in recording_roots:
-        if root.name != specifier:
+    identifiers = extract_unique_components(paths=list(cindra_roots)) if cindra_roots else ()
+    for root, identifier in zip(cindra_roots, identifiers, strict=False):
+        if identifier != specifier:
             continue
-        candidate = _read_tracked_recording_geometry(output_root=root)
+        candidate = _read_tracked_recording_geometry(cindra_root=root, probability_threshold=probability_threshold)
         if candidate.combined_pixels > 0:
             target_root, target = root, candidate
             break
 
     if target_root is None:
-        for root in recording_roots:
-            candidate = _read_tracked_recording_geometry(output_root=root)
+        for root in cindra_roots:
+            candidate = _read_tracked_recording_geometry(cindra_root=root, probability_threshold=probability_threshold)
             if candidate.combined_pixels > target.combined_pixels:
                 target_root, target = root, candidate
 
     if target_root is None:
         return None
 
-    acquisition = resolve_acquisition_parameters(output_root=target_root, data_path=None)
+    acquisition = resolve_acquisition_parameters(output_root=target_root.parent, data_path=None)
     region_count = _read_region_count(
-        array_path=resolve_array_path(
-            root_path=resolve_output_path(output_root=target_root), array=RecordingArrays.CELL_FLUORESCENCE
-        )
+        array_path=resolve_array_path(root_path=target_root, array=RecordingArrays.CELL_FLUORESCENCE)
     )
     return target_root, RecordingGeometry(
         combined_pixels=target.combined_pixels,
@@ -633,37 +826,131 @@ def _resolve_target_geometry(recording_roots: Sequence[Path], specifier: str) ->
     )
 
 
-def _read_plane_geometries(inventory: RecordingPlanes, plane_index: int | None = None) -> tuple[PlaneGeometry, ...]:
-    """Reads the geometry of one plane, or of every plane, from the runtime data each plane directory carries.
+def _resolve_plane_geometries(
+    inventory: RecordingPlanes,
+    acquisition: AcquisitionParameters | None,
+    source: SourceFrameGeometry | None,
+    output_root: Path,
+) -> tuple[PlaneGeometry, ...]:
+    """Resolves the geometry of every virtual plane, from what the conversion wrote or from the raw acquisition.
 
     Args:
         inventory: The recording's plane inventory.
-        plane_index: The index of the single plane to read, or None to read every plane the inventory names.
+        acquisition: The recording's acquisition parameters, or None when they were not readable.
+        source: The geometry the recording's source files hold, or None when they were not readable.
+        output_root: The output root the recording was configured with.
 
     Returns:
-        The geometry of every covered plane whose runtime data was readable.
+        The geometry of every plane the recording holds, empty when neither source resolves one.
     """
-    plane_paths = inventory.plane_paths if plane_index is None else inventory.plane_paths[plane_index : plane_index + 1]
+    written = _read_plane_geometries(inventory=inventory, output_root=output_root)
+    if written:
+        return written
+    return _derive_plane_geometries(acquisition=acquisition, source=source)
+
+
+def _read_plane_geometries(inventory: RecordingPlanes, output_root: Path) -> tuple[PlaneGeometry, ...]:
+    """Reads the geometry of every plane from the runtime data each plane directory carries.
+
+    Args:
+        inventory: The recording's plane inventory.
+        output_root: The output root the recording was configured with.
+
+    Returns:
+        The geometry of every plane whose runtime data was readable.
+    """
     geometries: list[PlaneGeometry] = []
-    for plane_path in plane_paths:
+    for plane_index, plane_path in enumerate(inventory.plane_paths):
         try:
             runtime = SingleRecordingRuntimeData.load(output_path=plane_path)
         except FileNotFoundError, ValueError:
             continue
         if runtime.io.frame_count <= 0:
             continue
+        valid_y, valid_x = runtime.registration.valid_y_range, runtime.registration.valid_x_range
+        valid_pixels = (valid_y[1] - valid_y[0]) * (valid_x[1] - valid_x[0]) if valid_y and valid_x else 0
         geometries.append(
             PlaneGeometry(
                 height=runtime.io.frame_height,
                 width=runtime.io.frame_width,
                 frame_count=runtime.io.frame_count,
                 sampling_rate=runtime.io.sampling_rate,
+                valid_pixels=max(0, valid_pixels),
+                index=plane_index,
+                region_count=_read_region_count(
+                    array_path=resolve_array_path(
+                        root_path=resolve_plane_path(output_root=output_root, plane_index=plane_index),
+                        array=RecordingArrays.CELL_FLUORESCENCE,
+                    )
+                ),
             )
         )
     return tuple(geometries)
 
 
-def _read_tracked_recording_geometry(output_root: Path) -> RecordingGeometry:
+def _derive_plane_geometries(
+    acquisition: AcquisitionParameters | None, source: SourceFrameGeometry | None
+) -> tuple[PlaneGeometry, ...]:
+    """Derives the geometry the conversion will write, from the acquisition metadata and one source file header.
+
+    Notes:
+        A multi-region recording takes each plane's height from the span of that region's line list and its width
+        from the acquisition page. Every plane receives the frames one whole interleave cycle delivers.
+
+    Args:
+        acquisition: The recording's acquisition parameters, or None when they were not readable.
+        source: The geometry the recording's source files hold, or None when they were not readable.
+
+    Returns:
+        The geometry every plane will hold, empty when either input is unreadable.
+    """
+    if acquisition is None or source is None:
+        return ()
+    stride = max(1, acquisition.plane_number * acquisition.channel_number)
+    frame_count = source.frame_count // stride
+    if frame_count <= 0:
+        return ()
+    sampling_rate = acquisition.frame_rate / max(1, acquisition.plane_number)
+    plane_count = acquisition.virtual_plane_count if acquisition.is_mroi else acquisition.plane_number
+
+    geometries: list[PlaneGeometry] = []
+    for virtual_plane_index in range(plane_count):
+        if acquisition.is_mroi and acquisition.roi_lines:
+            lines = acquisition.roi_lines[virtual_plane_index // max(1, acquisition.plane_number)]
+            height, width = lines[-1] - lines[0] + 1, source.frame_width
+        else:
+            height, width = source.frame_height, source.frame_width
+        geometries.append(
+            PlaneGeometry(
+                height=height,
+                width=width,
+                frame_count=frame_count,
+                sampling_rate=sampling_rate,
+                index=virtual_plane_index,
+            )
+        )
+    return tuple(geometries)
+
+
+def _read_source_geometry(data_path: Path | None, ignored_file_names: tuple[str, ...]) -> SourceFrameGeometry | None:
+    """Reads the geometry a recording's source files hold, tolerating their absence.
+
+    Args:
+        data_path: The raw imaging directory, or None when the caller named none.
+        ignored_file_names: The source file stems the recording excludes from conversion.
+
+    Returns:
+        The geometry the source files hold, or None when the directory holds none the discovery accepts.
+    """
+    if data_path is None or not data_path.is_dir():
+        return None
+    try:
+        return resolve_source_frame_geometry(data_directory=data_path, ignored_file_names=ignored_file_names)
+    except FileNotFoundError, OSError, ValueError:
+        return None
+
+
+def _read_tracked_recording_geometry(cindra_root: Path, probability_threshold: float) -> RecordingGeometry:
     """Reads the geometry every multi-recording model reads from one recording of a tracked dataset.
 
     Notes:
@@ -672,18 +959,55 @@ def _read_tracked_recording_geometry(output_root: Path) -> RecordingGeometry:
         works at the combined view.
 
     Args:
-        output_root: The output root the recording was configured with.
+        cindra_root: The recording's pipeline output directory, which carries the combined metadata archive.
+        probability_threshold: The minimum classifier probability a region must carry to be selected.
 
     Returns:
         The recording's geometry, whose resolved flag is False when the recording carries no combined output.
     """
-    combined_pixels, combined_frame_count, two_channels = _read_combined_geometry(output_root=output_root)
+    metadata_path = cindra_root / COMBINED_METADATA_FILENAME
+    if not metadata_path.is_file():
+        return RecordingGeometry()
+    combined_pixels, combined_frame_count, two_channels = _read_combined_geometry(output_root=cindra_root.parent)
     return RecordingGeometry(
         combined_pixels=combined_pixels,
         combined_frame_count=combined_frame_count,
         two_channels=two_channels,
+        region_count=_read_region_count(
+            array_path=resolve_array_path(root_path=cindra_root, array=RecordingArrays.CELL_FLUORESCENCE)
+        ),
+        selected_region_count=_read_selected_region_count(
+            cindra_root=cindra_root, probability_threshold=probability_threshold
+        ),
         resolved=combined_pixels > 0,
     )
+
+
+def _resolve_cindra_directories(recording_directories: Sequence[Path]) -> tuple[Path, ...]:
+    """Resolves the pipeline output directory of every recording a dataset names.
+
+    Notes:
+        A configured recording directory either is the pipeline output directory or contains it at an arbitrary
+        depth, which is the same latitude the context resolver allows, so the resolution is repeated here rather
+        than assumed. A recording whose output cannot be located resolves to the directory as configured, which
+        carries no combined archive and therefore contributes no geometry.
+
+    Args:
+        recording_directories: The recording directories the dataset configuration names.
+
+    Returns:
+        The pipeline output directory of every named recording, in the order they were named.
+    """
+    resolved: list[Path] = []
+    for directory in recording_directories:
+        if (directory / COMBINED_METADATA_FILENAME).is_file():
+            resolved.append(directory)
+            continue
+        try:
+            resolved.append(find_cindra_directory(recording_directory=directory))
+        except FileNotFoundError, RuntimeError, OSError:
+            resolved.append(directory)
+    return tuple(resolved)
 
 
 def _read_combined_geometry(output_root: Path) -> tuple[int, int, bool]:
@@ -704,6 +1028,33 @@ def _read_combined_geometry(output_root: Path) -> tuple[int, int, bool]:
         frame_count = int(metadata["frame_count"][0]) if "frame_count" in metadata else 0
         two_channels = "registered_binary_paths_channel_2" in metadata
     return pixels, frame_count, two_channels
+
+
+def _read_selected_region_count(cindra_root: Path, probability_threshold: float) -> int:
+    """Counts the regions of one recording that clear the dataset's ROI selection probability threshold.
+
+    Notes:
+        ROI selection additionally rejects regions by size and by their distance from a multi-region border, so the
+        count returned bounds above what the selection keeps rather than matching it. That is the direction a memory
+        estimate needs, and it is far tighter than assuming the selection rejects nothing.
+
+    Args:
+        cindra_root: The recording's pipeline output directory.
+        probability_threshold: The minimum classifier probability a region must carry to be selected.
+
+    Returns:
+        The regions clearing the threshold, or zero when the classification array is unreadable.
+    """
+    array_path = resolve_array_path(root_path=cindra_root, array=RecordingArrays.CELL_CLASSIFICATION)
+    if not array_path.is_file():
+        return 0
+    try:
+        classification = np.load(file=array_path, mmap_mode="r")
+        if classification.ndim != _TRACE_ARRAY_DIMENSIONS or classification.shape[1] < _TRACE_ARRAY_DIMENSIONS:
+            return 0
+        return int(np.count_nonzero(np.asarray(classification[:, 1]) >= probability_threshold))
+    except OSError, ValueError:
+        return 0
 
 
 def _read_region_count(array_path: Path) -> int:
@@ -753,15 +1104,3 @@ def _apply_tolerance(memory_mb: int) -> int:
     """
     reportable = int(memory_mb * MEMORY_ESTIMATE_TOLERANCE) + 1
     return math.ceil(reportable / _MEGABYTES_PER_GIGABYTE) * _MEGABYTES_PER_GIGABYTE
-
-
-def _resolve_stage_fallback(job_name: str) -> int:
-    """Resolves the conservative allowance one stage is charged when its own geometry cannot be read.
-
-    Args:
-        job_name: The name of the pipeline stage the job runs.
-
-    Returns:
-        The reportable allowance in megabytes.
-    """
-    return _apply_tolerance(memory_mb=WORKER_MEMORY_MB + _STAGE_FALLBACK_MEGABYTES[str(job_name)])
