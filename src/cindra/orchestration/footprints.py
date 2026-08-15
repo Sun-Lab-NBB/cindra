@@ -38,6 +38,7 @@ from ..layout import (
     resolve_dataset_path,
     parse_plane_specifier,
 )
+from .allocation import resolve_stage_workers
 from ..dataclasses import SingleRecordingRuntimeData
 
 if TYPE_CHECKING:
@@ -236,6 +237,20 @@ class RecordingGeometry:
     """Determines whether the geometry follows from the recording's own data rather than from its absence."""
 
 
+@dataclass(frozen=True, slots=True)
+class JobSizing:
+    """Describes the resources one job receives, as one sizing pass resolved them."""
+
+    cores: int
+    """The CPU cores the job occupies while it runs, as the stage's measured default declares them."""
+    memory_mb: int
+    """The memory the job occupies at its peak, in megabytes."""
+    modeled: bool
+    """Determines whether every region count the estimate scales by was read from an array the pipeline already
+    wrote, rather than budgeted against a planning ceiling. A stage whose estimate carries no region term is always
+    modeled, since its acquisition geometry determines it in full."""
+
+
 def resolve_recording_geometry(
     output_root: Path, data_path: Path | None = None, ignored_file_names: tuple[str, ...] = ()
 ) -> RecordingGeometry:
@@ -340,69 +355,14 @@ def estimate_single_recording_job_memory_mb(
         ValueError: If planned_roi_count is supplied and is not a positive integer, or if a per-plane job's specifier
             names an imaging plane the recording does not hold.
     """
-    if planned_roi_count is not None and planned_roi_count <= 0:
-        message = (
-            f"Unable to estimate the memory of the '{job_name}' job. The planned region count must be a positive "
-            f"integer counting every plane together, or None to accept the detection ceiling, but encountered "
-            f"{planned_roi_count}."
-        )
-        console.error(message=message, error=ValueError)
-
-    geometry = resolve_recording_geometry(
+    return _resolve_single_recording_memory(
+        job_name=job_name,
+        specifier=specifier,
         output_root=output_root,
+        configuration=configuration,
         data_path=data_path,
-        ignored_file_names=tuple(configuration.file_io.ignored_file_names),
-    )
-    if not geometry.planes and not geometry.combined_pixels:
-        message = (
-            f"Unable to estimate the memory of the '{job_name}' job. The recording configured with the output root "
-            f"{output_root} carries neither pipeline output nor readable raw imaging data, so no stage of it can "
-            f"run. Verify that the configured data path holds the recording's source files."
-        )
-        console.error(message=message, error=FileNotFoundError)
-
-    regions = _resolve_planned_regions(
-        geometry=geometry, configuration=configuration, planned_roi_count=planned_roi_count
-    )
-
-    if job_name == SingleRecordingJobNames.BINARIZE:
-        return _apply_tolerance(memory_mb=_estimate_binarization_mb(geometry=geometry, configuration=configuration))
-    if job_name == SingleRecordingJobNames.COMBINE:
-        return _apply_tolerance(memory_mb=_estimate_combination_mb(geometry=geometry, regions=regions))
-
-    plane_index = parse_plane_specifier(specifier=specifier)
-    planes = (
-        geometry.planes
-        if plane_index is None
-        else tuple(plane for plane in geometry.planes if plane.index == plane_index)
-    )
-    if not planes:
-        message = (
-            f"Unable to estimate the memory of the '{job_name}' job. Its specifier names imaging plane "
-            f"'{specifier}', which the recording configured with the output root {output_root} does not hold. The "
-            f"recording holds {len(geometry.planes)} plane(s)."
-        )
-        console.error(message=message, error=ValueError)
-
-    if job_name == SingleRecordingJobNames.REGISTER:
-        return _apply_tolerance(
-            memory_mb=max(_estimate_registration_mb(plane=plane, configuration=configuration) for plane in planes)
-        )
-
-    # A per-plane job is charged as though every planned region fell on its own plane, because the planned figure
-    # counts the recording rather than any one plane and the planes of one recording rarely hold similar counts.
-    per_plane_ceiling = resolve_maximum_roi_count(plane_count=1, configuration=configuration)
-    return _apply_tolerance(
-        memory_mb=max(
-            _estimate_processing_mb(
-                plane=plane,
-                configuration=configuration,
-                regions=plane.region_count or min(regions, per_plane_ceiling),
-                channels=2 if geometry.two_channels else 1,
-            )
-            for plane in planes
-        )
-    )
+        planned_roi_count=planned_roi_count,
+    )[0]
 
 
 def estimate_multi_recording_job_memory_mb(
@@ -440,6 +400,235 @@ def estimate_multi_recording_job_memory_mb(
             neither multi-recording stage can run.
         ValueError: If planned_roi_count is supplied and is not a positive integer.
     """
+    return _resolve_multi_recording_memory(
+        job_name=job_name,
+        specifier=specifier,
+        recording_directories=recording_directories,
+        dataset_name=dataset_name,
+        configuration=configuration,
+        planned_roi_count=planned_roi_count,
+    )[0]
+
+
+def size_single_recording_job(
+    job_name: SingleRecordingJobNames,
+    specifier: str,
+    output_root: Path,
+    configuration: SingleRecordingConfiguration,
+    data_path: Path | None = None,
+    *,
+    planned_roi_count: int | None = None,
+) -> JobSizing:
+    """Sizes one single-recording job from the recording it processes.
+
+    Notes:
+        Answers both halves of the sizing model from one pass over the recording's geometry, which is what lets a
+        caller size a whole job graph before dispatching any of it.
+
+    Args:
+        job_name: The pipeline stage the job runs.
+        specifier: The job's tracker specifier, which names a plane for the per-plane stages and is empty otherwise.
+        output_root: The output root the recording was configured with.
+        configuration: The recording's processing configuration.
+        data_path: The raw imaging directory, consulted when the recording carries no output yet.
+        planned_roi_count: The regions to plan for, counting every plane of the recording together. Use None to
+            accept the ceiling the detection iteration bound provides. Must be a positive integer when supplied.
+
+    Returns:
+        The cores and the memory the job receives, and whether the pipeline measured every region count the estimate
+        scales by.
+
+    Raises:
+        FileNotFoundError: If the recording carries neither pipeline output nor readable raw imaging data, in which
+            case no stage of it can run.
+        ValueError: If planned_roi_count is supplied and is not a positive integer, or if a per-plane job's specifier
+            names an imaging plane the recording does not hold.
+    """
+    memory_mb, modeled = _resolve_single_recording_memory(
+        job_name=job_name,
+        specifier=specifier,
+        output_root=output_root,
+        configuration=configuration,
+        data_path=data_path,
+        planned_roi_count=planned_roi_count,
+    )
+
+    return JobSizing(cores=resolve_stage_workers(job_name=job_name), memory_mb=memory_mb, modeled=modeled)
+
+
+def size_multi_recording_job(
+    job_name: MultiRecordingJobNames,
+    specifier: str,
+    recording_directories: Sequence[Path],
+    dataset_name: str,
+    configuration: MultiRecordingConfiguration,
+    *,
+    planned_roi_count: int | None = None,
+) -> JobSizing:
+    """Sizes one multi-recording job from the dataset it processes.
+
+    Notes:
+        Answers both halves of the sizing model from one pass over the dataset's geometry, which is what lets a
+        caller size a whole job graph before dispatching any of it.
+
+    Args:
+        job_name: The pipeline stage the job runs.
+        specifier: The job's tracker specifier, which names a recording for the extraction stage.
+        recording_directories: The root directory of every recording the dataset spans, as the configuration's
+            recording_directories field holds them.
+        dataset_name: The name of the tracked dataset.
+        configuration: The dataset's processing configuration.
+        planned_roi_count: The tracked templates to plan for. Use None to accept the dataset's own planning figure.
+            Must be a positive integer when supplied.
+
+    Returns:
+        The cores and the memory the job receives, and whether the pipeline measured every region count the estimate
+        scales by.
+
+    Raises:
+        FileNotFoundError: If no recording the dataset names carries a combined metadata archive, in which case
+            neither multi-recording stage can run.
+        ValueError: If planned_roi_count is supplied and is not a positive integer.
+    """
+    memory_mb, modeled = _resolve_multi_recording_memory(
+        job_name=job_name,
+        specifier=specifier,
+        recording_directories=recording_directories,
+        dataset_name=dataset_name,
+        configuration=configuration,
+        planned_roi_count=planned_roi_count,
+    )
+
+    return JobSizing(cores=resolve_stage_workers(job_name=job_name), memory_mb=memory_mb, modeled=modeled)
+
+
+def _resolve_single_recording_memory(
+    job_name: SingleRecordingJobNames,
+    specifier: str,
+    output_root: Path,
+    configuration: SingleRecordingConfiguration,
+    data_path: Path | None,
+    planned_roi_count: int | None,
+) -> tuple[int, bool]:
+    """Resolves the memory one single-recording job occupies and whether the pipeline measured its region counts.
+
+    Args:
+        job_name: The pipeline stage the job runs.
+        specifier: The job's tracker specifier, which names a plane for the per-plane stages and is empty otherwise.
+        output_root: The output root the recording was configured with.
+        configuration: The recording's processing configuration.
+        data_path: The raw imaging directory, consulted when the recording carries no output yet.
+        planned_roi_count: The regions to plan for, counting every plane of the recording together.
+
+    Returns:
+        The memory the job occupies in megabytes, and whether every region count the estimate scales by came from an
+        array the pipeline already wrote, in that order.
+
+    Raises:
+        FileNotFoundError: If the recording carries neither pipeline output nor readable raw imaging data.
+        ValueError: If planned_roi_count is supplied and is not a positive integer, or if a per-plane job's specifier
+            names an imaging plane the recording does not hold.
+    """
+    if planned_roi_count is not None and planned_roi_count <= 0:
+        message = (
+            f"Unable to estimate the memory of the '{job_name}' job. The planned region count must be a positive "
+            f"integer counting every plane together, or None to accept the detection ceiling, but encountered "
+            f"{planned_roi_count}."
+        )
+        console.error(message=message, error=ValueError)
+
+    geometry = resolve_recording_geometry(
+        output_root=output_root,
+        data_path=data_path,
+        ignored_file_names=tuple(configuration.file_io.ignored_file_names),
+    )
+    if not geometry.planes and not geometry.combined_pixels:
+        message = (
+            f"Unable to estimate the memory of the '{job_name}' job. The recording configured with the output root "
+            f"{output_root} carries neither pipeline output nor readable raw imaging data, so no stage of it can "
+            f"run. Verify that the configured data path holds the recording's source files."
+        )
+        console.error(message=message, error=FileNotFoundError)
+
+    regions, measured = _resolve_planned_regions(
+        geometry=geometry, configuration=configuration, planned_roi_count=planned_roi_count
+    )
+
+    # The conversion stage reads acquisition batches alone, so its estimate carries no region term to measure.
+    if job_name == SingleRecordingJobNames.BINARIZE:
+        binarization_mb = _estimate_binarization_mb(geometry=geometry, configuration=configuration)
+        return _apply_tolerance(memory_mb=binarization_mb), True
+    if job_name == SingleRecordingJobNames.COMBINE:
+        return _apply_tolerance(memory_mb=_estimate_combination_mb(geometry=geometry, regions=regions)), measured
+
+    plane_index = parse_plane_specifier(specifier=specifier)
+    planes = (
+        geometry.planes
+        if plane_index is None
+        else tuple(plane for plane in geometry.planes if plane.index == plane_index)
+    )
+    if not planes:
+        message = (
+            f"Unable to estimate the memory of the '{job_name}' job. Its specifier names imaging plane "
+            f"'{specifier}', which the recording configured with the output root {output_root} does not hold. The "
+            f"recording holds {len(geometry.planes)} plane(s)."
+        )
+        console.error(message=message, error=ValueError)
+
+    # Registration aligns frames rather than regions, so its estimate carries no region term to measure either.
+    if job_name == SingleRecordingJobNames.REGISTER:
+        return (
+            _apply_tolerance(
+                memory_mb=max(_estimate_registration_mb(plane=plane, configuration=configuration) for plane in planes)
+            ),
+            True,
+        )
+
+    # A per-plane job is charged as though every planned region fell on its own plane, because the planned figure
+    # counts the recording rather than any one plane and the planes of one recording rarely hold similar counts.
+    per_plane_ceiling = resolve_maximum_roi_count(plane_count=1, configuration=configuration)
+    return (
+        _apply_tolerance(
+            memory_mb=max(
+                _estimate_processing_mb(
+                    plane=plane,
+                    configuration=configuration,
+                    regions=plane.region_count or min(regions, per_plane_ceiling),
+                    channels=2 if geometry.two_channels else 1,
+                )
+                for plane in planes
+            )
+        ),
+        all(plane.region_count > 0 for plane in planes),
+    )
+
+
+def _resolve_multi_recording_memory(
+    job_name: MultiRecordingJobNames,
+    specifier: str,
+    recording_directories: Sequence[Path],
+    dataset_name: str,
+    configuration: MultiRecordingConfiguration,
+    planned_roi_count: int | None,
+) -> tuple[int, bool]:
+    """Resolves the memory one multi-recording job occupies and whether the pipeline measured its region counts.
+
+    Args:
+        job_name: The pipeline stage the job runs.
+        specifier: The job's tracker specifier, which names a recording for the extraction stage.
+        recording_directories: The root directory of every recording the dataset spans.
+        dataset_name: The name of the tracked dataset.
+        configuration: The dataset's processing configuration.
+        planned_roi_count: The tracked templates to plan for.
+
+    Returns:
+        The memory the job occupies in megabytes, and whether the tracked template count the estimate scales by came
+        from the dataset's own trace array, in that order.
+
+    Raises:
+        FileNotFoundError: If no recording the dataset names carries a combined metadata archive.
+        ValueError: If planned_roi_count is supplied and is not a positive integer.
+    """
     if planned_roi_count is not None and planned_roi_count <= 0:
         message = (
             f"Unable to estimate the memory of the '{job_name}' job. The planned tracked template count must be a "
@@ -449,6 +638,7 @@ def estimate_multi_recording_job_memory_mb(
         console.error(message=message, error=ValueError)
     threshold = configuration.roi_selection.probability_threshold
     cindra_roots = _resolve_cindra_directories(recording_directories=recording_directories)
+
     if job_name == MultiRecordingJobNames.DISCOVER:
         geometries = [
             _read_tracked_recording_geometry(cindra_root=root, probability_threshold=threshold) for root in cindra_roots
@@ -461,7 +651,11 @@ def estimate_multi_recording_job_memory_mb(
                 f"to track ROIs across. Run the single-recording pipeline over each recording first."
             )
             console.error(message=message, error=FileNotFoundError)
-        return _apply_tolerance(memory_mb=_estimate_discovery_mb(geometries=resolved))
+
+        # The clustering term is quadratic in the regions the dataset spans, so the estimate is measured only where
+        # every recording it covers reports a region count of its own.
+        measured = all(geometry.selected_region_count or geometry.region_count for geometry in resolved)
+        return _apply_tolerance(memory_mb=_estimate_discovery_mb(geometries=resolved)), measured
 
     target = _resolve_target_geometry(cindra_roots=cindra_roots, specifier=specifier, probability_threshold=threshold)
     if target is None:
@@ -479,12 +673,16 @@ def estimate_multi_recording_job_memory_mb(
             array=RecordingArrays.CELL_FLUORESCENCE,
         )
     )
-    if tracked == 0:
+    measured = tracked > 0
+    if not measured:
         tracked = planned_roi_count or _resolve_planned_template_count(
             cindra_roots=cindra_roots, probability_threshold=threshold, geometry=geometry
         )
-    return _apply_tolerance(
-        memory_mb=_estimate_extraction_mb(geometry=geometry, tracked_regions=tracked, configuration=configuration)
+    return (
+        _apply_tolerance(
+            memory_mb=_estimate_extraction_mb(geometry=geometry, tracked_regions=tracked, configuration=configuration)
+        ),
+        measured,
     )
 
 
@@ -721,8 +919,8 @@ def _resolve_binned_frame_count(plane: PlaneGeometry, configuration: SingleRecor
 
 def _resolve_planned_regions(
     geometry: RecordingGeometry, configuration: SingleRecordingConfiguration, planned_roi_count: int | None
-) -> int:
-    """Resolves the regions the region-scaled estimates are sized for.
+) -> tuple[int, bool]:
+    """Resolves the regions the region-scaled estimates are sized for, and whether the pipeline measured them.
 
     Notes:
         Prefers what the recording has already produced, taking the combined count when the combination stage has
@@ -735,16 +933,17 @@ def _resolve_planned_regions(
         planned_roi_count: The regions the caller asked to plan for, or None to accept the detection ceiling.
 
     Returns:
-        The regions to size the region-scaled estimates for.
+        The regions to size the region-scaled estimates for, and whether that count came from an array the pipeline
+        already wrote rather than from a planning ceiling, in that order.
     """
     if geometry.region_count > 0:
-        return geometry.region_count
+        return geometry.region_count, True
     plane_regions = sum(plane.region_count for plane in geometry.planes)
     if plane_regions > 0:
-        return plane_regions
+        return plane_regions, all(plane.region_count > 0 for plane in geometry.planes)
     if planned_roi_count is not None:
-        return planned_roi_count
-    return resolve_maximum_roi_count(plane_count=len(geometry.planes), configuration=configuration)
+        return planned_roi_count, False
+    return resolve_maximum_roi_count(plane_count=len(geometry.planes), configuration=configuration), False
 
 
 def _resolve_planned_template_count(

@@ -25,12 +25,19 @@ from cindra.dataclasses import (
     MultiRecordingConfiguration,
     SingleRecordingConfiguration,
 )
-from cindra.orchestration import MultiRecordingJobNames, SingleRecordingJobNames
+from cindra.orchestration import (
+    DISCOVERY_WORKERS,
+    COMBINATION_WORKERS,
+    BINARIZATION_WORKERS,
+    MultiRecordingJobNames,
+    SingleRecordingJobNames,
+)
 from cindra.orchestration.footprints import (
     WORKER_MEMORY_MB,
     _DISCOVERY_TRANSIENT_PLANES,
     _DISCOVERY_PLANES_PER_RECORDING,
     _TRACKING_PAIRWISE_BYTES_PER_SQUARED_REGION,
+    JobSizing,
     PlaneGeometry,
     RecordingGeometry,
     _apply_tolerance,
@@ -39,8 +46,10 @@ from cindra.orchestration.footprints import (
     _estimate_extraction_mb,
     _estimate_processing_mb,
     _estimate_combination_mb,
+    size_multi_recording_job,
     _estimate_registration_mb,
     resolve_maximum_roi_count,
+    size_single_recording_job,
     resolve_recording_geometry,
     _resolve_binned_frame_count,
     _resolve_metric_sample_count,
@@ -398,6 +407,200 @@ class TestMultiRecordingEstimates:
         assert memory_mb == _apply_tolerance(
             memory_mb=_estimate_extraction_mb(geometry=geometry, tracked_regions=40000, configuration=configuration)
         )
+
+
+class TestJobSizing:
+    """Tests the sizing entry points that pair each job's cores with its memory estimate."""
+
+    def test_single_recording_sizing_pairs_the_stage_default_with_the_estimate(self, tmp_path: Path) -> None:
+        """Verifies that a sized single-recording job carries its stage's measured cores and its memory estimate."""
+        _write_recording(output_root=tmp_path, plane_count=2)
+        configuration = SingleRecordingConfiguration()
+
+        sizing = size_single_recording_job(
+            job_name=SingleRecordingJobNames.BINARIZE,
+            specifier="",
+            output_root=tmp_path,
+            configuration=configuration,
+        )
+
+        assert isinstance(sizing, JobSizing)
+        assert sizing.cores == BINARIZATION_WORKERS
+        assert sizing.memory_mb == estimate_single_recording_job_memory_mb(
+            job_name=SingleRecordingJobNames.BINARIZE,
+            specifier="",
+            output_root=tmp_path,
+            configuration=configuration,
+        )
+
+    def test_multi_recording_sizing_pairs_the_stage_default_with_the_estimate(self, tmp_path: Path) -> None:
+        """Verifies that a sized multi-recording job carries its stage's measured cores and its memory estimate."""
+        roots = [tmp_path / "day1", tmp_path / "day2"]
+        for root in roots:
+            _write_combined(output_root=root)
+        configuration = MultiRecordingConfiguration()
+
+        sizing = size_multi_recording_job(
+            job_name=MultiRecordingJobNames.DISCOVER,
+            specifier="",
+            recording_directories=roots,
+            dataset_name="set",
+            configuration=configuration,
+        )
+
+        assert sizing.cores == DISCOVERY_WORKERS
+        assert sizing.memory_mb == estimate_multi_recording_job_memory_mb(
+            job_name=MultiRecordingJobNames.DISCOVER,
+            specifier="",
+            recording_directories=roots,
+            dataset_name="set",
+            configuration=configuration,
+        )
+
+    @pytest.mark.parametrize("job_name", [SingleRecordingJobNames.BINARIZE, SingleRecordingJobNames.REGISTER])
+    def test_a_stage_carrying_no_region_term_is_modeled_before_detection_runs(
+        self, tmp_path: Path, job_name: str
+    ) -> None:
+        """Verifies that a stage whose estimate holds no region term is modeled even with no traces on disk."""
+        _write_recording(output_root=tmp_path, plane_count=2)
+
+        sizing = size_single_recording_job(
+            job_name=job_name,
+            specifier="plane_0",
+            output_root=tmp_path,
+            configuration=SingleRecordingConfiguration(),
+        )
+
+        assert sizing.modeled
+
+    def test_a_budgeted_region_count_reports_an_unmodeled_sizing(self, tmp_path: Path) -> None:
+        """Verifies that a region-scaled stage sized against the planning ceiling reports itself unmodeled."""
+        _write_recording(output_root=tmp_path, plane_count=2)
+
+        sizing = size_single_recording_job(
+            job_name=SingleRecordingJobNames.COMBINE,
+            specifier="",
+            output_root=tmp_path,
+            configuration=SingleRecordingConfiguration(),
+        )
+
+        assert sizing.cores == COMBINATION_WORKERS
+        assert not sizing.modeled
+
+    def test_a_measured_region_count_reports_a_modeled_sizing(self, tmp_path: Path) -> None:
+        """Verifies that a region-scaled stage sized against a written trace array reports itself modeled."""
+        _write_recording(output_root=tmp_path, plane_count=2)
+        _write_traces(root_path=resolve_output_path(output_root=tmp_path), regions=500, samples=6000)
+
+        sizing = size_single_recording_job(
+            job_name=SingleRecordingJobNames.COMBINE,
+            specifier="",
+            output_root=tmp_path,
+            configuration=SingleRecordingConfiguration(),
+        )
+
+        assert sizing.modeled
+
+    def test_a_partially_processed_recording_reports_an_unmodeled_sizing(self, tmp_path: Path) -> None:
+        """Verifies that a region sum missing a plane's contribution reports itself unmodeled."""
+        _write_recording(output_root=tmp_path, plane_count=2)
+        _write_traces(root_path=resolve_plane_path(output_root=tmp_path, plane_index=0), regions=300, samples=6000)
+
+        sizing = size_single_recording_job(
+            job_name=SingleRecordingJobNames.COMBINE,
+            specifier="",
+            output_root=tmp_path,
+            configuration=SingleRecordingConfiguration(),
+        )
+
+        assert not sizing.modeled
+
+    def test_a_fully_processed_recording_reports_a_modeled_sizing(self, tmp_path: Path) -> None:
+        """Verifies that a region sum every plane contributed to reports itself modeled."""
+        _write_recording(output_root=tmp_path, plane_count=2)
+        for plane_index in range(2):
+            _write_traces(
+                root_path=resolve_plane_path(output_root=tmp_path, plane_index=plane_index),
+                regions=300,
+                samples=6000,
+            )
+
+        sizing = size_single_recording_job(
+            job_name=SingleRecordingJobNames.COMBINE,
+            specifier="",
+            output_root=tmp_path,
+            configuration=SingleRecordingConfiguration(),
+        )
+
+        assert sizing.modeled
+
+    def test_discovery_without_recording_region_counts_reports_an_unmodeled_sizing(self, tmp_path: Path) -> None:
+        """Verifies that discovery sized before any recording reports its regions is unmodeled."""
+        roots = [tmp_path / "day1", tmp_path / "day2"]
+        for root in roots:
+            _write_combined(output_root=root)
+
+        sizing = size_multi_recording_job(
+            job_name=MultiRecordingJobNames.DISCOVER,
+            specifier="",
+            recording_directories=roots,
+            dataset_name="set",
+            configuration=MultiRecordingConfiguration(),
+        )
+
+        assert not sizing.modeled
+
+    def test_discovery_with_every_recording_counted_reports_a_modeled_sizing(self, tmp_path: Path) -> None:
+        """Verifies that discovery sized once every recording reports its regions is modeled."""
+        roots = [tmp_path / "day1", tmp_path / "day2"]
+        for root in roots:
+            _write_combined(output_root=root)
+            _write_traces(root_path=resolve_output_path(output_root=root), regions=400, samples=6000)
+
+        sizing = size_multi_recording_job(
+            job_name=MultiRecordingJobNames.DISCOVER,
+            specifier="",
+            recording_directories=roots,
+            dataset_name="set",
+            configuration=MultiRecordingConfiguration(),
+        )
+
+        assert sizing.modeled
+
+    def test_extraction_without_tracked_traces_reports_an_unmodeled_sizing(self, tmp_path: Path) -> None:
+        """Verifies that extraction sized against the dataset's planning figure reports itself unmodeled."""
+        roots = [tmp_path / "day1", tmp_path / "day2"]
+        for root in roots:
+            _write_combined(output_root=root)
+
+        sizing = size_multi_recording_job(
+            job_name=MultiRecordingJobNames.EXTRACT,
+            specifier="day2",
+            recording_directories=roots,
+            dataset_name="set",
+            configuration=MultiRecordingConfiguration(),
+        )
+
+        assert not sizing.modeled
+
+    def test_extraction_with_tracked_traces_reports_a_modeled_sizing(self, tmp_path: Path) -> None:
+        """Verifies that extraction sized against the dataset's own trace array reports itself modeled."""
+        roots = [tmp_path / "day1", tmp_path / "day2"]
+        for root in roots:
+            _write_combined(output_root=root)
+        _write_traces(
+            root_path=resolve_dataset_path(output_root=roots[1], dataset_name="set"), regions=500, samples=6000
+        )
+
+        sizing = size_multi_recording_job(
+            job_name=MultiRecordingJobNames.EXTRACT,
+            specifier="day2",
+            recording_directories=roots,
+            dataset_name="set",
+            configuration=MultiRecordingConfiguration(),
+        )
+
+        assert sizing.modeled
 
 
 class TestUnsizableJobs:

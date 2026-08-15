@@ -176,27 +176,27 @@ outputs.
   performs diffeomorphic demons registration to a common space, clusters ROIs across recordings via spatial overlap, and
   projects template masks back to individual recordings. Phase 2 extracts fluorescence traces and applies OASIS
   deconvolution for tracked ROI templates (parallelizable across recordings).
-- **Self-driven orchestration**: `cindra.orchestration` owns the whole scheduling surface across seven modules that
-  form a one-way dependency chain. `jobs.py` is the leaf above `cindra.layout`: it holds the job name enumerations,
-  the phase model
-  (`SINGLE_RECORDING_PHASES`, `MULTI_RECORDING_PHASES`, `PipelinePhase`, `PrerequisiteScope`), the resolvers that
+- **Self-driven orchestration**: `cindra.orchestration` owns the whole scheduling surface across seven modules that form
+  a one-way dependency chain. `jobs.py` is the leaf above `cindra.layout`: it holds the job name enumerations, the phase
+  model (`SINGLE_RECORDING_PHASES`, `MULTI_RECORDING_PHASES`, `PipelinePhase`, `PrerequisiteScope`), the resolvers that
   expand it into a recording's job universe (`resolve_single_recording_jobs`, `resolve_multi_recording_jobs`,
   `resolve_pipeline_jobs`), the prerequisite graph (`resolve_single_recording_prerequisites`,
   `resolve_multi_recording_prerequisites`, `resolve_prerequisite_job_ids`, `validate_job_prerequisites`), the phase
   expansion (`resolve_downstream_phases`, `order_phases_by_execution`), and the prerequisite messages. The plane
   specifier, the tracker filenames, and every other on-disk name live one layer below in `cindra.layout`, which
-  `jobs.py` reads them from. `allocation.py` adds the measured stage worker defaults, the resource-class model, and
-  the host core and memory budgets. `footprints.py` adds the per-stage memory models and the two estimators that
-  report what one job holds. `discovery.py` pairs the job model with the on-disk inventory to report both the jobs a
-  recording declares and the subset whose inputs exist. `worker.py` holds the per-job entry points every scheduler
-  dispatches, along with the two priming entry points that write the shared bootstrap. `execution.py` holds the batch
-  engine: `PendingJob`, `JobExecutionState`, the admission scan, the two-pass dispatcher, and the manager thread.
-  `pipeline.py` holds the two sequential entry points. `openmp.py` carries no module-level side effect and its check
-  runs only inside those two entry points, so importing the package writes nothing and a console message never
-  precedes the stdio MCP server's JSON-RPC stream. Nothing below `orchestration` imports it, and
-  no module inside it imports `interface`, so the MCP layer is a thin argument-validation and JSON-shaping wrapper
-  over calls into the package. This mirrors the orchestration package of `ataraxis-video-system` and
-  `ataraxis-communication-interface`, and its concurrency model follows `sollertia-forgery`.
+  `jobs.py` reads them from. `allocation.py` adds the measured stage worker defaults, the resource-class model, and the
+  host core and memory budgets. `footprints.py` adds the per-stage memory models, the two estimators that report what
+  one job holds, and the two sizers that pair each estimate with its stage's declared cores as a `JobSizing`, which is
+  the one thing it reads `allocation.py` for. `discovery.py` pairs the job model with the on-disk inventory to report
+  both the jobs a recording declares and the subset whose inputs exist. `worker.py` holds the per-job entry points every
+  scheduler dispatches, along with the two priming entry points that write the shared bootstrap. `execution.py` holds
+  the batch engine: `PendingJob`, `JobExecutionState`, the admission scan, the two-pass dispatcher, and the manager
+  thread. `pipeline.py` holds the two sequential entry points. `openmp.py` carries no module-level side effect and its
+  check runs only inside those two entry points, so importing the package writes nothing and a console message never
+  precedes the stdio MCP server's JSON-RPC stream. Nothing below `orchestration` imports it, and no module inside it
+  imports `interface`, so the MCP layer is a thin argument-validation and JSON-shaping wrapper over calls into the
+  package. This mirrors the orchestration package of `ataraxis-video-system` and `ataraxis-communication-interface`, and
+  its concurrency model follows `sollertia-forgery`.
 - **Tracker-driven job state**: The transitions of a job the pipeline runs belong to the tracker's `run_job()`
   context manager rather than to a hand-rolled `start_job`/`complete_job`/`fail_job` sequence. The engine's
   `_fail_pending_jobs` is the one exception, because it records a terminal outcome for a job that never ran and
