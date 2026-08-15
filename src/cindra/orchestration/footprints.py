@@ -179,7 +179,8 @@ Notes:
     thresholded copy, that copy's square and upper triangle, a condensed Jaccard array, and the copy the linkage
     makes of it. Every one of those scales with the square of the regions the bin holds, and bin occupancy scales
     with the regions the dataset spans, so the term is quadratic in that count and independent of the combined frame.
-    The value covers the densest of four measured dataset sizes, over which the coefficient varied by a fifth.
+    The value bounds the coefficient measured across five animals, over which it spans a factor of four, because bin
+    occupancy follows local region crowding rather than any count the processed data reports.
 
     The count it multiplies is the regions surviving ROI selection rather than the regions detection found, so the
     coefficient is a property of the clustering alone and does not absorb whatever share a particular selection
