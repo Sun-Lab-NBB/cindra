@@ -792,42 +792,43 @@ class TestUnsizableJobs:
 
     def test_discovery_over_a_dataset_without_combined_output_is_rejected(self, tmp_path: Path) -> None:
         """Verifies that discovery rejects a dataset whose recordings hold no combined output."""
+        roots = [tmp_path / "day1", tmp_path / "day2"]
         message = (
-            f"Unable to estimate the memory of the '{MultiRecordingJobNames.DISCOVER}' job. None of the 2 recording "
-            f"director(ies) the dataset names carries a combined metadata archive, so the dataset holds nothing to "
-            f"track ROIs across. Run the single-recording pipeline over each recording first."
+            f"Unable to estimate the memory of the '{MultiRecordingJobNames.DISCOVER}' job. 2 of the 2 recording(s) "
+            f"the dataset spans carry no combined metadata archive: {roots[0]}, {roots[1]}. Run the single-recording "
+            f"pipeline to completion over every recording of the dataset first."
         )
 
         with pytest.raises(FileNotFoundError, match=error_format(message=message)):
             estimate_multi_recording_job_memory_mb(
                 job_name=MultiRecordingJobNames.DISCOVER,
                 specifier="",
-                recording_directories=[tmp_path / "day1", tmp_path / "day2"],
+                recording_directories=roots,
                 configuration=MultiRecordingConfiguration(),
             )
 
     def test_extraction_over_a_dataset_without_combined_output_is_rejected(self, tmp_path: Path) -> None:
         """Verifies that extraction rejects a dataset whose recordings hold no combined output."""
+        roots = [tmp_path / "day1", tmp_path / "day2"]
         message = (
-            f"Unable to estimate the memory of the '{MultiRecordingJobNames.EXTRACT}' job. None of the 2 recording "
-            f"director(ies) the dataset names carries a combined metadata archive, so the recording its specifier "
-            f"'day1' names holds nothing to extract. Run the single-recording pipeline over it first."
+            f"Unable to estimate the memory of the '{MultiRecordingJobNames.EXTRACT}' job. 2 of the 2 recording(s) "
+            f"the dataset spans carry no combined metadata archive: {roots[0]}, {roots[1]}. Run the single-recording "
+            f"pipeline to completion over every recording of the dataset first."
         )
 
         with pytest.raises(FileNotFoundError, match=error_format(message=message)):
             estimate_multi_recording_job_memory_mb(
                 job_name=MultiRecordingJobNames.EXTRACT,
                 specifier="day1",
-                recording_directories=[tmp_path / "day1", tmp_path / "day2"],
+                recording_directories=roots,
                 configuration=MultiRecordingConfiguration(),
             )
 
     def test_dataset_spanning_no_recording_is_rejected(self) -> None:
         """Verifies that a dataset naming no recording at all is rejected."""
         message = (
-            f"Unable to estimate the memory of the '{MultiRecordingJobNames.EXTRACT}' job. None of the 0 recording "
-            f"director(ies) the dataset names carries a combined metadata archive, so the recording its specifier "
-            f"'' names holds nothing to extract. Run the single-recording pipeline over it first."
+            f"Unable to estimate the memory of the '{MultiRecordingJobNames.EXTRACT}' job. The dataset names no "
+            f"recording directory, so the stage has nothing to size against."
         )
 
         with pytest.raises(FileNotFoundError, match=error_format(message=message)):
@@ -848,9 +849,10 @@ class TestUnsizableJobs:
         for root in roots:
             _write_combined(output_root=root)
         message = (
-            f"Unable to estimate the memory of the '{job_name}' job. None of the 2 recording(s) the dataset spans "
-            f"reports the regions its combined trace array holds, so the stage has no region count to size against. "
-            f"Run the single-recording pipeline to completion over each recording first."
+            f"Unable to estimate the memory of the '{job_name}' job. 2 of the 2 recording(s) the dataset spans "
+            f"report no regions in their combined trace array: "
+            f"{resolve_output_path(output_root=roots[0])}, {resolve_output_path(output_root=roots[1])}. Run the "
+            f"single-recording pipeline to completion over every recording of the dataset first."
         )
 
         with pytest.raises(FileNotFoundError, match=error_format(message=message)):
@@ -861,20 +863,25 @@ class TestUnsizableJobs:
                 configuration=MultiRecordingConfiguration(),
             )
 
-    def test_one_reporting_recording_carries_a_dataset_past_the_region_guard(self, tmp_path: Path) -> None:
-        """Verifies that the region guard accepts a dataset as soon as one recording reports its regions."""
+    def test_one_unreported_recording_rejects_the_whole_dataset(self, tmp_path: Path) -> None:
+        """Verifies that a dataset is rejected whole when even one of its recordings reports no regions."""
         roots = [tmp_path / "day1", tmp_path / "day2"]
         _write_combined(output_root=roots[0])
         _write_tracked_recording(output_root=roots[1], height=64, width=64, frame_count=600, regions=400)
-
-        memory_mb = estimate_multi_recording_job_memory_mb(
-            job_name=MultiRecordingJobNames.DISCOVER,
-            specifier="",
-            recording_directories=roots,
-            configuration=MultiRecordingConfiguration(),
+        message = (
+            f"Unable to estimate the memory of the '{MultiRecordingJobNames.DISCOVER}' job. 1 of the 2 recording(s) "
+            f"the dataset spans report no regions in their combined trace array: "
+            f"{resolve_output_path(output_root=roots[0])}. Run the single-recording pipeline to completion over "
+            f"every recording of the dataset first."
         )
 
-        assert memory_mb > 0
+        with pytest.raises(FileNotFoundError, match=error_format(message=message)):
+            estimate_multi_recording_job_memory_mb(
+                job_name=MultiRecordingJobNames.DISCOVER,
+                specifier="",
+                recording_directories=roots,
+                configuration=MultiRecordingConfiguration(),
+            )
 
 
 class TestDualChannelRecordings:

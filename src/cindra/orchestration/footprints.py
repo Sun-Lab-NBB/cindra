@@ -420,36 +420,14 @@ def estimate_multi_recording_job_memory_mb(
             neither multi-recording stage can run.
     """
     cindra_roots = _resolve_cindra_directories(recording_directories=recording_directories)
+    geometries = _resolve_dataset_geometries(job_name=job_name, cindra_roots=cindra_roots)
 
     if job_name == MultiRecordingJobNames.DISCOVER:
-        geometries = [_read_tracked_recording_geometry(cindra_root=root) for root in cindra_roots]
-        resolved = [geometry for geometry in geometries if geometry.combined_pixels > 0]
-        if not resolved:
-            message = (
-                f"Unable to estimate the memory of the '{job_name}' job. None of the {len(cindra_roots)} recording "
-                f"director(ies) the dataset names carries a combined metadata archive, so the dataset holds nothing "
-                f"to track ROIs across. Run the single-recording pipeline over each recording first."
-            )
-            console.error(message=message, error=FileNotFoundError)
-        _reject_unreadable_region_counts(job_name=job_name, geometries=resolved)
-        return _apply_tolerance(memory_mb=_estimate_discovery_mb(geometries=resolved))
+        return _apply_tolerance(memory_mb=_estimate_discovery_mb(geometries=geometries))
 
-    target = _resolve_target_geometry(cindra_roots=cindra_roots, specifier=specifier)
-    if target is None:
-        message = (
-            f"Unable to estimate the memory of the '{job_name}' job. None of the {len(cindra_roots)} recording "
-            f"director(ies) the dataset names carries a combined metadata archive, so the recording its specifier "
-            f"'{specifier}' names holds nothing to extract. Run the single-recording pipeline over it first."
-        )
-        console.error(message=message, error=FileNotFoundError)
-
-    _, geometry = target
     # A template gathers regions that co-locate across recordings, and no recording contributes more than one region
     # to one template, so the regions any single recording holds bound the templates the dataset can track.
-    geometries = [_read_tracked_recording_geometry(cindra_root=root) for root in cindra_roots]
-    _reject_unreadable_region_counts(
-        job_name=job_name, geometries=[entry for entry in geometries if entry.combined_pixels > 0]
-    )
+    geometry = _resolve_target_geometry(cindra_roots=cindra_roots, geometries=geometries, specifier=specifier)
     tracked_regions = max(entry.region_count for entry in geometries)
     return _apply_tolerance(
         memory_mb=_estimate_extraction_mb(
@@ -758,45 +736,39 @@ def _resolve_planned_regions(
     return resolve_maximum_roi_count(plane_count=len(geometry.planes), configuration=configuration)
 
 
-def _resolve_target_geometry(cindra_roots: Sequence[Path], specifier: str) -> tuple[Path, RecordingGeometry] | None:
+def _resolve_target_geometry(
+    cindra_roots: Sequence[Path], geometries: Sequence[RecordingGeometry], specifier: str
+) -> RecordingGeometry:
     """Resolves the recording one extraction job runs on, together with the geometry the estimate reads from it.
 
     Notes:
         The specifier carries the identifying component of the recording's path, which is what the dataset resolver
         derives its recording identifiers from, so the match is made against that component rather than against the
-        directory's own name. Every recording is scanned only when the specifier matches none of them, in which case
-        the widest readable recording is charged so that an unmatched job never understates.
+        directory's own name. The widest recording is charged when the specifier matches none of them, so an
+        unmatched job never understates.
 
     Args:
         cindra_roots: The pipeline output directory of every recording the dataset spans.
+        geometries: The geometry of every recording, in the order the dataset names them.
         specifier: The specifier naming the target recording.
 
     Returns:
-        The target recording's output directory paired with its geometry, or None when no recording carries combined
-        output.
+        The geometry of the recording the extraction job runs on.
     """
-    target_root: Path | None = None
-    target = RecordingGeometry()
-    identifiers = extract_unique_components(paths=list(cindra_roots)) if cindra_roots else ()
-    for root, identifier in zip(cindra_roots, identifiers, strict=False):
-        if identifier != specifier:
-            continue
-        candidate = _read_tracked_recording_geometry(cindra_root=root)
-        if candidate.combined_pixels > 0:
-            target_root, target = root, candidate
-            break
-
-    if target_root is None:
-        for root in cindra_roots:
-            candidate = _read_tracked_recording_geometry(cindra_root=root)
-            if candidate.combined_pixels > target.combined_pixels:
-                target_root, target = root, candidate
-
-    if target_root is None:
-        return None
+    identifiers = extract_unique_components(paths=list(cindra_roots))
+    matched = [
+        (root, geometry)
+        for root, identifier, geometry in zip(cindra_roots, identifiers, geometries, strict=False)
+        if identifier == specifier
+    ]
+    target_root, target = (
+        matched[0]
+        if matched
+        else max(zip(cindra_roots, geometries, strict=True), key=lambda entry: entry[1].combined_pixels)
+    )
 
     acquisition = resolve_acquisition_parameters(output_root=target_root.parent, data_path=None)
-    return target_root, RecordingGeometry(
+    return RecordingGeometry(
         combined_pixels=target.combined_pixels,
         combined_frame_count=target.combined_frame_count,
         two_channels=target.two_channels or (acquisition is not None and acquisition.channel_number > 1),
@@ -940,31 +912,60 @@ def _read_combined_geometry(metadata_path: Path) -> tuple[int, int, bool]:
     return pixels, frame_count, two_channels
 
 
-def _reject_unreadable_region_counts(job_name: MultiRecordingJobNames, geometries: Sequence[RecordingGeometry]) -> None:
-    """Rejects a dataset whose recordings report no regions for the multi-recording stages to size against.
+def _resolve_dataset_geometries(
+    job_name: MultiRecordingJobNames, cindra_roots: Sequence[Path]
+) -> tuple[RecordingGeometry, ...]:
+    """Resolves the geometry of every recording the dataset spans, rejecting a dataset any recording leaves short.
 
     Notes:
-        Every multi-recording stage runs on the combined output of a completed single-recording pipeline, which
-        writes a recording's trace array beside the metadata archive naming its geometry. An archive standing without
-        its array marks a partial output, which the stages read as a run to repeat rather than a figure to plan
-        against.
+        The multi-recording pipeline resolves its context from every recording at once and refuses a dataset whose
+        recordings do not all carry the combined output a completed single-recording run leaves behind. The estimate
+        refuses the same datasets, so a partial dataset is reported rather than sized from whichever recordings
+        happen to be complete, which would understate the stage by the share the dataset is missing.
 
     Args:
         job_name: The pipeline stage the job runs.
-        geometries: The geometry of every recording the dataset spans that carries combined output.
+        cindra_roots: The pipeline output directory of every recording the dataset spans.
+
+    Returns:
+        The geometry of every recording, in the order the dataset names them.
 
     Raises:
-        FileNotFoundError: If no recording reports a region count.
+        FileNotFoundError: If the dataset names no recording, if any recording carries no combined metadata archive,
+            or if any recording reports no regions in its combined trace array.
     """
-    if any(geometry.region_count > 0 for geometry in geometries):
-        return
+    if not cindra_roots:
+        message = (
+            f"Unable to estimate the memory of the '{job_name}' job. The dataset names no recording directory, so "
+            f"the stage has nothing to size against."
+        )
+        console.error(message=message, error=FileNotFoundError)
 
-    message = (
-        f"Unable to estimate the memory of the '{job_name}' job. None of the {len(geometries)} recording(s) the "
-        f"dataset spans reports the regions its combined trace array holds, so the stage has no region count to "
-        f"size against. Run the single-recording pipeline to completion over each recording first."
-    )
-    console.error(message=message, error=FileNotFoundError)
+    geometries = tuple(_read_tracked_recording_geometry(cindra_root=root) for root in cindra_roots)
+    incomplete = [
+        str(root) for root, geometry in zip(cindra_roots, geometries, strict=True) if geometry.combined_pixels <= 0
+    ]
+    if incomplete:
+        message = (
+            f"Unable to estimate the memory of the '{job_name}' job. {len(incomplete)} of the {len(cindra_roots)} "
+            f"recording(s) the dataset spans carry no combined metadata archive: {', '.join(incomplete)}. Run the "
+            f"single-recording pipeline to completion over every recording of the dataset first."
+        )
+        console.error(message=message, error=FileNotFoundError)
+
+    unreported = [
+        str(root) for root, geometry in zip(cindra_roots, geometries, strict=True) if geometry.region_count <= 0
+    ]
+    if unreported:
+        message = (
+            f"Unable to estimate the memory of the '{job_name}' job. {len(unreported)} of the {len(cindra_roots)} "
+            f"recording(s) the dataset spans report no regions in their combined trace array: "
+            f"{', '.join(unreported)}. Run the single-recording pipeline to completion over every recording of the "
+            f"dataset first."
+        )
+        console.error(message=message, error=FileNotFoundError)
+
+    return geometries
 
 
 def _read_region_count(array_path: Path) -> int:
