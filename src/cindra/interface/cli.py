@@ -242,12 +242,15 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     ),
 )
 @click.option(
-    "-pb",
-    "--progress-bars",
+    "-np",
+    "--no-progress",
     is_flag=True,
     show_default=True,
     default=False,
-    help="Determines whether to use progress bars during long-running tasks to visualize progress.",
+    help=(
+        "Determines whether to suppress the progress bars displayed during long-running tasks. The progress bars are "
+        "displayed by default."
+    ),
 )
 @click.option(
     "-id",
@@ -395,7 +398,7 @@ def cindra_run(
     discover_workers: int | None,
     extract_workers: int | None,
     *,
-    progress_bars: bool,
+    no_progress: bool,
     job_id: str | None,
     binarize: bool,
     register: bool,
@@ -421,7 +424,7 @@ def cindra_run(
     if pipeline_type == PipelineType.SINGLE_RECORDING:
         # Writes CLI overrides into the configuration file before running the pipeline.
         configuration = SingleRecordingConfiguration.from_yaml(file_path=input_path)
-        configuration.runtime.display_progress_bars = progress_bars
+        configuration.runtime.display_progress_bars = not no_progress
         if data_path is not None:
             configuration.file_io.data_path = data_path
         if output_path is not None:
@@ -451,7 +454,7 @@ def cindra_run(
         multi_recording_configuration = MultiRecordingConfiguration.from_yaml(file_path=input_path)
         if recording_paths:
             multi_recording_configuration.recording_io.recording_directories = tuple(natsorted(recording_paths))
-        multi_recording_configuration.runtime.display_progress_bars = progress_bars
+        multi_recording_configuration.runtime.display_progress_bars = not no_progress
         multi_recording_configuration.save(file_path=input_path)
 
         run_multi_recording_pipeline(
