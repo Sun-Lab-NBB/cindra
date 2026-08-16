@@ -97,7 +97,7 @@ Phase 1: BINARIZE (phase name binarization, I/O bound, 3 cores per job, up to 4 
 ├── Converts raw TIFFs to binary format
 └── Initializes the per-plane runtime data hierarchy, one job per recording with an empty specifier
 
-Phase 2: REGISTER (phase name registration, per plane, 12 cores per job)
+Phase 2: REGISTER (phase name registration, per plane, 4 cores per job)
 ├── Motion correction plus the registration-quality metrics computation
 └── One job per plane, specifier plane_{plane_index}
 
@@ -121,7 +121,7 @@ Batch processing across multiple recordings:
 
 ```text
 BINARIZE: Up to 4 concurrent recordings, 3 cores each, a hard ceiling spare capacity never lifts
-REGISTER: 12 cores per plane job, 4 jobs reserved, released when nothing else can use the capacity
+REGISTER: 4 cores per plane job, 4 jobs reserved, released when nothing else can use the capacity
 PROCESS:  10 cores per plane job, 5 jobs reserved, released when nothing else can use the capacity
 COMBINE:  1 core each, bounded by the session CPU budget alone
 ```
@@ -292,7 +292,7 @@ operations, and the dispatcher holds the sum of the cores committed by every cla
 | Phase    | Resource class | Cores per job | Concurrency                            |
 |----------|----------------|---------------|----------------------------------------|
 | BINARIZE | `binarization` | 3             | Hard ceiling of 4                      |
-| REGISTER | `registration` | 12            | Session CPU budget, 4 jobs reserved    |
+| REGISTER | `registration` | 4             | Session CPU budget, 4 jobs reserved    |
 | PROCESS  | `processing`   | 10            | Session CPU budget, 5 jobs reserved    |
 | COMBINE  | `combination`  | 1             | Session CPU budget                     |
 

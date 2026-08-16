@@ -274,7 +274,7 @@ class TestDerivedCapacityAllocation:
     @pytest.mark.parametrize(
         ("budget", "job_count", "workers_per_job", "max_parallel_jobs", "expected"),
         [
-            (24, 10, None, None, (REGISTRATION_WORKERS, 2)),
+            (24, 10, None, None, (REGISTRATION_WORKERS, 6)),
             (24, 1, None, None, (REGISTRATION_WORKERS, 1)),
             (24, 0, None, None, (REGISTRATION_WORKERS, 1)),
             (24, 5, ALL_CORES_REQUEST, None, (24, 1)),
