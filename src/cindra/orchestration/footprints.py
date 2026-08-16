@@ -2,11 +2,13 @@
 peak anonymous working set from the shape of the data it processes.
 
 Most models here are read from the stage's own allocations, so a change to what a kernel holds is a change to the
-model beside it. The single-recording estimates resolve from the raw acquisition data when a recording carries no
-output yet, which lets a caller size a whole job graph before dispatching any of it. The estimates cover anonymous
-memory alone, which is the term that forces a host to swap and a scheduler to kill a job, so the reclaimable pages a
-memory-mapping stage leaves resident are excluded. A recording carrying neither output nor readable raw data can run
-no stage at all, so sizing one is rejected rather than answered with a guess.
+model beside it. Each model reads the data that exists when the sizing happens, which lets a caller size a whole job
+graph before dispatching any of it. The single-recording estimates resolve from the raw acquisition alone, while the
+multi-recording estimates resolve from the completed single-recording output they run on. The estimates cover
+anonymous memory alone, which is the term that forces a host to swap and a scheduler to kill a job, so the
+reclaimable pages a memory-mapping stage leaves resident are excluded. A recording carrying no readable raw data, and
+a dataset reporting no regions, can run no stage at all, so sizing either is rejected rather than answered with a
+guess.
 """
 
 from __future__ import annotations
@@ -178,9 +180,9 @@ Notes:
     The value bounds the coefficient measured across five animals, over which it spans a factor of four, because bin
     occupancy follows local region crowding rather than any count the processed data reports.
 
-    The count it multiplies is the regions surviving ROI selection rather than the regions detection found, so the
-    coefficient is a property of the clustering alone and does not absorb whatever share a particular selection
-    threshold happens to keep.
+    The count it multiplies is the regions each recording's combined trace array holds, which the discovery stage
+    narrows by ROI selection before it clusters. The coefficient therefore prices a bin the selection has not yet
+    thinned, which overstates rather than understates the stage it sizes.
 """
 
 
@@ -237,7 +239,7 @@ class JobSizing:
 def resolve_recording_geometry(
     output_root: Path, data_path: Path | None = None, ignored_file_names: tuple[str, ...] = ()
 ) -> RecordingGeometry:
-    """Resolves the shape of one recording from the output its earlier stages wrote, or from its raw acquisition.
+    """Resolves the shape of one recording from the raw acquisition its conversion stage will read.
 
     Notes:
         Reads the acquisition metadata and one source file header, which fix every shape the pipeline will write
@@ -299,13 +301,13 @@ def estimate_single_recording_job_memory_mb(
     """Estimates the memory one single-recording job occupies at its peak.
 
     Notes:
-        Every figure but the region-scaled ones follows from the recording's acquisition geometry, which the raw data
-        determines before any job runs, so a caller sizing a whole job graph up front receives the same answer it
-        would receive once the outputs exist. A per-plane job whose specifier does not resolve is charged the largest
-        per-plane estimate, so an unmatched job never understates.
+        Every figure follows from the recording's acquisition geometry, which the raw data fixes before any job runs,
+        so a caller sizing a whole job graph up front receives the same answer at every point in the run. A per-plane
+        job whose specifier does not resolve is charged the largest per-plane estimate, so an unmatched job never
+        understates.
 
-        The regions detection will find are the one input the acquisition does not determine. They are read from the
-        per-plane trace arrays once those exist and are budgeted against planned_roi_count until then.
+        The regions detection will find are the one input the acquisition leaves open. A caller that knows them
+        passes them through planned_roi_count, and the detection ceiling bounds them otherwise.
 
     Args:
         job_name: The pipeline stage the job runs.
