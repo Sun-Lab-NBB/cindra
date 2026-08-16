@@ -821,10 +821,17 @@ subdirectories, whose names the same module exports. `resolve_plane_specifier()`
 `parse_plane_specifier()` convert between a plane index and the specifier its jobs and its directory both carry.
 
 `estimate_single_recording_job_memory_mb()` and `estimate_multi_recording_job_memory_mb()` project the memory one job
-holds from the shape of the data it will process, returning the figure in megabytes alongside a flag stating whether it
-followed from the recording's own geometry. A job whose geometry cannot be read is charged a conservative allowance for its
-stage rather than a floor, because understating is the failure that gets a job killed. Two of those allowances are
-measured peaks and four are flat figures the module documents individually.
+holds from the shape of the data it will process, returning the figure in megabytes. `size_single_recording_job()` and
+`size_multi_recording_job()` return that figure together with the cores the stage's measured default declares, as a
+`JobSizing` record. A job is sized from the data that exists when the sizing happens, so a whole job graph resolves up
+front and every job of it reports the same figure at every point in the run. A single-recording job reads the
+acquisition metadata and one source file header, which fix every shape the pipeline will write. The regions detection
+will find are the one input the acquisition leaves open, so a caller that knows them passes them through
+`planned_roi_count` and the ceiling `resolve_maximum_roi_count()` derives from the detection iteration bound covers them
+otherwise. A multi-recording job runs on the completed output of that pipeline, so it reads the combined geometry and
+the region count each recording holds directly. A recording carrying no readable raw imaging data, and a dataset whose
+recordings report no regions, can run no stage at all, so sizing either raises rather than returning a figure, and the
+interface layer reports the job as unsizable instead of admitting it.
 
 `prime_recording()` and `prime_dataset()` write the shared bootstrap every job reads and report that same inventory, so
 a scheduler primes a recording and enumerates its jobs in one step.

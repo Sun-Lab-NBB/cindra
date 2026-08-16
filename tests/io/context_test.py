@@ -12,7 +12,7 @@ from cindra.io.context import (
     PARAMETERS_FILENAME,
     OUTPUT_DIRECTORY_NAME,
     find_data_directory,
-    _find_cindra_directory,
+    find_cindra_directory,
     resolve_recording_roots,
     extract_unique_components,
     load_acquisition_parameters,
@@ -493,7 +493,7 @@ class TestResolveRecordingRoots:
 
 
 class TestFindCindraDirectory:
-    """Tests _find_cindra_directory."""
+    """Tests find_cindra_directory."""
 
     def test_finds_directory_with_combined_metadata(self, tmp_path: Path) -> None:
         """Verifies that the cindra output directory is found when combined_metadata.npz exists."""
@@ -501,7 +501,7 @@ class TestFindCindraDirectory:
         cindra_directory.mkdir(parents=True)
         (cindra_directory / "combined_metadata.npz").write_bytes(b"")
 
-        result = _find_cindra_directory(recording_directory=tmp_path)
+        result = find_cindra_directory(recording_directory=tmp_path)
 
         assert result == cindra_directory
 
@@ -515,7 +515,7 @@ class TestFindCindraDirectory:
         )
 
         with pytest.raises(FileNotFoundError, match=error_format(expected_message)):
-            _find_cindra_directory(recording_directory=tmp_path)
+            find_cindra_directory(recording_directory=tmp_path)
 
     def test_raises_error_when_multiple_combined_metadata_found(self, tmp_path: Path) -> None:
         """Verifies that a RuntimeError is raised when multiple combined_metadata.npz files exist."""
@@ -530,7 +530,7 @@ class TestFindCindraDirectory:
         )
 
         with pytest.raises(RuntimeError, match=error_format(expected_message)):
-            _find_cindra_directory(recording_directory=tmp_path)
+            find_cindra_directory(recording_directory=tmp_path)
 
 
 class TestComputeMroiRegionBorders:

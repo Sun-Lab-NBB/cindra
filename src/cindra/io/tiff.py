@@ -32,11 +32,28 @@ TIFF_DECODE_CEILING: int = 4
 """The maximum number of TIFF decode threads, measured as the point where added decode threads stop shortening the
 conversion. The decode pool never exceeds this value regardless of how many cores the surrounding job holds."""
 
+_INTERNAL_ELEMENT_BYTES: int = 2
+"""The width of one element of the internal binary format, which stands in for a source page reporting no dtype."""
+
 _MULTIDIMENSIONAL_PROCESSING_THRESHOLD: int = 3
 """The minimum number of image dimensions considered 'multidimensional'."""
 
 _MISMATCH_REPORT_LIMIT: int = 5
 """The maximum number of differently shaped TIFF files named individually in the frame-shape mismatch error."""
+
+
+@dataclass(frozen=True, slots=True)
+class SourceFrameGeometry:
+    """Describes the frames a recording's source files hold, read from their headers alone."""
+
+    frame_height: int
+    """The height of one whole acquisition frame in pixels."""
+    frame_width: int
+    """The width of one whole acquisition frame in pixels."""
+    element_bytes: int
+    """The width of one source element in bytes."""
+    frame_count: int
+    """The frames the source files hold across every plane and channel."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +94,51 @@ class TiffConversionPlan:
     """The number of functional channel frames each plane receives."""
     channel_2_frame_counts: tuple[int, ...]
     """The number of second channel frames each plane receives, empty for a single-channel recording."""
+
+
+def resolve_source_frame_geometry(
+    data_directory: Path, ignored_file_names: tuple[str, ...] = ()
+) -> SourceFrameGeometry:
+    """Reads the frame shape, element width, and frame count a recording's source files hold.
+
+    Notes:
+        Opens the header of the first source file alone, so the cost stays flat however many frames the recording
+        holds. The frame count is that file's page count multiplied by the file count, which is exact while every
+        file is full and an upper bound once the final one is short. A memory estimate sized from it therefore never
+        understates, which is the direction an estimate has to err in.
+
+    Args:
+        data_directory: The directory holding the recording's source TIFF files.
+        ignored_file_names: The file stems to exclude from discovery.
+
+    Returns:
+        The geometry the source files hold.
+
+    Raises:
+        FileNotFoundError: If the directory holds no TIFF file the discovery accepts.
+    """
+    # Discovery is performed without the conversion's own announcement, because sizing a job graph calls this once
+    # per job and a stdio server carries that output on the same stream as its protocol messages.
+    tiff_files = _collect_tiff_files(data_directory=data_directory, ignored_file_names=ignored_file_names)
+    if not tiff_files:
+        message = f"Unable to find any TIFF files in the data directory: {data_directory}."
+        console.error(message=message, error=FileNotFoundError)
+
+    with TiffFile(tiff_files[0]) as tiff:
+        page = tiff.pages.first
+        page_shape = page.shape
+        frame_height, frame_width = int(page_shape[-2]), int(page_shape[-1])
+        # A page carrying no dtype reports no element width either, so the internal width stands in for it and the
+        # conversion's own validation reports the malformed file.
+        element_bytes = int(page.dtype.itemsize) if page.dtype is not None else _INTERNAL_ELEMENT_BYTES
+        page_count = len(tiff.pages)
+
+    return SourceFrameGeometry(
+        frame_height=frame_height,
+        frame_width=frame_width,
+        element_bytes=element_bytes,
+        frame_count=page_count * len(tiff_files),
+    )
 
 
 def resolve_tiff_conversion_plan(contexts: list[RuntimeContext], *, workers: int) -> TiffConversionPlan:
@@ -436,8 +498,31 @@ def _discover_tiff_files(
         message = f"Unable to discover TIFF files. The path is not a directory: {data_directory}."
         console.error(message=message, error=ValueError)
 
-    # Performs non-recursive scan for TIFF files. Uses a set to deduplicate matches on case-insensitive filesystems
-    # (e.g., Windows, macOS default) where a single file is returned by multiple case-variant globs.
+    file_paths = _collect_tiff_files(data_directory=data_directory, ignored_file_names=ignored_file_names)
+    if not file_paths:
+        message = f"Unable to find any TIFF files in the data directory: {data_directory}."
+        console.error(message=message, error=FileNotFoundError)
+
+    message = f"Found {len(file_paths)} valid TIFF files."
+    console.echo(message=message, level=LogLevel.INFO)
+
+    return file_paths
+
+
+def _collect_tiff_files(data_directory: Path, ignored_file_names: tuple[str, ...] = ()) -> list[Path]:
+    """Collects the TIFF files one directory holds, in conversion order.
+
+    Notes:
+        Deduplicates through a set, because a case-insensitive filesystem returns one file from several case-variant
+        globs.
+
+    Args:
+        data_directory: The directory to scan for TIFF files.
+        ignored_file_names: The file stems to exclude from the results.
+
+    Returns:
+        The discovered files sorted naturally by name, empty when the directory holds none.
+    """
     discovered_paths: set[Path] = set()
     for extension in TIFF_EXTENSIONS:
         discovered_paths.update(
@@ -445,17 +530,7 @@ def _discover_tiff_files(
             for file_path in data_directory.glob(f"*.{extension}")
             if file_path.stem not in ignored_file_names
         )
-
-    if not discovered_paths:
-        message = f"Unable to find any TIFF files in the data directory: {data_directory}."
-        console.error(message=message, error=FileNotFoundError)
-
-    file_paths = natsorted(discovered_paths)
-
-    message = f"Found {len(file_paths)} valid TIFF files."
-    console.echo(message=message, level=LogLevel.INFO)
-
-    return file_paths
+    return natsorted(discovered_paths)
 
 
 def _read_tiff(tiff: TiffFile, start_index: int, batch_size: int, decode_workers: int) -> NDArray[np.int16] | None:

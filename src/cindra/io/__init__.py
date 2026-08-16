@@ -3,8 +3,10 @@
 from .tiff import (
     TIFF_EXTENSIONS,
     TIFF_DECODE_CEILING,
+    SourceFrameGeometry,
     convert_tiffs_to_binary,
     resolve_tiff_conversion_plan,
+    resolve_source_frame_geometry,
 )
 from .binary import (
     BinaryFile,
@@ -23,6 +25,7 @@ from .context import (
     PARAMETERS_FILENAME,
     MAXIMUM_CHANNEL_COUNT,
     OUTPUT_DIRECTORY_NAME,
+    find_cindra_directory,
     resolve_recording_roots,
     extract_unique_components,
     load_acquisition_parameters,
@@ -53,6 +56,7 @@ __all__ = [
     "BinaryFileCombined",
     "DatasetRecordings",
     "RecordingPlanes",
+    "SourceFrameGeometry",
     "clear_binarization_marker",
     "clear_registration_marker",
     "combine_planes",
@@ -61,6 +65,7 @@ __all__ = [
     "create_binarization_marker",
     "create_registration_marker",
     "extract_unique_components",
+    "find_cindra_directory",
     "is_dataset_discovered",
     "is_plane_converted",
     "is_plane_processed",
@@ -77,6 +82,7 @@ __all__ = [
     "resolve_recording_roots",
     "resolve_registration_marker_path",
     "resolve_single_recording_contexts",
+    "resolve_source_frame_geometry",
     "resolve_tiff_conversion_plan",
     "select_recording_rois",
 ]

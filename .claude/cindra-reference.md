@@ -13,6 +13,7 @@
 | `resolve_recording_planes`        | `io/inventory.py`                               | Read-only recording and dataset on-disk inventory       |
 | `resolve_single_recording_job_universe` | `orchestration/discovery.py`              | Declared job set and the subset whose inputs exist      |
 | `estimate_single_recording_job_memory_mb` | `orchestration/footprints.py`           | Per-stage memory models and the two job estimators      |
+| `size_single_recording_job`       | `orchestration/footprints.py`                   | Pairs a job's declared cores with its memory estimate   |
 | `execute_single_recording_job`    | `orchestration/worker.py`                       | Per-job entry point against a caller-owned tracker      |
 | `prime_recording`                 | `orchestration/worker.py`                       | Writes the shared bootstrap and reports the inventory   |
 | `run_single_recording_pipeline`   | `orchestration/pipeline.py`                     | Execute single-recording four-phase workflow            |
@@ -103,9 +104,10 @@
    (`SINGLE_RECORDING_PHASES`, `MULTI_RECORDING_PHASES`). Add, remove, or reorder a phase there rather than at each call
    site, and the pipelines, the execution engine, and the MCP layer follow automatically
 6. Maintain the job naming convention (`SingleRecordingJobNames`, `MultiRecordingJobNames`) for tracker consistency
-7. Keep the dependency chain one-way. `jobs.py` imports `cindra.layout` alone, `allocation.py`, `footprints.py`, and
-   `discovery.py` import `jobs`, `worker.py` imports `jobs` and `allocation`, `pipeline.py` imports `worker`,
-   `execution.py` imports `pipeline`, `jobs`, and `allocation`, and no orchestration module imports `interface`.
+7. Keep the dependency chain one-way. `jobs.py` imports `cindra.layout` alone, `allocation.py` and `discovery.py`
+   import `jobs`, `footprints.py` imports `jobs` and `allocation`, `worker.py` imports `jobs` and `allocation`,
+   `pipeline.py` imports `worker`, `execution.py` imports `pipeline`, `jobs`, and `allocation`, and no orchestration
+   module imports `interface`.
    `openmp.py` carries no module-level side effect and its check runs only inside the two sequential entry points,
    so importing the package writes nothing and a console message never precedes the stdio MCP server's JSON-RPC
    stream

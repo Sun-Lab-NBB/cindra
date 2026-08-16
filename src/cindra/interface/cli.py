@@ -197,7 +197,7 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     default=None,
     help=(
         "[Single-recording] The number of parallel workers to allocate to each plane-registration step. When this "
-        "option is omitted, the step receives its measured default allocation of 12 workers, which is the knee of the "
+        "option is omitted, the step receives its measured default allocation of 4 workers, which is the knee of the "
         "measured registration scaling curve. Setting this to -1 uses every available core, minus the cores reserved "
         "for system use."
     ),

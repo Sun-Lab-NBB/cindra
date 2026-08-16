@@ -12,7 +12,7 @@ import pytest
 from tifffile import TiffFile, TiffWriter
 from ataraxis_base_utilities import error_format
 
-from cindra.io.tiff import _read_tiff, _discover_tiff_files
+from cindra.io.tiff import _read_tiff, _discover_tiff_files, resolve_source_frame_geometry
 
 
 class TestDiscoverTiffFiles:
@@ -246,3 +246,51 @@ class TestReadTiff:
         assert result.dtype == np.int16
         np.testing.assert_array_equal(result, source.astype(np.int16))
         assert [int(value) for value in result[:, 0, 0]] == [int(value) for value in page_values]
+
+
+class TestSourceFrameGeometry:
+    """Tests resolve_source_frame_geometry."""
+
+    def _write_stack(self, directory: Path, name: str, pages: int, height: int, width: int) -> None:
+        """Writes one TIFF file holding the requested number of int16 pages."""
+        with TiffWriter(directory / name) as writer:
+            for _ in range(pages):
+                writer.write(np.zeros((height, width), dtype=np.int16))
+
+    def test_geometry_follows_the_first_page_header(self, tmp_path: Path) -> None:
+        """Verifies that the frame shape and element width are read from the first source file."""
+        self._write_stack(directory=tmp_path, name="frames_001.tif", pages=4, height=12, width=9)
+
+        geometry = resolve_source_frame_geometry(data_directory=tmp_path)
+
+        assert geometry.frame_height == 12
+        assert geometry.frame_width == 9
+        assert geometry.element_bytes == 2
+
+    def test_frame_count_scales_the_first_file_over_the_whole_directory(self, tmp_path: Path) -> None:
+        """Verifies that the frame count is the first file's page count taken across every file."""
+        self._write_stack(directory=tmp_path, name="frames_001.tif", pages=5, height=8, width=8)
+        self._write_stack(directory=tmp_path, name="frames_002.tif", pages=5, height=8, width=8)
+        self._write_stack(directory=tmp_path, name="frames_003.tif", pages=2, height=8, width=8)
+
+        geometry = resolve_source_frame_geometry(data_directory=tmp_path)
+
+        # The final file is short, so the product is an upper bound on the twelve frames the directory holds.
+        assert geometry.frame_count == 15
+
+    def test_ignored_stems_are_excluded_from_the_geometry(self, tmp_path: Path) -> None:
+        """Verifies that an ignored file neither supplies the shape nor counts toward the frames."""
+        self._write_stack(directory=tmp_path, name="zstack.tif", pages=1, height=64, width=64)
+        self._write_stack(directory=tmp_path, name="frames_001.tif", pages=3, height=8, width=8)
+
+        geometry = resolve_source_frame_geometry(data_directory=tmp_path, ignored_file_names=("zstack",))
+
+        assert geometry.frame_height == 8
+        assert geometry.frame_count == 3
+
+    def test_directory_without_sources_is_rejected(self, tmp_path: Path) -> None:
+        """Verifies that a directory holding no accepted TIFF file raises."""
+        message = f"Unable to find any TIFF files in the data directory: {tmp_path}."
+
+        with pytest.raises(FileNotFoundError, match=error_format(message=message)):
+            resolve_source_frame_geometry(data_directory=tmp_path)

@@ -332,7 +332,7 @@ def resolve_multi_recording_contexts(
     data_paths: list[Path] = []
     output_paths: list[Path] = []
     for recording_directory in recording_directories:
-        data_path = _find_cindra_directory(recording_directory=recording_directory)
+        data_path = find_cindra_directory(recording_directory=recording_directory)
         data_paths.append(data_path)
         output_paths.append(data_path / MULTI_RECORDING_DIRECTORY_NAME / dataset_name)
 
@@ -697,7 +697,7 @@ def _find_acquisition_parameters(data_path: Path) -> AcquisitionParameters:
     return load_acquisition_parameters(json_path=parameters_path)
 
 
-def _find_cindra_directory(recording_directory: Path) -> Path:
+def find_cindra_directory(recording_directory: Path) -> Path:
     """Discovers the cindra output directory within a recording directory tree.
 
     Searches recursively for the combined_metadata.npz file created by the single-recording pipeline's combination step.
