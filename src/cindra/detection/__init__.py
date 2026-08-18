@@ -1,7 +1,6 @@
 """Provides algorithms for segmenting and describing ROIs from motion-corrected recordings."""
 
 from .utils import (
-    mean_centered_meshgrid,
     compute_spatial_taper_mask,
     compute_registration_blocks,
     compute_block_smoothing_kernel,
@@ -24,6 +23,5 @@ __all__ = [
     "detect_plane_rois",
     "estimate_diameter_from_rois",
     "extend_roi",
-    "mean_centered_meshgrid",
     "track_rois_across_recordings",
 ]

@@ -15,8 +15,6 @@ from scipy.fft import (
 from scipy.ndimage import gaussian_filter1d
 from ataraxis_base_utilities import console
 
-from ..detection import mean_centered_meshgrid
-
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
@@ -144,13 +142,16 @@ def compute_gaussian_frequency_filter(sigma: float, height: int, width: int) -> 
     Returns:
         The smoothing filter in the Fourier domain with shape (height, width // 2 + 1) for real FFT compatibility.
     """
-    # Creates grids of distances from center for a spatial-domain kernel.
-    column_distances, row_distances = mean_centered_meshgrid(height=height, width=width)
+    # Measures each axis from the sample the ifftshift below moves to the origin, which is what makes the filter
+    # zero-phase. An even-length axis carries its mean between two samples, so a kernel built around that mean lands
+    # half a pixel off the origin and shifts every correlation peak the filter smooths by that half pixel.
+    row_distances = np.abs(np.arange(height, dtype=np.float32) - np.float32(height // 2))
+    column_distances = np.abs(np.arange(width, dtype=np.float32) - np.float32(width // 2))
 
     # Computes separable 1D Gaussians along each axis, then combines into 2D kernel.
     gaussian_column = np.exp(-np.square(column_distances / sigma) / 2)
     gaussian_row = np.exp(-np.square(row_distances / sigma) / 2)
-    gaussian_kernel = gaussian_row * gaussian_column
+    gaussian_kernel = np.outer(a=gaussian_row, b=gaussian_column)
 
     # Normalizes kernel to unit sum and transforms to frequency domain.
     gaussian_kernel /= gaussian_kernel.sum()
