@@ -12,8 +12,8 @@ class _CommonStyle:
     """Encapsulates static visual parameters shared by all viewer windows."""
 
     white_label: str = "color: white;"
-    """The stylesheet for QLabel text that sits on the dark window background. Applied to status labels, axis labels,
-    checkbox captions, and group headings across all viewer windows."""
+    """The stylesheet for QLabel text that sits on the dark window background. Applied to status labels, control field
+    captions, and checkbox captions across all viewer windows."""
     icon_size: int = 30
     """The pixel dimension (width and height) for QIcon-based media control buttons (play, pause, step-forward,
     step-backward) in the Binary, PC, and Tracking viewer playback toolbars."""

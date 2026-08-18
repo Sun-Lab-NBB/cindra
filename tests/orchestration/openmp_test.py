@@ -195,7 +195,7 @@ class TestRuntimeResolution:
             resolve_openmp_runtime()
 
     def test_resolution_leaves_a_host_whose_runtime_loads_alone(self, monkeypatch):
-        """Verifies that a host whose runtime already loads is reported as available and changed."""
+        """Verifies that a host whose runtime already loads is reported as available and loadable."""
         monkeypatch.setattr("cindra.orchestration.openmp.sys.platform", "darwin")
         monkeypatch.setattr("cindra.orchestration.openmp._openmp_runtime_loadable", lambda: True)
         summary = resolve_openmp_runtime()

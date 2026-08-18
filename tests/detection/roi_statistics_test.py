@@ -212,7 +212,9 @@ class TestROI:
         """Verifies that a compact circular ROI has a compactness near 1.0."""
         roi_statistics = _make_circular_roi(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
         roi = _ROI(data=roi_statistics, diameter=10)
-        # A near-perfect disk has perimeter^2 / (4 * pi * area) close to 1. An elongated or fragmented shape
+        # compactness is the ROI's mean pixel-to-center distance over the mean radius a uniformly packed pixel set
+        # of the same count would occupy, floored at 1.0. A near-perfect disk therefore sits at 1.0. An elongated or
+        # fragmented shape
         # would exceed this tight band.
         assert roi.compactness == pytest.approx(1.0, abs=0.3)
 

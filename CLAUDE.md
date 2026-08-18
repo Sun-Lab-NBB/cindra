@@ -199,14 +199,14 @@ outputs.
   the MCP layer is a thin argument-validation and JSON-shaping wrapper over calls into the package. This mirrors the
   orchestration package of `ataraxis-video-system` and `ataraxis-communication-interface`, and its concurrency model
   follows `sollertia-forgery`.
-- **Tracker-driven job state**: The transitions of a job the pipeline runs belong to the tracker's `run_job()`
-  context manager rather than to a hand-rolled `start_job`/`complete_job`/`fail_job` sequence. The engine's
-  `_fail_pending_jobs` is the one exception, because it records a terminal outcome for a job that never ran and
-  therefore has no block to wrap. A remote
-  invocation recovers its job's name and specifier through `tracker.resolve_job(job_id, universe)` rather than
+- **Tracker-driven job state**: The transitions of a job the pipeline runs belong to the tracker's `run_job()` context
+  manager rather than to a hand-rolled `start_job`/`complete_job`/`fail_job` sequence. The engine's
+  `_fail_dispatched_job`, `_fail_pending_jobs`, and the `_pipeline_worker` fallback are the exceptions, because each
+  records a terminal outcome for a job whose worker or pool died without reaching one, leaving no block to wrap. A
+  remote invocation recovers its job's name and specifier through `tracker.resolve_job(job_id, universe)` rather than
   rebuilding the identifier map itself. Both pipeline entry points validate `target_plane` and `target_recording`
-  against the resolved universe before aligning the tracker, so an out-of-range request reports the argument the
-  caller passed instead of a job identifier the caller never saw.
+  against the resolved universe before aligning the tracker, so an out-of-range request reports the argument the caller
+  passed instead of a job identifier the caller never saw.
 - **Context pattern**: `RuntimeContext` combines configuration, acquisition parameters, and runtime data into a single
   object passed through pipeline steps. `MultiRecordingRuntimeContext` follows the same pattern, but carries only
   configuration and runtime data.
@@ -272,10 +272,10 @@ outputs.
   while they are imported. Neither touches `NUMBA_NUM_THREADS`, so a worker still latches the host's full ceiling and
   each stage raises to its own budget through `numba.set_num_threads`. `threadpool_limits` then confines the
   scikit-learn and LAPACK fits inside the running worker, which is the only one of the three that acts on an
-  already-loaded library. `detection/detect.py` and `registration/metrics.py` limit to the job's `workers`, and
-  `detection/denoise.py` limits to 1 because its own block pool already spends the budget. The BLAS width these set
-  is a property of the process rather than of the thread that asked for it, which is why the engine gives each job
-  its own process.
+  already-loaded library. `pipelines/single_recording.py`, `pipelines/multi_recording.py`, and
+  `registration/register.py` limit to the job's `workers`, and `detection/denoise.py` limits to 1 because its own block
+  pool already spends the budget. The BLAS width these set is a property of the process rather than of the thread that
+  asked for it, which is why the engine gives each job its own process.
 - **Binary write integrity**: Binarization fills a plane binary sized to its full frame count, and registration
   rewrites that binary in place. Each phase guards its own write with its own marker, `<binary>.binarizing` and
   `<binary>.registering`, whose suffixes match the `binarizing` and `registering` job statuses the interface reports.
@@ -333,7 +333,7 @@ The `deploy` and `upload` tasks stay out of the envlist and are invoked manually
 
 Tests use pytest with pytest-xdist for parallel execution (`-n logical --dist loadgroup`). Test files mirror the source
 structure under `tests/` with a `_test.py` suffix, across `classification/`, `dataclasses/`, `detection/`,
-`extraction/`, `io/`, `orchestration/`, `pipelines/`, and `registration/`.
+`extraction/`, `gui/`, `interface/`, `io/`, `orchestration/`, `pipelines/`, and `registration/`.
 
 The component map, CLI command reference, dependency table, and per-area workflow guidance live in an imported reference
 file:

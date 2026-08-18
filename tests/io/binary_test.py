@@ -144,7 +144,8 @@ class TestBinaryFileRepresentation:
             f"BinaryFile(file_path={file_path}, height={reopened_height}, width={reopened_width}, dtype=int16, "
             f"read_only=True)"
         )
-        # The three instances differ from the first in one field each, so each field must move on its own.
+        # The writable instance differs from the read-only one in the read_only field alone, and the uint8
+        # instance differs in both dtype and read_only, so each field must move on its own.
         assert writable_representation == read_only_representation.replace("read_only=True", "read_only=False")
         assert narrow_representation == read_only_representation.replace("dtype=int16", "dtype=uint8").replace(
             "read_only=True", "read_only=False"

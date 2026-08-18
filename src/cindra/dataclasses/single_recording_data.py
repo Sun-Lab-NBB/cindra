@@ -415,9 +415,9 @@ class RegistrationData:
     def memory_map_arrays(self, output_path: Path) -> None:
         """Memory-maps registration arrays from individual .npy files in the ``registration_data/`` subdirectory.
 
-        Uses ``r+`` mode to allow both reading and writing through the memory-mapped arrays. This avoids loading the
-        full array contents into memory, which is useful when reusing previously-generated data (e.g., single-recording
-        outputs consumed by the multi-recording pipeline).
+        Uses ``r`` mode, so the mapped arrays are read-only. This avoids loading the full array contents into memory,
+        which is useful when reusing previously-generated data (e.g., single-recording outputs consumed by the
+        multi-recording pipeline).
 
         Args:
             output_path: The directory containing the ``registration_data/`` subdirectory.
@@ -628,9 +628,9 @@ class DetectionData:
     def memory_map_arrays(self, output_path: Path) -> None:
         """Memory-maps detection arrays from individual .npy files in the ``detection_data/`` subdirectory.
 
-        Uses ``r+`` mode to allow both reading and writing through the memory-mapped arrays. This avoids loading the
-        full array contents into memory, which is useful when reusing previously-generated data (e.g., single-recording
-        outputs consumed by the multi-recording pipeline).
+        Uses ``r`` mode, so the mapped arrays are read-only. This avoids loading the full array contents into memory,
+        which is useful when reusing previously-generated data (e.g., single-recording outputs consumed by the
+        multi-recording pipeline).
 
         Args:
             output_path: The directory containing the ``detection_data/`` subdirectory.
@@ -845,7 +845,7 @@ class ROIStatistics:
 
     # Optional extraction data (added during signal extraction).
     skewness: float | None = None
-    """The skewness of the baseline-subtracted fluorescence time series."""
+    """The skewness of the neuropil-corrected fluorescence time series."""
 
     neuropil_mask: NDArray[np.int32] | None = None
     """The raveled (flattened) pixel indices used for neuropil signal extraction. Each index refers to a pixel position
@@ -1333,8 +1333,9 @@ class ExtractionData:
     def memory_map_arrays(self, output_path: Path) -> None:
         """Memory-maps ROI statistics and classification results from disk.
 
-        This method mirrors ``load_arrays()`` but uses ``r+`` memory mapping for .npy files instead of eager loading.
-        ROI statistics (.npz) are still eagerly loaded because NumPy does not support memory mapping for .npz archives.
+        This method mirrors ``load_arrays()`` but uses read-only ``r`` memory mapping for .npy files instead of eager
+        loading. ROI statistics (.npz) are still eagerly loaded because NumPy does not support memory mapping for .npz
+        archives.
 
         Args:
             output_path: The directory containing the extraction data files.
@@ -1376,8 +1377,8 @@ class ExtractionData:
     def memory_map_results(self, output_path: Path) -> None:
         """Memory-maps all extraction result arrays from disk.
 
-        This method mirrors ``load_results()`` but uses ``r+`` memory mapping for all .npy files instead of eager
-        loading. This avoids loading the full array contents into memory, which is useful when reusing
+        This method mirrors ``load_results()`` but uses read-only ``r`` memory mapping for all .npy files instead of
+        eager loading. This avoids loading the full array contents into memory, which is useful when reusing
         previously-generated data (e.g., single-recording outputs consumed by the multi-recording pipeline).
 
         Args:
@@ -1557,9 +1558,9 @@ class SingleRecordingRuntimeData(YamlConfig):
         self.extraction.load_arrays(self.output_path)
 
     def memory_map_arrays(self) -> None:
-        """Memory-maps the registration, detection, and extraction arrays the pipeline stages need, in ``r+`` mode.
+        """Memory-maps the registration, detection, and extraction arrays the pipeline stages need, in ``r`` mode.
 
-        This method opens each .npy file as a read-write memory-mapped array, avoiding full materialization in RAM.
+        This method opens each .npy file as a read-only memory-mapped array, avoiding full materialization in RAM.
         ROI statistics are eagerly loaded instead, because NumPy cannot memory-map .npz archives. Use this when
         reusing previously-generated data that does not need to be copied into memory (e.g., single-recording outputs
         consumed by the multi-recording pipeline). Extraction fluorescence traces and colocalization arrays are

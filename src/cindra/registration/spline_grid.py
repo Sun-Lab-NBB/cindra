@@ -79,8 +79,8 @@ class SplineGrid:
         self._grid_sampling: float = sampling
 
         # Computes grid shape: (field_dim - 1) / sampling gives the number of grid intervals spanning the field,
-        # truncated to whole intervals. The +4 adds boundary padding since cubic B-spline evaluation at any point
-        # requires 4 surrounding knots (2 beyond each field edge).
+        # truncated to whole intervals. Spanning those intervals takes one more knot than intervals, and cubic
+        # B-spline evaluation adds one knot before the field's first knot and two past its last, so the total is +4.
         grid_height = int((field_height - 1) / self._grid_sampling) + 4
         grid_width = int((field_width - 1) / self._grid_sampling) + 4
         self._grid_shape: tuple[int, int] = (grid_height, grid_width)
@@ -146,8 +146,8 @@ class SplineGrid:
             The shape of the knot grid as (height, width).
         """
         # Computes grid shape: (field_dim - 1) / sampling gives the number of grid intervals spanning the field,
-        # truncated to whole intervals. The +4 adds boundary padding since cubic B-spline evaluation at any point
-        # requires 4 surrounding knots (2 beyond each field edge).
+        # truncated to whole intervals. Spanning those intervals takes one more knot than intervals, and cubic
+        # B-spline evaluation adds one knot before the field's first knot and two past its last, so the total is +4.
         grid_height = int((field_height - 1) / grid_sampling) + 4
         grid_width = int((field_width - 1) / grid_sampling) + 4
         return grid_height, grid_width

@@ -297,10 +297,10 @@ Stored under `plane_<i>/detection_data/`:
 
 | File                      | Format         | Description                                        |
 |---------------------------|----------------|----------------------------------------------------|
-| `mean_image.npy`          | float32 (h, w) | Average of all registered frames                   |
+| `mean_image.npy`          | float32 (h, w) | Mean of the binned movie, excluding bad frames     |
 | `enhanced_mean_image.npy` | float32 (h, w) | Background-subtracted and contrast-normalized mean |
-| `maximum_projection.npy`  | float32 (h, w) | Maximum intensity projection across all frames     |
-| `correlation_map.npy`     | float32 (h, w) | Pixel-wise correlation with neighboring pixels     |
+| `maximum_projection.npy`  | float32 (h, w) | Maximum over the binned, high-pass filtered movie  |
+| `correlation_map.npy`     | float32 (h, w) | Cross-scale maximum from the detection pyramid     |
 
 The `mean_image_channel_2.npy` variant is written for any two-channel recording. The remaining channel 2 variants
 (`enhanced_mean_image_channel_2.npy`, `maximum_projection_channel_2.npy`, `correlation_map_channel_2.npy`) are saved
@@ -500,10 +500,10 @@ Produces:
 |----------------------------------------------------|------------------------------------------------------------|
 | `plane_<i>/roi_masks.npz`                          | Per-ROI pixel coordinates, weights, and centroids          |
 | `plane_<i>/roi_statistics.npz`                     | Per-ROI shape properties (area, compactness, aspect ratio) |
-| `plane_<i>/detection_data/mean_image.npy`          | Average of all registered frames                           |
+| `plane_<i>/detection_data/mean_image.npy`          | Mean of the binned movie, excluding bad frames             |
 | `plane_<i>/detection_data/enhanced_mean_image.npy` | Background-subtracted and contrast-normalized mean         |
-| `plane_<i>/detection_data/maximum_projection.npy`  | Maximum intensity projection across all frames             |
-| `plane_<i>/detection_data/correlation_map.npy`     | Pixel-wise correlation with neighboring pixels             |
+| `plane_<i>/detection_data/maximum_projection.npy`  | Maximum over the binned, high-pass filtered movie          |
+| `plane_<i>/detection_data/correlation_map.npy`     | Cross-scale maximum from the detection pyramid             |
 
 ##### Signal Extraction and Classification
 
@@ -817,7 +817,7 @@ a dataset spans without building a runtime context or creating a directory, and 
 under a caller-supplied output root, and `resolve_array_path()` names a file inside one of them. The result arrays sit
 directly in those roots and are named by `RecordingArrays`, while `DetectionImages`, `RegistrationArrays`, and
 `MultiRecordingArrays` name files inside the `detection_data`, `registration_data`, and `registration_arrays`
-subdirectories, whose names the same module exports. `resolve_plane_specifier()` and
+subdirectories, whose names `cindra.layout` exports. `resolve_plane_specifier()` and
 `parse_plane_specifier()` convert between a plane index and the specifier its jobs and its directory both carry.
 
 `estimate_single_recording_job_memory_mb()` and `estimate_multi_recording_job_memory_mb()` project the memory one job
@@ -921,7 +921,7 @@ cindra mcp
 | `verify_multi_recording_output_tool`              | Verifies completeness of multi-recording pipeline output            |
 | `query_single_recording_metadata_tool`            | Queries recording metadata (planes, channels, frame count)          |
 | `query_registration_quality_tool`                 | Queries registration quality metrics (rigid and nonrigid offsets)   |
-| `query_detection_summary_tool`                    | Queries detection summary (ROI counts, classification statistics)   |
+| `query_detection_summary_tool`                    | Queries detection image statistics, ROI diameter, and aspect ratio  |
 | `query_roi_statistics_tool`                       | Queries detailed ROI statistics for up to 500 ROIs                  |
 | `query_traces_tool`                               | Queries fluorescence traces for up to 50 ROIs                       |
 | `query_multi_recording_overview_tool`             | Queries multi-recording dataset overview                            |

@@ -75,6 +75,7 @@ def run_single_recording_pipeline(
 
     Raises:
         FileNotFoundError: If the single-recording configuration data cannot be loaded from the specified file.
+        RuntimeError: If the host is macOS and carries no loadable OpenMP runtime for the Numba threading layer.
         ValueError: If the recording's data validation fails, the specified job_id does not match any available job,
             or target_plane names a plane the recording does not hold.
     """
@@ -223,8 +224,9 @@ def run_multi_recording_pipeline(
     Raises:
         FileNotFoundError: If the multi-recording configuration data cannot be loaded from the specified file, or if a
             recording directory holds no combined_metadata.npz file.
-        RuntimeError: If a recording directory holds multiple combined_metadata.npz files, if the recording paths do
-            not contain unique identifying components, or if a resolved identifying component contains a colon.
+        RuntimeError: If the host is macOS and carries no loadable OpenMP runtime for the Numba threading layer, if
+            a recording directory holds multiple combined_metadata.npz files, if the recording paths do not contain
+            unique identifying components, or if a resolved identifying component contains a colon.
         ValueError: If recording validation fails, recording_directories names fewer than two recordings,
             target_recording does not name a resolved recording, or the specified job_id does not match any available
             jobs.

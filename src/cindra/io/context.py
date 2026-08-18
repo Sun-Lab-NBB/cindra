@@ -122,7 +122,9 @@ def resolve_single_recording_contexts(
 
     Raises:
         ValueError: If output_path is not configured, if no processed data exists at output_path while data_path is
-            also not configured, or if the acquisition parameters specify more than 2 channels.
+            also not configured, if data_path is not a directory, if the acquisition parameters file omits a required
+            field or carries a non-positive frame rate, plane count, channel count, or ROI count, or if the
+            acquisition parameters specify more than 2 channels.
         FileNotFoundError: If the acquisition parameters file is not found under data_path, or if ``persist=False``
             and any plane's runtime_data.yaml does not already exist on disk.
     """
@@ -319,8 +321,8 @@ def resolve_multi_recording_contexts(
         FileNotFoundError: If no combined_metadata.npz file is found in a recording directory, or if
             ``persist=False`` and any resolved recording's multi_recording_runtime_data.yaml does not already
             exist on disk.
-        RuntimeError: If multiple combined_metadata.npz files are found in a recording directory, or if recording paths
-            do not contain unique identifying components.
+        RuntimeError: If multiple combined_metadata.npz files are found in a recording directory, if recording paths
+            do not contain unique identifying components, or if a resolved recording identifier contains a colon.
         ValueError: If target_recording_id does not match any resolved recording identifier.
     """
     recording_directories = configuration.recording_io.recording_directories

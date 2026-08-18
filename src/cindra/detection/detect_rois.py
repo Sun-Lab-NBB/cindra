@@ -713,7 +713,8 @@ def _extend_iteratively(
         At each iteration, the ROI boundary is expanded by one pixel in all cardinal directions. Pixels are retained
         if their mean activity on active frames exceeds a fraction of the peak activity. Growth terminates when
         the pixel count exceeds the maximum pixel limit or when the ROI stops growing (its pixel count no longer
-        exceeds the pre-extension count).
+        exceeds the pre-extension count). Growth also stops when no pixel survives the retention mask, in which case
+        the extended coordinates and their pre-filter weights are returned unfiltered.
 
     Args:
         y_pixels: The y-coordinates of the current ROI pixels.
@@ -727,7 +728,8 @@ def _extend_iteratively(
 
     Returns:
         A tuple of three arrays: the extended y-coordinates, x-coordinates, and unit-normalized pixel weights for
-        the grown ROI.
+        the grown ROI. An ROI whose residual is uniformly zero returns its zero weight vector unnormalized, which the
+        caller rejects on its own activity threshold.
     """
     max_pixel_count = 10000
     previous_count = 0

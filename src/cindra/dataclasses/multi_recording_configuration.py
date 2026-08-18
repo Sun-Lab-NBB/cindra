@@ -66,11 +66,11 @@ class ROISelection:
     parameter applies to channel 1 ROIs."""
 
     mroi_region_margin: int = 30
-    """The minimum required distance, in pixels, between the center-point (the median x-coordinate) of the ROI
-    and the MROI region border. ROIs that are too close to region borders are excluded from processing to avoid
-    ambiguities associated with tracking ROIs that span multiple regions. This parameter is only used for MROI
-    recordings where region borders are automatically computed from the acquisition parameters. This parameter applies
-    to channel 1 ROIs."""
+    """The minimum required distance, in pixels, between the x-coordinate of the centroid the ROI carries, which
+    detection sets to the residual-variance peak, and the MROI region border. ROIs that are too close to region borders
+    are excluded from processing to avoid ambiguities associated with tracking ROIs that span multiple regions. This
+    parameter is only used for MROI recordings where region borders are automatically computed from the acquisition
+    parameters. This parameter applies to channel 1 ROIs."""
 
     probability_threshold_channel_2: float | None = None
     """The minimum required cell probability score for channel 2 ROIs. When set to None (default), channel 2 ROIs use
@@ -144,8 +144,10 @@ class ROITracking:
     each tracked ROI contribute to the template used for fluorescence extraction across recordings."""
 
     step_sizes: tuple[int, int] = (200, 200)
-    """The block size, in pixels, as (height, width) used to partition the deformed visual space into spatial bins
-    for clustering. Smaller blocks reduce memory usage but increase processing overhead."""
+    """The block size, in pixels, as (height, width) used to partition the deformed visual space into spatial bins for
+    clustering. Smaller blocks reduce memory usage but increase processing overhead. Both entries must hold the same
+    value, because tracking bins the space with a single square step and rejects a configuration whose height and width
+    differ."""
 
     bin_size: int = 50
     """The extension, in pixels, added to each spatial bin boundary in both directions when collecting ROI masks

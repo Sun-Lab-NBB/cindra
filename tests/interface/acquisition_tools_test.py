@@ -48,7 +48,7 @@ class TestIntegerListGuard:
 
 
 class TestAcquisitionParameterValidation:
-    """Tests the shared validator that both the generation and the readiness tools run."""
+    """Tests the shared validator that the generation, file-validation, and readiness tools all run."""
 
     @pytest.mark.parametrize(
         "roi_lines",

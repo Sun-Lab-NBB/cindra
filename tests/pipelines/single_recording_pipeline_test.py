@@ -66,7 +66,9 @@ _MAXIMUM_PIXEL_VALUE: int = 32766
 """The clipping ceiling for the synthetic movie, keeping intensities within the signed 16-bit range."""
 
 _TEST_WORKERS: int = 1
-"""The worker allocation every stage entry point receives in these tests, which keeps the synthetic runs serial."""
+"""The worker allocation the tests that invoke a stage entry point directly pass to it, which keeps those runs
+serial. The tests that drive the stages through run_single_recording_pipeline get the measured stage defaults
+instead."""
 
 _BINARY_ITEM_SIZE: int = 2
 """The number of bytes one pixel occupies inside a cindra binary, which stores int16 samples."""
@@ -141,7 +143,7 @@ def _write_mismatched_tiff(data_directory: Path) -> None:
 
 
 def _make_configuration(*, data_directory: Path | None, output_directory: Path | None) -> SingleRecordingConfiguration:
-    """Builds a tuned single-recording configuration that runs serially and detects the planted blobs."""
+    """Builds a tuned single-recording configuration that detects the planted blobs."""
     configuration = SingleRecordingConfiguration()
     configuration.file_io.data_path = data_directory
     configuration.file_io.output_path = output_directory
@@ -506,8 +508,8 @@ class TestBinarizeRecording:
 
     def test_plane_without_recorded_geometry_skips_the_size_check(self, tmp_path: Path) -> None:
         """Verifies that a plane whose runtime record carries no frame geometry is exempt from the size check."""
-        # A freshly bootstrapped plane records a zero frame height, width, and count, and the conversion clears the
-        # binarization marker before it saves the geometry it measured. A conversion killed between those two writes
+        # A freshly bootstrapped plane records a zero frame height, width, and count, and the conversion saves the
+        # geometry it measured before it clears the binarization marker. A conversion killed before that save
         # therefore leaves a binary beside a runtime record that states no geometry, which is the state built here.
         configuration = _bootstrap_recording(root=tmp_path)
         plane_directory = tmp_path / "output" / "cindra" / "plane_0"

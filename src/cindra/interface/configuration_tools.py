@@ -104,8 +104,9 @@ def discover_recordings_tool(root_directory: str) -> dict[str, object]:
 
     Notes:
         The marker search keeps only the entries that resolve to files, so a directory carrying a marker's name is not
-        reported as a recording. A subtree the process cannot read falls back to a tolerant scan that skips it, so an
-        unreadable subtree lowers the candidate counts without surfacing a distinct diagnostic.
+        reported as a recording. A subtree the process cannot read falls back to a tolerant recursive glob that skips
+        it and applies no file check, so an unreadable subtree lowers the candidate counts without surfacing a
+        distinct diagnostic and can let a directory carrying a marker's name through.
 
     Args:
         root_directory: The absolute path to the root directory to search.

@@ -84,8 +84,8 @@ def execute_single_recording_job(
     Raises:
         FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid single-recording
             configuration.
-        ValueError: If the configuration does not configure an output path, or if job_name is not a recognized
-            single-recording job.
+        ValueError: If the configuration does not configure an output path, if job_name is not a recognized
+            single-recording job, or if workers is zero or a negative value other than -1.
     """
     configuration, _ = load_single_recording_configuration(configuration_path=configuration_path)
 
@@ -135,8 +135,9 @@ def execute_multi_recording_job(
     Raises:
         FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid multi-recording
             configuration.
-        ValueError: If the configuration specifies fewer than two recording directories or no dataset name, or if
-            job_name is not a recognized multi-recording job.
+        ValueError: If the configuration specifies fewer than two recording directories or no dataset name, if
+            job_name is not a recognized multi-recording job, or if workers is zero or a negative value other
+            than -1.
     """
     configuration = load_multi_recording_configuration(configuration_path=configuration_path)
 
@@ -434,6 +435,7 @@ def prime_recording(configuration_path: Path) -> RecordingPlanes:
     Raises:
         FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid
             single-recording configuration.
+        ValueError: If the configuration does not configure an output path.
     """
     configuration, output_path = load_single_recording_configuration(configuration_path=configuration_path)
     resolve_single_recording_contexts(configuration=configuration, persist=True)
@@ -458,8 +460,8 @@ def prime_dataset(configuration_path: Path) -> DatasetRecordings:
         FileNotFoundError: If the configuration file is missing, is not a .yaml file, is not a valid multi-recording
             configuration, or if a recording holds no combined metadata archive.
         ValueError: If the configuration names fewer than two recording directories or no dataset name.
-        RuntimeError: If a recording directory holds several combined metadata archives, or if the recording paths
-            carry no unique identifying component.
+        RuntimeError: If a recording directory holds several combined metadata archives, if the recording paths
+            carry no unique identifying component, or if a resolved identifying component contains a colon.
     """
     configuration = load_multi_recording_configuration(configuration_path=configuration_path)
     contexts = resolve_multi_recording_contexts(configuration=configuration, persist=True)

@@ -259,12 +259,12 @@ class Registration:
     signal-to-noise data."""
 
     bad_frame_threshold: float = 1.0
-    """The threshold for identifying frames with excessive motion or poor correlation quality. The algorithm computes
-    a ratio of motion deviation to phase correlation quality for each frame. Frames exceeding this threshold (scaled
-    by 100 internally) are marked as 'bad' and excluded when computing the valid pixel region (yrange, xrange) after
-    registration. This prevents a few frames with extreme motion from unnecessarily shrinking the usable field of view.
-    Bad frames may also be excluded during movie binning for ROI detection. Lower values are more strict and exclude
-    more frames."""
+    """The threshold for identifying frames with excessive motion or poor correlation quality. The algorithm computes a
+    ratio of motion deviation to phase correlation quality for each frame. Frames exceeding this threshold (scaled by
+    100 internally) are marked as 'bad' and excluded when computing the valid pixel region (valid_y_range,
+    valid_x_range) after registration. This prevents a few frames with extreme motion from unnecessarily shrinking the
+    usable field of view. Bad frames may also be excluded during movie binning for ROI detection. Lower values are more
+    strict and exclude more frames."""
 
     normalize_frames: bool = True
     """Determines whether to clip pixel intensities to the 1st-99th percentile range during registration. This removes
@@ -351,7 +351,8 @@ class ROIDetection:
     """Stores parameters for Region of Interest (ROI) detection."""
 
     enabled: bool = True
-    """Determines whether to perform ROI detection and classification."""
+    """Determines whether to perform ROI detection. When disabled, the plane's whole processing stage is skipped, so no
+    fluorescence traces are extracted, no ROIs are classified, and no spikes are deconvolved."""
 
     preclassification_threshold: float = 0.5
     """The classifier probability threshold used to pre-filter ROIs before signal extraction. This is the minimum
@@ -388,9 +389,10 @@ class ROIDetection:
     increase processing time."""
 
     maximum_binned_frames: int = 5000
-    """The maximum number of time-binned frames used for ROI detection. Temporal binning averages consecutive frames
-    to improve signal-to-noise ratio for detection. Higher values provide better averaging but increase memory usage
-    and processing time. The bin size is computed to produce at most this many binned frames."""
+    """The maximum number of time-binned frames used for ROI detection. Temporal binning averages consecutive frames to
+    improve signal-to-noise ratio for detection. The bin size is computed to produce at most this many binned frames, so
+    a higher value keeps more binned frames, each averaging fewer source frames, at the cost of increased memory usage
+    and processing time."""
 
     denoise: bool = False
     """Determines whether to apply PCA-based denoising to the binned movie before ROI detection. This can improve
@@ -439,8 +441,9 @@ class SignalExtraction:
 
     batch_size: int = 500
     """The number of frames to process at the same time during fluorescence extraction. This controls memory usage
-    during the extraction step. Larger values may improve throughput on fast storage but increase RAM consumption.
-    This is independent of the registration batch size."""
+    during the extraction step. Larger values may improve throughput on fast storage but increase RAM consumption. This
+    is independent of the registration batch size. The same value is reused as the number of ROIs per batch during OASIS
+    spike deconvolution, where it bounds the four (batch, frames) workspace arrays that stage allocates."""
 
     colocalization_threshold: float = 0.65
     """The threshold for determining whether ROIs from one channel correspond to ROIs or signals in the other channel.

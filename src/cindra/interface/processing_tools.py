@@ -385,7 +385,8 @@ def prepare_single_recording_batch_tool(
     Returns:
         On success, contains per-recording manifests in 'recordings' keyed by recording path, with each entry listing
         its configuration_path, tracker_path, output_path, pipeline_type, and per-phase job entries (binarize_job,
-        register_jobs, process_jobs, combine_job) including job_id, name, specifier, and current status. The output_path
+        register_jobs, process_jobs, combine_job) including job_id, name, specifier, and current status, plus
+        executor_id for a tracker that already existed. The output_path
         is the absolute output directory and the parent of the cindra/ directory, where configuration_path equals
         <output_path>/cindra/configuration.yaml, so downstream verify, status, and clean tools need no re-derivation.
         Also includes 'total_recordings' and 'total_jobs' counts, plus 'migrated_recordings' listing any recording
@@ -652,7 +653,8 @@ def prepare_multi_recording_batch_tool(
     Returns:
         On success, contains per-dataset manifests in 'datasets' keyed by the lowercased dataset name, with each entry
         listing its configuration_path, tracker_path, dataset_name, pipeline_type, and per-phase job entries
-        (discover_job, extract_jobs) including job_id, name, specifier, and current status. The dataset_name field is
+        (discover_job, extract_jobs) including job_id, name, specifier, and current status, plus executor_id for a
+        tracker that already existed. The dataset_name field is
         the resolved lowercased dataset name. To verify a dataset, call verify_multi_recording_output_tool with the
         dataset_name plus any recording_path belonging to the dataset (one of the input recording_paths, whose cindra/
         subdirectory is resolved automatically). Also includes 'total_datasets' and 'total_jobs' counts, plus
@@ -1217,11 +1219,11 @@ def execute_processing_jobs_tool(
         binarization to registration to processing to combination for single-recording work and discovery to extraction
         for multi-recording work.
 
-        Each job runs under the resource class of its phase. Binarization holds 4 cores per job at a fixed concurrency
-        of 4. Combination holds 1 core per job at the same fixed concurrency, because it merges result files serially.
-        Registration holds 8 cores per job with a concurrency bounded by the CPU budget. Processing holds 10 cores per
-        job with a concurrency bounded by both the CPU budget and the available system memory. The binarization and
-        combination classes ignore both parameters below.
+        Each job runs under the resource class of its phase. Binarization holds 3 cores per job at a fixed concurrency
+        of 4. Combination holds 1 core per job, because it merges result files serially, and its concurrency is bounded
+        by the CPU budget alone. Registration holds 4 cores per job and processing holds 10, each with a concurrency
+        bounded by the CPU budget. The session memory budget bounds dispatch for every class alike rather than the
+        concurrency cap of any one of them. The binarization class alone ignores both parameters below.
 
         Every class dispatches during the same cycle, so the dispatcher additionally holds the sum of the cores
         committed by the running jobs of every class inside the session CPU budget reported as 'cpu_budget'. That
@@ -1235,7 +1237,7 @@ def execute_processing_jobs_tool(
         workers_per_job: CPU cores per job, overriding the measured default of every class that carries no hard
         concurrency ceiling. Leave
             as None to accept the measured defaults, which are 3 cores for binarization, 4 for registration, 10 for
-            processing, 1 for combination, 30 for multi-recording discovery, and 16 for multi-recording extraction.
+            processing, 1 for combination, 2 for multi-recording discovery, and 16 for multi-recording extraction.
             Set to -1 to give every job the whole session core budget. The override is a single scalar applied to
             every non-fixed class alike.
         max_parallel_jobs: Maximum concurrent jobs per resource class, overriding the derived concurrency cap of every
@@ -1244,7 +1246,8 @@ def execute_processing_jobs_tool(
 
     Returns:
         Always contains a 'success' flag indicating the tool ran. On a started session, also contains a 'started' flag,
-        'total_jobs' dispatched, and the session 'cpu_budget' that bounds the classes in aggregate. A started session
+        'total_jobs' dispatched, and the session 'cpu_budget' and 'memory_budget_mb' that bound the classes in
+        aggregate. A started session
         further reports a 'resource_classes' mapping with the resolved workers_per_job, max_parallel_jobs, and
         job_count of every class present in the session, and 'invalid_jobs' listing any jobs that failed validation
         with reasons. On failure, contains success:False and an 'error' describing the issue.
@@ -1591,8 +1594,9 @@ def cancel_processing_jobs_tool() -> dict[str, object]:
     """Cancels the active job execution session.
 
     Clears the admission pool and every resource class queue to prevent new jobs from starting and resets the execution
-    state. Already-dispatched worker threads keep running because session state is cleared immediately. The agent
-    should therefore poll get_recording_status_tool on the affected recordings or datasets until previously-RUNNING jobs
+    state. Already-dispatched jobs keep running in their worker processes, because cancellation only empties the
+    queues and never cancels a running job. The agent should therefore poll get_recording_status_tool on the affected
+    recordings or datasets until previously-RUNNING jobs
     leave RUNNING before starting a new session, to avoid colliding with still-running cancelled jobs. Calling cancel
     when no session is active is a safe no-op.
 
@@ -1841,8 +1845,8 @@ def execute_full_pipeline_tool(
             Each must contain 'configuration_path', 'recording_paths', and 'dataset_name'.
         workers_per_job: CPU cores per job, overriding the measured default of every class that carries no hard
         concurrency ceiling. Leave
-            as None to accept the measured defaults of 4 cores for binarization, 1 for combination, 8 for
-            registration, 10 for processing, 30 for multi-recording discovery, and 16 for multi-recording extraction.
+            as None to accept the measured defaults of 3 cores for binarization, 1 for combination, 4 for
+            registration, 10 for processing, 2 for multi-recording discovery, and 16 for multi-recording extraction.
             Set to -1 to give every job the whole session core budget.
         max_parallel_jobs: Maximum concurrent jobs per resource class, overriding the derived concurrency cap of every
             non-fixed resource class. Leave as None to accept the derived caps, or set to -1 to lift them so that only
@@ -1851,12 +1855,15 @@ def execute_full_pipeline_tool(
     Returns:
         Always contains a 'success' flag indicating the tool ran, and callers MUST also check the 'started' flag rather
         than 'success' alone. When jobs are dispatched, contains started:True, 'total_jobs', 'phase_count', per-phase
-        'phases' with job counts and IDs, the session 'cpu_budget' that bounds the classes in aggregate, and a
+        'phases' with job counts and IDs, the session 'cpu_budget' and 'memory_budget_mb' that bound the classes in
+        aggregate, and a
         'resource_classes' mapping with the resolved allocation of every class in the session. When all phases are
         already complete, returns {success:True, started:False, message:"All pipeline phases are already completed.",
-        total_jobs:0, phase_count:0, phases:[]} plus a 'next_step' string. The rejection lists the preparation step
-        produces, 'invalid_paths', 'invalid_recordings', and 'invalid_configurations', are forwarded when non-empty
-        and name every recording or dataset the session omits. A batch whose preparation accepted no input at all
+        pipeline_type:<the requested type>, total_jobs:0, phase_count:0, phases:[]} plus a 'next_step' string. Every
+        outcome carries 'pipeline_type'. The rejection lists the preparation step produces, 'invalid_paths',
+        'invalid_recordings', and 'invalid_configurations', and the lists this step's own sizing pass produces,
+        'unsizable_recordings' and 'unsizable_datasets', are forwarded when non-empty and together name every
+        recording or dataset the session omits. A batch whose preparation accepted no input at all
         returns success:False alongside those lists, because it holds no phase to report as complete. On failure,
         contains success:False and an 'error' describing the issue. Cascade-aborted downstream jobs are recorded in
         their trackers as FAILED with the exact message "Unable to execute job. A preceding pipeline phase failed.",
@@ -2112,7 +2119,8 @@ def _start_session(
         extra_result_fields: Additional key-value pairs to include in the result dictionary.
 
     Returns:
-        A result dictionary containing 'success', 'started', the session 'cpu_budget', per-class resource allocation
+        A result dictionary containing 'success', 'started', the session 'cpu_budget' and 'memory_budget_mb',
+        per-class resource allocation
         details, and any extra fields. A rejected override yields success:False and an 'error' instead.
     """
     try:

@@ -345,7 +345,7 @@ class TestApplyOasisDeconvolution:
         np.testing.assert_allclose(result[0, 50], 10.0, atol=1e-5)
 
         # The total inferred spike mass equals the single spike's amplitude, and no other frame carries mass. The
-        # off-peak residual measures 1.7e-07 for this trace, so the 1e-5 bound leaves three orders of headroom.
+        # off-peak residual measures 1.7e-07 for this trace, so the 1e-5 bound leaves nearly two orders of headroom.
         np.testing.assert_allclose(result[0].sum(), 10.0, atol=1e-5)
         assert float(np.abs(np.delete(result[0], 50)).max()) < 1e-5
 

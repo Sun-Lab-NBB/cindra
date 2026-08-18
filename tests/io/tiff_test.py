@@ -204,9 +204,11 @@ class TestReadTiff:
         self, tmp_path: Path, dtype: type[np.generic]
     ) -> None:
         """Verifies that float pages keep their magnitude and are truncated toward zero rather than rounded."""
-        # Every value is chosen so that truncation and rounding disagree, and so that halving the page would change
+        # Most values are chosen so that truncation and rounding disagree, and so that halving the page would change
         # the result. -0.9 truncates to 0 but rounds to -1, 5.999 truncates to 5 but rounds to 6, and 1200.7
-        # truncates to 1200 but would land on 600 if the float arm were folded into the uint16 halving branch.
+        # truncates to 1200 but would land on 600 if the float arm were folded into the uint16 halving branch. 2.5
+        # and 0.0 truncate and round alike, and 0.0 also survives a halving unchanged, so they pin the arm rather
+        # than separate it.
         page_values = (-0.9, 5.999, -3.5, 2.5, 1200.7, -1200.7, 0.0)
         pages = [np.full((4, 5), fill_value=value, dtype=dtype) for value in page_values]
 

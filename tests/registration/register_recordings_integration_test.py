@@ -91,7 +91,7 @@ def _make_configuration(
     image_type: ReferenceImageType = ReferenceImageType.ENHANCED_MEAN,
     repeat_registration: bool = False,
 ) -> MultiRecordingConfiguration:
-    """Builds a serial multi-recording configuration with fast diffeomorphic registration settings."""
+    """Builds a multi-recording configuration with fast diffeomorphic registration settings."""
     configuration = MultiRecordingConfiguration()
     configuration.runtime.display_progress_bars = False
     configuration.diffeomorphic_registration.image_type = image_type

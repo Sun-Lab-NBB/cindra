@@ -284,7 +284,7 @@ class SingleRecordingData:
 
     @property
     def cell_classification(self) -> NDArray[np.float32]:
-        """Returns the memory-mapped read-write cell classification array with shape (roi_count, 2) for the current
+        """Returns the memory-mapped read-only cell classification array with shape (roi_count, 2) for the current
         view, where column 0 holds binary labels (0.0/1.0) and column 1 holds classifier probabilities.
         """
         value = self._current_extraction.cell_classification

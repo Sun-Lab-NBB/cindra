@@ -52,7 +52,7 @@ _MINIMUM_REGISTRATION_METRIC_FRAMES: int = 1500
 """The minimum number of frames required to compute registration quality metrics."""
 
 _BAD_FRAME_FRACTION_THRESHOLD: float = 0.5
-"""The threshold fraction of bad frames above which registration is considered failed."""
+"""The threshold fraction of bad frames at or above which registration is considered failed."""
 
 _MAXIMUM_MEDIAN_FILTER_WINDOW: int = 101
 """The maximum median filter window size for offset time series smoothing."""
@@ -396,15 +396,15 @@ def _compute_crop(
     )
 
     # Computes valid region from good frames only (excludes outliers from shrinking the FOV).
-    # If >50% are bad, falls back to using all frames and warns about registration failure.
+    # If at least 50% are bad, falls back to using all frames and warns about registration failure.
     if bad_frames.mean() < _BAD_FRAME_FRACTION_THRESHOLD:
         y_min = np.ceil(np.abs(y_offsets[~bad_frames]).max())
         x_min = np.ceil(np.abs(x_offsets[~bad_frames]).max())
     else:
         console.echo(
             message=(
-                "WARNING: >50% of frames have large movements, suggesting that registration has failed to correct "
-                "motion artifacts."
+                "WARNING: at least 50% of frames have large movements, suggesting that registration has failed "
+                "to correct motion artifacts."
             ),
             level=LogLevel.WARNING,
         )

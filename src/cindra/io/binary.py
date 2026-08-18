@@ -141,7 +141,8 @@ class BinaryFile:
         height: The height of each frame stored inside the file.
         width: The width of each frame stored inside the file.
         file_path: The absolute path of the file to read from or write to.
-        frame_number: The total number of frames in the file.
+        frame_number: The total number of frames to size a newly created file for. The value is ignored when the
+            file already exists, where the frame count is read from the file's size instead.
         dtype: The data type to use for pixel values stored inside the file, specified as a NumPy datatype
             string (e.g.: "int16").
         read_only: Determines whether to open an existing file in read-only mode. When enabled, the file is
@@ -505,7 +506,7 @@ class BinaryFile:
 
 
 class BinaryFileCombined:
-    """Creates or opens a collection of cindra binaries (.bin) for reading image data across planes.
+    """Opens a collection of existing cindra binaries (.bin) for reading image data across planes.
 
     Works with multiple imaging planes, each stored inside a separate cindra binary. Extends the BinaryFile
     functionality to handle multiple planes.

@@ -71,9 +71,11 @@ def compute_intensity_colocalization(
     Returns:
         A tuple of two arrays. The first array has shape (n_rois, 2) where column 0 contains boolean
         colocalization flags and column 1 contains probability values. The second array is the
-        bleedthrough-corrected structural mean image.
+        bleedthrough-corrected structural mean image, or the unmodified structural mean image cast to float32 when
+        the ROI list is empty.
     """
-    # Handles edge cases with empty ROI lists. Returns early to satisfy type narrowing requirements.
+    # Handles edge cases with empty ROI lists. Returns early because the reductions below are undefined over an
+    # empty ROI set.
     if not rois:
         empty_result = np.zeros((0, 2), dtype=np.float32)
         return empty_result, structural_mean_image.astype(np.float32)
@@ -159,7 +161,8 @@ def compute_spatial_colocalization(
     """
     count_1 = len(rois_channel_1)
 
-    # Handles edge cases with empty ROI lists. Returns early to satisfy type narrowing requirements.
+    # Handles edge cases with empty ROI lists. Returns early because the reductions below are undefined over an
+    # empty ROI set.
     if not rois_channel_1:
         return np.zeros((0, 2), dtype=np.float32)
 
@@ -358,7 +361,8 @@ def _compute_overlap_matrix(
     count_1 = len(rois_channel_1)
     count_2 = len(rois_channel_2)
 
-    # Handles edge cases with empty ROI lists. Returns early to satisfy type narrowing requirements.
+    # Handles edge cases with empty ROI lists. Returns early because the reductions below are undefined over an
+    # empty ROI set.
     if not rois_channel_1 or not rois_channel_2:
         return np.zeros((count_1, count_2), dtype=np.float32)
 

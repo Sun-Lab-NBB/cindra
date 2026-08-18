@@ -107,7 +107,7 @@ def _build_processed_recording(root: Path, *, seed: int) -> Path:
 def _make_multi_configuration(
     *, recording_directories: tuple[Path, ...], dataset_name: str = _DATASET_NAME, display_progress_bars: bool = False
 ) -> MultiRecordingConfiguration:
-    """Builds a serial multi-recording configuration referencing the given recording directories and dataset name."""
+    """Builds a multi-recording configuration referencing the given recording directories and dataset name."""
     configuration = MultiRecordingConfiguration()
     configuration.recording_io.recording_directories = recording_directories
     configuration.recording_io.dataset_name = dataset_name

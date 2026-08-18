@@ -1,4 +1,7 @@
-"""Provides assets for importing, converting, and combining multi-plane imaging data."""
+"""Provides assets for importing, converting, and combining multi-plane imaging data, for resolving the pipeline
+runtime contexts and the read-only recording inventory, and for selecting the ROIs the multi-recording pipeline
+tracks.
+"""
 
 from .tiff import (
     TIFF_EXTENSIONS,

@@ -7,8 +7,8 @@
 | `AcquisitionParameters`           | `dataclasses/single_recording_configuration.py` | Per-recording acquisition metadata                      |
 | `RuntimeContext`                  | `dataclasses/runtime_contexts.py`               | Single-recording config + acquisition + runtime data    |
 | `MultiRecordingRuntimeContext`    | `dataclasses/runtime_contexts.py`               | Multi-recording config + runtime data                   |
-| `SingleRecordingRuntimeData`      | `dataclasses/single_recording_data.py`          | IOData, RegistrationData, DetectionData, ExtractionData |
-| `MultiRecordingRuntimeData`       | `dataclasses/multi_recording_data.py`           | Multi-recording IO, registration, tracking, timing data |
+| `SingleRecordingRuntimeData`      | `dataclasses/single_recording_data.py`          | IO, registration, detection, extraction, timing data    |
+| `MultiRecordingRuntimeData`       | `dataclasses/multi_recording_data.py`           | IO, registration, tracking, extraction, timing data     |
 | `RecordingArrays`                 | `layout.py`                                     | On-disk contract: names, markers, and path resolvers    |
 | `resolve_recording_planes`        | `io/inventory.py`                               | Read-only recording and dataset on-disk inventory       |
 | `resolve_single_recording_job_universe` | `orchestration/discovery.py`              | Declared job set and the subset whose inputs exist      |
@@ -72,7 +72,7 @@
 | `numpy`                    | Array operations, memory mapping, data storage                |
 | `numba`                    | JIT compilation for registration, detection, extraction       |
 | `scipy`                    | Signal processing, spatial algorithms, sparse matrices        |
-| `scikit-learn`             | PCA denoising, clustering for ROI detection                   |
+| `scikit-learn`             | PCA denoising, registration PCs, ROI classification           |
 | `natsort`                  | Semantic file path sorting (1, 2, 10 vs 1, 10, 2)             |
 | `tifffile`                 | TIFF file loading and metadata extraction                     |
 | `imagecodecs`              | Image codec support for TIFF decompression                    |
@@ -81,10 +81,10 @@
 | `pyqtgraph`                | High-performance plotting for GUI image display               |
 | `click`                    | CLI framework for command-line interfaces                     |
 | `mcp`                      | MCPServer host for agentic AI tool integration                |
-| `psutil`                   | Available host memory reads that size the processing class    |
+| `psutil`                   | Available host memory reads that bound job admission          |
 | `ataraxis-time`            | PrecisionTimer for pipeline step timing                       |
 | `ataraxis-base-utilities`  | Console for unified message handling and error reporting      |
-| `ataraxis-data-structures` | YamlConfig, ProcessingTracker, and data logging utilities     |
+| `ataraxis-data-structures` | YamlConfig, ProcessingTracker, atomic and marker I/O          |
 | `threadpoolctl`            | BLAS thread confinement around scikit-learn and LAPACK fits   |
 | `pyyaml`                   | YAML serialization for configuration and tracker files        |
 | `tbb4py`                   | Intel TBB threading layer for Numba parallelization (non-Mac) |
@@ -104,10 +104,10 @@
    (`SINGLE_RECORDING_PHASES`, `MULTI_RECORDING_PHASES`). Add, remove, or reorder a phase there rather than at each call
    site, and the pipelines, the execution engine, and the MCP layer follow automatically
 6. Maintain the job naming convention (`SingleRecordingJobNames`, `MultiRecordingJobNames`) for tracker consistency
-7. Keep the dependency chain one-way. `jobs.py` imports `cindra.layout` alone, `allocation.py` and `discovery.py`
-   import `jobs`, `footprints.py` imports `jobs` and `allocation`, `worker.py` imports `jobs` and `allocation`,
-   `pipeline.py` imports `worker`, `execution.py` imports `pipeline`, `jobs`, and `allocation`, and no orchestration
-   module imports `interface`.
+7. Keep the dependency chain one-way. `jobs.py` imports `cindra.layout` alone, `allocation.py` and `discovery.py` import
+   `jobs`, `footprints.py` imports `jobs` and `allocation`, `worker.py` imports `jobs` and `allocation`, `pipeline.py`
+   imports `worker` and `jobs`, `execution.py` imports `pipeline`, `jobs`, and `allocation`, and no orchestration module
+   imports `interface`.
    `openmp.py` carries no module-level side effect and its check runs only inside the two sequential entry points,
    so importing the package writes nothing and a console message never precedes the stdio MCP server's JSON-RPC
    stream
@@ -120,7 +120,7 @@
 4. Cross-recording registration uses diffeomorphic demons (`diffeomorphic.py`) with multiscale pyramid (`pyramid.py`)
 5. Registration rewrites its input binary in place under a `<binary>.registering` marker, the parallel of the
    `<binary>.binarizing` marker binarization writes while it fills that binary. Keep the create and clear pair around
-   any new write loop, and confine BLAS fits with `threadpool_limits` as `metrics.py` does
+   any new write loop, and confine BLAS fits with `threadpool_limits` as `register.py` does
 
 **Modifying detection:**
 

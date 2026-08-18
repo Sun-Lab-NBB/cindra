@@ -374,8 +374,9 @@ def _apply_bilinear_interpolation(  # pragma: no cover
     """Applies in-place bilinear interpolation to transform an image.
 
     Maps pixel values from the source image to new locations specified by the coordinate arrays
-    using bilinear interpolation. Coordinates outside the image bounds are clamped to the nearest
-    edge pixel.
+    using bilinear interpolation. Neighbor indices are clamped to the source bounds, so a coordinate above the last
+    row or column resolves to the edge pixel, while a coordinate below zero keeps its negative fractional part and is
+    linearly extrapolated from the first two edge pixels.
 
     Args:
         source: The source image, sampled with bilinear interpolation, with shape (source_height, source_width).

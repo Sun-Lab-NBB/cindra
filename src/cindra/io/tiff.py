@@ -169,10 +169,12 @@ def resolve_tiff_conversion_plan(contexts: list[RuntimeContext], *, workers: int
         The resolved conversion plan.
 
     Raises:
-        ValueError: If contexts is empty, if data_path is not configured, or if a plane carries no destination binary
-            path. Also raised if the discovered TIFF files do not all hold frames of the same shape, or if the frames
-            those files hold do not fill one complete plane and channel interleave cycle.
-        FileNotFoundError: If no TIFF files are found in the data directory.
+        ValueError: If contexts is empty, if data_path is not configured, if data_path is not a directory, or if a
+            plane carries no destination binary path. Also raised if the first discovered TIFF file holds no pages, if
+            the discovered TIFF files do not all hold frames of the same shape, or if the frames those files hold do
+            not fill one complete plane and channel interleave cycle.
+        FileNotFoundError: If no acquisition parameters file is found under data_path, or if no TIFF files are found
+            in the data directory.
     """
     if not contexts:
         message = "Unable to resolve the TIFF conversion plan. At least one RuntimeContext must be provided."
@@ -271,7 +273,9 @@ def convert_tiffs_to_binary(plan: TiffConversionPlan) -> None:
 
     Notes:
         Modifies the planned contexts in place, populating frame dimensions, frame counts, and mean images in each
-        context's runtime data, and initializing each plane's valid pixel ranges to the full frame.
+        context's runtime data, and initializing each plane's valid pixel ranges to the full frame. It also persists
+        each plane's runtime data through context.save_runtime() before any binarization mark is cleared, so the frame
+        geometry the binaries were written against is durable on disk.
 
         The conversion reads the leading frames the plan budgets, which span whole plane and channel interleave cycles
         alone, so the trailing frames of an incomplete final cycle are never decoded.
