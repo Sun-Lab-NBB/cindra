@@ -11,15 +11,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _write_one_photon_configuration(file_path: Path, window: int, sigma: float) -> None:
-    """Saves a single-recording configuration whose one-photon registration section carries the given filter sizes."""
-    configuration = SingleRecordingConfiguration()
-    configuration.one_photon_registration.enabled = True
-    configuration.one_photon_registration.spatial_highpass_window = window
-    configuration.one_photon_registration.pre_smoothing_sigma = sigma
-    configuration.save(file_path=file_path)
-
-
 class TestResolveDatasetName:
     """Tests the qualified dataset name the multi-recording preparation workflow builds."""
 
@@ -83,3 +74,12 @@ class TestOnePhotonRegistrationValidation:
 
         assert result["valid"] is True
         assert "errors" not in result
+
+
+def _write_one_photon_configuration(file_path: Path, window: int, sigma: float) -> None:
+    """Saves a single-recording configuration whose one-photon registration section carries the given filter sizes."""
+    configuration = SingleRecordingConfiguration()
+    configuration.one_photon_registration.enabled = True
+    configuration.one_photon_registration.spatial_highpass_window = window
+    configuration.one_photon_registration.pre_smoothing_sigma = sigma
+    configuration.save(file_path=file_path)

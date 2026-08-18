@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 
 # Selects the headless Qt platform plugin. Qt resolves the plugin when the GUI library initializes, so this
-# assignment has to run before the PySide6 imports below, which is why they carry the E402 suppression.
+# assignment has to run before the PySide6 imports below.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from typing import TYPE_CHECKING
@@ -26,6 +26,8 @@ from cindra.gui.viewer_context import ViewerData
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from numpy.typing import NDArray
+
 _DATASET_RECORDING_ROOTS: tuple[Path, ...] = (
     Path("/data/recording_a/cindra"),
     Path("/data/recording_b/cindra"),
@@ -38,7 +40,8 @@ _DATASET_RECORDING_IDS: tuple[str, ...] = ("a", "b", "c")
 
 
 class _StubSingleRecording:
-    """Stands in for SingleRecordingData, exposing the attributes the ROI and tracking viewers read."""
+    """Stands in for SingleRecordingData, exposing the attributes the ROI and tracking viewers read while they
+    load and render a recording."""
 
     def __init__(
         self,
@@ -104,7 +107,7 @@ class _StubPlaneBinary:
         generator = np.random.default_rng(seed=11)
         self._movie = generator.integers(0, 4096, size=(frame_count, frame_size, frame_size)).astype(np.int16)
 
-    def subsample_movie(self, sample_count: int) -> np.ndarray:
+    def subsample_movie(self, sample_count: int) -> NDArray[np.int16]:
         """Returns the leading frames of the synthetic movie, capped at the requested sample count."""
         return self._movie[:sample_count]
 
@@ -143,13 +146,13 @@ class _StubRegistrationRecording:
         """Records the requested view index the way SingleRecordingData does."""
         self.view_index = view_index
 
-    def plane_rigid_offsets(self, plane_index: int) -> tuple[np.ndarray, np.ndarray]:
+    def plane_rigid_offsets(self, plane_index: int) -> tuple[NDArray[np.int32], NDArray[np.int32]]:
         """Returns per-plane offsets spanning that plane's own frame count, as the registration stage stores them."""
         frame_count = self._plane_frame_counts[plane_index]
         offsets = np.full(frame_count, fill_value=plane_index + 1, dtype=np.int32)
         return offsets, offsets * 2
 
-    def read_stitched_frame(self, frame_index: int) -> np.ndarray:
+    def read_stitched_frame(self, frame_index: int) -> NDArray[np.int16]:
         """Returns a synthetic stitched frame for the requested frame index."""
         return np.full((self._frame_size * self.plane_count, self._frame_size), frame_index, dtype=np.int16)
 
@@ -157,17 +160,25 @@ class _StubRegistrationRecording:
 class _StubPrincipalComponentData:
     """Stands in for SingleRecordingData, exposing the attributes the principal component viewer reads."""
 
-    def __init__(self, pc_count: int = 3, plane_count: int = 2, frame_size: int = 8, frame_count: int = 20) -> None:
+    def __init__(
+        self,
+        principal_component_count: int = 3,
+        plane_count: int = 2,
+        frame_size: int = 8,
+        frame_count: int = 20,
+    ) -> None:
         generator = np.random.default_rng(seed=7)
-        self.principal_component_count = pc_count
+        self.principal_component_count = principal_component_count
         self.plane_count = plane_count
         self.view_labels = ("Combined", *(f"Plane {index}" for index in range(plane_count)))
         self.view_index = 0
         self.recording_label = "stub_recording"
-        extreme_images = generator.random((2, pc_count, frame_size, frame_size))
+        extreme_images = generator.random((2, principal_component_count, frame_size, frame_size))
         self.principal_component_extreme_images = extreme_images.astype(np.float32)
-        self.principal_component_shift_metrics = generator.random((pc_count, 3)).astype(np.float32)
-        self.principal_component_projections = generator.random((frame_count, pc_count)).astype(np.float32)
+        self.principal_component_shift_metrics = generator.random((principal_component_count, 3)).astype(np.float32)
+        self.principal_component_projections = generator.random((frame_count, principal_component_count)).astype(
+            np.float32
+        )
 
     def switch_view(self, view_index: int) -> None:
         """Records the requested view index the way SingleRecordingData does."""

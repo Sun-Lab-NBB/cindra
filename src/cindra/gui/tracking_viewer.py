@@ -105,8 +105,8 @@ class TrackingViewer(QMainWindow):
         # Configures pyqtgraph to use row-major axis order so images display with the correct orientation.
         pg.setConfigOptions(imageAxisOrder="row-major")
 
-        # Display cache fields. Populated by _refresh_display and reused by _composite_and_display for fast opacity
-        # updates without recomputing the background or mask coordinates.
+        # Holds the display caches. _refresh_display populates them and _composite_and_display reuses them for fast
+        # opacity updates without recomputing the background or mask coordinates.
         self._cached_background: NDArray[np.uint8] | None = None
         self._cached_mask_y: NDArray[np.int32] | None = None
         self._cached_mask_x: NDArray[np.int32] | None = None
@@ -121,12 +121,11 @@ class TrackingViewer(QMainWindow):
         self._selection_was_template: bool = False
         self._selection_recording_index: int = -1
 
-        # Builds the UI layout.
         central_widget = QWidget(self)
         self.setCentralWidget(central_widget)
         outer_layout = QVBoxLayout(central_widget)
 
-        # Toolbar row with file menu button.
+        # Assembles the toolbar row that holds the file menu button.
         toolbar = QHBoxLayout()
         self._file_button: QPushButton = QPushButton("File")
         self._file_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
@@ -147,10 +146,9 @@ class TrackingViewer(QMainWindow):
         toolbar.addStretch()
         outer_layout.addLayout(toolbar)
 
-        # Main content row: image panel + control panel sidebar.
         main_layout = QHBoxLayout()
 
-        # Image display panel.
+        # Assembles the image display panel.
         self._graphics_widget = pg.GraphicsLayoutWidget()
         self._view_box: pg.ViewBox = self._graphics_widget.addViewBox(row=0, col=0)
         self._view_box.setAspectLocked(lock=True)
@@ -160,17 +158,14 @@ class TrackingViewer(QMainWindow):
         main_layout.addWidget(self._graphics_widget, stretch=3)
         self._graphics_widget.scene().sigMouseClicked.connect(self._on_image_clicked)
 
-        # Control panel (right sidebar).
         control_panel = self._build_control_panel()
         main_layout.addWidget(control_panel, stretch=0)
 
         outer_layout.addLayout(main_layout, stretch=1)
 
-        # Status bar.
         self._status_bar = QStatusBar(self)
         self.setStatusBar(self._status_bar)
 
-        # Populates the UI with the initial data.
         self.load_data(data=data)
 
     def load_data(self, data: ViewerData) -> None:
@@ -193,12 +188,10 @@ class TrackingViewer(QMainWindow):
 
         self._data = data
 
-        # Populates the dataset selector.
         self._dataset_combo.blockSignals(True)
         self._dataset_combo.clear()
         for name in data.available_datasets:
             self._dataset_combo.addItem(name, userData=name)
-        # Selects the active dataset in the combo box.
         active = data.active_dataset_name
         for index in range(self._dataset_combo.count()):
             if self._dataset_combo.itemData(index) == active:
@@ -206,7 +199,6 @@ class TrackingViewer(QMainWindow):
                 break
         self._dataset_combo.blockSignals(False)
 
-        # Populates the recording selector.
         self._recording_combo.blockSignals(True)
         self._recording_combo.clear()
         for index, recording_id in enumerate(data.recording_ids):
@@ -216,10 +208,8 @@ class TrackingViewer(QMainWindow):
         self._recording_combo.setCurrentIndex(data.current_recording_index)
         self._recording_combo.blockSignals(False)
 
-        # Shows channel 2 group only if channel 2 data exists.
         self._channel_group.setVisible(data.current_recording.has_channel_2)
 
-        # Updates the window title to reflect the active dataset.
         self.setWindowTitle(f"Multi-Recording ROI Tracking — {data.dataset_name}")
 
         self._refresh_display()
@@ -268,7 +258,6 @@ class TrackingViewer(QMainWindow):
             elif event.key() == QtCore.Qt.Key.Key_Right:
                 self._next_recording()
 
-        # Up/down arrow keys cycle through mask layers.
         if event.key() == QtCore.Qt.Key.Key_Up:
             index = self._mask_combo.currentIndex()
             if index > 0:
@@ -278,7 +267,6 @@ class TrackingViewer(QMainWindow):
             if index < self._mask_combo.count() - 1:
                 self._mask_combo.setCurrentIndex(index + 1)
 
-        # Spacebar toggles between play and pause.
         if event.key() == QtCore.Qt.Key.Key_Space:
             if self._play_button.isEnabled():
                 self._start_cycling()
@@ -297,8 +285,8 @@ class TrackingViewer(QMainWindow):
 
     def _load_dataset(self) -> None:
         """Displays a file dialog that allows users to select a new multi-recording dataset to visualize."""
-        # Defaults the file dialog to the parent of the currently loaded recording's output
-        # directory, so the user can easily navigate to a sibling recording.
+        # Defaults the file dialog to the parent of the currently loaded recording's output directory, so the user can
+        # easily navigate to a sibling recording.
         start_directory = ""
         output = self._data.single_recording.output_path
         parent = output.parent
@@ -342,7 +330,8 @@ class TrackingViewer(QMainWindow):
         layout = QVBoxLayout(panel)
         panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
 
-        # Dataset selector group. Lists all discovered multi-recording datasets for runtime switching.
+        # Assembles the dataset selector group, which lists all discovered multi-recording datasets for runtime
+        # switching.
         dataset_group = QGroupBox("Dataset")
         dataset_group.setStyleSheet(STYLE.group_box)
         dataset_layout = QVBoxLayout(dataset_group)
@@ -352,7 +341,7 @@ class TrackingViewer(QMainWindow):
         dataset_layout.addWidget(self._dataset_combo)
         layout.addWidget(dataset_group)
 
-        # Recording navigation group.
+        # Assembles the recording navigation group.
         recording_group = QGroupBox("Recording Navigation")
         recording_group.setStyleSheet(STYLE.group_box)
         recording_layout = QVBoxLayout(recording_group)
@@ -362,7 +351,7 @@ class TrackingViewer(QMainWindow):
         self._recording_combo.currentIndexChanged.connect(self._on_recording_selected)
         recording_layout.addWidget(self._recording_combo)
 
-        # Playback controls. Play and pause are grouped exclusively so only one can be active at a time.
+        # Assembles the playback controls. Play and pause are grouped exclusively so only one can be active at a time.
         navigation_row = QHBoxLayout()
         icon_size = QtCore.QSize(STYLE.icon_size, STYLE.icon_size)
 
@@ -399,7 +388,7 @@ class TrackingViewer(QMainWindow):
 
         layout.addWidget(recording_group)
 
-        # Background image group.
+        # Assembles the background image group.
         background_group = QGroupBox("Background Image")
         background_group.setStyleSheet(STYLE.group_box)
         background_layout = QVBoxLayout(background_group)
@@ -423,7 +412,7 @@ class TrackingViewer(QMainWindow):
 
         layout.addWidget(background_group)
 
-        # Coordinate space group.
+        # Assembles the coordinate space group.
         space_group = QGroupBox("Coordinate Space")
         space_group.setStyleSheet(STYLE.group_box)
         space_layout = QVBoxLayout(space_group)
@@ -440,7 +429,7 @@ class TrackingViewer(QMainWindow):
 
         layout.addWidget(space_group)
 
-        # Mask layer group.
+        # Assembles the mask layer group.
         mask_group = QGroupBox("Mask Layer")
         mask_group.setStyleSheet(STYLE.group_box)
         mask_layout = QVBoxLayout(mask_group)
@@ -466,7 +455,7 @@ class TrackingViewer(QMainWindow):
 
         layout.addWidget(mask_group)
 
-        # Channel group. Hidden when channel 2 data does not exist.
+        # Assembles the channel group, which stays hidden when channel 2 data does not exist.
         self._channel_group = QGroupBox("Channel")
         self._channel_group.setStyleSheet(STYLE.group_box)
         channel_layout = QVBoxLayout(self._channel_group)
@@ -483,7 +472,7 @@ class TrackingViewer(QMainWindow):
         self._channel_group.setVisible(False)
         layout.addWidget(self._channel_group)
 
-        # ROI selection group.
+        # Assembles the ROI selection group.
         roi_group = QGroupBox("ROI Selection")
         roi_group.setStyleSheet(STYLE.group_box)
         roi_layout = QVBoxLayout(roi_group)
@@ -537,7 +526,6 @@ class TrackingViewer(QMainWindow):
         mask_layer = self._mask_combo.currentData()
         channel_2 = self._channel_2_checkbox.isChecked()
 
-        # Retrieves and normalizes the background image into the cache.
         recording = self._data.current_recording
         background = self._resolve_background(
             recording=recording,
@@ -547,7 +535,6 @@ class TrackingViewer(QMainWindow):
         )
         self._cached_background = self._normalize_image(image=background)
 
-        # Pre-collects all valid mask pixel coordinates and per-ROI colors into the cache.
         masks = self._resolve_masks(recording=recording, layer=mask_layer, channel_2=channel_2)
         self._cached_mask_count = len(masks) if masks else 0
         self._roi_edit.setValidator(QtGui.QIntValidator(0, max(0, self._cached_mask_count - 1)))
@@ -643,14 +630,12 @@ class TrackingViewer(QMainWindow):
         opacity = self._opacity_slider.value()
         display_image = self._cached_background.copy()
 
-        # Alpha-blends every mask pixel in a single vectorized operation using the per-ROI colors.
         if (
             self._cached_mask_y is not None
             and self._cached_mask_x is not None
             and self._cached_mask_colors is not None
             and len(self._cached_mask_y) > 0
         ):
-            # Filters to only selected ROIs when a subset is active.
             if self._selected_rois is not None and self._cached_mask_roi_indices is not None:
                 selected_mask = np.isin(self._cached_mask_roi_indices, list(self._selected_rois))
                 mask_y = self._cached_mask_y[selected_mask]
@@ -670,7 +655,6 @@ class TrackingViewer(QMainWindow):
 
         self._image_item.setImage(display_image)
 
-        # Updates the status bar with selection info when a subset is active.
         recording_id = self._data.current_recording_id
         if self._selected_rois is not None:
             selection_text = f"Selected: {len(self._selected_rois)} / {self._cached_mask_count}"
@@ -734,13 +718,11 @@ class TrackingViewer(QMainWindow):
         if self._cached_roi_map is None:
             return
 
-        # Maps click position from scene coordinates to image pixel coordinates.
         scene_position = event.scenePos()  # type: ignore[attr-defined]
         view_position = self._view_box.mapSceneToView(scene_position)
         click_x = int(view_position.x())
         click_y = int(view_position.y())
 
-        # Bounds-checks against frame dimensions.
         single_recording = self._data.single_recording
         if (
             click_y < 0
@@ -754,7 +736,6 @@ class TrackingViewer(QMainWindow):
         if roi_index < 0:
             return
 
-        # Determines whether to toggle (Ctrl/Shift held) or replace selection (plain click).
         modifiers = event.modifiers()  # type: ignore[attr-defined]
         is_toggle = bool(
             modifiers & (QtCore.Qt.KeyboardModifier.ControlModifier | QtCore.Qt.KeyboardModifier.ShiftModifier)

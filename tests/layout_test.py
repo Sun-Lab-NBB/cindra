@@ -8,11 +8,11 @@ import pytest
 
 from cindra.layout import (
     OUTPUT_DIRECTORY_NAME,
-    CHANNEL_2_ARRAY_SUFFIX,
     PLANE_SPECIFIER_PREFIX,
-    BINARIZATION_MARKER_SUFFIX,
+    _CHANNEL_2_ARRAY_SUFFIX,
     COMBINED_METADATA_FILENAME,
-    REGISTRATION_MARKER_SUFFIX,
+    _BINARIZATION_MARKER_SUFFIX,
+    _REGISTRATION_MARKER_SUFFIX,
     MULTI_RECORDING_DIRECTORY_NAME,
     RecordingArrays,
     resolve_array_path,
@@ -50,19 +50,19 @@ class TestPathResolvers:
     def test_binarization_marker_name_appends_the_suffix(self) -> None:
         """Verifies that the binarization marker name is the binary name plus the binarization suffix."""
         assert resolve_binarization_marker_name(binary_name="channel_1_data.bin") == (
-            f"channel_1_data.bin{BINARIZATION_MARKER_SUFFIX}"
+            f"channel_1_data.bin{_BINARIZATION_MARKER_SUFFIX}"
         )
 
     def test_registration_marker_name_appends_the_suffix(self) -> None:
         """Verifies that the registration marker name is the binary name plus the registration suffix."""
         assert resolve_registration_marker_name(binary_name="channel_1_data.bin") == (
-            f"channel_1_data.bin{REGISTRATION_MARKER_SUFFIX}"
+            f"channel_1_data.bin{_REGISTRATION_MARKER_SUFFIX}"
         )
 
     def test_marker_suffixes_match_the_reported_job_statuses(self) -> None:
         """Verifies that each marker suffix spells its phase the way the reported job status spells it."""
-        assert BINARIZATION_MARKER_SUFFIX == ".binarizing"
-        assert REGISTRATION_MARKER_SUFFIX == ".registering"
+        assert _BINARIZATION_MARKER_SUFFIX == ".binarizing"
+        assert _REGISTRATION_MARKER_SUFFIX == ".registering"
 
 
 class TestArrayPaths:
@@ -80,13 +80,13 @@ class TestArrayPaths:
             root_path=Path("/out"), array=RecordingArrays.CELL_FLUORESCENCE, second_channel=True
         )
 
-        assert resolved == Path(f"/out/cell_fluorescence{CHANNEL_2_ARRAY_SUFFIX}.npy")
+        assert resolved == Path(f"/out/cell_fluorescence{_CHANNEL_2_ARRAY_SUFFIX}.npy")
 
     def test_second_channel_suffix_applies_to_archives(self) -> None:
         """Verifies that the channel suffix is inserted before an archive extension as well."""
         resolved = resolve_array_path(root_path=Path("/out"), array=RecordingArrays.ROI_MASKS, second_channel=True)
 
-        assert resolved == Path(f"/out/roi_masks{CHANNEL_2_ARRAY_SUFFIX}.npz")
+        assert resolved == Path(f"/out/roi_masks{_CHANNEL_2_ARRAY_SUFFIX}.npz")
 
     def test_combined_metadata_filename_is_the_completion_marker(self) -> None:
         """Verifies that the combined metadata filename keeps the name the combination stage publishes."""

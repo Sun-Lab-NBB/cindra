@@ -22,50 +22,6 @@ from cindra.extraction.colocalization import (
 )
 
 
-def _make_roi(
-    y_pixels: Sequence[int],
-    x_pixels: Sequence[int],
-    weights: Sequence[float],
-    frame_width: int,
-    radius: float = 5.0,
-    overlap_mask: NDArray[np.bool_] | None = None,
-) -> ROIStatistics:
-    """Creates a minimal ROIStatistics instance for testing."""
-    mask = ROIMask(
-        y_pixels=np.array(y_pixels, dtype=np.int32),
-        x_pixels=np.array(x_pixels, dtype=np.int32),
-        pixel_weights=np.array(weights, dtype=np.float32),
-        centroid=(int(np.median(y_pixels)), int(np.median(x_pixels))),
-        frame_width=frame_width,
-        radius=radius,
-        overlap_mask=overlap_mask,
-    )
-    return ROIStatistics(mask=mask)
-
-
-def _make_circular_roi(
-    center_y: int,
-    center_x: int,
-    radius: int,
-    frame_height: int,
-    frame_width: int,
-) -> ROIStatistics:
-    """Creates a circular ROI for testing."""
-    y_coordinates, x_coordinates = np.mgrid[0:frame_height, 0:frame_width]
-    distance = np.sqrt((y_coordinates - center_y) ** 2 + (x_coordinates - center_x) ** 2)
-    inside = distance <= radius
-    y_pixels = y_coordinates[inside].astype(np.int32)
-    x_pixels = x_coordinates[inside].astype(np.int32)
-    weights = np.maximum(0, 1.0 - distance[inside] / radius).astype(np.float32)
-    return _make_roi(
-        y_pixels=y_pixels,
-        x_pixels=x_pixels,
-        weights=weights,
-        frame_width=frame_width,
-        radius=float(radius),
-    )
-
-
 class TestCorrectBleedthrough:
     """Tests _correct_bleedthrough."""
 
@@ -126,7 +82,7 @@ class TestBuildSparseRoiMasks:
 
     def test_binary_clipping(self) -> None:
         """Verifies that duplicate pixel coordinates are clipped to binary values."""
-        # Creates ROI with duplicate pixels to trigger the clipping path.
+        # Creates an ROI with duplicate pixels to trigger the clipping path.
         roi = _make_roi(y_pixels=[5, 5, 5], x_pixels=[5, 5, 6], weights=[1.0, 1.0, 1.0], frame_width=20)
         sparse = _build_sparse_roi_masks(rois=[roi], frame_height=20, frame_width=20)
         assert np.all(sparse.data <= 1.0)
@@ -241,7 +197,6 @@ class TestComputeSpatialColocalization:
             frame_width=20,
             colocalization_threshold=0.3,
         )
-        # Only one of the two should be matched (the one with higher mutual overlap).
         matched_count = np.sum(result[:, 0] >= 0)
         assert matched_count <= 1
 
@@ -326,7 +281,7 @@ class TestComputeIntensityColocalization:
         """Verifies that an ROI bright in the structural channel is detected as colocalized."""
         roi = _make_circular_roi(center_y=20, center_x=20, radius=4, frame_height=40, frame_width=40)
         functional = np.ones((40, 40), dtype=np.float32) * 10.0
-        # Structural image has high intensity inside the ROI region.
+        # The structural image has high intensity inside the ROI region.
         structural = np.ones((40, 40), dtype=np.float32) * 10.0
         structural[16:25, 16:25] = 200.0
         result, _ = compute_intensity_colocalization(
@@ -341,5 +296,49 @@ class TestComputeIntensityColocalization:
             inner_neuropil_border_radius=2,
             minimum_neuropil_pixels=50,
         )
-        # Probability (column 1) should be high since ROI region is bright.
+        # The probability in column 1 should be high, since the ROI region is bright.
         assert result[0, 1] > 0.5
+
+
+def _make_roi(
+    y_pixels: Sequence[int],
+    x_pixels: Sequence[int],
+    weights: Sequence[float],
+    frame_width: int,
+    radius: float = 5.0,
+    overlap_mask: NDArray[np.bool_] | None = None,
+) -> ROIStatistics:
+    """Creates a minimal ROIStatistics instance for testing."""
+    mask = ROIMask(
+        y_pixels=np.array(y_pixels, dtype=np.int32),
+        x_pixels=np.array(x_pixels, dtype=np.int32),
+        pixel_weights=np.array(weights, dtype=np.float32),
+        centroid=(int(np.median(y_pixels)), int(np.median(x_pixels))),
+        frame_width=frame_width,
+        radius=radius,
+        overlap_mask=overlap_mask,
+    )
+    return ROIStatistics(mask=mask)
+
+
+def _make_circular_roi(
+    center_y: int,
+    center_x: int,
+    radius: int,
+    frame_height: int,
+    frame_width: int,
+) -> ROIStatistics:
+    """Creates a circular ROI for testing."""
+    y_coordinates, x_coordinates = np.mgrid[0:frame_height, 0:frame_width]
+    distance = np.sqrt((y_coordinates - center_y) ** 2 + (x_coordinates - center_x) ** 2)
+    inside = distance <= radius
+    y_pixels = y_coordinates[inside].astype(np.int32)
+    x_pixels = x_coordinates[inside].astype(np.int32)
+    weights = np.maximum(0, 1.0 - distance[inside] / radius).astype(np.float32)
+    return _make_roi(
+        y_pixels=y_pixels,
+        x_pixels=x_pixels,
+        weights=weights,
+        frame_width=frame_width,
+        radius=float(radius),
+    )

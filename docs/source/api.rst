@@ -25,6 +25,25 @@ Orchestration
    :undoc-members:
    :show-inheritance:
 
+.. Documents the package constants explicitly, since the automodule directive above discovers module-level data through
+   the source of the module it documents and therefore skips a constant this package re-exports. The directive names the
+   defining module rather than the package, because autodoc reads the attribute docstring from that module's source and
+   falls back to the docstring of the value's own type when it is pointed at the re-exporting package. The block covers
+   exactly the constants the package's __all__ names and the package's own modules define. A constant the package holds
+   for its own use stays off the page, and one this page documents under its own module's section renders there.
+.. autodata:: cindra.orchestration.jobs.SINGLE_RECORDING_PHASES
+.. autodata:: cindra.orchestration.jobs.MULTI_RECORDING_PHASES
+.. autodata:: cindra.orchestration.allocation.BINARIZATION_WORKERS
+.. autodata:: cindra.orchestration.allocation.REGISTRATION_WORKERS
+.. autodata:: cindra.orchestration.allocation.PROCESSING_WORKERS
+.. autodata:: cindra.orchestration.allocation.COMBINATION_WORKERS
+.. autodata:: cindra.orchestration.allocation.DISCOVERY_WORKERS
+.. autodata:: cindra.orchestration.allocation.EXTRACTION_WORKERS
+.. autodata:: cindra.orchestration.allocation.RESOURCE_CLASS_BY_JOB_NAME
+.. autodata:: cindra.orchestration.footprints.WORKER_MEMORY_MB
+.. autodata:: cindra.orchestration.footprints.SPAWNED_CHILD_MEMORY_MB
+.. autodata:: cindra.orchestration.footprints.MEMORY_ESTIMATE_TOLERANCE
+
 Pipelines
 =========
 
@@ -72,6 +91,16 @@ File I/O
    :members:
    :undoc-members:
    :show-inheritance:
+
+.. Documents the package constants explicitly, since the automodule directive above discovers module-level data through
+   the source of the module it documents and therefore skips a constant this package re-exports. The directive names the
+   defining module rather than the package, because autodoc reads the attribute docstring from that module's source and
+   falls back to the docstring of the value's own type when it is pointed at the re-exporting package. The block covers
+   exactly the constants the package's __all__ names and the package's own modules define. A constant the package holds
+   for its own use stays off the page, and one this page documents under its own module's section renders there.
+.. autodata:: cindra.io.tiff.TIFF_EXTENSIONS
+.. autodata:: cindra.io.tiff.TIFF_DECODE_CEILING
+.. autodata:: cindra.io.context.MAXIMUM_CHANNEL_COUNT
 
 GUI Viewers
 ===========

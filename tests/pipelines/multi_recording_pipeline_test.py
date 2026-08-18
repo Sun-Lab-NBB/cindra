@@ -59,85 +59,12 @@ _DATASET_NAME: str = "tracked_cells"
 """The dataset name under which multi-recording outputs are written for every test recording."""
 
 
-def _build_flickering_movie(*, seed: int) -> NDArray[np.int16]:
-    """Builds a synthetic movie whose spatially fixed Gaussian blobs flicker independently across frames."""
-    generator = np.random.default_rng(seed=seed)
-    rows, columns = np.mgrid[0:_FRAME_HEIGHT, 0:_FRAME_WIDTH]
-    movie = np.full((_FRAME_COUNT, _FRAME_HEIGHT, _FRAME_WIDTH), fill_value=_BACKGROUND_LEVEL, dtype=np.float64)
-    for center_row, center_column in _BLOB_CENTERS:
-        blob = np.exp(-(((rows - center_row) ** 2 + (columns - center_column) ** 2) / (2.0 * _BLOB_SIGMA**2)))
-        amplitudes = _BLOB_AMPLITUDE * (0.5 + np.abs(generator.standard_normal(_FRAME_COUNT)))
-        movie += amplitudes[:, np.newaxis, np.newaxis] * blob[np.newaxis, :, :]
-    return np.clip(movie, 0, _MAXIMUM_PIXEL_VALUE).astype(np.int16)
-
-
-def _build_processed_recording(root: Path, *, seed: int) -> Path:
-    """Processes one synthetic recording through the single-recording pipeline and returns its output directory."""
-    data_directory = root / "data"
-    output_directory = root / "output"
-    ensure_directory_exists(data_directory)
-    movie = _build_flickering_movie(seed=seed)
-    with TiffWriter(data_directory / "recording.tif") as writer:
-        for frame_index in range(_FRAME_COUNT):
-            writer.write(movie[frame_index])
-    parameters = {"frame_rate": 30.0, "plane_number": 1, "channel_number": 1}
-    (data_directory / PARAMETERS_FILENAME).write_text(json.dumps(parameters))
-
-    configuration = SingleRecordingConfiguration()
-    configuration.file_io.data_path = data_directory
-    configuration.file_io.output_path = output_directory
-    configuration.runtime.display_progress_bars = False
-    configuration.registration.registration_metric_principal_components = 0
-    configuration.nonrigid_registration.enabled = False
-    configuration.one_photon_registration.enabled = False
-    configuration.roi_detection.denoise = False
-    configuration.roi_detection.preclassification_threshold = 0.0
-    configuration.roi_detection.crop_to_soma = False
-    configuration.roi_detection.threshold_scaling = 0.5
-    configuration.main.tau = 0.01
-    configuration_path = root / "configuration.yaml"
-    configuration.save(file_path=configuration_path)
-
-    run_single_recording_pipeline(
-        configuration_path=configuration_path, binarize=True, register=True, process=True, combine=True
-    )
-    return output_directory
-
-
-def _make_multi_configuration(
-    *, recording_directories: tuple[Path, ...], dataset_name: str = _DATASET_NAME, display_progress_bars: bool = False
-) -> MultiRecordingConfiguration:
-    """Builds a serial multi-recording configuration referencing the given recording directories and dataset name."""
-    configuration = MultiRecordingConfiguration()
-    configuration.recording_io.recording_directories = recording_directories
-    configuration.recording_io.dataset_name = dataset_name
-    configuration.runtime.display_progress_bars = display_progress_bars
-    return configuration
-
-
-def _prepare_dataset(tmp_path: Path, *, display_progress_bars: bool = False) -> tuple[Path, Path, Path]:
-    """Processes two synthetic recordings and writes a multi-recording configuration referencing both of them."""
-    first_output = _build_processed_recording(root=tmp_path / "rec1", seed=0)
-    second_output = _build_processed_recording(root=tmp_path / "rec2", seed=1)
-    configuration = _make_multi_configuration(
-        recording_directories=(first_output, second_output), display_progress_bars=display_progress_bars
-    )
-    configuration_path = tmp_path / "multi_configuration.yaml"
-    configuration.save(file_path=configuration_path)
-    return configuration_path, first_output, second_output
-
-
-def _multi_output(recording_output: Path) -> Path:
-    """Returns the dataset-specific multi-recording output directory for a processed recording."""
-    return recording_output / "cindra" / "multi_recording" / _DATASET_NAME
-
-
 class TestRunMultiRecordingPipeline:
     """Tests run_multi_recording_pipeline."""
 
     def test_runs_all_phases_when_no_flags_set(self, tmp_path: Path) -> None:
         """Verifies that omitting every phase flag runs discovery and extraction across both recordings."""
-        configuration_path, first_output, second_output = _prepare_dataset(tmp_path)
+        configuration_path, first_output, second_output = _prepare_dataset(tmp_path=tmp_path)
 
         run_multi_recording_pipeline(configuration_path=configuration_path)
 
@@ -161,7 +88,7 @@ class TestRunMultiRecordingPipeline:
 
     def test_invalid_job_id_raises(self, tmp_path: Path) -> None:
         """Verifies that a job identifier outside the configuration's job universe raises a ValueError."""
-        configuration_path, first_output, _ = _prepare_dataset(tmp_path)
+        configuration_path, first_output, _ = _prepare_dataset(tmp_path=tmp_path)
 
         # Bootstraps the multi-recording runtime data so that the remote resolution reaches job identifier validation.
         run_multi_recording_pipeline(configuration_path=configuration_path, discover=True)
@@ -183,7 +110,7 @@ class TestRunMultiRecordingPipeline:
 
     def test_unknown_target_recording_raises(self, tmp_path: Path) -> None:
         """Verifies that a target recording the dataset does not span raises a ValueError."""
-        configuration_path, _, _ = _prepare_dataset(tmp_path)
+        configuration_path, _, _ = _prepare_dataset(tmp_path=tmp_path)
 
         # Bootstraps the multi-recording runtime data so that the local resolution reaches the target validation.
         run_multi_recording_pipeline(configuration_path=configuration_path, discover=True)
@@ -199,7 +126,7 @@ class TestRunMultiRecordingPipeline:
 
     def test_extract_without_discovery_raises(self, tmp_path: Path) -> None:
         """Verifies that extracting before discovery completes raises a RuntimeError from the statistics guard."""
-        configuration_path, _, _ = _prepare_dataset(tmp_path)
+        configuration_path, _, _ = _prepare_dataset(tmp_path=tmp_path)
 
         with pytest.raises(RuntimeError, match="Backward-transformed"):
             run_multi_recording_pipeline(configuration_path=configuration_path, extract=True)
@@ -208,8 +135,8 @@ class TestRunMultiRecordingPipeline:
         """Verifies that a configuration path that does not exist raises a FileNotFoundError."""
         configuration_path = tmp_path / "missing.yaml"
         expected_message = (
-            "Unable to run the multi-recording cindra processing pipeline. "
-            "Expected the configuration file to end with a '.yaml' extension and "
+            f"Unable to run the multi-recording cindra processing pipeline. "
+            f"Expected the configuration file to end with a '.yaml' extension and "
             f"exist at the specified path, but encountered: {configuration_path}."
         )
 
@@ -221,8 +148,8 @@ class TestRunMultiRecordingPipeline:
         configuration_path = tmp_path / "configuration.txt"
         configuration_path.write_text("placeholder")
         expected_message = (
-            "Unable to run the multi-recording cindra processing pipeline. "
-            "Expected the configuration file to end with a '.yaml' extension and "
+            f"Unable to run the multi-recording cindra processing pipeline. "
+            f"Expected the configuration file to end with a '.yaml' extension and "
             f"exist at the specified path, but encountered: {configuration_path}."
         )
 
@@ -252,9 +179,9 @@ class TestRunMultiRecordingPipeline:
         configuration.save(file_path=configuration_path)
 
         expected_message = (
-            "Unable to run the multi-recording cindra processing pipeline. The "
-            "configuration file must specify at least two recording directories "
-            "under 'recording_io.recording_directories'. The provided configuration "
+            f"Unable to run the multi-recording cindra processing pipeline. The "
+            f"configuration file must specify at least two recording directories "
+            f"under 'recording_io.recording_directories'. The provided configuration "
             f"specifies {recording_count}."
         )
 
@@ -333,7 +260,7 @@ class TestExecuteMultiRecordingJobInjection:
 
     def test_injected_tracker_records_jobs_without_disturbing_foreign_entries(self, tmp_path: Path) -> None:
         """Verifies that discovery and extraction stamp a foreign tracker while preserving its other jobs."""
-        configuration_path, first_output, second_output = _prepare_dataset(tmp_path)
+        configuration_path, first_output, second_output = _prepare_dataset(tmp_path=tmp_path)
 
         # Builds a caller-owned tracker whose universe uses the caller's own job names and includes a foreign job the
         # injected executor leaves in place, mirroring how the forging pipeline drives cindra.
@@ -390,8 +317,8 @@ class TestExecuteMultiRecordingJobInjection:
         tracker = ProcessingTracker(file_path=tmp_path / "forging_tracker.yaml")
         configuration_path = tmp_path / "missing.yaml"
         expected_message = (
-            "Unable to run the multi-recording cindra processing pipeline. "
-            "Expected the configuration file to end with a '.yaml' extension and "
+            f"Unable to run the multi-recording cindra processing pipeline. "
+            f"Expected the configuration file to end with a '.yaml' extension and "
             f"exist at the specified path, but encountered: {configuration_path}."
         )
 
@@ -403,3 +330,76 @@ class TestExecuteMultiRecordingJobInjection:
                 job_id="deadbeefdeadbeef",
                 tracker=tracker,
             )
+
+
+def _build_flickering_movie(*, seed: int) -> NDArray[np.int16]:
+    """Builds a synthetic movie whose spatially fixed Gaussian blobs flicker independently across frames."""
+    generator = np.random.default_rng(seed=seed)
+    rows, columns = np.mgrid[0:_FRAME_HEIGHT, 0:_FRAME_WIDTH]
+    movie = np.full((_FRAME_COUNT, _FRAME_HEIGHT, _FRAME_WIDTH), fill_value=_BACKGROUND_LEVEL, dtype=np.float64)
+    for center_row, center_column in _BLOB_CENTERS:
+        blob = np.exp(-(((rows - center_row) ** 2 + (columns - center_column) ** 2) / (2.0 * _BLOB_SIGMA**2)))
+        amplitudes = _BLOB_AMPLITUDE * (0.5 + np.abs(generator.standard_normal(_FRAME_COUNT)))
+        movie += amplitudes[:, np.newaxis, np.newaxis] * blob[np.newaxis, :, :]
+    return np.clip(movie, 0, _MAXIMUM_PIXEL_VALUE).astype(np.int16)
+
+
+def _build_processed_recording(root: Path, *, seed: int) -> Path:
+    """Processes one synthetic recording through the single-recording pipeline and returns its output directory."""
+    data_directory = root / "data"
+    output_directory = root / "output"
+    ensure_directory_exists(data_directory)
+    movie = _build_flickering_movie(seed=seed)
+    with TiffWriter(data_directory / "recording.tif") as writer:
+        for frame_index in range(_FRAME_COUNT):
+            writer.write(movie[frame_index])
+    parameters = {"frame_rate": 30.0, "plane_number": 1, "channel_number": 1}
+    (data_directory / PARAMETERS_FILENAME).write_text(json.dumps(parameters))
+
+    configuration = SingleRecordingConfiguration()
+    configuration.file_io.data_path = data_directory
+    configuration.file_io.output_path = output_directory
+    configuration.runtime.display_progress_bars = False
+    configuration.registration.registration_metric_principal_components = 0
+    configuration.nonrigid_registration.enabled = False
+    configuration.one_photon_registration.enabled = False
+    configuration.roi_detection.denoise = False
+    configuration.roi_detection.preclassification_threshold = 0.0
+    configuration.roi_detection.crop_to_soma = False
+    configuration.roi_detection.threshold_scaling = 0.5
+    configuration.main.tau = 0.01
+    configuration_path = root / "configuration.yaml"
+    configuration.save(file_path=configuration_path)
+
+    run_single_recording_pipeline(
+        configuration_path=configuration_path, binarize=True, register=True, process=True, combine=True
+    )
+    return output_directory
+
+
+def _make_multi_configuration(
+    *, recording_directories: tuple[Path, ...], dataset_name: str = _DATASET_NAME, display_progress_bars: bool = False
+) -> MultiRecordingConfiguration:
+    """Builds a multi-recording configuration referencing the given recording directories and dataset name."""
+    configuration = MultiRecordingConfiguration()
+    configuration.recording_io.recording_directories = recording_directories
+    configuration.recording_io.dataset_name = dataset_name
+    configuration.runtime.display_progress_bars = display_progress_bars
+    return configuration
+
+
+def _prepare_dataset(tmp_path: Path, *, display_progress_bars: bool = False) -> tuple[Path, Path, Path]:
+    """Processes two synthetic recordings and writes a multi-recording configuration referencing both of them."""
+    first_output = _build_processed_recording(root=tmp_path / "rec1", seed=0)
+    second_output = _build_processed_recording(root=tmp_path / "rec2", seed=1)
+    configuration = _make_multi_configuration(
+        recording_directories=(first_output, second_output), display_progress_bars=display_progress_bars
+    )
+    configuration_path = tmp_path / "multi_configuration.yaml"
+    configuration.save(file_path=configuration_path)
+    return configuration_path, first_output, second_output
+
+
+def _multi_output(recording_output: Path) -> Path:
+    """Returns the dataset-specific multi-recording output directory for a processed recording."""
+    return recording_output / "cindra" / "multi_recording" / _DATASET_NAME

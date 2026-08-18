@@ -43,7 +43,7 @@ def cindra_gui() -> None:
 @click.option(
     "-sf",
     "--state-file",
-    type=click.Path(path_type=Path),
+    type=click.Path(exists=False, file_okay=True, dir_okay=False, path_type=Path),
     default=None,
     hidden=True,
     help="Path to the state file for cross-process state exchange with the GUI MCP server.",
@@ -67,7 +67,7 @@ def gui_roi(recording_path: Path, dataset: str | None, state_file: Path | None) 
 @click.option(
     "-sf",
     "--state-file",
-    type=click.Path(path_type=Path),
+    type=click.Path(exists=False, file_okay=True, dir_okay=False, path_type=Path),
     default=None,
     hidden=True,
     help="Path to the state file for cross-process state exchange with the GUI MCP server.",
@@ -95,7 +95,7 @@ def gui_registration(recording_path: Path, state_file: Path | None) -> None:
 @click.option(
     "-sf",
     "--state-file",
-    type=click.Path(path_type=Path),
+    type=click.Path(exists=False, file_okay=True, dir_okay=False, path_type=Path),
     default=None,
     hidden=True,
     help="Path to the state file for cross-process state exchange with the GUI MCP server.",

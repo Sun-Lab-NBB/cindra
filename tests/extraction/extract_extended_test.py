@@ -14,36 +14,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _make_circular_roi(
-    centroid: tuple[int, int],
-    radius: int = 5,
-    frame_width: int = 64,
-) -> ROIStatistics:
-    """Creates an ROIStatistics instance backed by a circular mask with L2-normalized pixel weights."""
-    y_pixels = []
-    x_pixels = []
-    for delta_y in range(-radius, radius + 1):
-        for delta_x in range(-radius, radius + 1):
-            if delta_y**2 + delta_x**2 <= radius**2:
-                y_pixels.append(centroid[0] + delta_y)
-                x_pixels.append(centroid[1] + delta_x)
-    y_array = np.array(y_pixels, dtype=np.int32)
-    x_array = np.array(x_pixels, dtype=np.int32)
-    pixel_weights = np.ones(len(y_pixels), dtype=np.float32)
-    pixel_weights /= np.linalg.norm(pixel_weights)
-    mask = ROIMask(
-        y_pixels=y_array,
-        x_pixels=x_array,
-        pixel_weights=pixel_weights,
-        centroid=centroid,
-        frame_width=frame_width,
-        radius=float(radius),
-    )
-    roi = ROIStatistics(mask=mask)
-    roi.pixel_count = len(y_pixels)
-    return roi
-
-
 class TestCreateAndUnpackMasks:
     """Tests _create_and_unpack_masks."""
 
@@ -158,3 +128,30 @@ class TestExtractFluorescenceTraces:
         np.testing.assert_allclose(neuropil_fluorescence[0], float(pixel_value), rtol=1e-5)
         np.testing.assert_array_equal(neuropil_fluorescence[1], np.zeros(frame_count, dtype=np.float32))
         np.testing.assert_allclose(fluorescence, float(pixel_value), rtol=1e-5)
+
+
+def _make_circular_roi(
+    centroid: tuple[int, int],
+    radius: int = 5,
+    frame_width: int = 64,
+) -> ROIStatistics:
+    """Creates an ROIStatistics instance backed by a circular mask with L2-normalized pixel weights."""
+    y_coordinates, x_coordinates = np.mgrid[
+        centroid[0] - radius : centroid[0] + radius + 1, centroid[1] - radius : centroid[1] + radius + 1
+    ]
+    inside = (y_coordinates - centroid[0]) ** 2 + (x_coordinates - centroid[1]) ** 2 <= radius**2
+    y_array = y_coordinates[inside].astype(np.int32)
+    x_array = x_coordinates[inside].astype(np.int32)
+    pixel_weights = np.ones(y_array.size, dtype=np.float32)
+    pixel_weights /= np.linalg.norm(pixel_weights)
+    mask = ROIMask(
+        y_pixels=y_array,
+        x_pixels=x_array,
+        pixel_weights=pixel_weights,
+        centroid=centroid,
+        frame_width=frame_width,
+        radius=float(radius),
+    )
+    roi = ROIStatistics(mask=mask)
+    roi.pixel_count = y_array.size
+    return roi

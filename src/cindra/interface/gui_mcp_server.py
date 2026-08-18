@@ -1,9 +1,4 @@
-"""Provides the MCP server for managing GUI viewer subprocesses and querying their display state.
-
-Exposes tools that enable AI agents to launch, list, close, and query the current display state of GUI viewer
-windows. All data loading and interpretation is handled by the results tools in the non-GUI MCP server. This server
-focuses exclusively on viewer lifecycle management and live display state queries.
-"""
+"""Provides the MCP server for managing GUI viewer subprocesses and querying their display state."""
 
 from __future__ import annotations
 
@@ -19,7 +14,7 @@ from mcp.server import MCPServer
 
 from ..gui import read_viewer_state, cleanup_state_file, generate_state_path
 
-gui_mcp: MCPServer = MCPServer(name="cindra-gui-mcp")
+_gui_mcp: MCPServer = MCPServer(name="cindra-gui-mcp")
 """The GUI MCP server instance that exposes the viewer lifecycle tools to AI agents."""
 
 
@@ -63,13 +58,13 @@ def run_gui_server(transport: Literal["stdio", "sse", "streamable-http"] = "stdi
     if transport == "streamable-http":
         # Frames each response as a single JSON body instead of an event stream. Only the streamable-http transport
         # accepts this flag, so it stays out of the call below.
-        gui_mcp.run(transport=transport, json_response=True)
+        _gui_mcp.run(transport=transport, json_response=True)
         return
 
-    gui_mcp.run(transport=transport)
+    _gui_mcp.run(transport=transport)
 
 
-@gui_mcp.tool()
+@_gui_mcp.tool()
 def launch_viewer_tool(
     viewer_type: Literal["roi", "tracking", "registration"],
     recording_path: str,
@@ -145,14 +140,12 @@ def launch_viewer_tool(
     }
 
 
-@gui_mcp.tool()
+@_gui_mcp.tool()
 def list_viewers_tool() -> dict[str, Any]:
     """Lists all active GUI viewer instances managed by this server.
 
-    Returns viewer IDs, types, recording paths, alive status, and live active dataset for each managed viewer. Dead
-    viewers are automatically cleaned up. The ``active_dataset`` field reflects the dataset currently displayed by the
-    viewer, which may differ from the ``dataset`` value provided at launch if the user switched datasets inside the
-    viewer.
+    The ``active_dataset`` field reflects the dataset currently displayed by the viewer, which may differ from the
+    ``dataset`` value provided at launch if the user switched datasets inside the viewer.
 
     Returns:
         A JSON dictionary containing 'success' flag, 'viewers' list (each with 'viewer_id', 'viewer_type',
@@ -198,7 +191,7 @@ def list_viewers_tool() -> dict[str, Any]:
     return {"success": True, "viewers": viewers, "count": len(viewers)}
 
 
-@gui_mcp.tool()
+@_gui_mcp.tool()
 def close_viewer_tool(viewer_id: str) -> dict[str, Any]:
     """Closes a GUI viewer and terminates its subprocess.
 
@@ -215,7 +208,7 @@ def close_viewer_tool(viewer_id: str) -> dict[str, Any]:
     # Claims the entry under the lock and drops it from the registry before the shutdown wait, so exactly one caller
     # terminates a given viewer and the wait itself blocks no other tool.
     with _registry_lock:
-        entry = _get_viewer(viewer_id)
+        entry = _get_viewer(viewer_id=viewer_id)
         if entry is None:
             return {"success": False, "error": f"Unable to find viewer with id '{viewer_id}'."}
         del _viewer_registry[viewer_id]
@@ -230,7 +223,7 @@ def close_viewer_tool(viewer_id: str) -> dict[str, Any]:
     return {"success": True, "viewer_id": viewer_id}
 
 
-@gui_mcp.tool()
+@_gui_mcp.tool()
 def query_viewer_state_tool(viewer_id: str) -> dict[str, Any]:
     """Queries the current display state of an active GUI viewer.
 
@@ -253,7 +246,7 @@ def query_viewer_state_tool(viewer_id: str) -> dict[str, Any]:
         has not written its state file, 'state' is the placeholder {'loaded': False} for every viewer type and an
         extra 'note' key reports the startup delay. On failure, contains an 'error' message.
     """
-    entry = _get_viewer(viewer_id)
+    entry = _get_viewer(viewer_id=viewer_id)
     if entry is None:
         return {"success": False, "error": f"Unable to find viewer with id '{viewer_id}'."}
 

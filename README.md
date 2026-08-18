@@ -58,8 +58,8 @@ ___
 - Implements a novel multi-recording ROI tracking pipeline: diffeomorphic demons registration to a common coordinate
   space, spatial clustering for cross-recording ROI matching, and template-based fluorescence extraction across
   recordings.
-- Provides a configuration-driven architecture using YAML files, enabling flexible execution of individual pipeline
-  phases via API or CLI for local and remote parallelization.
+- Provides a configuration-driven architecture using YAML files, allowing each pipeline phase to run on its own via
+  API or CLI for local and remote parallelization.
 - Includes three interactive PySide6/PyQtGraph GUI viewers for inspecting ROI detection, registration quality, and
   multi-recording tracking results.
 - Exposes two MCP servers for AI agent integration: a data processing server with 30 tools for pipeline orchestration
@@ -140,8 +140,7 @@ ___
 
 ### Input Data Format
 
-Cindra processes two-photon (or one-photon) calcium imaging data stored as TIFF files. Before running any pipeline,
-the raw data directory must be prepared with the correct structure.
+Cindra processes two-photon (or one-photon) calcium imaging data stored as TIFF files.
 
 #### TIFF Files
 
@@ -154,7 +153,7 @@ extension.
 The pipeline expects a flat directory containing one or more `.tif` / `.tiff` files. For multi-plane or multichannel
 acquisitions, frames must be interleaved in the following order within each TIFF file: plane0_channel1, plane0_channel2,
 plane1_channel1, plane1_channel2, and so on, repeating for each time point. This interleaving pattern continues
-seamlessly across TIFF file boundaries when a recording spans multiple files.
+across TIFF file boundaries when a recording spans multiple files.
 
 One interleave cycle carries one frame of every plane on every channel, and binarization consumes whole cycles, so the
 total frame count across every TIFF file should be a multiple of `plane_number * channel_number`. The frames of a final
@@ -246,7 +245,7 @@ including defaults and valid ranges.
 
 ### Data Structures
 
-This section describes the key data files produced by the pipelines. All per-plane data is stored under
+All per-plane data is stored under
 `<output_path>/cindra/plane_<i>/`, and combined data at the `<output_path>/cindra/` root.
 
 #### Binary Imaging Data
@@ -297,10 +296,10 @@ Stored under `plane_<i>/detection_data/`:
 
 | File                      | Format         | Description                                        |
 |---------------------------|----------------|----------------------------------------------------|
-| `mean_image.npy`          | float32 (h, w) | Average of all registered frames                   |
+| `mean_image.npy`          | float32 (h, w) | Mean of the binned movie, excluding bad frames     |
 | `enhanced_mean_image.npy` | float32 (h, w) | Background-subtracted and contrast-normalized mean |
-| `maximum_projection.npy`  | float32 (h, w) | Maximum intensity projection across all frames     |
-| `correlation_map.npy`     | float32 (h, w) | Pixel-wise correlation with neighboring pixels     |
+| `maximum_projection.npy`  | float32 (h, w) | Maximum over the binned, high-pass filtered movie  |
+| `correlation_map.npy`     | float32 (h, w) | Cross-scale maximum from the detection pyramid     |
 
 The `mean_image_channel_2.npy` variant is written for any two-channel recording. The remaining channel 2 variants
 (`enhanced_mean_image_channel_2.npy`, `maximum_projection_channel_2.npy`, `correlation_map_channel_2.npy`) are saved
@@ -478,8 +477,8 @@ registered raises an error rather than detecting ROIs on uncorrected data.
 
 Detection identifies regions of interest (ROIs), typically neuronal cell bodies, in the registered imaging data.
 Locating individual neurons is the prerequisite for extracting their activity. The sparse detection approach identifies
-sources based on their spatiotemporal fluorescence patterns rather than morphological templates, making it robust to
-variations in cell shape and brightness.
+sources based on their spatiotemporal fluorescence patterns rather than morphological templates, so cell shape and
+brightness variations do not change the result.
 
 The algorithm temporally bins frames to improve signal-to-noise ratio, optionally applies PCA denoising, then runs a
 sparse iterative detection procedure that identifies compact fluorescent sources. Detected ROIs are optionally filtered
@@ -500,10 +499,10 @@ Produces:
 |----------------------------------------------------|------------------------------------------------------------|
 | `plane_<i>/roi_masks.npz`                          | Per-ROI pixel coordinates, weights, and centroids          |
 | `plane_<i>/roi_statistics.npz`                     | Per-ROI shape properties (area, compactness, aspect ratio) |
-| `plane_<i>/detection_data/mean_image.npy`          | Average of all registered frames                           |
+| `plane_<i>/detection_data/mean_image.npy`          | Mean of the binned movie, excluding bad frames             |
 | `plane_<i>/detection_data/enhanced_mean_image.npy` | Background-subtracted and contrast-normalized mean         |
-| `plane_<i>/detection_data/maximum_projection.npy`  | Maximum intensity projection across all frames             |
-| `plane_<i>/detection_data/correlation_map.npy`     | Pixel-wise correlation with neighboring pixels             |
+| `plane_<i>/detection_data/maximum_projection.npy`  | Maximum over the binned, high-pass filtered movie          |
+| `plane_<i>/detection_data/correlation_map.npy`     | Cross-scale maximum from the detection pyramid             |
 
 ##### Signal Extraction and Classification
 
@@ -802,7 +801,9 @@ themselves can read the phase model exported from `cindra.orchestration`. `SINGL
 `MULTI_RECORDING_PHASES` describe the ordered phases, `resolve_single_recording_jobs()` and
 `resolve_multi_recording_jobs()` expand them into a job universe of `(job_name, specifier)` pairs, and
 `resolve_single_recording_prerequisites()` and `resolve_multi_recording_prerequisites()` return the jobs each job
-depends on. This keeps a scheduler's view of the pipeline in step with the library rather than restating it.
+depends on. `generate_job_ids()` derives the identifier each of those jobs is tracked under, which is what the
+`job_id` parameter of both pipeline entry points names. This keeps a scheduler's view of the pipeline in step with the
+library rather than restating it.
 
 A scheduler that also wants to know which of those jobs can run right now, where their inputs and outputs live, and
 how much memory each one holds reads three further groups, all exported from `cindra`.
@@ -817,20 +818,20 @@ a dataset spans without building a runtime context or creating a directory, and 
 under a caller-supplied output root, and `resolve_array_path()` names a file inside one of them. The result arrays sit
 directly in those roots and are named by `RecordingArrays`, while `DetectionImages`, `RegistrationArrays`, and
 `MultiRecordingArrays` name files inside the `detection_data`, `registration_data`, and `registration_arrays`
-subdirectories, whose names the same module exports. `resolve_plane_specifier()` and
+subdirectories, whose names `cindra.layout` exports. `resolve_plane_specifier()` and
 `parse_plane_specifier()` convert between a plane index and the specifier its jobs and its directory both carry.
 
 `estimate_single_recording_job_memory_mb()` and `estimate_multi_recording_job_memory_mb()` project the memory one job
-holds from the shape of the data it will process, returning the figure in megabytes. `size_single_recording_job()` and
+holds from the shape of the data it processes, returning the figure in megabytes. `size_single_recording_job()` and
 `size_multi_recording_job()` return that figure together with the cores the stage's measured default declares, as a
 `JobSizing` record. A job is sized from the data that exists when the sizing happens, so a whole job graph resolves up
 front and every job of it reports the same figure at every point in the run. A single-recording job reads the
-acquisition metadata and one source file header, which fix every shape the pipeline will write. The regions detection
-will find are the one input the acquisition leaves open, so a caller that knows them passes them through
+acquisition metadata and one source file header, which fix every shape the pipeline writes. The regions detection
+finds are the one input the acquisition leaves open, so a caller that knows them passes them through
 `planned_roi_count` and the ceiling `resolve_maximum_roi_count()` derives from the detection iteration bound covers them
 otherwise. A multi-recording job runs on the completed output of that pipeline, so it reads the combined geometry and
 the region count each recording holds directly. A recording carrying no readable raw imaging data, and a dataset whose
-recordings report no regions, can run no stage at all, so sizing either raises rather than returning a figure, and the
+recordings report no regions, can run no stage at all. Sizing either raises rather than returning a figure, and the
 interface layer reports the job as unsizable instead of admitting it.
 
 `prime_recording()` and `prime_dataset()` write the shared bootstrap every job reads and report that same inventory, so
@@ -921,7 +922,7 @@ cindra mcp
 | `verify_multi_recording_output_tool`              | Verifies completeness of multi-recording pipeline output            |
 | `query_single_recording_metadata_tool`            | Queries recording metadata (planes, channels, frame count)          |
 | `query_registration_quality_tool`                 | Queries registration quality metrics (rigid and nonrigid offsets)   |
-| `query_detection_summary_tool`                    | Queries detection summary (ROI counts, classification statistics)   |
+| `query_detection_summary_tool`                    | Queries detection image statistics, ROI diameter, and aspect ratio  |
 | `query_roi_statistics_tool`                       | Queries detailed ROI statistics for up to 500 ROIs                  |
 | `query_traces_tool`                               | Queries fluorescence traces for up to 50 ROIs                       |
 | `query_multi_recording_overview_tool`             | Queries multi-recording dataset overview                            |

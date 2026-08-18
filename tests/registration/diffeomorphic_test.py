@@ -66,7 +66,8 @@ class TestComputeDemonsForce:
         generator = np.random.default_rng(seed=77)
         fields = [generator.standard_normal((height, width)).astype(np.float32) for _ in range(6)]
 
-        # Flattens one corner of both gradients so the zero-denominator branch is exercised.
+        # Flattens one corner of both gradients so the zero gradient-magnitude path is covered. The intensity
+        # difference keeps both denominators non-zero there, so the zero-denominator branch stays untaken.
         for index in (1, 2, 4, 5):
             fields[index][:5, :5] = 0.0
 
@@ -137,7 +138,7 @@ class TestDiffeomorphicDemonsRegistration:
             "Unable to initialize the diffeomorphic demons registration. Groupwise registration aligns the images "
             "of a group to their common mean space, so it requires at least 2 images, but got 1."
         )
-        with pytest.raises(ValueError, match=error_format(expected_message)):
+        with pytest.raises(ValueError, match=error_format(message=expected_message)):
             DiffeomorphicDemonsRegistration(images=[image])
 
     def test_compute_grid_sampling(self) -> None:
@@ -179,7 +180,7 @@ class TestDiffeomorphicDemonsRegistration:
 
     def test_register_identical_images(self) -> None:
         """Verifies that registering identical images produces near-identity deformations."""
-        image = np.random.default_rng(42).standard_normal((32, 32)).astype(np.float32)
+        image = np.random.default_rng(seed=42).standard_normal((32, 32)).astype(np.float32)
         images = [image.copy(), image.copy()]
         registration = DiffeomorphicDemonsRegistration(
             images=images, scale_sampling=5, final_scale=1.0, final_grid_sampling=8.0
@@ -187,9 +188,8 @@ class TestDiffeomorphicDemonsRegistration:
         registration.register(progress=False)
         for image_index in range(2):
             deformation = registration.get_deformation(image_index=image_index)
-            # Deformations should be near-zero for identical images.
-            assert np.max(np.abs(deformation[0])) < 2.0
-            assert np.max(np.abs(deformation[1])) < 2.0
+            assert np.max(np.abs(deformation.get_field(dimension=0))) < 2.0
+            assert np.max(np.abs(deformation.get_field(dimension=1))) < 2.0
 
     def test_coarse_level_contributes_nothing(self) -> None:
         """Verifies that a level whose knot grid cannot freeze its edges resolves to None for every image."""
@@ -231,17 +231,15 @@ class TestDiffeomorphicDemonsRegistration:
         assert 1 in registration._deformations
         first_deformation = registration.get_deformation(image_index=0)
         second_deformation = registration.get_deformation(image_index=1)
-        # Final deformation fields span the full image resolution and contain only finite values.
-        assert first_deformation[0].shape == (32, 32)
-        assert first_deformation[1].shape == (32, 32)
-        assert second_deformation[0].shape == (32, 32)
-        assert second_deformation[1].shape == (32, 32)
-        assert np.all(np.isfinite(first_deformation[0]))
-        assert np.all(np.isfinite(first_deformation[1]))
-        assert np.all(np.isfinite(second_deformation[0]))
-        assert np.all(np.isfinite(second_deformation[1]))
-        # Distinct input images must produce a non-trivial (non-zero) deformation.
-        assert np.max(np.abs(first_deformation[0])) > 1e-3
+        assert first_deformation.get_field(dimension=0).shape == (32, 32)
+        assert first_deformation.get_field(dimension=1).shape == (32, 32)
+        assert second_deformation.get_field(dimension=0).shape == (32, 32)
+        assert second_deformation.get_field(dimension=1).shape == (32, 32)
+        assert np.all(np.isfinite(first_deformation.get_field(dimension=0)))
+        assert np.all(np.isfinite(first_deformation.get_field(dimension=1)))
+        assert np.all(np.isfinite(second_deformation.get_field(dimension=0)))
+        assert np.all(np.isfinite(second_deformation.get_field(dimension=1)))
+        assert np.max(np.abs(first_deformation.get_field(dimension=0))) > 1e-3
 
     def test_register_without_smooth_scale(self) -> None:
         """Verifies that registration runs with smooth scale transitions disabled."""
@@ -284,12 +282,12 @@ class TestDiffeomorphicDemonsRegistration:
         # The default 16.0 pixel sampling spans the 32 pixel images with 5 knots, one short of the 6 that freezing the
         # edges needs. Every coarser level builds a smaller grid, so the run would resolve no deformation at all.
         expected_message = (
-            "Unable to register the (32, 32) images to their common mean space. Freezing the knot grid edges "
+            f"Unable to register the (32, 32) images to their common mean space. Freezing the knot grid edges "
             f"requires at least {MINIMUM_KNOTS_FOR_FROZEN_EDGES} knots along each dimension, but the finest scale "
-            "level samples its (32, 32) working resolution every 16.0 pixels, which builds a (5, 5) grid. Register "
-            "larger images or lower the 'diffeomorphic_registration.final_grid_sampling' configuration parameter."
+            f"level samples its (32, 32) working resolution every 16.0 pixels, which builds a (5, 5) grid. Register "
+            f"larger images or lower the 'diffeomorphic_registration.final_grid_sampling' configuration parameter."
         )
-        with pytest.raises(RuntimeError, match=error_format(expected_message)):
+        with pytest.raises(RuntimeError, match=error_format(message=expected_message)):
             registration.register(progress=False)
 
         assert registration._deformations == {}
@@ -303,7 +301,7 @@ class TestDiffeomorphicDemonsRegistration:
             "Unable to retrieve the deformation for image 0. The requested index must identify an image register() "
             "resolved a deformation for, and the resolved indices are []."
         )
-        with pytest.raises(RuntimeError, match=error_format(expected_message)):
+        with pytest.raises(RuntimeError, match=error_format(message=expected_message)):
             registration.get_deformation(image_index=0)
 
     def test_regularize_deformation_without_injectivity(self) -> None:
@@ -333,9 +331,9 @@ class TestDiffeomorphicDemonsRegistration:
         )
 
         expected_message = (
-            "Unable to resolve the field shape. The pyramids have not been initialized, call register() first."
+            "Unable to resolve the field shape. The pyramids have not been initialized. Call register() first."
         )
-        with pytest.raises(RuntimeError, match=error_format(expected_message)):
+        with pytest.raises(RuntimeError, match=error_format(message=expected_message)):
             registration._resolve_field_shape(scale=1.0)
 
     def test_groupwise_deformation_averages_the_signed_pairwise_deformations(self) -> None:
@@ -371,17 +369,28 @@ class TestDiffeomorphicDemonsRegistration:
         # pairs, so the divisor is two rather than the group size.
         for dimension in (0, 1):
             np.testing.assert_array_equal(
-                groupwise[0][dimension], _average(first_second[dimension], first_third[dimension])
+                groupwise[0].get_field(dimension=dimension),
+                _average(
+                    first=first_second.get_field(dimension=dimension), second=first_third.get_field(dimension=dimension)
+                ),
             )
             np.testing.assert_array_equal(
-                groupwise[1][dimension], _average(-first_second[dimension], second_third[dimension])
+                groupwise[1].get_field(dimension=dimension),
+                _average(
+                    first=-first_second.get_field(dimension=dimension),
+                    second=second_third.get_field(dimension=dimension),
+                ),
             )
             np.testing.assert_array_equal(
-                groupwise[2][dimension], _average(-first_third[dimension], -second_third[dimension])
+                groupwise[2].get_field(dimension=dimension),
+                _average(
+                    first=-first_third.get_field(dimension=dimension),
+                    second=-second_third.get_field(dimension=dimension),
+                ),
             )
 
         # A trivially zero field would satisfy any divisor, so this pins the comparison to real deformation values.
-        assert float(np.max(np.abs(groupwise[0][0]))) > 0.01
+        assert float(np.max(np.abs(groupwise[0].get_field(dimension=0)))) > 0.01
 
     def test_default_parameters(self) -> None:
         """Verifies that the constructor stores default parameter values."""
@@ -484,11 +493,15 @@ class TestDiffeomorphicRegistrationAccuracy:
         for image_index in range(2):
             first_deformation = first_run.get_deformation(image_index=image_index)
             second_deformation = second_run.get_deformation(image_index=image_index)
-            np.testing.assert_array_equal(first_deformation[0], second_deformation[0])
-            np.testing.assert_array_equal(first_deformation[1], second_deformation[1])
+            np.testing.assert_array_equal(
+                first_deformation.get_field(dimension=0), second_deformation.get_field(dimension=0)
+            )
+            np.testing.assert_array_equal(
+                first_deformation.get_field(dimension=1), second_deformation.get_field(dimension=1)
+            )
 
 
-@pytest.mark.xdist_group("console_progress_state")
+@pytest.mark.xdist_group(name="console_progress_state")
 class TestRegisterProgressState:
     """Tests that register() honors its progress argument without leaking the caller's console progress state.
 
@@ -496,15 +509,6 @@ class TestRegisterProgressState:
         The batch engine reuses worker processes across jobs, so a progress flag left flipped by one registration
         run would follow every later job in that process.
     """
-
-    @staticmethod
-    def _build_registration() -> DiffeomorphicDemonsRegistration:
-        """Builds the smallest registration instance whose finest level can still freeze its knot grid edges."""
-        generator = np.random.default_rng(seed=71)
-        images = [generator.standard_normal((32, 32)).astype(np.float32) for _ in range(2)]
-        return DiffeomorphicDemonsRegistration(
-            images=images, scale_sampling=2, final_scale=1.0, final_grid_sampling=8.0
-        )
 
     @pytest.mark.parametrize("previous_state", [True, False])
     @pytest.mark.parametrize("progress", [True, False])
@@ -519,7 +523,7 @@ class TestRegisterProgressState:
             else:
                 console.disable_progress()
 
-            registration = self._build_registration()
+            registration = TestRegisterProgressState._build_registration()
             observed_states: list[bool] = []
             original_iteration = registration._perform_iteration
 
@@ -550,7 +554,7 @@ class TestRegisterProgressState:
         restore_state = console.progress_enabled
         try:
             console.enable_progress()
-            registration = self._build_registration()
+            registration = TestRegisterProgressState._build_registration()
 
             def _fail(**_keyword_arguments: object) -> None:
                 """Stands in for the per-iteration step and fails on the first call the scale loop makes."""
@@ -562,12 +566,21 @@ class TestRegisterProgressState:
                 registration.register(progress=False)
 
             # register() disabled progress on the way in, so only the finally block can put it back.
-            assert console.progress_enabled is True
+            assert console.progress_enabled
         finally:
             if restore_state:
                 console.enable_progress()
             else:
                 console.disable_progress()
+
+    @staticmethod
+    def _build_registration() -> DiffeomorphicDemonsRegistration:
+        """Builds the smallest registration instance whose finest level can still freeze its knot grid edges."""
+        generator = np.random.default_rng(seed=71)
+        images = [generator.standard_normal((32, 32)).astype(np.float32) for _ in range(2)]
+        return DiffeomorphicDemonsRegistration(
+            images=images, scale_sampling=2, final_scale=1.0, final_grid_sampling=8.0
+        )
 
 
 def _prepare_level_registration(
@@ -648,8 +661,8 @@ def _mean_field_displacement(deformation: Deformation) -> tuple[float, float]:
     """
     interior = slice(_ACCURACY_FIELD_MARGIN, -_ACCURACY_FIELD_MARGIN)
     return (
-        float(deformation[0][interior, interior].mean()),
-        float(deformation[1][interior, interior].mean()),
+        float(deformation.get_field(dimension=0)[interior, interior].mean()),
+        float(deformation.get_field(dimension=1)[interior, interior].mean()),
     )
 
 

@@ -102,7 +102,6 @@ class TestCreateEnhancedMeanImage:
 
         assert result.shape == (frame_height, frame_width)
 
-        # The interior should contain valid enhanced values.
         valid_region = result[valid_y_range[0] : valid_y_range[1], valid_x_range[0] : valid_x_range[1]]
         assert np.all(np.isfinite(valid_region))
         assert np.all(valid_region >= 0.0)

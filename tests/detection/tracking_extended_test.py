@@ -8,20 +8,6 @@ from cindra.dataclasses import ROIMask
 from cindra.detection.tracking import _collect_bin_rois
 
 
-def _make_roi_mask(centroid: tuple[int, int], pixel_count: int = 5, cluster_id: int = 0) -> ROIMask:
-    """Creates a minimal ROIMask instance for testing."""
-    y_pixels = np.full(pixel_count, fill_value=centroid[0], dtype=np.int32)
-    x_pixels = np.full(pixel_count, fill_value=centroid[1], dtype=np.int32)
-    return ROIMask(
-        y_pixels=y_pixels,
-        x_pixels=x_pixels,
-        pixel_weights=np.ones(pixel_count, dtype=np.float32),
-        centroid=centroid,
-        frame_width=200,
-        cluster_id=cluster_id,
-    )
-
-
 class TestCollectBinRois:
     """Tests _collect_bin_rois."""
 
@@ -136,7 +122,7 @@ class TestCollectBinRois:
         roi_unclustered = _make_roi_mask(centroid=(30, 30), cluster_id=0)
         roi_clustered = _make_roi_mask(centroid=(45, 45), cluster_id=5)
 
-        # The two ROIs are placed in different cells to avoid overwriting each other in the grid.
+        # The two ROIs land in different grid cells, so the collector reaches each through its own cell scan.
         roi_grid: dict[tuple[int, int], list[tuple[ROIMask, int]]] = {}
         for roi, recording_index in [(roi_unclustered, 0), (roi_clustered, 1)]:
             grid_key = (roi.centroid[0] // grid_roi_size, roi.centroid[1] // grid_roi_size)
@@ -155,3 +141,17 @@ class TestCollectBinRois:
         # Only the unclustered ROI should be collected.
         assert len(collected_rois) == 1
         assert collected_recordings == [0]
+
+
+def _make_roi_mask(centroid: tuple[int, int], pixel_count: int = 5, cluster_id: int = 0) -> ROIMask:
+    """Creates a minimal ROIMask instance for testing."""
+    y_pixels = np.full(pixel_count, fill_value=centroid[0], dtype=np.int32)
+    x_pixels = np.full(pixel_count, fill_value=centroid[1], dtype=np.int32)
+    return ROIMask(
+        y_pixels=y_pixels,
+        x_pixels=x_pixels,
+        pixel_weights=np.ones(pixel_count, dtype=np.float32),
+        centroid=centroid,
+        frame_width=200,
+        cluster_id=cluster_id,
+    )

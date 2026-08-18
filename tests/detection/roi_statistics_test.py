@@ -15,60 +15,11 @@ from cindra.detection.roi_statistics import (
     compute_roi_statistics,
     _compute_distance_kernel,
     estimate_diameter_from_rois,
-    compute_median_pixel_position,
+    _compute_median_pixel_position,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-
-
-def _make_mask(
-    y_pixels: Sequence[int],
-    x_pixels: Sequence[int],
-    weights: Sequence[float],
-    frame_width: int,
-    radius: float = 5.0,
-    centroid: tuple[int, int] | None = None,
-) -> ROIMask:
-    """Creates a minimal ROIMask for testing."""
-    y_array = np.array(y_pixels, dtype=np.int32)
-    x_array = np.array(x_pixels, dtype=np.int32)
-    weight_array = np.array(weights, dtype=np.float32)
-    if centroid is None:
-        centroid = (int(np.median(y_array)), int(np.median(x_array)))
-    return ROIMask(
-        y_pixels=y_array,
-        x_pixels=x_array,
-        pixel_weights=weight_array,
-        centroid=centroid,
-        frame_width=frame_width,
-        radius=radius,
-    )
-
-
-def _make_circular_roi(
-    center_y: int,
-    center_x: int,
-    radius: int,
-    frame_height: int,
-    frame_width: int,
-) -> ROIStatistics:
-    """Creates a circular ROIStatistics instance."""
-    y_coordinates, x_coordinates = np.mgrid[0:frame_height, 0:frame_width]
-    distance = np.sqrt((y_coordinates - center_y) ** 2 + (x_coordinates - center_x) ** 2)
-    inside = distance <= radius
-    y_pixels = y_coordinates[inside].astype(np.int32)
-    x_pixels = x_coordinates[inside].astype(np.int32)
-    weights = np.maximum(0, 1.0 - distance[inside] / radius).astype(np.float32)
-    mask = ROIMask(
-        y_pixels=y_pixels,
-        x_pixels=x_pixels,
-        pixel_weights=weights,
-        centroid=(center_y, center_x),
-        frame_width=frame_width,
-        radius=float(radius),
-    )
-    return ROIStatistics(mask=mask)
 
 
 class TestEstimateDiameterFromRois:
@@ -125,27 +76,27 @@ class TestEstimateDiameterFromRois:
 
 
 class TestComputeMedianPixelPosition:
-    """Tests compute_median_pixel_position."""
+    """Tests _compute_median_pixel_position."""
 
     def test_single_pixel(self) -> None:
         """Verifies that a single pixel returns itself."""
         y_pixels = np.array([5], dtype=np.int32)
         x_pixels = np.array([10], dtype=np.int32)
-        result = compute_median_pixel_position(y_pixels=y_pixels, x_pixels=x_pixels)
+        result = _compute_median_pixel_position(y_pixels=y_pixels, x_pixels=x_pixels)
         assert result == (5, 10)
 
     def test_symmetric_pixels(self) -> None:
         """Verifies that the center pixel is returned for a symmetric layout."""
         y_pixels = np.array([0, 1, 2], dtype=np.int32)
         x_pixels = np.array([0, 1, 2], dtype=np.int32)
-        result = compute_median_pixel_position(y_pixels=y_pixels, x_pixels=x_pixels)
+        result = _compute_median_pixel_position(y_pixels=y_pixels, x_pixels=x_pixels)
         assert result == (1, 1)
 
     def test_returns_actual_pixel(self) -> None:
         """Verifies that the result is an actual pixel from the input arrays."""
         y_pixels = np.array([0, 5, 10], dtype=np.int32)
         x_pixels = np.array([0, 3, 8], dtype=np.int32)
-        result_y, result_x = compute_median_pixel_position(y_pixels=y_pixels, x_pixels=x_pixels)
+        result_y, result_x = _compute_median_pixel_position(y_pixels=y_pixels, x_pixels=x_pixels)
         assert result_y in y_pixels
         assert result_x in x_pixels
 
@@ -212,7 +163,9 @@ class TestROI:
         """Verifies that a compact circular ROI has a compactness near 1.0."""
         roi_statistics = _make_circular_roi(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
         roi = _ROI(data=roi_statistics, diameter=10)
-        # A near-perfect disk has perimeter^2 / (4 * pi * area) close to 1. An elongated or fragmented shape
+        # compactness is the ROI's mean pixel-to-center distance over the mean radius a uniformly packed pixel set
+        # of the same count would occupy, floored at 1.0. A near-perfect disk therefore sits at 1.0. An elongated or
+        # fragmented shape
         # would exceed this tight band.
         assert roi.compactness == pytest.approx(1.0, abs=0.3)
 
@@ -371,38 +324,26 @@ class TestROI:
 class TestEllipseData:
     """Tests _EllipseData properties."""
 
-    def _make_ellipse(self, radii: tuple[float, float] = (5.0, 3.0)) -> _EllipseData:
-        """Creates a minimal _EllipseData."""
-        return _EllipseData(
-            centroid=np.array([10.0, 10.0], dtype=np.float32),
-            covariance=np.eye(2, dtype=np.float32),
-            radii=radii,
-            boundary_points=np.zeros((100, 2), dtype=np.float32),
-            y_scale=10,
-            x_scale=10,
-        )
-
-    def test_area(self) -> None:
-        """Verifies the ellipse area formula."""
-        ellipse = self._make_ellipse(radii=(5.0, 5.0))
-        expected = (5.0 * 5.0) ** 0.5 * np.pi
-        np.testing.assert_allclose(ellipse.area, expected, atol=1e-4)
-
     def test_radius_scales_by_mean(self) -> None:
         """Verifies that the effective radius is scaled by the mean of y_scale and x_scale."""
-        ellipse = self._make_ellipse(radii=(5.0, 3.0))
+        ellipse = TestEllipseData._make_ellipse(radii=(5.0, 3.0))
         expected = 5.0 * np.mean([10, 10])
         np.testing.assert_allclose(ellipse.radius, expected, atol=1e-4)
 
     def test_aspect_ratio_circular(self) -> None:
         """Verifies that equal radii produce an aspect ratio of ~1."""
-        ellipse = self._make_ellipse(radii=(5.0, 5.0))
+        ellipse = TestEllipseData._make_ellipse(radii=(5.0, 5.0))
         np.testing.assert_allclose(ellipse.aspect_ratio, 1.0, atol=0.01)
 
     def test_aspect_ratio_bounded(self) -> None:
         """Verifies that the aspect ratio is bounded between 0 and 2."""
-        ellipse = self._make_ellipse(radii=(10.0, 0.01))
+        ellipse = TestEllipseData._make_ellipse(radii=(10.0, 0.01))
         assert 0 < ellipse.aspect_ratio <= 2.0
+
+    @staticmethod
+    def _make_ellipse(radii: tuple[float, float] = (5.0, 3.0)) -> _EllipseData:
+        """Creates a minimal _EllipseData."""
+        return _EllipseData(radii=radii, y_scale=10, x_scale=10)
 
 
 class TestComputeRoiStatistics:
@@ -498,3 +439,52 @@ class TestComputeRoiStatistics:
         compute_roi_statistics(rois=rois, frame_height=64, frame_width=64, diameter=10)
         # The aspect ratio should differ from 1.0 because the pixels are elongated along the diagonal.
         assert roi.aspect_ratio != 1.0
+
+
+def _make_mask(
+    y_pixels: Sequence[int],
+    x_pixels: Sequence[int],
+    weights: Sequence[float],
+    frame_width: int,
+    radius: float = 5.0,
+    centroid: tuple[int, int] | None = None,
+) -> ROIMask:
+    """Creates a minimal ROIMask for testing."""
+    y_array = np.array(y_pixels, dtype=np.int32)
+    x_array = np.array(x_pixels, dtype=np.int32)
+    weight_array = np.array(weights, dtype=np.float32)
+    if centroid is None:
+        centroid = (int(np.median(y_array)), int(np.median(x_array)))
+    return ROIMask(
+        y_pixels=y_array,
+        x_pixels=x_array,
+        pixel_weights=weight_array,
+        centroid=centroid,
+        frame_width=frame_width,
+        radius=radius,
+    )
+
+
+def _make_circular_roi(
+    center_y: int,
+    center_x: int,
+    radius: int,
+    frame_height: int,
+    frame_width: int,
+) -> ROIStatistics:
+    """Creates a circular ROIStatistics instance."""
+    y_coordinates, x_coordinates = np.mgrid[0:frame_height, 0:frame_width]
+    distance = np.sqrt((y_coordinates - center_y) ** 2 + (x_coordinates - center_x) ** 2)
+    inside = distance <= radius
+    y_pixels = y_coordinates[inside].astype(np.int32)
+    x_pixels = x_coordinates[inside].astype(np.int32)
+    weights = np.maximum(0, 1.0 - distance[inside] / radius).astype(np.float32)
+    mask = ROIMask(
+        y_pixels=y_pixels,
+        x_pixels=x_pixels,
+        pixel_weights=weights,
+        centroid=(center_y, center_x),
+        frame_width=frame_width,
+        radius=float(radius),
+    )
+    return ROIStatistics(mask=mask)

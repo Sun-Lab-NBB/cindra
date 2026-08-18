@@ -1,10 +1,5 @@
 """Provides the job model of the single and multi-recording pipelines, which names every pipeline stage, defines the
 job universe of a recording, and resolves the prerequisite graph over that universe.
-
-The pipelines, the execution engine, the interface layer, and any external scheduler all need the same answers about
-which jobs exist for a recording and which jobs must succeed before a given job runs. Keeping the model in one leaf
-module gives every consumer the same answers, so that inserting or reordering a phase does not require each of them to
-be edited in step.
 """
 
 from __future__ import annotations
@@ -13,7 +8,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from dataclasses import dataclass
 
-from ataraxis_data_structures import JobState, ProcessingStatus
+from ataraxis_data_structures import JobState, ProcessingStatus, ProcessingTracker
 
 from ..layout import resolve_plane_specifier
 
@@ -33,9 +28,8 @@ class SingleRecordingJobNames(StrEnum):
     """Defines the job names for the single-recording processing pipeline components.
 
     Notes:
-        The members are declared in execution order, and that order is rendered into the error messages that list
-        the valid job names. The authoritative phase order and prerequisite graph live in SINGLE_RECORDING_PHASES.
-        The interface layer derives only an unordered validation set from these members.
+        The members are declared in execution order, and that order is rendered into the error messages that list the
+        valid job names. The authoritative phase order and prerequisite graph live in SINGLE_RECORDING_PHASES.
     """
 
     BINARIZE = "binarization"
@@ -143,9 +137,7 @@ def resolve_single_recording_jobs(plane_count: int) -> list[tuple[str, str]]:
     """Returns every job the single-recording pipeline can execute for a recording with the given plane count.
 
     Notes:
-        The returned list is the recording's job universe, which a tracker uses to distinguish the jobs that belong to
-        the recording from foreign entries. It therefore covers every plane, independently of which planes a particular
-        invocation intends to run.
+        The returned list covers every plane, independently of which planes a particular invocation intends to run.
 
     Args:
         plane_count: The number of virtual imaging planes the recording holds.
@@ -169,6 +161,28 @@ def resolve_multi_recording_jobs(recording_ids: Sequence[str]) -> list[tuple[str
         each extraction job carries its recording identifier.
     """
     return resolve_pipeline_jobs(phases=MULTI_RECORDING_PHASES, specifiers=list(recording_ids))
+
+
+def generate_job_ids(jobs: Iterable[tuple[str, str]]) -> dict[tuple[str, str], str]:
+    """Generates the processing job identifier of every job in a resolved job universe.
+
+    Notes:
+        The identifier derives from the job name and specifier alone, and a tracker records each job under the same
+        derivation.
+
+    Args:
+        jobs: The jobs to generate identifiers for, as the (job name, specifier) pairs the job resolvers return.
+
+    Returns:
+        The hexadecimal identifier of every job, keyed by its name and specifier.
+
+    Raises:
+        ValueError: If a job name or a specifier contains a colon.
+    """
+    return {
+        (job_name, specifier): ProcessingTracker.generate_job_id(job_name=job_name, specifier=specifier)
+        for job_name, specifier in jobs
+    }
 
 
 def resolve_single_recording_prerequisites(
@@ -229,9 +243,8 @@ def order_phases_by_execution(phase_names: Iterable[str], *, single_recording: b
     """Orders phase job names by the order the pipeline executes them.
 
     Notes:
-        Callers report the resulting list to the user, who reads a phase list as a sequence. Alphabetical order would
-        render the single-recording chain as binarization, combination, processing, registration, which inverts the
-        two middle phases relative to the order they run in.
+        Alphabetical order would render the single-recording chain as binarization, combination, processing,
+        registration, which inverts the two middle phases relative to the order they run in.
 
     Args:
         phase_names: The phase job names to order.
@@ -249,11 +262,6 @@ def order_phases_by_execution(phase_names: Iterable[str], *, single_recording: b
 
 def resolve_pipeline_jobs(phases: tuple[PipelinePhase, ...], specifiers: Sequence[str]) -> list[tuple[str, str]]:
     """Expands a pipeline's phases into a job list over the given specifiers.
-
-    Notes:
-        Use this function when the specifiers are already known, for example when rebuilding the universe of a tracker
-        whose existing per-specifier jobs must be preserved exactly. Prefer resolve_single_recording_jobs when the
-        specifiers follow from a plane count.
 
     Args:
         phases: The ordered phases of the pipeline.

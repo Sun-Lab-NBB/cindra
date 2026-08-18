@@ -23,43 +23,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 
-def _make_mask(
-    y_pixels: Sequence[int],
-    x_pixels: Sequence[int],
-    weights: Sequence[float],
-    frame_width: int,
-    centroid: tuple[int, int] | None = None,
-    radius: float = 5.0,
-    cluster_id: int = 0,
-) -> ROIMask:
-    """Creates a minimal ROIMask instance for testing."""
-    y_array = np.array(y_pixels, dtype=np.int32)
-    x_array = np.array(x_pixels, dtype=np.int32)
-    weight_array = np.array(weights, dtype=np.float32)
-    if centroid is None:
-        centroid = (int(np.median(y_array)), int(np.median(x_array)))
-    return ROIMask(
-        y_pixels=y_array,
-        x_pixels=x_array,
-        pixel_weights=weight_array,
-        centroid=centroid,
-        frame_width=frame_width,
-        radius=radius,
-        cluster_id=cluster_id,
-    )
-
-
-def _make_block_mask(first_row: int, first_column: int, height: int, width: int, frame_width: int = 40) -> ROIMask:
-    """Creates a solid rectangular ROIMask whose pixel count and overlaps are exactly known."""
-    rows, columns = np.mgrid[first_row : first_row + height, first_column : first_column + width]
-    return _make_mask(
-        y_pixels=rows.ravel().tolist(),
-        x_pixels=columns.ravel().tolist(),
-        weights=[1.0] * (height * width),
-        frame_width=frame_width,
-    )
-
-
 class TestComputeOverlap:
     """Tests _compute_overlap."""
 
@@ -328,3 +291,40 @@ class TestFilterTemplates:
         mask = _make_mask(y_pixels=[5], x_pixels=[5], weights=[1.0], frame_width=20)
         result = _filter_templates(template_masks=[mask], minimum_size=100)
         assert len(result) == 1
+
+
+def _make_mask(
+    y_pixels: Sequence[int],
+    x_pixels: Sequence[int],
+    weights: Sequence[float],
+    frame_width: int,
+    centroid: tuple[int, int] | None = None,
+    radius: float = 5.0,
+    cluster_id: int = 0,
+) -> ROIMask:
+    """Creates a minimal ROIMask instance for testing."""
+    y_array = np.array(y_pixels, dtype=np.int32)
+    x_array = np.array(x_pixels, dtype=np.int32)
+    weight_array = np.array(weights, dtype=np.float32)
+    if centroid is None:
+        centroid = (int(np.median(y_array)), int(np.median(x_array)))
+    return ROIMask(
+        y_pixels=y_array,
+        x_pixels=x_array,
+        pixel_weights=weight_array,
+        centroid=centroid,
+        frame_width=frame_width,
+        radius=radius,
+        cluster_id=cluster_id,
+    )
+
+
+def _make_block_mask(first_row: int, first_column: int, height: int, width: int, frame_width: int = 40) -> ROIMask:
+    """Creates a solid rectangular ROIMask whose pixel count and overlaps are exactly known."""
+    rows, columns = np.mgrid[first_row : first_row + height, first_column : first_column + width]
+    return _make_mask(
+        y_pixels=rows.ravel().tolist(),
+        x_pixels=columns.ravel().tolist(),
+        weights=[1.0] * (height * width),
+        frame_width=frame_width,
+    )

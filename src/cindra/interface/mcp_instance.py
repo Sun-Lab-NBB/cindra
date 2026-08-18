@@ -1,8 +1,6 @@
-"""Provides the shared MCP server instance used by all cindra-mcp data-processing tool modules.
-
-The acquisition, configuration, processing, and results tool modules import the ``mcp`` instance from this module and
-register their tools through the ``@mcp.tool()`` decorator. The ``mcp_server`` module imports all four tool modules at
-module level to trigger that registration before starting the server.
+"""Provides the shared MCP server instance used by all cindra-mcp data-processing tool modules. The acquisition,
+configuration, processing, and results tool modules import the ``mcp`` instance from this module and register their
+tools through the ``@mcp.tool()`` decorator.
 """
 
 from __future__ import annotations

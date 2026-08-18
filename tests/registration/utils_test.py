@@ -77,14 +77,14 @@ class TestApplyPhaseCorrelation:
 
 
 class TestApplyMask:
-    """Tests apply_mask (numba vectorized)."""
+    """Tests apply_mask (numba parallel kernel)."""
 
     def test_basic_computation(self) -> None:
         """Verifies the element-wise computation frames * mask + offset."""
         frames = np.ones((2, 4, 4), dtype=np.float32) * 10.0
         mask = np.ones((4, 4), dtype=np.float32) * 0.5
         offset = np.ones((4, 4), dtype=np.float32) * 2.0
-        result = apply_mask(frames, mask, offset)
+        result = apply_mask(frames=frames, mask=mask, offset=offset)
         expected = 10.0 * 0.5 + 2.0
         np.testing.assert_allclose(result, expected)
 
@@ -94,7 +94,7 @@ class TestApplyMask:
         mask = np.array([[0.0, 0.5, 1.0], [2.0, -1.0, 0.25]], dtype=np.float32)
         offset = np.array([[1.0, -2.0, 3.0], [0.0, 10.0, -0.5]], dtype=np.float32)
 
-        result = apply_mask(frames, mask, offset)
+        result = apply_mask(frames=frames, mask=mask, offset=offset)
 
         # Constant operands hide a transposed mask, a swapped mask and offset, and a broadcast over the wrong axis,
         # so every operand here varies and the expectation is written out per element.
@@ -118,7 +118,7 @@ class TestApplyMask:
         frames = np.ones((1, 4, 4), dtype=np.float32) * 100.0
         mask = np.zeros((4, 4), dtype=np.float32)
         offset = np.ones((4, 4), dtype=np.float32) * 5.0
-        result = apply_mask(frames, mask, offset)
+        result = apply_mask(frames=frames, mask=mask, offset=offset)
         np.testing.assert_allclose(result, 5.0)
 
     def test_identity_mask(self) -> None:
@@ -126,7 +126,7 @@ class TestApplyMask:
         frames = np.arange(16, dtype=np.float32).reshape(1, 4, 4)
         mask = np.ones((4, 4), dtype=np.float32)
         offset = np.zeros((4, 4), dtype=np.float32)
-        result = apply_mask(frames, mask, offset)
+        result = apply_mask(frames=frames, mask=mask, offset=offset)
         np.testing.assert_allclose(result, frames)
 
     def test_broadcasting(self) -> None:
@@ -134,9 +134,41 @@ class TestApplyMask:
         frames = np.ones((3, 4, 4), dtype=np.float32) * 2.0
         mask = np.ones((4, 4), dtype=np.float32) * 3.0
         offset = np.ones((4, 4), dtype=np.float32) * 1.0
-        result = apply_mask(frames, mask, offset)
+        result = apply_mask(frames=frames, mask=mask, offset=offset)
         assert result.shape == (3, 4, 4)
         np.testing.assert_allclose(result, 7.0)
+
+    def test_float32_frames_produce_float32_output(self) -> None:
+        """Verifies the kernel keeps the pipeline at single precision."""
+        frames = np.ones((3, 4, 4), dtype=np.float32)
+        mask = np.ones((4, 4), dtype=np.float32)
+        offset = np.zeros((4, 4), dtype=np.float32)
+
+        # The output buffer takes its dtype from the frames, so this pins the contract the callers rely on.
+        assert apply_mask(frames=frames, mask=mask, offset=offset).dtype == np.float32
+
+    def test_four_dimensional_blocks_with_a_per_block_mask(self) -> None:
+        """Verifies the nonrigid rank, where a per-block mask meets extracted blocks."""
+        frames = np.arange(2 * 3 * 4 * 4, dtype=np.float32).reshape(2, 3, 4, 4)
+        mask = np.linspace(0.0, 1.0, 3 * 4 * 4, dtype=np.float32).reshape(3, 4, 4)
+        offset = np.full((3, 4, 4), 2.0, dtype=np.float32)
+
+        result = apply_mask(frames=frames, mask=mask, offset=offset)
+
+        assert result.shape == (2, 3, 4, 4)
+        assert result.dtype == np.float32
+        np.testing.assert_allclose(result, frames * mask + offset, rtol=1e-6)
+
+    def test_single_frame_batch(self) -> None:
+        """Verifies a leading axis of one, which the registration metrics path always passes."""
+        frames = np.arange(16, dtype=np.float32).reshape(1, 4, 4)
+        mask = np.full((4, 4), 0.5, dtype=np.float32)
+        offset = np.full((4, 4), 1.0, dtype=np.float32)
+
+        result = apply_mask(frames=frames, mask=mask, offset=offset)
+
+        assert result.shape == (1, 4, 4)
+        np.testing.assert_allclose(result, frames * 0.5 + 1.0)
 
 
 class TestCombineRigidOffsets:

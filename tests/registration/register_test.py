@@ -19,33 +19,6 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 
-def _build_baseline_frames(frame_count: int, size: int, baseline: float, seed: int) -> NDArray[np.float32]:
-    """Builds a stack of blob frames with integer-pixel shifts rendered on top of a positive intensity baseline.
-
-    Args:
-        frame_count: The number of frames to render.
-        size: The height and width of each square frame in pixels.
-        baseline: The constant intensity offset added to every pixel of every frame.
-        seed: The seed for the random generator used to render the per-frame noise.
-
-    Returns:
-        The rendered frame stack with shape (frame_count, size, size) as a float32 array.
-    """
-    generator = np.random.default_rng(seed=seed)
-    y_grid = np.arange(size, dtype=np.float32)[:, np.newaxis]
-    x_grid = np.arange(size, dtype=np.float32)[np.newaxis, :]
-
-    template = np.zeros((size, size), dtype=np.float32)
-    for center_y, center_x in ((12, 14), (30, 20), (22, 36)):
-        template += 90.0 * np.exp(-(((y_grid - center_y) ** 2 + (x_grid - center_x) ** 2) / 18.0))
-
-    frames = np.empty((frame_count, size, size), dtype=np.float32)
-    for index in range(frame_count):
-        shifted = np.roll(template, shift=(index % 5 - 2, index % 3 - 1), axis=(0, 1))
-        frames[index] = baseline + shifted + generator.normal(scale=6.0, size=(size, size))
-    return frames
-
-
 class TestComputeCrop:
     """Tests the _compute_crop function."""
 
@@ -77,7 +50,6 @@ class TestComputeCrop:
         frame_count = 100
         y_offsets = np.zeros(frame_count, dtype=np.int32)
         x_offsets = np.zeros(frame_count, dtype=np.int32)
-        # Introduces a few frames with large offsets.
         y_offsets[50] = 10
         x_offsets[50] = 5
         correlations = np.ones(frame_count, dtype=np.float32)
@@ -104,7 +76,7 @@ class TestComputeCrop:
         frame_count = 100
         y_offsets = np.zeros(frame_count, dtype=np.int32)
         x_offsets = np.zeros(frame_count, dtype=np.int32)
-        # Sets an extremely large offset that exceeds the threshold.
+        # An offset this large exceeds the maximum offset threshold.
         x_offsets[10] = 50
         correlations = np.ones(frame_count, dtype=np.float32)
         bad_frames = np.zeros(frame_count, dtype=np.bool_)
@@ -261,7 +233,6 @@ class TestApplyPrecomputedOffsetsBatch:
         height = 16
         width = 16
         frames = np.zeros((batch_size, height, width), dtype=np.float32)
-        # Places a bright pixel at a known location in each frame.
         frames[:, 8, 8] = 100.0
 
         y_offsets = np.array([2, 0, -1], dtype=np.int32)
@@ -370,7 +341,6 @@ class TestApplyPrecomputedOffsetsBatch:
             nonrigid_enabled=True,
         )
 
-        # Nonrigid correction should modify the frames.
         assert result.shape == original.shape
         assert not np.array_equal(result, original)
 
@@ -423,3 +393,30 @@ class TestComputeCropBadFrameFraction:
         assert int(result_bad_frames.sum()) == bad_frame_count
         assert valid_y_range == expected_y_range
         assert valid_x_range == expected_x_range
+
+
+def _build_baseline_frames(frame_count: int, size: int, baseline: float, seed: int) -> NDArray[np.float32]:
+    """Builds a stack of blob frames with integer-pixel shifts rendered on top of a positive intensity baseline.
+
+    Args:
+        frame_count: The number of frames to render.
+        size: The height and width of each square frame in pixels.
+        baseline: The constant intensity offset added to every pixel of every frame.
+        seed: The seed for the random generator used to render the per-frame noise.
+
+    Returns:
+        The rendered frame stack with shape (frame_count, size, size) as a float32 array.
+    """
+    generator = np.random.default_rng(seed=seed)
+    y_grid = np.arange(size, dtype=np.float32)[:, np.newaxis]
+    x_grid = np.arange(size, dtype=np.float32)[np.newaxis, :]
+
+    template = np.zeros((size, size), dtype=np.float32)
+    for center_y, center_x in ((12, 14), (30, 20), (22, 36)):
+        template += 90.0 * np.exp(-(((y_grid - center_y) ** 2 + (x_grid - center_x) ** 2) / 18.0))
+
+    frames = np.empty((frame_count, size, size), dtype=np.float32)
+    for index in range(frame_count):
+        shifted = np.roll(template, shift=(index % 5 - 2, index % 3 - 1), axis=(0, 1))
+        frames[index] = baseline + shifted + generator.normal(scale=6.0, size=(size, size))
+    return frames

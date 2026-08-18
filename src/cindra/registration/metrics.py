@@ -50,13 +50,6 @@ def compute_pc_metrics(context: RuntimeContext, *, workers: int) -> None:
     spatial displacement. Large displacements indicate residual motion or registration artifacts.
 
     Notes:
-        This function processes frames from a single processing plane at a time. For multi-plane recordings, call this
-        function separately for each plane's RuntimeContext.
-
-        The function reads frames from the registered binary file, subsamples them to reduce memory overhead, and
-        computes PCA-based metrics. The subsampling selects evenly-spaced frames across the recording to maintain
-        statistical representativeness while limiting memory usage.
-
         The computed metrics are stored in context.runtime.registration. The principal_component_extreme_images field
         contains mean images from low and high PC projections. The principal_component_projections field contains PC
         projection values for each sampled frame. The principal_component_shift_metrics field contains registration
@@ -78,7 +71,6 @@ def compute_pc_metrics(context: RuntimeContext, *, workers: int) -> None:
     # The Numba thread mask is thread-local and cannot exceed the core count Numba detected at import time.
     numba.set_num_threads(min(workers, numba.config.NUMBA_NUM_THREADS))
 
-    # Extracts IO parameters from runtime context.
     registered_binary_path = context.runtime.io.registered_binary_path
     if registered_binary_path is None:
         message = (
@@ -99,39 +91,33 @@ def compute_pc_metrics(context: RuntimeContext, *, workers: int) -> None:
     frame_count = context.runtime.io.frame_count
     plane_index = context.runtime.io.plane_index
 
-    # Extracts valid pixel ranges from registration data.
     valid_y_range = context.runtime.registration.valid_y_range
     valid_x_range = context.runtime.registration.valid_x_range
 
-    # Extracts registration configuration parameters.
-    num_components = context.configuration.registration.registration_metric_principal_components
+    component_count = context.configuration.registration.registration_metric_principal_components
     spatial_smoothing_sigma = context.configuration.registration.spatial_smoothing_sigma
     maximum_offset_fraction = context.configuration.registration.maximum_offset_fraction
 
-    # Extracts nonrigid registration parameters.
     nonrigid_enabled = context.configuration.nonrigid_registration.enabled
     block_size = context.configuration.nonrigid_registration.block_size
-    snr_threshold = context.configuration.nonrigid_registration.signal_to_noise_threshold
+    signal_to_noise_threshold = context.configuration.nonrigid_registration.signal_to_noise_threshold
     maximum_nonrigid_offset = context.configuration.nonrigid_registration.maximum_block_offset
 
-    # Extracts one-photon registration parameters.
     one_photon_mode = context.configuration.one_photon_registration.enabled
     pre_smoothing_sigma = context.configuration.one_photon_registration.pre_smoothing_sigma
     spatial_highpass_window = context.configuration.one_photon_registration.spatial_highpass_window
     edge_taper_pixels = context.configuration.one_photon_registration.edge_taper_pixels
 
-    # Extracts registration state from runtime data.
     bidirectional_phase_offset = context.runtime.registration.bidirectional_phase_offset
     bidirectional_corrected = context.runtime.registration.bidirectional_phase_corrected
 
-    # Computes edge taper slope based on imaging mode.
     edge_taper_slope = edge_taper_pixels if one_photon_mode else 3.0 * spatial_smoothing_sigma
 
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
 
     console.echo(
         message=(
-            f"Computing {num_components} Principal Components (PCs) for plane {plane_index} to assess registration "
+            f"Computing {component_count} Principal Components (PCs) for plane {plane_index} to assess registration "
             f"quality..."
         ),
         level=LogLevel.INFO,
@@ -150,7 +136,6 @@ def compute_pc_metrics(context: RuntimeContext, *, workers: int) -> None:
         frame_count,
     )
 
-    # Reads and subsamples frames from the registered binary file.
     with BinaryFile(height=frame_height, width=frame_width, file_path=registered_binary_path) as binary_file:
         frames = binary_file.subsample_movie(
             sample_count=sample_count,
@@ -160,12 +145,12 @@ def compute_pc_metrics(context: RuntimeContext, *, workers: int) -> None:
 
     # Determines the extreme images for each requested PC and averages them into representative low / high projection
     # images.
-    num_extreme_frames = min(300, frames.shape[0] // 2)
+    extreme_frame_count = min(300, frames.shape[0] // 2)
 
     pc_low, pc_high, principal_component_projections = _compute_pc_extremes(
         frames=frames,
-        num_extreme_frames=num_extreme_frames,
-        num_components=num_components,
+        extreme_frame_count=extreme_frame_count,
+        component_count=component_count,
     )
 
     console.echo(
@@ -185,7 +170,6 @@ def compute_pc_metrics(context: RuntimeContext, *, workers: int) -> None:
     )
     timer.reset()
 
-    # Computes registration metrics by aligning PC extremes.
     principal_component_shift_metrics = _register_pc_extremes(
         pc_low=pc_low,
         pc_high=pc_high,
@@ -197,7 +181,7 @@ def compute_pc_metrics(context: RuntimeContext, *, workers: int) -> None:
         maximum_offset_fraction=maximum_offset_fraction,
         maximum_nonrigid_offset=maximum_nonrigid_offset,
         one_photon_mode=one_photon_mode,
-        snr_threshold=snr_threshold,
+        signal_to_noise_threshold=signal_to_noise_threshold,
         nonrigid_enabled=nonrigid_enabled,
         bidirectional_phase_offset=bidirectional_phase_offset,
         edge_taper_slope=edge_taper_slope,
@@ -212,7 +196,6 @@ def compute_pc_metrics(context: RuntimeContext, *, workers: int) -> None:
         level=LogLevel.SUCCESS,
     )
 
-    # Stores the computed metrics in the runtime context.
     context.runtime.registration.principal_component_extreme_images = principal_component_extreme_images
     context.runtime.registration.principal_component_projections = principal_component_projections
     context.runtime.registration.principal_component_shift_metrics = principal_component_shift_metrics
@@ -220,8 +203,8 @@ def compute_pc_metrics(context: RuntimeContext, *, workers: int) -> None:
 
 def _compute_pc_extremes(
     frames: NDArray[np.float32],
-    num_extreme_frames: int,
-    num_components: int,
+    extreme_frame_count: int,
+    component_count: int,
 ) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
     """Computes mean images from frames at extreme ends of each principal component.
 
@@ -230,25 +213,25 @@ def _compute_pc_extremes(
     visually assess registration quality.
 
     Args:
-        frames: The input frames with shape (num_frames, height, width).
-        num_extreme_frames: The number of frames to average at each extreme of each PC.
-        num_components: The number of principal components to compute.
+        frames: The input frames with shape (frame_count, height, width).
+        extreme_frame_count: The number of frames to average at each extreme of each PC.
+        component_count: The number of principal components to compute.
 
     Returns:
-        A tuple of (pc_low, pc_high, projections). The pc_low array with shape (num_components, height, width)
+        A tuple of (pc_low, pc_high, projections). The pc_low array with shape (component_count, height, width)
         contains mean images from frames with the lowest PC projections. The pc_high array has the same shape and
         contains mean images from the highest PC projections. The projections array with shape
-        (num_frames, num_components) contains the PC projection values for each frame.
+        (frame_count, component_count) contains the PC projection values for each frame.
     """
-    num_frames, height, width = frames.shape
+    frame_count, height, width = frames.shape
 
     # Reshapes frames to 2D for PCA and centers the data. Uses a view to avoid copying when possible.
-    frames_flat = frames.reshape((num_frames, -1))
+    frames_flat = frames.reshape((frame_count, -1))
     mean_image = frames_flat.mean(axis=0)
     frames_centered = frames_flat - mean_image
 
     # Fits PCA on transposed data to get frame-wise projections.
-    pca = PCA(n_components=num_components).fit(frames_centered.T)
+    pca = PCA(n_components=component_count).fit(frames_centered.T)
     projections: NDArray[np.float32] = pca.components_.T.astype(np.float32)
 
     # Pre-computes sorted indices for all components at once.
@@ -256,12 +239,12 @@ def _compute_pc_extremes(
 
     # Computes mean images from extreme frames for each PC. Indexes directly into the original frames array to avoid
     # creating a transposed copy of the entire dataset.
-    pc_low = np.empty((num_components, height, width), dtype=np.float32)
-    pc_high = np.empty((num_components, height, width), dtype=np.float32)
+    pc_low = np.empty((component_count, height, width), dtype=np.float32)
+    pc_high = np.empty((component_count, height, width), dtype=np.float32)
 
-    for component_index in range(num_components):
-        low_indices = sorted_indices[:num_extreme_frames, component_index]
-        high_indices = sorted_indices[-num_extreme_frames:, component_index]
+    for component_index in range(component_count):
+        low_indices = sorted_indices[:extreme_frame_count, component_index]
+        high_indices = sorted_indices[-extreme_frame_count:, component_index]
         pc_low[component_index] = frames[low_indices].mean(axis=0)
         pc_high[component_index] = frames[high_indices].mean(axis=0)
 
@@ -280,7 +263,7 @@ def _register_pc_extremes(
     maximum_offset_fraction: float = 0.1,
     maximum_nonrigid_offset: float = 5.0,
     one_photon_mode: bool = False,
-    snr_threshold: float = 1.2,
+    signal_to_noise_threshold: float = 1.2,
     nonrigid_enabled: bool = True,
     bidirectional_phase_offset: int = 0,
     edge_taper_slope: float = 40.0,
@@ -293,8 +276,8 @@ def _register_pc_extremes(
     registration. Large offsets suggest poor registration.
 
     Args:
-        pc_low: The mean images from low PC projections with shape (num_components, height, width).
-        pc_high: The mean images from high PC projections with shape (num_components, height, width).
+        pc_low: The mean images from low PC projections with shape (component_count, height, width).
+        pc_high: The mean images from high PC projections with shape (component_count, height, width).
         bidirectional_corrected: Determines whether bidirectional phase correction has already been applied.
         spatial_highpass_window: The window size for spatial high-pass filtering in one-photon mode.
         pre_smoothing_window: The window size for spatial smoothing before high-pass filtering.
@@ -303,18 +286,18 @@ def _register_pc_extremes(
         maximum_offset_fraction: The maximum allowed rigid offset as a fraction of the minimum dimension.
         maximum_nonrigid_offset: The maximum allowed nonrigid offset in pixels.
         one_photon_mode: Determines whether to apply one-photon preprocessing.
-        snr_threshold: The SNR threshold for adaptive smoothing during nonrigid registration.
+        signal_to_noise_threshold: The SNR threshold for adaptive smoothing during nonrigid registration.
         nonrigid_enabled: Determines whether to compute nonrigid registration metrics.
         bidirectional_phase_offset: The bidirectional phase offset in pixels.
         edge_taper_slope: Controls the steepness of the edge taper for phase correlation.
         workers: The number of parallel workers for FFT computation.
 
     Returns:
-        A 2D array with shape (num_components, 3) containing registration metrics. Column 0 contains the rigid
+        A 2D array with shape (component_count, 3) containing registration metrics. Column 0 contains the rigid
         offset magnitude in pixels. Column 1 contains the mean nonrigid offset magnitude. Column 2 contains the maximum
         nonrigid offset magnitude. When nonrigid registration is disabled, columns 1 and 2 are zero.
     """
-    num_components, height, width = pc_low.shape
+    component_count, height, width = pc_low.shape
 
     # Computes constants that do not change across components.
     taper_slope = edge_taper_slope if one_photon_mode else 3.0 * smoothing_sigma
@@ -326,9 +309,9 @@ def _register_pc_extremes(
         block_size=block_size,
     )
 
-    metrics = np.zeros((num_components, 3), dtype=np.float32)
+    metrics = np.zeros((component_count, 3), dtype=np.float32)
 
-    for component_index in range(num_components):
+    for component_index in range(component_count):
         reference_image = pc_low[component_index]
         target_frame = pc_high[component_index].copy()
 
@@ -406,7 +389,7 @@ def _register_pc_extremes(
                 taper_mask=nonrigid_taper,
                 mean_offset=nonrigid_offset,
                 reference_kernel=nonrigid_kernel,
-                snr_threshold=snr_threshold,
+                snr_threshold=signal_to_noise_threshold,
                 smoothing_kernel=smoothing_kernel,
                 x_blocks=x_blocks,
                 y_blocks=y_blocks,

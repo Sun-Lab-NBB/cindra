@@ -29,7 +29,7 @@ def compute_cardinal_coefficients(  # pragma: no cover
 
     Args:
         interpolation_factor: The position between the central lattice points, in range [0, 1].
-        coefficients: The output array where to store the computed coefficients.
+        coefficients: The output array that stores the computed coefficients.
     """
     factor = interpolation_factor
     factor_squared = factor * factor
@@ -79,8 +79,8 @@ class SplineGrid:
         self._grid_sampling: float = sampling
 
         # Computes grid shape: (field_dim - 1) / sampling gives the number of grid intervals spanning the field,
-        # truncated to whole intervals. The +4 adds boundary padding since cubic B-spline evaluation at any point
-        # requires 4 surrounding knots (2 beyond each field edge).
+        # truncated to whole intervals. Spanning those intervals takes one more knot than intervals, and cubic
+        # B-spline evaluation adds one knot before the field's first knot and two past its last, so the total is +4.
         grid_height = int((field_height - 1) / self._grid_sampling) + 4
         grid_width = int((field_width - 1) / self._grid_sampling) + 4
         self._grid_shape: tuple[int, int] = (grid_height, grid_width)
@@ -100,9 +100,7 @@ class SplineGrid:
 
     @property
     def dimension_count(self) -> int:
-        """Returns the number of grid dimensions, which is fixed to 2 in the current SplineGrid
-        implementation.
-        """
+        """Returns the number of grid dimensions, which is fixed to 2 in the current SplineGrid implementation."""
         return len(self._field_shape)
 
     @property
@@ -134,9 +132,6 @@ class SplineGrid:
     def compute_grid_shape(field_height: int, field_width: int, grid_sampling: float) -> tuple[int, int]:
         """Computes the grid shape for the given field and sampling parameters without creating a full instance.
 
-        Notes:
-            This method is primarily used to ensure that the proposed grid size meets the minimum size requirements.
-
         Args:
             field_height: The height of the underlying image field.
             field_width: The width of the underlying image field.
@@ -146,8 +141,8 @@ class SplineGrid:
             The shape of the knot grid as (height, width).
         """
         # Computes grid shape: (field_dim - 1) / sampling gives the number of grid intervals spanning the field,
-        # truncated to whole intervals. The +4 adds boundary padding since cubic B-spline evaluation at any point
-        # requires 4 surrounding knots (2 beyond each field edge).
+        # truncated to whole intervals. Spanning those intervals takes one more knot than intervals, and cubic
+        # B-spline evaluation adds one knot before the field's first knot and two past its last, so the total is +4.
         grid_height = int((field_height - 1) / grid_sampling) + 4
         grid_width = int((field_width - 1) / grid_sampling) + 4
         return grid_height, grid_width
@@ -184,7 +179,6 @@ class SplineGrid:
             field=field_x,
         )
 
-        # Applies injectivity constraint and freezes edges if requested.
         if injective:
             self._unfold(factor=injective_factor)
 
@@ -245,7 +239,6 @@ class SplineGrid:
             grid_edge = (self._grid_shape[dimension] - 4) * self._grid_sampling
             edge_interpolation_factor = 1.0 - (field_edge - grid_edge) / self._grid_sampling
 
-            # Computes the B-spline coefficients at the field edge position.
             coefficients: NDArray[np.float32] = np.zeros((4,), dtype=np.float32)
             _compute_basis_coefficients(interpolation_factor=edge_interpolation_factor, coefficients=coefficients)
 
@@ -284,7 +277,7 @@ def _compute_basis_coefficients(  # pragma: no cover
 
     Args:
         interpolation_factor: The position between the central lattice points, in range [0, 1].
-        coefficients: The output array where to store the computed coefficients.
+        coefficients: The output array that stores the computed coefficients.
     """
     factor = interpolation_factor
     factor_squared = factor * factor
@@ -334,7 +327,6 @@ def _sample_grid(  # pragma: no cover
             interpolation_factor=grid_position_x - knot_index_x, coefficients=column_coefficients[x]
         )
 
-    # Parallelizes the computation over rows to improve performance.
     for y in prange(result.shape[0]):
         # Each thread gets its own coefficient array.
         coefficients_y = np.empty((4,), dtype=np.float32)
@@ -382,7 +374,6 @@ def _fit_knots_to_field(  # pragma: no cover
     numerator = np.zeros_like(knots)
     denominator = np.zeros_like(knots)
 
-    # Accumulates contributions from each pixel to its surrounding knots.
     for y in range(field.shape[0]):
         for x in range(field.shape[1]):
             field_value = field[y, x]
@@ -396,11 +387,9 @@ def _fit_knots_to_field(  # pragma: no cover
             knot_index_x = int(grid_position_x)
             interpolation_factor_x = grid_position_x - knot_index_x
 
-            # Computes B-spline basis coefficients at this pixel position.
             _compute_basis_coefficients(interpolation_factor=interpolation_factor_y, coefficients=coefficients_y)
             _compute_basis_coefficients(interpolation_factor=interpolation_factor_x, coefficients=coefficients_x)
 
-            # Pre-normalizes the value by the sum of squared basis coefficients.
             coefficient_sum_squared = 0.0
             for offset_y in range(4):
                 for offset_x in range(4):

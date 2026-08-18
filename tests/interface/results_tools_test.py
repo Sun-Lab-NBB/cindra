@@ -46,54 +46,6 @@ _REGISTRATION_ARRAYS: tuple[str, ...] = (
 """The registration outputs the verification tool requires of every registered plane."""
 
 
-def _touch(path: Path) -> None:
-    """Creates an empty file, together with the directories leading to it."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(b"")
-
-
-def _write_configuration(cindra_root: Path, flyback_planes: tuple[int, ...]) -> None:
-    """Saves a single-recording configuration naming the planes the pipeline binarizes without processing."""
-    configuration = SingleRecordingConfiguration()
-    configuration.main.ignored_flyback_planes = flyback_planes
-    configuration.save(file_path=cindra_root / SINGLE_RECORDING_CONFIGURATION_FILENAME)
-
-
-def _populate_recording(cindra_root: Path, plane_count: int, processed_planes: set[int]) -> None:
-    """Writes the output file set of a finished recording, giving unprocessed planes their binarization files alone."""
-    _touch(cindra_root / ACQUISITION_PARAMETERS_FILENAME)
-    _touch(cindra_root / COMBINED_METADATA_FILENAME)
-    for image in DetectionImages:
-        _touch(cindra_root / DETECTION_DATA_DIRECTORY_NAME / image)
-    for name in _EXTRACTION_ARRAYS:
-        _touch(cindra_root / name)
-
-    for plane_index in range(plane_count):
-        plane_directory = cindra_root / resolve_plane_specifier(plane_index=plane_index)
-        _touch(plane_directory / SINGLE_RECORDING_RUNTIME_DATA_FILENAME)
-        _touch(plane_directory / CHANNEL_1_BINARY_FILENAME)
-        _touch(plane_directory / DETECTION_DATA_DIRECTORY_NAME / DetectionImages.MEAN_IMAGE)
-
-        if plane_index not in processed_planes:
-            continue
-
-        for name in _REGISTRATION_ARRAYS:
-            _touch(plane_directory / REGISTRATION_DATA_DIRECTORY_NAME / name)
-        for image in (
-            DetectionImages.ENHANCED_MEAN_IMAGE,
-            DetectionImages.MAXIMUM_PROJECTION,
-            DetectionImages.CORRELATION_MAP,
-        ):
-            _touch(plane_directory / DETECTION_DATA_DIRECTORY_NAME / image)
-        for name in _EXTRACTION_ARRAYS:
-            _touch(plane_directory / name)
-
-
-def _deny_marker_scan(directory: Path, marker_name: str) -> list[Path]:
-    """Refuses the marker scan the way the ataraxis discoverer refuses an unreadable subtree."""
-    raise OSError(13, "Permission denied", str(directory))
-
-
 class TestFlybackPlaneVerification:
     """Tests the completeness verdict for a recording whose configuration excludes a plane from processing."""
 
@@ -129,10 +81,10 @@ class TestCindraRootResolution:
         """Verifies that a refused marker scan still resolves the output directory through the readable tree."""
         nested_root = tmp_path / "session" / OUTPUT_DIRECTORY_NAME
         nested_root.mkdir(parents=True)
-        _touch(nested_root / SINGLE_RECORDING_CONFIGURATION_FILENAME)
+        _touch(path=nested_root / SINGLE_RECORDING_CONFIGURATION_FILENAME)
         monkeypatch.setattr(results_tools, "discover_marker_files", _deny_marker_scan)
 
-        cindra_root, error = results_tools._find_cindra_root(str(tmp_path))
+        cindra_root, error = results_tools._find_cindra_root(recording_path=str(tmp_path))
 
         assert error is None
         assert cindra_root == nested_root
@@ -145,3 +97,51 @@ class TestCindraRootResolution:
 
         assert result["success"] is False
         assert "No cindra output directory found" in result["error"]
+
+
+def _touch(path: Path) -> None:
+    """Creates an empty file, together with the directories leading to it."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"")
+
+
+def _write_configuration(cindra_root: Path, flyback_planes: tuple[int, ...]) -> None:
+    """Saves a single-recording configuration naming the planes the pipeline binarizes without processing."""
+    configuration = SingleRecordingConfiguration()
+    configuration.main.ignored_flyback_planes = flyback_planes
+    configuration.save(file_path=cindra_root / SINGLE_RECORDING_CONFIGURATION_FILENAME)
+
+
+def _populate_recording(cindra_root: Path, plane_count: int, processed_planes: set[int]) -> None:
+    """Writes the output file set of a finished recording, giving unprocessed planes their binarization files alone."""
+    _touch(path=cindra_root / ACQUISITION_PARAMETERS_FILENAME)
+    _touch(path=cindra_root / COMBINED_METADATA_FILENAME)
+    for image in DetectionImages:
+        _touch(path=cindra_root / DETECTION_DATA_DIRECTORY_NAME / image)
+    for name in _EXTRACTION_ARRAYS:
+        _touch(path=cindra_root / name)
+
+    for plane_index in range(plane_count):
+        plane_directory = cindra_root / resolve_plane_specifier(plane_index=plane_index)
+        _touch(path=plane_directory / SINGLE_RECORDING_RUNTIME_DATA_FILENAME)
+        _touch(path=plane_directory / CHANNEL_1_BINARY_FILENAME)
+        _touch(path=plane_directory / DETECTION_DATA_DIRECTORY_NAME / DetectionImages.MEAN_IMAGE)
+
+        if plane_index not in processed_planes:
+            continue
+
+        for name in _REGISTRATION_ARRAYS:
+            _touch(path=plane_directory / REGISTRATION_DATA_DIRECTORY_NAME / name)
+        for image in (
+            DetectionImages.ENHANCED_MEAN_IMAGE,
+            DetectionImages.MAXIMUM_PROJECTION,
+            DetectionImages.CORRELATION_MAP,
+        ):
+            _touch(path=plane_directory / DETECTION_DATA_DIRECTORY_NAME / image)
+        for name in _EXTRACTION_ARRAYS:
+            _touch(path=plane_directory / name)
+
+
+def _deny_marker_scan(directory: Path, marker_name: str) -> list[Path]:
+    """Refuses the marker scan the way the ataraxis discoverer refuses an unreadable subtree."""
+    raise OSError(13, "Permission denied", str(directory))

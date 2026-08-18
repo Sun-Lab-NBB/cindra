@@ -75,6 +75,7 @@ def run_single_recording_pipeline(
 
     Raises:
         FileNotFoundError: If the single-recording configuration data cannot be loaded from the specified file.
+        RuntimeError: If the host is macOS and carries no loadable OpenMP runtime for the Numba threading layer.
         ValueError: If the recording's data validation fails, the specified job_id does not match any available job,
             or target_plane names a plane the recording does not hold.
     """
@@ -115,7 +116,6 @@ def run_single_recording_pipeline(
         SingleRecordingJobNames.COMBINE: combine,
     }
 
-    # If all requested job flags are False, treats them as all True (run all jobs).
     if not any(requested_jobs.values()):
         requested_jobs = dict.fromkeys(requested_jobs, True)
 
@@ -128,10 +128,8 @@ def run_single_recording_pipeline(
 
     tracker = ProcessingTracker(file_path=tracker_path)
 
-    # Determines the execution mode and resolves job IDs accordingly.
     if job_id is not None:
-        # REMOTE mode: Resolves the requested job_id against the pipeline's universe, aligns the tracker with every
-        # valid job so that the tracker holds the requested ID, and executes the matching job.
+        # REMOTE mode.
         resolved_name, resolved_specifier = tracker.resolve_job(job_id=job_id, universe=universe)
 
         tracker.align_jobs(jobs=universe, universe=universe)
@@ -145,9 +143,7 @@ def run_single_recording_pipeline(
             workers=stage_workers.get(resolved_name),
         )
     else:
-        # LOCAL mode: Builds all requested jobs upfront using the pre-resolved plane count, aligns the tracker
-        # with the requested subset, then runs them sequentially. This mirrors the approach used by
-        # run_multi_recording_pipeline.
+        # LOCAL mode.
 
         # Rejects a plane the recording does not hold before the tracker is aligned. Without this guard the
         # out-of-range job pair reaches align_jobs, which rejects it against the universe with a message naming job
@@ -223,8 +219,9 @@ def run_multi_recording_pipeline(
     Raises:
         FileNotFoundError: If the multi-recording configuration data cannot be loaded from the specified file, or if a
             recording directory holds no combined_metadata.npz file.
-        RuntimeError: If a recording directory holds multiple combined_metadata.npz files, if the recording paths do
-            not contain unique identifying components, or if a resolved identifying component contains a colon.
+        RuntimeError: If the host is macOS and carries no loadable OpenMP runtime for the Numba threading layer. It is
+            also raised when a recording directory holds multiple combined_metadata.npz files, when the recording paths
+            do not contain unique identifying components, or when a resolved identifying component contains a colon.
         ValueError: If recording validation fails, recording_directories names fewer than two recordings,
             target_recording does not name a resolved recording, or the specified job_id does not match any available
             jobs.
@@ -267,7 +264,6 @@ def run_multi_recording_pipeline(
         MultiRecordingJobNames.EXTRACT: extract,
     }
 
-    # If all requested job flags are False, treats them as all True (run all jobs).
     if not any(requested_jobs.values()):
         requested_jobs = dict.fromkeys(requested_jobs, True)
 
@@ -280,10 +276,8 @@ def run_multi_recording_pipeline(
 
     tracker = ProcessingTracker(file_path=main_recording_path.joinpath(MULTI_RECORDING_TRACKER_FILENAME))
 
-    # Determines the execution mode and resolves job IDs accordingly.
     if job_id is not None:
-        # REMOTE mode: Resolves the requested job_id against the pipeline's universe, aligns the tracker with every
-        # valid job so that the tracker holds the requested ID, and executes the matching job.
+        # REMOTE mode.
         resolved_name, resolved_specifier = tracker.resolve_job(job_id=job_id, universe=universe)
 
         tracker.align_jobs(jobs=universe, universe=universe)
@@ -297,8 +291,7 @@ def run_multi_recording_pipeline(
             workers=stage_workers[resolved_name],
         )
     else:
-        # LOCAL mode: Builds all requested jobs, aligns the tracker with the requested subset, then runs
-        # them sequentially. For EXTRACT jobs, expands to recording-specific jobs if target_recording is None.
+        # LOCAL mode.
 
         # Rejects a recording the dataset does not span before the tracker is aligned. The context resolver applies
         # the same check, but only once the extraction job reaches it, which is after align_jobs would have rejected

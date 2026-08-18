@@ -1,10 +1,5 @@
-"""Provides the read-only inventory of what a recording or a tracked dataset already holds on disk, which an external
-scheduler reads to size and sequence its own work without driving the pipeline.
-
-Every resolver here reads the acquisition parameters and stats the output tree. None of them decodes an image, builds a
-runtime context, or creates a directory, so asking what a recording holds costs a few small reads and changes nothing.
-A recording that carries neither parameters nor output resolves to an empty record rather than raising, because an
-absent recording is an answer rather than a failure.
+"""Provides the read-only inventory of what a recording or a tracked dataset already holds on disk. Every resolver here
+answers from the recording's acquisition parameters and a stat of its output tree.
 """
 
 from __future__ import annotations
@@ -83,11 +78,11 @@ def resolve_recording_planes(output_root: Path, data_path: Path | None = None) -
     Notes:
         The plane count is read from the acquisition parameters the recording's output directory carries, falling back
         to the parameters file in the raw imaging directory when the recording has not been processed yet. A recording
-        offering neither resolves to a record whose plane count is zero and whose resolved flag is False, which a
-        caller reads as a floor to plan around rather than as an error.
+        offering neither resolves to an empty record whose plane count is zero and whose resolved flag is False,
+        because an absent recording is an answer a caller plans around rather than a failure.
 
         The plane count follows the same rule the context resolver applies, so the planes named here are the planes
-        the pipeline creates.
+        the pipeline creates. Resolving costs a few small reads and creates nothing on disk.
 
     Args:
         output_root: The output root the recording was configured with.
@@ -129,7 +124,8 @@ def resolve_dataset_recordings(recording_roots: Sequence[Path], dataset_name: st
     Notes:
         The dataset is considered discovered when the first recording's dataset directory carries the template mask
         archive, matching where the discovery stage writes it. A recording is considered extracted when its own
-        dataset directory carries the tracked fluorescence trace, which only the extraction stage writes.
+        dataset directory carries the tracked fluorescence trace, which only the extraction stage writes. Resolving
+        costs a few small reads and creates nothing on disk.
 
     Args:
         recording_roots: The output root of every recording the dataset spans.

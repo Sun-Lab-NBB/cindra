@@ -11,6 +11,21 @@ from cindra.registration.metrics import _compute_pc_extremes, _register_pc_extre
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
+_PC_BLOB_CENTERS: tuple[tuple[int, int], ...] = ((30, 34), (72, 46), (48, 88), (94, 92))
+"""Blob centers for the 128x128 synthetic principal-component extreme images."""
+
+_PC_SHIFT_Y: int = 3
+"""The vertical translation, in pixels, planted between the low and high principal-component extreme images."""
+
+_PC_SHIFT_X: int = -4
+"""The horizontal translation, in pixels, planted between the low and high principal-component extreme images."""
+
+_PC_EDGE_TAPER_SLOPE: float = 10.0
+"""The edge taper falloff used by the principal-component tests, which keeps the taper off the blobs it measures."""
+
+_PC_HIGHPASS_WINDOW: int = 20
+"""The spatial high-pass window used by the principal-component tests."""
+
 
 class TestComputePcExtremes:
     """Tests _compute_pc_extremes."""
@@ -28,8 +43,8 @@ class TestComputePcExtremes:
 
         pc_low, pc_high, projections = _compute_pc_extremes(
             frames=frames,
-            num_extreme_frames=extreme_frame_count,
-            num_components=component_count,
+            extreme_frame_count=extreme_frame_count,
+            component_count=component_count,
         )
 
         assert pc_low.shape == (component_count, height, width)
@@ -49,8 +64,8 @@ class TestComputePcExtremes:
 
         pc_low, pc_high, projections = _compute_pc_extremes(
             frames=frames,
-            num_extreme_frames=extreme_frame_count,
-            num_components=component_count,
+            extreme_frame_count=extreme_frame_count,
+            component_count=component_count,
         )
 
         assert pc_low.shape == (component_count, height, width)
@@ -58,7 +73,7 @@ class TestComputePcExtremes:
         assert projections.shape == (frame_count, component_count)
 
     def test_output_dtypes(self) -> None:
-        """Verifies that pc_low and pc_high arrays have float32 dtype."""
+        """Verifies that the pc_low, pc_high, and projections arrays all have float32 dtype."""
         frame_count = 50
         height = 16
         width = 16
@@ -70,8 +85,8 @@ class TestComputePcExtremes:
 
         pc_low, pc_high, projections = _compute_pc_extremes(
             frames=frames,
-            num_extreme_frames=extreme_frame_count,
-            num_components=component_count,
+            extreme_frame_count=extreme_frame_count,
+            component_count=component_count,
         )
 
         assert pc_low.dtype == np.float32
@@ -91,8 +106,8 @@ class TestComputePcExtremes:
 
         _, _, projections = _compute_pc_extremes(
             frames=frames,
-            num_extreme_frames=extreme_frame_count,
-            num_components=component_count,
+            extreme_frame_count=extreme_frame_count,
+            component_count=component_count,
         )
 
         assert np.all(np.isfinite(projections))
@@ -114,8 +129,8 @@ class TestComputePcExtremes:
 
         pc_low, pc_high, _ = _compute_pc_extremes(
             frames=frames,
-            num_extreme_frames=extreme_frame_count,
-            num_components=component_count,
+            extreme_frame_count=extreme_frame_count,
+            component_count=component_count,
         )
 
         # Expects the pc_low and pc_high means to differ because extreme frames come from opposite ends of the gradient.
@@ -139,54 +154,15 @@ class TestComputePcExtremes:
 
         pc_low, pc_high, _ = _compute_pc_extremes(
             frames=frames,
-            num_extreme_frames=extreme_frame_count,
-            num_components=component_count,
+            extreme_frame_count=extreme_frame_count,
+            component_count=component_count,
         )
 
-        # Checks that the two extremes have different mean intensities. The PC sign is arbitrary, so avoid assuming an
-        # ordering.
+        # Checks that the two extremes have different mean intensities. The PC sign is arbitrary, so the assertion
+        # compares the magnitude of the difference rather than an ordering.
         low_mean = float(pc_low[0].mean())
         high_mean = float(pc_high[0].mean())
         assert abs(high_mean - low_mean) > 1.0
-
-
-_PC_BLOB_CENTERS: tuple[tuple[int, int], ...] = ((30, 34), (72, 46), (48, 88), (94, 92))
-"""Blob centers for the 128x128 synthetic principal-component extreme images."""
-
-_PC_SHIFT_Y: int = 3
-"""The vertical translation, in pixels, planted between the low and high principal-component extreme images."""
-
-_PC_SHIFT_X: int = -4
-"""The horizontal translation, in pixels, planted between the low and high principal-component extreme images."""
-
-_PC_EDGE_TAPER_SLOPE: float = 10.0
-"""The edge taper falloff used by the principal-component tests, which keeps the taper off the blobs it measures."""
-
-_PC_HIGHPASS_WINDOW: int = 20
-"""The spatial high-pass window used by the principal-component tests."""
-
-
-def _build_pc_extreme_pair() -> tuple[NDArray[np.float32], NDArray[np.float32]]:
-    """Builds a low and a high principal-component image separated by an exact integer translation.
-
-    The blobs translate between the two images while a linear illumination ramp stays where it is. The ramp is far
-    brighter than the blobs, and a box mean over a symmetric window reproduces a linear ramp exactly, so the spatial
-    high-pass filter annihilates it while leaving the blobs intact. A correlation that skips that filter is instead
-    dominated by the ramp, which is identical in both images and therefore pulls the peak toward a zero offset.
-
-    Returns:
-        A tuple of the low and high extreme images, each with shape (1, 128, 128).
-    """
-    rows, columns = np.mgrid[0:128, 0:128]
-    blobs = np.zeros((128, 128), dtype=np.float64)
-    for center_row, center_column in _PC_BLOB_CENTERS:
-        blobs += 900.0 * np.exp(-(((rows - center_row) ** 2 + (columns - center_column) ** 2) / (2.0 * 4.0**2)))
-    illumination = 50.0 * (rows + 0.5 * columns)
-
-    pc_low = (blobs + illumination).astype(np.float32)[np.newaxis, :, :]
-    shifted = np.roll(blobs, shift=(_PC_SHIFT_Y, _PC_SHIFT_X), axis=(0, 1))
-    pc_high = (shifted + illumination).astype(np.float32)[np.newaxis, :, :]
-    return pc_low, pc_high
 
 
 class TestRegisterPcExtremes:
@@ -234,7 +210,30 @@ class TestRegisterPcExtremes:
         )
 
         # Without the high-pass the shared illumination ramp dominates both images, and the ramp does not move between
-        # them, so the correlation peak has to stay inside the one-pixel quantum around the origin instead of landing
+        # them. The correlation peak therefore stays inside the one-pixel quantum around the origin instead of landing
         # on the five-pixel translation the blobs carry. This is the control that gives the one-photon assertion above
         # its meaning: the recovered shift comes from the filtering, not from the blobs being trivially findable.
         assert float(metrics[0, 0]) <= 1.0
+
+
+def _build_pc_extreme_pair() -> tuple[NDArray[np.float32], NDArray[np.float32]]:
+    """Builds a low and a high principal-component image separated by an exact integer translation.
+
+    The blobs translate between the two images while a linear illumination ramp stays where it is. The ramp is far
+    brighter than the blobs, and a box mean over a symmetric window reproduces a linear ramp exactly, so the spatial
+    high-pass filter annihilates it while leaving the blobs intact. A correlation that skips that filter is instead
+    dominated by the ramp, which is identical in both images and therefore pulls the peak toward a zero offset.
+
+    Returns:
+        A tuple of the low and high extreme images, each with shape (1, 128, 128).
+    """
+    rows, columns = np.mgrid[0:128, 0:128]
+    blobs = np.zeros((128, 128), dtype=np.float64)
+    for center_row, center_column in _PC_BLOB_CENTERS:
+        blobs += 900.0 * np.exp(-(((rows - center_row) ** 2 + (columns - center_column) ** 2) / (2.0 * 4.0**2)))
+    illumination = 50.0 * (rows + 0.5 * columns)
+
+    pc_low = (blobs + illumination).astype(np.float32)[np.newaxis, :, :]
+    shifted = np.roll(blobs, shift=(_PC_SHIFT_Y, _PC_SHIFT_X), axis=(0, 1))
+    pc_high = (shifted + illumination).astype(np.float32)[np.newaxis, :, :]
+    return pc_low, pc_high

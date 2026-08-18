@@ -12,17 +12,14 @@ class _CommonStyle:
     """Encapsulates static visual parameters shared by all viewer windows."""
 
     white_label: str = "color: white;"
-    """The stylesheet for QLabel text that sits on the dark window background. Applied to status labels, axis labels,
-    checkbox captions, and group headings across all viewer windows."""
+    """The stylesheet for QLabel text that sits on the dark window background."""
     icon_size: int = 30
     """The pixel dimension (width and height) for QIcon-based media control buttons (play, pause, step-forward,
     step-backward) in the Binary, PC, and Tracking viewer playback toolbars."""
     default_mask_opacity: int = 127
-    """The default mask overlay opacity (0-255 uint8 range). Determines the initial transparency of ROI masks rendered
-    over background images in the ROI viewer and Tracking viewer."""
+    """The default mask overlay opacity (0-255 uint8 range)."""
     group_box: str = "QGroupBox { color: white; }"
-    """The stylesheet for QGroupBox title text. Applied to every QGroupBox across all viewer windows so section titles
-    read clearly on the dark background."""
+    """The stylesheet for QGroupBox title text."""
     edit_width: int = 50
     """The fixed pixel width for small numeric QLineEdit input fields across all viewer windows."""
     button_pressed: str = (
@@ -49,19 +46,17 @@ class _PlotStyle:
     scatter_point_size: int = 10
     """The marker diameter in pixels for pyqtgraph scatter plot overlays."""
     legend_headroom: float = 0.25
-    """The fraction of the y-axis data range added as extra top padding when a plot contains a legend. Prevents
-    legend entries from overlapping the topmost data points."""
+    """The fraction of the y-axis data range added as extra top padding when a plot contains a legend. Prevents legend
+    entries from overlapping the topmost data points."""
     legend_horizontal_spacing: int = 20
     """The horizontal pixel spacing between adjacent legend entries in pyqtgraph plot widgets."""
     legend_offset: tuple[int, int] = (-10, 1)
-    """The (x, y) pixel offset that positions the pyqtgraph legend relative to the top-right corner of the plot area.
-    A negative x value pulls the legend inward from the right edge to avoid clipping."""
+    """The (x, y) pixel offset that positions the pyqtgraph legend relative to the top-right corner of the plot area. A
+    negative x value pulls the legend inward from the right edge to avoid clipping."""
     left_axis_width: int = 80
-    """The fixed pixel width for the left (y) axis in plot widgets. Provides consistent spacing between the axis label
-    and tick labels across all viewers."""
+    """The fixed pixel width for the left (y) axis in plot widgets."""
     bottom_axis_height: int = 50
-    """The fixed pixel height for the bottom (x) axis in plot widgets. Provides consistent spacing between the axis
-    label and tick labels across all viewers."""
+    """The fixed pixel height for the bottom (x) axis in plot widgets."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,8 +114,8 @@ class _BinaryPlayerStyle:
     window_geometry: tuple[int, int, int, int] = (50, 50, 1400, 1070)
     """The initial window position (x, y) and size (width, height) for the binary player."""
     legend_column_count: int = 2
-    """The number of columns in the registration offset plot legend. Spreading the entries across two columns lays
-    the legend out horizontally."""
+    """The number of columns in the registration offset plot legend. Spreading the entries across two columns lays the
+    legend out horizontally."""
     group_spacing: int = 20
     """The pixel spacing inserted between logical widget groups in the frame navigation info bar."""
 
@@ -132,21 +127,21 @@ class _PCViewerStyle:
     group_spacing: int = 20
     """The pixel spacing inserted between logical widget groups in the bottom control panel."""
     title_gutter_fraction: float = 0.08
-    """The fraction of image height added as black space below each Principal Component extreme image. This ensures
-    that the image titles anchored to the bottom of the image are not clipped by the image or any other GUI elements."""
+    """The fraction of image height added as black space below each Principal Component extreme image. This ensures that
+    the image titles anchored to the bottom of the image are not clipped by the image or any other GUI elements."""
     window_geometry: tuple[int, int, int, int] = (50, 50, 1300, 800)
     """The initial window position (x, y) and size (width, height) for the PC viewer."""
     legend_column_count: int = 3
-    """The number of columns in the PC metrics plot legend. Spreading the entries across three columns lays the
-    legend out horizontally."""
+    """The number of columns in the PC metrics plot legend. Spreading the entries across three columns lays the legend
+    out horizontally."""
 
 
 @dataclass(frozen=True, slots=True)
 class _Colors:
     """Defines the RGB color palette shared across all viewer windows.
 
-    All colors are expressed as ``(R, G, B)`` integer tuples in the 0-255 range. Viewers select
-    from this palette at their call sites, giving each entry a local semantic name.
+    All colors are expressed as ``(R, G, B)`` integer tuples in the 0-255 range. Viewers select from this palette at
+    their call sites, giving each entry a local semantic name.
     """
 
     cyan: tuple[int, int, int] = (0, 255, 255)

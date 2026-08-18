@@ -15,63 +15,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _make_roi(
-    compactness: float = 1.5,
-    normalized_pixel_count: float = 1.0,
-    skewness: float = 0.5,
-) -> ROIStatistics:
-    """Creates a minimal ROIStatistics instance with classification features."""
-    mask = ROIMask(
-        y_pixels=np.array([5, 5, 6, 6], dtype=np.int32),
-        x_pixels=np.array([5, 6, 5, 6], dtype=np.int32),
-        pixel_weights=np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32),
-        centroid=(5, 5),
-        frame_width=20,
-    )
-    roi = ROIStatistics(mask=mask)
-    roi.compactness = compactness
-    roi.normalized_pixel_count = normalized_pixel_count
-    roi.skewness = skewness
-    return roi
-
-
-def _create_classifier_file(path: Path, sample_count: int = 200) -> None:
-    """Creates a temporary classifier .npz file."""
-    generator = np.random.default_rng(seed=42)
-    labels = generator.choice([True, False], size=sample_count)
-    np.savez(
-        path,
-        training_labels=labels,
-        normalized_pixel_count=generator.standard_normal(sample_count).astype(np.float32) + 1.0,
-        compactness=generator.standard_normal(sample_count).astype(np.float32) + 1.5,
-        skewness=generator.standard_normal(sample_count).astype(np.float32),
-    )
-
-
-def _create_separable_classifier_file(path: Path, sample_count: int = 200) -> None:
-    """Creates a classifier file whose labels follow its features, so a fitted model can discriminate at all.
-
-    The cell half and the artifact half occupy disjoint ranges of every feature, which is what makes the fitted
-    probability grid, the log-odds transform, and the logistic fit observable in the predictions.
-    """
-    generator = np.random.default_rng(seed=11)
-    half = sample_count // 2
-    labels = np.concatenate([np.ones(half, dtype=np.bool_), np.zeros(half, dtype=np.bool_)])
-    np.savez(
-        path,
-        training_labels=labels,
-        normalized_pixel_count=np.concatenate(
-            [generator.normal(loc=2.0, scale=0.1, size=half), generator.normal(loc=0.3, scale=0.1, size=half)]
-        ).astype(np.float32),
-        compactness=np.concatenate(
-            [generator.normal(loc=1.0, scale=0.05, size=half), generator.normal(loc=2.5, scale=0.05, size=half)]
-        ).astype(np.float32),
-        skewness=np.concatenate(
-            [generator.normal(loc=2.0, scale=0.2, size=half), generator.normal(loc=-0.5, scale=0.2, size=half)]
-        ).astype(np.float32),
-    )
-
-
 class TestClassifierDiscrimination:
     """Tests that the fitted model separates ROIs drawn from the two training populations."""
 
@@ -413,3 +356,60 @@ class TestClassifyFunction:
         result_high = classify(roi_statistics=rois, classification_threshold=1.0)
         assert result_low[0, 0] == 1.0
         assert result_high[0, 0] == 0.0
+
+
+def _make_roi(
+    compactness: float = 1.5,
+    normalized_pixel_count: float = 1.0,
+    skewness: float = 0.5,
+) -> ROIStatistics:
+    """Creates a minimal ROIStatistics instance with classification features."""
+    mask = ROIMask(
+        y_pixels=np.array([5, 5, 6, 6], dtype=np.int32),
+        x_pixels=np.array([5, 6, 5, 6], dtype=np.int32),
+        pixel_weights=np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32),
+        centroid=(5, 5),
+        frame_width=20,
+    )
+    roi = ROIStatistics(mask=mask)
+    roi.compactness = compactness
+    roi.normalized_pixel_count = normalized_pixel_count
+    roi.skewness = skewness
+    return roi
+
+
+def _create_classifier_file(path: Path, sample_count: int = 200) -> None:
+    """Creates a temporary classifier .npz file."""
+    generator = np.random.default_rng(seed=42)
+    labels = generator.choice([True, False], size=sample_count)
+    np.savez(
+        path,
+        training_labels=labels,
+        normalized_pixel_count=generator.standard_normal(sample_count).astype(np.float32) + 1.0,
+        compactness=generator.standard_normal(sample_count).astype(np.float32) + 1.5,
+        skewness=generator.standard_normal(sample_count).astype(np.float32),
+    )
+
+
+def _create_separable_classifier_file(path: Path, sample_count: int = 200) -> None:
+    """Creates a classifier file whose labels follow its features, so a fitted model can discriminate at all.
+
+    The cell half and the artifact half occupy disjoint ranges of every feature, which is what makes the fitted
+    probability grid, the log-odds transform, and the logistic fit observable in the predictions.
+    """
+    generator = np.random.default_rng(seed=11)
+    half = sample_count // 2
+    labels = np.concatenate([np.ones(half, dtype=np.bool_), np.zeros(half, dtype=np.bool_)])
+    np.savez(
+        path,
+        training_labels=labels,
+        normalized_pixel_count=np.concatenate(
+            [generator.normal(loc=2.0, scale=0.1, size=half), generator.normal(loc=0.3, scale=0.1, size=half)]
+        ).astype(np.float32),
+        compactness=np.concatenate(
+            [generator.normal(loc=1.0, scale=0.05, size=half), generator.normal(loc=2.5, scale=0.05, size=half)]
+        ).astype(np.float32),
+        skewness=np.concatenate(
+            [generator.normal(loc=2.0, scale=0.2, size=half), generator.normal(loc=-0.5, scale=0.2, size=half)]
+        ).astype(np.float32),
+    )

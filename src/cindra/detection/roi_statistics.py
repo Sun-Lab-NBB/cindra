@@ -15,12 +15,39 @@ if TYPE_CHECKING:
     from ..dataclasses import ROIMask, ROIStatistics
 
 
+@dataclass(frozen=True, slots=True)
+class _EllipseData:
+    """Defines an ellipse fitted to the ROI's pixels via weighted covariance analysis.
+
+    Notes:
+        The radius and aspect ratio derived from this ellipse are used as cell classification features.
+    """
+
+    radii: tuple[float, float]
+    """The semi-major and semi-minor axis lengths, ordered from largest to smallest."""
+
+    y_scale: int
+    """The y-axis scaling factor that corrects for non-square pixel aspect ratios during fitting."""
+
+    x_scale: int
+    """The x-axis scaling factor that corrects for non-square pixel aspect ratios during fitting."""
+
+    @property
+    def radius(self) -> float:
+        """Returns the effective radius of the ROI ellipse scaled by the mean of y_scale and x_scale."""
+        return float(self.radii[0] * np.mean((self.x_scale, self.y_scale)))
+
+    @property
+    def aspect_ratio(self) -> float:
+        """Returns the normalized aspect ratio bounded between 0 and 2, where 1 indicates a circular shape."""
+        major, minor = self.radii
+        return 2 * major / (major + minor + 0.01)
+
+
 def estimate_diameter_from_rois(rois: list[ROIMask], default_diameter: int = 10) -> int:
     """Estimates the ROI diameter from the pixel counts of a list of ROIs.
 
-    This function computes the median pixel count across all ROIs and derives an equivalent circular diameter. This is
-    useful when the original ROI diameter is unavailable or when ROI geometry has been transformed (e.g., after
-    diffeomorphic registration or template mask generation).
+    Computes the median pixel count across all ROIs and derives an equivalent circular diameter.
 
     Args:
         rois: The list of ROIMask instances to analyze.
@@ -29,7 +56,7 @@ def estimate_diameter_from_rois(rois: list[ROIMask], default_diameter: int = 10)
 
     Returns:
         The estimated ROI diameter in pixels, computed as the diameter of a circle with area equal to the median
-        ROI pixel count.
+        ROI pixel count, truncated toward zero and floored at 1 pixel.
     """
     if not rois:
         return default_diameter
@@ -48,22 +75,6 @@ def estimate_diameter_from_rois(rois: list[ROIMask], default_diameter: int = 10)
     return max(estimated_diameter, 1)
 
 
-def compute_median_pixel_position(y_pixels: NDArray[np.int32], x_pixels: NDArray[np.int32]) -> tuple[int, int]:
-    """Computes the ROI centroid as the y and x coordinates of the pixel closest to the coordinate-wise median.
-
-    Args:
-        y_pixels: The y-coordinates of the ROI's pixels.
-        x_pixels: The x-coordinates of the ROI's pixels.
-
-    Returns:
-        The (y, x) coordinates of the pixel closest to the median position.
-    """
-    y_median = np.median(y_pixels)
-    x_median = np.median(x_pixels)
-    min_index = np.argmin(np.square(x_pixels - x_median) + np.square(y_pixels - y_median))
-    return int(y_pixels[min_index]), int(x_pixels[min_index])
-
-
 def compute_roi_statistics(
     rois: list[ROIStatistics],
     frame_height: int,
@@ -78,11 +89,11 @@ def compute_roi_statistics(
     """Computes shape statistics for a list of ROIStatistics instances in-place.
 
     Notes:
-        This function computes statistics (compactness, solidity, radius, aspect ratio, etc.) for each input ROI and
-        writes the computed values back to the ROIStatistics instances. If maximum_overlap_fraction is specified, ROIs
-        exceeding the overlap threshold are removed from the list in-place. When lightweight is True, only the minimal
-        statistics required for preclassification (compactness, pixel_count, soma_mask, and normalized_pixel_count) are
-        computed, skipping the expensive ellipse fitting, convex hull solidity, and overlap computations.
+        Computes statistics (compactness, solidity, radius, aspect ratio, etc.) for each input ROI and writes the
+        computed values back to the ROIStatistics instances. If maximum_overlap_fraction is specified, ROIs exceeding
+        the overlap threshold are removed from the list in-place. When lightweight is True, only the minimal statistics
+        required for preclassification (compactness, pixel_count, soma_mask, and normalized_pixel_count) are computed,
+        skipping the expensive ellipse fitting, convex hull solidity, and overlap computations.
 
     Args:
         rois: The list of ROIStatistics instances that define the ROIs to process. Modified in-place.
@@ -109,7 +120,7 @@ def compute_roi_statistics(
     # Initializes centroids for ROIs that lack them. The centroid is required for computing radial statistics.
     for roi in rois:
         if not roi.mask.centroid or roi.mask.centroid == (0, 0):
-            roi.mask.centroid = compute_median_pixel_position(y_pixels=roi.mask.y_pixels, x_pixels=roi.mask.x_pixels)
+            roi.mask.centroid = _compute_median_pixel_position(y_pixels=roi.mask.y_pixels, x_pixels=roi.mask.x_pixels)
 
     # Resolves the ROI diameter for distance normalization. A sensible default is used when no diameter is provided.
     default_diameter = 10
@@ -176,54 +187,24 @@ def compute_roi_statistics(
             wrapper.data.mask.overlap_mask = wrapper.get_overlap_mask(overlap_count_image=overlap_counts)
 
 
-@dataclass(frozen=True, slots=True)
-class _EllipseData:
-    """Defines an ellipse fitted to the ROI's pixels via weighted covariance analysis.
+def _compute_median_pixel_position(y_pixels: NDArray[np.int32], x_pixels: NDArray[np.int32]) -> tuple[int, int]:
+    """Computes the ROI centroid as the y and x coordinates of the pixel closest to the coordinate-wise median.
 
-    Notes:
-        The radius and aspect ratio derived from this ellipse are used as cell classification features.
+    Args:
+        y_pixels: The y-coordinates of the ROI's pixels.
+        x_pixels: The x-coordinates of the ROI's pixels.
+
+    Returns:
+        The (y, x) coordinates of the pixel closest to the median position.
     """
-
-    centroid: NDArray[np.float32]
-    """The weighted mean of pixel coordinates that serves as the ellipse center point."""
-
-    covariance: NDArray[np.float32]
-    """The 2x2 covariance matrix that encodes the ellipse orientation and axis lengths."""
-
-    radii: tuple[float, float]
-    """The semi-major and semi-minor axis lengths, ordered from largest to smallest."""
-
-    boundary_points: NDArray[np.float32]
-    """The (y, x) coordinates of 100 evenly spaced points along the ellipse perimeter for visualization."""
-
-    y_scale: int
-    """The y-axis scaling factor that corrects for non-square pixel aspect ratios during fitting."""
-
-    x_scale: int
-    """The x-axis scaling factor that corrects for non-square pixel aspect ratios during fitting."""
-
-    @property
-    def area(self) -> float:
-        """Returns pi scaled by the geometric mean of the semi-major and semi-minor axis lengths."""
-        return float((self.radii[0] * self.radii[1]) ** 0.5 * np.pi)
-
-    @property
-    def radius(self) -> float:
-        """Returns the effective radius of the ROI ellipse scaled by the mean of y_scale and x_scale."""
-        return float(self.radii[0] * np.mean((self.x_scale, self.y_scale)))
-
-    @property
-    def aspect_ratio(self) -> float:
-        """Returns the normalized aspect ratio bounded between 0 and 2, where 1 indicates a circular shape."""
-        major, minor = self.radii
-        return 2 * major / (major + minor + 0.01)
+    y_median = np.median(y_pixels)
+    x_median = np.median(x_pixels)
+    min_index = np.argmin(np.square(x_pixels - x_median) + np.square(y_pixels - y_median))
+    return int(y_pixels[min_index]), int(x_pixels[min_index])
 
 
 def _compute_distance_kernel(radius: int) -> NDArray[np.float32]:
     """Computes a 2D array of Euclidean distances from the center point.
-
-    This function generates a reference distance distribution used to compute the baseline mean radius (see
-    _ROI.baseline_mean_radius) for ROI compactness calculations.
 
     Args:
         radius: The radius of the kernel in pixels.
@@ -241,10 +222,9 @@ class _ROI:
 
     Notes:
         The class uses a shared class variable caching sorted baseline distances (keyed by diameter) to avoid
-        recomputation across instances. The
-        soma mask is cached after first computation to avoid redundant calculations when accessing dependent
-        properties. Distance-based statistics (mean_radius, compactness) are normalized by the ROI diameter to make
-        them scale-invariant across different ROI sizes and imaging magnifications.
+        recomputation across instances. The soma mask is cached after first computation to avoid redundant calculations
+        when accessing dependent properties. Distance-based statistics (mean_radius, compactness) are normalized by the
+        ROI diameter to make them scale-invariant across different ROI sizes and imaging magnifications.
 
     Attributes:
         _data: The underlying ROIStatistics instance.
@@ -370,7 +350,9 @@ class _ROI:
 
     @property
     def solidity(self) -> float:
-        """Returns the ROI solidity as the ratio of soma pixel count to convex hull area."""
+        """Returns the ROI solidity as the ratio of soma pixel count to convex hull area, substituting a fixed area
+        of 10.0 for ROIs of 10 or fewer pixels and for degenerate hulls.
+        """
         minimum_pixels_for_hull = 10
         default_area = 10.0
 
@@ -402,15 +384,13 @@ class _ROI:
     def fit_ellipse(self, y_scale: int, x_scale: int) -> _EllipseData:
         """Fits a 2D Gaussian ellipse to the ROI pixels via covariance eigendecomposition.
 
-        The fitted ellipse's radius and aspect ratio are used as cell classification features.
-
         Args:
             y_scale: The y-axis scaling factor for correcting non-square pixel aspect ratios.
             x_scale: The x-axis scaling factor for correcting non-square pixel aspect ratios.
 
         Returns:
-            The fitted ellipse parameters including center, covariance, radii, and boundary points, packaged into an
-            _EllipseData instance.
+            The semi-major and semi-minor radii of the fitted ellipse, together with the axis scaling factors applied
+            during the fit.
         """
         y_pixels = self.soma_y_pixels
         x_pixels = self.soma_x_pixels
@@ -425,15 +405,14 @@ class _ROI:
         y_scaled = y_pixels[valid_mask].astype(np.float32) / y_scale
         x_scaled = x_pixels[valid_mask].astype(np.float32) / x_scale
 
-        # Computes weighted centroid and covariance matrix. The covariance encodes ellipse shape and orientation.
-        centroid = np.array([np.dot(weights, y_scaled), np.dot(weights, x_scaled)], dtype=np.float32)
+        # Computes the weighted centroid and the covariance terms. The covariance encodes ellipse shape and orientation.
+        centroid = np.array([np.dot(a=weights, b=y_scaled), np.dot(a=weights, b=x_scaled)], dtype=np.float32)
         sqrt_weights = np.sqrt(weights)
         y_centered = (y_scaled - centroid[0]) * sqrt_weights
         x_centered = (x_scaled - centroid[1]) * sqrt_weights
-        covariance_yy = np.dot(y_centered, y_centered)
-        covariance_xx = np.dot(x_centered, x_centered)
-        covariance_yx = np.dot(y_centered, x_centered)
-        covariance = np.array([[covariance_yy, covariance_yx], [covariance_yx, covariance_xx]], dtype=np.float32)
+        covariance_yy = np.dot(a=y_centered, b=y_centered)
+        covariance_xx = np.dot(a=x_centered, b=x_centered)
+        covariance_yx = np.dot(a=y_centered, b=x_centered)
 
         # Computes eigenvalues analytically for 2x2 symmetric matrix (faster than np.linalg.eig).
         trace = covariance_yy + covariance_xx
@@ -442,38 +421,14 @@ class _ROI:
         eigenvalue_1 = (trace + discriminant) / 2.0
         eigenvalue_2 = (trace - discriminant) / 2.0
 
-        # Computes eigenvectors. Falls back to axis-aligned vectors when covariance is diagonal.
-        covariance_epsilon = 1e-10
-        if abs(covariance_yx) > covariance_epsilon:
-            eigenvector_1 = np.array([eigenvalue_1 - covariance_xx, covariance_yx], dtype=np.float32)
-            eigenvector_1 = eigenvector_1 / np.hypot(eigenvector_1[0], eigenvector_1[1])
-            eigenvector_2 = np.array([-eigenvector_1[1], eigenvector_1[0]], dtype=np.float32)
-        else:
-            eigenvector_1 = np.array([1.0, 0.0], dtype=np.float32)
-            eigenvector_2 = np.array([0.0, 1.0], dtype=np.float32)
-
         # Converts eigenvalues to radii (2.5 sigma boundary captures ~99% of Gaussian distribution).
         sigma_multiplier = 2.5
-        eigenvectors = np.column_stack((eigenvector_1, eigenvector_2))
         radii = sigma_multiplier * np.sqrt(np.maximum(0.0, np.array([eigenvalue_1, eigenvalue_2])))
-
-        # Generates boundary points by transforming a unit circle through the eigenvector basis.
-        boundary_point_count = 100
-        theta = np.linspace(0, 2 * np.pi, boundary_point_count, dtype=np.float32)
-        unit_circle = np.column_stack((np.cos(theta), np.sin(theta)))
-        boundary_points = (unit_circle * radii) @ eigenvectors.T + centroid
 
         # Orders radii as (semi-major, semi-minor) for consistent access.
         sorted_radii = (max(radii[0], radii[1]), min(radii[0], radii[1]))
 
-        return _EllipseData(
-            centroid=centroid,
-            covariance=covariance,
-            radii=sorted_radii,
-            boundary_points=boundary_points.astype(np.float32),
-            y_scale=y_scale,
-            x_scale=x_scale,
-        )
+        return _EllipseData(radii=sorted_radii, y_scale=y_scale, x_scale=x_scale)
 
     def get_overlap_mask(self, overlap_count_image: NDArray[np.uint16]) -> NDArray[np.bool_]:
         """Computes a boolean mask identifying pixels that overlap with other ROIs.
@@ -548,7 +503,6 @@ class _ROI:
         if not self._crop or self.y_pixels.size <= minimum_pixels_for_crop:
             return np.ones(self.y_pixels.size, dtype=np.bool_)
 
-        # Computes Euclidean distance from each pixel to the ROI centroid.
         distances = np.hypot(self.y_pixels - self.centroid[0], self.x_pixels - self.centroid[1])
 
         # Sorts pixels by distance to enable efficient cumulative weight computation via cumsum.
@@ -559,8 +513,10 @@ class _ROI:
         # Samples cumulative weights at integer radii. Uses searchsorted to find the index where each radius would
         # be inserted, then looks up the cumulative weight at that position.
         radii = np.arange(1, int(distances.max()) + 1, dtype=np.float32)
-        indices = np.searchsorted(sorted_distances, radii, side="left")
-        cumulative_weights = np.where(indices > 0, cumsum_weights[np.clip(indices - 1, 0, len(cumsum_weights) - 1)], 0)
+        indices = np.searchsorted(a=sorted_distances, v=radii, side="left")
+        cumulative_weights = np.where(
+            indices > 0, cumsum_weights[np.clip(a=indices - 1, a_min=0, a_max=len(cumsum_weights) - 1)], 0
+        )
 
         # Computes radial gradient of cumulative weights. A sharp drop indicates the soma boundary.
         weight_gradient = np.diff(cumulative_weights)

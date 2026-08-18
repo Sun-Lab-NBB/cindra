@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from functools import lru_cache
 
-from numba import vectorize
+from numba import njit, prange
 import numpy as np
 from numpy.fft import ifftshift
 from scipy.fft import (
@@ -27,7 +27,7 @@ def apply_phase_correlation(
     kernel: NDArray[np.complex64],
     workers: int,
 ) -> NDArray[np.float32]:
-    """Applies phase correlation between frames and reference kernel.
+    """Applies phase correlation between the frames and the reference kernel.
 
     Computes normalized cross-correlation in the frequency domain for motion estimation. Uses real FFT
     for efficiency.
@@ -43,7 +43,6 @@ def apply_phase_correlation(
     # Stores original width for inverse FFT reconstruction.
     width = frames.shape[-1]
 
-    # Transforms frames to frequency domain.
     frames_fft = scipy_rfft2(x=frames, axes=(-2, -1), workers=workers)
 
     # Normalizes by magnitude to extract phase-only information. This makes the correlation robust to
@@ -62,31 +61,38 @@ def apply_phase_correlation(
     )
 
 
-@vectorize(
-    ["float32(float32, float32, float32)"],
-    nopython=True,
-    target="parallel",
-    cache=True,
-)
-def apply_mask(
+@njit(parallel=True, cache=True)
+def apply_mask(  # pragma: no cover
     frames: NDArray[np.float32],
     mask: NDArray[np.float32],
     offset: NDArray[np.float32],
 ) -> NDArray[np.float32]:
-    """Applies spatial mask to frame data.
+    """Applies a spatial mask to frame data.
 
-    Computes (frames * mask + offset) to apply edge tapering and mean offset correction. Uses parallel
-    execution for performance on large arrays.
+    Computes (frames * mask + offset) to apply edge tapering and mean offset correction, parallelized over the leading
+    frame axis.
+
+    Notes:
+        Callers pass float32 arrays. The output buffer takes its dtype from 'frames', so an integer or float64 input
+        propagates that width into the result and through the phase correlation that consumes it. Every caller reads
+        its frames from a float32 allocation or an explicit cast, which is what keeps the pipeline at single precision.
+
+        The 'mask' and 'offset' arrays match the shape of a single frame, so this kernel covers both the rigid case,
+        where a two-dimensional mask meets three-dimensional frames, and the nonrigid case, where a three-dimensional
+        per-block mask meets four-dimensional extracted blocks.
 
     Args:
-        frames: The input frame data with shape (num_frames, height, width).
-        mask: The multiplicative taper mask with shape (height, width), typically from compute_spatial_taper_mask.
-        offset: The additive offset with shape (height, width), typically reference_image.mean() * (1 - mask).
+        frames: The input frame data with shape (num_frames, height, width) or (num_frames, num_blocks, height, width).
+        mask: The multiplicative taper mask shaped like one frame, typically from compute_spatial_taper_mask.
+        offset: The additive offset shaped like one frame, typically reference_image.mean() * (1 - mask).
 
     Returns:
-        The masked frames with the same shape as input.
+        The masked frames with the same shape and dtype as the input frames.
     """
-    return frames * mask + offset  # pragma: no cover
+    masked_frames = np.empty_like(frames)
+    for frame_index in prange(frames.shape[0]):
+        masked_frames[frame_index] = frames[frame_index] * mask + offset
+    return masked_frames
 
 
 def combine_rigid_offsets(
@@ -94,8 +100,8 @@ def combine_rigid_offsets(
 ) -> tuple[NDArray[np.int32], NDArray[np.int32], NDArray[np.float32]]:
     """Combines rigid registration offsets from multiple processing batches.
 
-    Rigid offsets are 1D arrays with one integer pixel offset per frame, so horizontal stacking
-    concatenates all frames into a single array.
+    Rigid offsets are 1D arrays with one integer pixel offset per frame, so horizontal stacking concatenates all frames
+    into a single array.
 
     Args:
         offset_list: A list of tuples containing (y_offsets, x_offsets, correlation_values) for each batch.
@@ -103,7 +109,6 @@ def combine_rigid_offsets(
     Returns:
         A tuple of (y_offsets, x_offsets, correlation_values) arrays combined from all batches.
     """
-    # Transposes list of tuples into separate tuples for each offset type.
     y_offsets, x_offsets, correlations = zip(*offset_list, strict=True)
     return np.hstack(y_offsets), np.hstack(x_offsets), np.hstack(correlations)
 
@@ -113,8 +118,8 @@ def combine_nonrigid_offsets(
 ) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
     """Combines nonrigid registration offsets from multiple processing batches.
 
-    Nonrigid offsets are 2D arrays with subpixel offsets per block per frame, so vertical stacking
-    preserves the block structure across batches.
+    Nonrigid offsets are 2D arrays with subpixel offsets per block per frame, so vertical stacking preserves the block
+    structure across batches.
 
     Args:
         offset_list: A list of tuples containing (y_offsets, x_offsets, correlation_values) for each batch.
@@ -122,7 +127,6 @@ def combine_nonrigid_offsets(
     Returns:
         A tuple of (y_offsets, x_offsets, correlation_values) arrays combined from all batches.
     """
-    # Transposes list of tuples into separate tuples for each offset type.
     y_offsets, x_offsets, correlations = zip(*offset_list, strict=True)
     return np.vstack(y_offsets), np.vstack(x_offsets), np.vstack(correlations)
 
@@ -148,12 +152,10 @@ def compute_gaussian_frequency_filter(sigma: float, height: int, width: int) -> 
     row_distances = np.abs(np.arange(height, dtype=np.float32) - np.float32(height // 2))
     column_distances = np.abs(np.arange(width, dtype=np.float32) - np.float32(width // 2))
 
-    # Computes separable 1D Gaussians along each axis, then combines into 2D kernel.
     gaussian_column = np.exp(-np.square(column_distances / sigma) / 2)
     gaussian_row = np.exp(-np.square(row_distances / sigma) / 2)
     gaussian_kernel = np.outer(a=gaussian_row, b=gaussian_column)
 
-    # Normalizes kernel to unit sum and transforms to frequency domain.
     gaussian_kernel /= gaussian_kernel.sum()
     return scipy_rfft2(x=ifftshift(x=gaussian_kernel), axes=(-2, -1)).astype(np.complex64)
 
@@ -277,13 +279,12 @@ def compute_upsampling_kernel(padding: int, subpixel: int = 10) -> tuple[NDArray
 
     Args:
         padding: The half-width of the correlation peak region to upsample, in pixels.
-        subpixel: The subpixel resolution factor (e.g., 10 means 0.1 pixel precision).
+        subpixel: The subpixel resolution factor (e.g., 10 means 0.1 pixel precision). Defaults to 10.
 
     Returns:
         A tuple of (kernel_matrix, upsampled_point_count) where kernel_matrix is the upsampling transformation
         matrix and upsampled_point_count is the number of points in the upsampled grid.
     """
-    # Creates low-resolution grid centered at zero with integer spacing.
     low_resolution_coordinates = np.arange(-padding, padding + 1, dtype=np.float64)
 
     # Creates high-resolution grid with subpixel spacing. The +0.001 ensures the endpoint is included
@@ -326,22 +327,19 @@ def _compute_gaussian_rbf_weights(
             the array length.
         target_coordinates: The 1D array of target coordinates. The 2D target grid has m² points where m is
             the array length.
-        sigma: The Gaussian kernel bandwidth controlling interpolation smoothness. Smaller values produce
-            sharper interpolation, larger values produce smoother results.
+        sigma: The Gaussian kernel bandwidth controlling interpolation smoothness. Defaults to 0.85. Smaller values
+            produce sharper interpolation, larger values produce smoother results.
 
     Returns:
         The Gaussian RBF weight matrix with shape (n², m²). Float64 precision is used because this matrix
         is inverted during RBF interpolation, and matrix inversion is numerically sensitive.
     """
-    # Creates 2D grids from Cartesian product of coordinates with themselves.
     source_grid_x, source_grid_y = np.meshgrid(source_coordinates, source_coordinates)
     target_grid_x, target_grid_y = np.meshgrid(target_coordinates, target_coordinates)
 
-    # Flattens grids and computes pairwise coordinate differences between all source and target points.
     delta_x = source_grid_x.reshape(-1, 1) - target_grid_x.reshape(1, -1)
     delta_y = source_grid_y.reshape(-1, 1) - target_grid_y.reshape(1, -1)
 
-    # Computes Gaussian weights based on squared Euclidean distance.
     return np.exp(-(delta_x**2 + delta_y**2) / (2 * sigma**2))
 
 

@@ -54,70 +54,6 @@ _SPLIT_TAIL_STRENGTH: float = 0.25
 """The intensity of the trailing process as a fraction of the source peak, high enough to survive the weight trim."""
 
 
-def _build_flickering_movie(
-    centers: tuple[tuple[int, int], ...],
-    frame_count: int = 60,
-    height: int = 48,
-    width: int = 48,
-    seed: int = 7,
-) -> NDArray[np.float32]:
-    """Builds a movie whose fixed Gaussian blobs flicker independently, planting one detectable ROI per center."""
-    generator = np.random.default_rng(seed=seed)
-    movie = np.full((frame_count, height, width), fill_value=100.0, dtype=np.float64)
-    rows, columns = np.mgrid[0:height, 0:width]
-    for center in centers:
-        blob = np.exp(-(((rows - center[0]) ** 2 + (columns - center[1]) ** 2) / (2 * 3.0**2)))
-        activity = (generator.random(frame_count) < 0.25).astype(np.float64)
-        movie += 1500.0 * activity[:, np.newaxis, np.newaxis] * blob[np.newaxis, :, :]
-    return movie.astype(np.float32)
-
-
-def _build_split_movie(seed: int = 1, tail_length: int = 0) -> tuple[NDArray[np.float32], NDArray[np.float64]]:
-    """Builds a movie holding two overlapping sources that never fire together, planting one splittable ROI."""
-    generator = np.random.default_rng(seed=seed)
-    height = width = 64
-
-    # The first source fires on every fourth frame and the second on every eighth, offset by three frames, so the two
-    # time courses never coincide and the first source carries twice the energy of the second. A single spatial
-    # component cannot explain both, which drives the variance ratio the split branch tests above its threshold, and
-    # the energy gap between them decides which of the two components that branch retains.
-    activities = np.zeros((2, _SPLIT_FRAME_COUNT), dtype=np.float64)
-    activities[0, 0 :: _SPLIT_SOURCE_PERIODS[0]] = 1.0
-    activities[1, 3 :: _SPLIT_SOURCE_PERIODS[1]] = 1.0
-
-    # The sensor noise is what keeps the per-pixel temporal standard deviation the detector divides by well defined
-    # away from the sources. Without it the quotient amplifies float rounding into frame-wide structure, and the
-    # detector grows masks over a quarter of the frame instead of over the planted sources.
-    movie = np.full((_SPLIT_FRAME_COUNT, height, width), fill_value=100.0, dtype=np.float64)
-    movie += generator.normal(loc=0.0, scale=15.0, size=movie.shape)
-    rows, columns = np.mgrid[0:height, 0:width]
-    for center, activity in zip(_SPLIT_SOURCE_CENTERS, activities, strict=True):
-        blob = np.exp(-(((rows - center[0]) ** 2 + (columns - center[1]) ** 2) / (2 * 2.5**2)))
-        movie += _SPLIT_SOURCE_AMPLITUDE * activity[:, np.newaxis, np.newaxis] * blob[np.newaxis, :, :]
-
-    # Plants a one-pixel-wide process trailing the first source below its center, carrying that source's own time
-    # course. The split therefore keeps it, and it skews the retained mask far enough down that the mask's spatial
-    # mean and its spatial median no longer round onto the same pixel.
-    if tail_length > 0:
-        tail = np.zeros((height, width), dtype=np.float64)
-        tail[_SPLIT_TAIL_ROW : _SPLIT_TAIL_ROW + tail_length, _SPLIT_SOURCE_CENTERS[0][1]] = _SPLIT_TAIL_STRENGTH
-        movie += _SPLIT_SOURCE_AMPLITUDE * activities[0][:, np.newaxis, np.newaxis] * tail[np.newaxis, :, :]
-    return movie.astype(np.float32), activities
-
-
-def _detect(frames: NDArray[np.float32], maximum_iterations: int) -> list[ROIStatistics]:
-    """Runs the sparse detector over a private copy of the movie and returns the detected ROI statistics."""
-    _, _, _, roi_statistics = detect_rois_in_frames(
-        frames=frames.copy(),
-        temporal_highpass_window=30,
-        spatial_highpass_window=25,
-        threshold_scaling=0.5,
-        maximum_iterations=maximum_iterations,
-        plane_index=0,
-    )
-    return roi_statistics
-
-
 class TestCheckSplitComponents:
     """Tests _check_split_components."""
 
@@ -188,7 +124,6 @@ class TestCheckSplitComponents:
             intensity_threshold=0.1,
         )
 
-        # The number of temporal projections should match the number of active frames.
         assert temporal_projections.shape[0] == active_mask.sum()
         assert spatial_weights.shape[0] == pixel_count
 
@@ -227,15 +162,12 @@ class TestExtendIteratively:
             active_frame_indices=active_frame_indices,
         )
 
-        # The extension should have grown beyond the initial single pixel.
         assert len(extended_y) > 1
         assert len(extended_x) > 1
         assert len(extended_weights) == len(extended_y)
 
-        # The weights should be normalized.
         assert np.isclose(norm(extended_weights), 1.0, atol=1e-5)
 
-        # The extended pixels should be near the center.
         assert np.all(np.abs(extended_y - center_y) <= 5)
         assert np.all(np.abs(extended_x - center_x) <= 5)
 
@@ -344,7 +276,6 @@ class TestExtendIteratively:
 
         assert np.isclose(norm(extended_weights), 1.0, atol=1e-5)
 
-        # The growth should be driven by and localized to the bright 4:8 x 4:8 source block.
         assert len(extended_y) > 1
         assert np.all((extended_y >= 3) & (extended_y <= 8))
         assert np.all((extended_x >= 3) & (extended_x <= 8))
@@ -448,7 +379,6 @@ class TestFindBestScale:
 
         # Creates scale images where one scale has the strongest signal.
         scale_images = generator.standard_normal((scale_count, height, width)).astype(np.float32)
-        # Makes scale 2 dominant by adding a strong signal.
         scale_images[2] += 10.0
 
         result = _find_best_scale(scale_images=scale_images)
@@ -517,21 +447,6 @@ class TestDetectRoisInFrames:
 class TestDetectRoisInFramesDeadPeak:
     """Tests the dead-peak suppression of detect_rois_in_frames."""
 
-    @staticmethod
-    def _stub_extension(observed_seeds: list[tuple[int, int]]) -> Callable[..., object]:
-        """Returns an extension stub that yields zero weights for every seed and records the seed it was given."""
-
-        def extension(**arguments: object) -> object:
-            y_pixels = np.asarray(arguments["y_pixels"])
-            x_pixels = np.asarray(arguments["x_pixels"])
-            observed_seeds.append((round(float(y_pixels.mean())), round(float(x_pixels.mean()))))
-
-            # Reproduces the state a fully explained residual leaves behind. The mask survives, but every weight is
-            # zero, so the caller's projection clears no frame and the ROI contributes nothing.
-            return y_pixels, x_pixels, np.zeros(y_pixels.size, dtype=np.float32)
-
-        return extension
-
     def test_abandoned_peaks_are_suppressed_so_the_loop_advances(self, monkeypatch) -> None:
         """Verifies that every abandoned peak is cleared, so no two iterations select the same dead location."""
         movie = _build_flickering_movie(centers=_ITERATION_LIMIT_CENTERS)
@@ -559,35 +474,24 @@ class TestDetectRoisInFramesDeadPeak:
         # iteration selects the identical seed and the run repeats one location until the budget is exhausted.
         assert len(set(observed_seeds)) == len(observed_seeds)
 
+    @staticmethod
+    def _stub_extension(observed_seeds: list[tuple[int, int]]) -> Callable[..., object]:
+        """Returns an extension stub that yields zero weights for every seed and records the seed it was given."""
+
+        def extension(**arguments: object) -> object:
+            y_pixels = np.asarray(arguments["y_pixels"])
+            x_pixels = np.asarray(arguments["x_pixels"])
+            observed_seeds.append((round(float(y_pixels.mean())), round(float(x_pixels.mean()))))
+
+            # Reproduces the state a fully explained residual leaves behind. The mask survives, but every weight is
+            # zero, so the caller's projection clears no frame and the ROI contributes nothing.
+            return y_pixels, x_pixels, np.zeros(y_pixels.size, dtype=np.float32)
+
+        return extension
+
 
 class TestDetectRoisInFramesSplit:
     """Tests the two-component split branch of detect_rois_in_frames."""
-
-    @staticmethod
-    def _project(movie: NDArray[np.float32], roi: ROIStatistics) -> NDArray[np.float64]:
-        """Projects the raw movie onto an ROI mask, returning the fluorescence trace that mask reports."""
-        y_pixels = roi.mask.y_pixels.astype(np.intp)
-        x_pixels = roi.mask.x_pixels.astype(np.intp)
-        return np.asarray(movie[:, y_pixels, x_pixels], dtype=np.float64) @ roi.mask.pixel_weights.astype(np.float64)
-
-    @staticmethod
-    def _center_of_mass(roi: ROIStatistics) -> tuple[float, float]:
-        """Returns the weight-weighted center of an ROI mask."""
-        weights = roi.mask.pixel_weights.astype(np.float64)
-        total = weights.sum()
-        return (
-            float((weights * roi.mask.y_pixels).sum() / total),
-            float((weights * roi.mask.x_pixels).sum() / total),
-        )
-
-    @staticmethod
-    def _squared_distances(roi: ROIStatistics, anchor: tuple[float, float]) -> tuple[NDArray[np.float64], float]:
-        """Returns every mask pixel's squared distance to the anchor and the reported centroid's own distance."""
-        y_pixels = roi.mask.y_pixels.astype(np.float64)
-        x_pixels = roi.mask.x_pixels.astype(np.float64)
-        distances = (y_pixels - anchor[0]) ** 2 + (x_pixels - anchor[1]) ** 2
-        centroid_distance = float((roi.mask.centroid[0] - anchor[0]) ** 2 + (roi.mask.centroid[1] - anchor[1]) ** 2)
-        return distances, centroid_distance
 
     def test_two_component_roi_is_split_onto_the_more_active_source(self) -> None:
         """Verifies that an ROI seeded over two independent overlapping sources is reduced to the dominant one."""
@@ -677,3 +581,93 @@ class TestDetectRoisInFramesSplit:
         # mean, which is exactly what re-centering on the median rather than on the mean produces.
         assert centroid_to_median == float(median_distances.min())
         assert centroid_to_mean > float(mean_distances.min())
+
+    @staticmethod
+    def _project(movie: NDArray[np.float32], roi: ROIStatistics) -> NDArray[np.float64]:
+        """Projects the raw movie onto an ROI mask, returning the fluorescence trace that mask reports."""
+        y_pixels = roi.mask.y_pixels.astype(np.intp)
+        x_pixels = roi.mask.x_pixels.astype(np.intp)
+        return np.asarray(movie[:, y_pixels, x_pixels], dtype=np.float64) @ roi.mask.pixel_weights.astype(np.float64)
+
+    @staticmethod
+    def _center_of_mass(roi: ROIStatistics) -> tuple[float, float]:
+        """Returns the weight-weighted center of an ROI mask."""
+        weights = roi.mask.pixel_weights.astype(np.float64)
+        total = weights.sum()
+        return (
+            float((weights * roi.mask.y_pixels).sum() / total),
+            float((weights * roi.mask.x_pixels).sum() / total),
+        )
+
+    @staticmethod
+    def _squared_distances(roi: ROIStatistics, anchor: tuple[float, float]) -> tuple[NDArray[np.float64], float]:
+        """Returns every mask pixel's squared distance to the anchor and the reported centroid's own distance."""
+        y_pixels = roi.mask.y_pixels.astype(np.float64)
+        x_pixels = roi.mask.x_pixels.astype(np.float64)
+        distances = (y_pixels - anchor[0]) ** 2 + (x_pixels - anchor[1]) ** 2
+        centroid_distance = float((roi.mask.centroid[0] - anchor[0]) ** 2 + (roi.mask.centroid[1] - anchor[1]) ** 2)
+        return distances, centroid_distance
+
+
+def _build_flickering_movie(
+    centers: tuple[tuple[int, int], ...],
+    frame_count: int = 60,
+    height: int = 48,
+    width: int = 48,
+    seed: int = 7,
+) -> NDArray[np.float32]:
+    """Builds a movie whose fixed Gaussian blobs flicker independently, planting one detectable ROI per center."""
+    generator = np.random.default_rng(seed=seed)
+    movie = np.full((frame_count, height, width), fill_value=100.0, dtype=np.float64)
+    rows, columns = np.mgrid[0:height, 0:width]
+    for center in centers:
+        blob = np.exp(-(((rows - center[0]) ** 2 + (columns - center[1]) ** 2) / (2 * 3.0**2)))
+        activity = (generator.random(frame_count) < 0.25).astype(np.float64)
+        movie += 1500.0 * activity[:, np.newaxis, np.newaxis] * blob[np.newaxis, :, :]
+    return movie.astype(np.float32)
+
+
+def _build_split_movie(seed: int = 1, tail_length: int = 0) -> tuple[NDArray[np.float32], NDArray[np.float64]]:
+    """Builds a movie holding two overlapping sources that never fire together, planting one splittable ROI."""
+    generator = np.random.default_rng(seed=seed)
+    height = width = 64
+
+    # The first source fires on every fourth frame and the second on every eighth, offset by three frames, so the two
+    # time courses never coincide and the first source carries twice the energy of the second. A single spatial
+    # component cannot explain both, which drives the variance ratio the split branch tests above its threshold, and
+    # the energy gap between them decides which of the two components that branch retains.
+    activities = np.zeros((2, _SPLIT_FRAME_COUNT), dtype=np.float64)
+    activities[0, 0 :: _SPLIT_SOURCE_PERIODS[0]] = 1.0
+    activities[1, 3 :: _SPLIT_SOURCE_PERIODS[1]] = 1.0
+
+    # The sensor noise is what keeps the per-pixel temporal standard deviation the detector divides by well defined
+    # away from the sources. Without it the quotient amplifies float rounding into frame-wide structure, and the
+    # detector grows masks over a quarter of the frame instead of over the planted sources.
+    movie = np.full((_SPLIT_FRAME_COUNT, height, width), fill_value=100.0, dtype=np.float64)
+    movie += generator.normal(loc=0.0, scale=15.0, size=movie.shape)
+    rows, columns = np.mgrid[0:height, 0:width]
+    for center, activity in zip(_SPLIT_SOURCE_CENTERS, activities, strict=True):
+        blob = np.exp(-(((rows - center[0]) ** 2 + (columns - center[1]) ** 2) / (2 * 2.5**2)))
+        movie += _SPLIT_SOURCE_AMPLITUDE * activity[:, np.newaxis, np.newaxis] * blob[np.newaxis, :, :]
+
+    # Plants a one-pixel-wide process trailing the first source below its center, carrying that source's own time
+    # course. The split therefore keeps it, and it skews the retained mask far enough down that the mask's spatial
+    # mean and its spatial median no longer round onto the same pixel.
+    if tail_length > 0:
+        tail = np.zeros((height, width), dtype=np.float64)
+        tail[_SPLIT_TAIL_ROW : _SPLIT_TAIL_ROW + tail_length, _SPLIT_SOURCE_CENTERS[0][1]] = _SPLIT_TAIL_STRENGTH
+        movie += _SPLIT_SOURCE_AMPLITUDE * activities[0][:, np.newaxis, np.newaxis] * tail[np.newaxis, :, :]
+    return movie.astype(np.float32), activities
+
+
+def _detect(frames: NDArray[np.float32], maximum_iterations: int) -> list[ROIStatistics]:
+    """Runs the sparse detector over a private copy of the movie and returns the detected ROI statistics."""
+    _, _, _, roi_statistics = detect_rois_in_frames(
+        frames=frames.copy(),
+        temporal_highpass_window=30,
+        spatial_highpass_window=25,
+        threshold_scaling=0.5,
+        maximum_iterations=maximum_iterations,
+        plane_index=0,
+    )
+    return roi_statistics

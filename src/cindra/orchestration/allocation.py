@@ -1,10 +1,7 @@
-"""Provides the measured CPU worker defaults of the single and multi-recording pipeline stages, the resource-class
-model that sizes a batch of jobs, and the resolvers that turn a caller's request into a concrete allocation.
-
-The defaults encode the knee of each stage's measured scaling curve, so a caller that expresses no preference gets the
-allocation that maximizes batch throughput rather than the allocation that minimizes the wall time of one job. The
-resource classes extend that per-stage figure with the concurrency each class sustains, which is what lets a scheduler
-plan a batch mixing several stages against one host.
+"""Provides the measured CPU worker defaults of the single and multi-recording pipeline stages, the resource-class model
+that sizes a batch of jobs, and the resolvers that turn a caller's request into a concrete allocation. The defaults
+encode the knee of each stage's measured scaling curve, so a caller expressing no preference receives the allocation
+that maximizes batch throughput rather than the one that minimizes the wall time of a single job.
 """
 
 from __future__ import annotations
@@ -42,7 +39,7 @@ the deformation pool alone."""
 
 EXTRACTION_WORKERS: int = 16
 """The number of workers allocated to the multi-recording extraction stage by default. The stage keeps shortening well
-past this width, so the figure follows the concurrency a host sustains rather than a plateau: sixteen leaves room for
+past this width, so the figure follows the concurrency a host sustains rather than a plateau. Sixteen leaves room for
 the six to eight datasets a compute node extracts at once while still reaching a sevenfold single-job speedup."""
 
 COMBINATION_WORKERS: int = 1
@@ -299,7 +296,6 @@ def resolve_class_allocation(
     else:
         workers = workers_per_job
 
-    # An all-cores concurrency request lifts the derived cap, leaving the job count as the only bound.
     if max_parallel_jobs == ALL_CORES_REQUEST:
         return workers, max(1, job_count)
 

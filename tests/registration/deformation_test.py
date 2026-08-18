@@ -66,14 +66,14 @@ class TestDiffuse:
 
     def test_small_sigma_identity(self) -> None:
         """Verifies that a very small sigma produces no smoothing."""
-        generator = np.random.default_rng(42)
+        generator = np.random.default_rng(seed=42)
         data = generator.standard_normal((16, 16)).astype(np.float32)
         result = diffuse(data=data, sigma=0.01)
         np.testing.assert_array_equal(result, data)
 
     def test_output_shape_and_dtype(self) -> None:
         """Verifies that diffuse returns data with correct shape and dtype."""
-        generator = np.random.default_rng(42)
+        generator = np.random.default_rng(seed=42)
         data = generator.standard_normal((32, 32)).astype(np.float32)
         result = diffuse(data=data, sigma=3.0)
         assert result.shape == data.shape
@@ -81,7 +81,7 @@ class TestDiffuse:
 
     def test_per_dimension_sigma(self) -> None:
         """Verifies that per-dimension sigma list is accepted."""
-        generator = np.random.default_rng(42)
+        generator = np.random.default_rng(seed=42)
         data = generator.standard_normal((32, 32)).astype(np.float32)
         result = diffuse(data=data, sigma=[2.0, 0.01])
         assert result.dtype == np.float32
@@ -244,7 +244,7 @@ class TestResize:
 
     def test_same_size_preserves_values(self) -> None:
         """Verifies that resizing to the same dimensions preserves values."""
-        generator = np.random.default_rng(42)
+        generator = np.random.default_rng(seed=42)
         data = generator.standard_normal((10, 10)).astype(np.float32)
         result = _resize(data=data, new_height=10, new_width=10)
         np.testing.assert_allclose(result, data, atol=1e-4)
@@ -264,8 +264,6 @@ class TestDeformationIdentity:
         deformation = Deformation.identity(height=10, width=20)
         assert deformation.is_identity
         assert deformation.field_shape == (10, 20)
-        assert deformation.dimension_count == 2
-        assert len(deformation) == 0
 
     def test_identity_repr(self) -> None:
         """Verifies the string representation for identity deformations."""
@@ -303,8 +301,6 @@ class TestDeformationConstructor:
         deformation = Deformation(field_y=field_y, field_x=field_x)
         assert not deformation.is_identity
         assert deformation.field_shape == (10, 20)
-        assert deformation.dimension_count == 2
-        assert len(deformation) == 2
 
     def test_repr_includes_shape(self) -> None:
         """Verifies the string representation includes the field shape."""
@@ -312,16 +308,6 @@ class TestDeformationConstructor:
         field_x = np.zeros((10, 20), dtype=np.float32)
         deformation = Deformation(field_y=field_y, field_x=field_x)
         assert "field_shape=(10, 20)" in repr(deformation)
-
-    def test_getitem_and_iter(self) -> None:
-        """Verifies field access via indexing and iteration."""
-        field_y = np.ones((5, 5), dtype=np.float32) * 1.0
-        field_x = np.ones((5, 5), dtype=np.float32) * 2.0
-        deformation = Deformation(field_y=field_y, field_x=field_x)
-        np.testing.assert_array_equal(deformation[0], field_y)
-        np.testing.assert_array_equal(deformation[1], field_x)
-        fields = list(deformation)
-        assert len(fields) == 2
 
     def test_get_field(self) -> None:
         """Verifies get_field returns the correct field array."""
@@ -341,8 +327,8 @@ class TestDeformationScale:
         field_x = np.ones((5, 5), dtype=np.float32) * 3.0
         deformation = Deformation(field_y=field_y, field_x=field_x)
         scaled = deformation.scale(factor=0.5)
-        np.testing.assert_allclose(scaled[0], 1.0)
-        np.testing.assert_allclose(scaled[1], 1.5)
+        np.testing.assert_allclose(scaled.get_field(dimension=0), 1.0)
+        np.testing.assert_allclose(scaled.get_field(dimension=1), 1.5)
 
     def test_scale_by_one_copies(self) -> None:
         """Verifies that scale(1.0) creates a copy with identical values."""
@@ -350,45 +336,10 @@ class TestDeformationScale:
         field_x = np.ones((5, 5), dtype=np.float32) * 3.0
         deformation = Deformation(field_y=field_y, field_x=field_x)
         copied = deformation.scale(factor=1.0)
-        np.testing.assert_array_equal(copied[0], field_y)
+        np.testing.assert_array_equal(copied.get_field(dimension=0), field_y)
         # Confirms the result is a copy rather than a view.
-        copied[0][0, 0] = 999.0
-        assert deformation[0][0, 0] != 999.0
-
-
-class TestDeformationAdd:
-    """Tests Deformation.add and __add__."""
-
-    def test_add_identity_left(self) -> None:
-        """Verifies that identity + deformation returns a copy of the deformation."""
-        identity = Deformation.identity(height=5, width=5)
-        field_y = np.ones((5, 5), dtype=np.float32) * 2.0
-        field_x = np.ones((5, 5), dtype=np.float32) * 3.0
-        deformation = Deformation(field_y=field_y, field_x=field_x)
-        result = identity.add(other=deformation)
-        np.testing.assert_array_equal(result[0], field_y)
-        np.testing.assert_array_equal(result[1], field_x)
-
-    def test_add_identity_right(self) -> None:
-        """Verifies that deformation + identity returns a copy of the deformation."""
-        identity = Deformation.identity(height=5, width=5)
-        field_y = np.ones((5, 5), dtype=np.float32) * 2.0
-        field_x = np.ones((5, 5), dtype=np.float32) * 3.0
-        deformation = Deformation(field_y=field_y, field_x=field_x)
-        result = deformation + identity
-        np.testing.assert_array_equal(result[0], field_y)
-
-    def test_add_two_deformations(self) -> None:
-        """Verifies element-wise addition of two deformations."""
-        first_field_y = np.ones((5, 5), dtype=np.float32) * 1.0
-        first_field_x = np.ones((5, 5), dtype=np.float32) * 2.0
-        second_field_y = np.ones((5, 5), dtype=np.float32) * 3.0
-        second_field_x = np.ones((5, 5), dtype=np.float32) * 4.0
-        first_deformation = Deformation(field_y=first_field_y, field_x=first_field_x)
-        second_deformation = Deformation(field_y=second_field_y, field_x=second_field_x)
-        result = first_deformation + second_deformation
-        np.testing.assert_allclose(result[0], 4.0)
-        np.testing.assert_allclose(result[1], 6.0)
+        copied.get_field(dimension=0)[0, 0] = 999.0
+        assert deformation.get_field(dimension=0)[0, 0] != 999.0
 
 
 class TestDeformationCompose:
@@ -401,8 +352,8 @@ class TestDeformationCompose:
         field_x = np.ones((10, 10), dtype=np.float32) * -0.5
         deformation = Deformation(field_y=field_y, field_x=field_x)
         result = identity.compose(other=deformation)
-        np.testing.assert_allclose(result[0], 0.5, atol=1e-5)
-        np.testing.assert_allclose(result[1], -0.5, atol=1e-5)
+        np.testing.assert_allclose(result.get_field(dimension=0), 0.5, atol=1e-5)
+        np.testing.assert_allclose(result.get_field(dimension=1), -0.5, atol=1e-5)
 
     def test_compose_with_identity_right(self) -> None:
         """Verifies that deformation.compose(identity) returns a copy of the deformation."""
@@ -411,7 +362,7 @@ class TestDeformationCompose:
         field_x = np.ones((10, 10), dtype=np.float32) * -0.5
         deformation = Deformation(field_y=field_y, field_x=field_x)
         result = deformation.compose(other=identity)
-        np.testing.assert_allclose(result[0], 0.5, atol=1e-5)
+        np.testing.assert_allclose(result.get_field(dimension=0), 0.5, atol=1e-5)
 
     def test_compose_two_uniform_deformations(self) -> None:
         """Verifies composition of two small uniform displacements."""
@@ -421,8 +372,8 @@ class TestDeformationCompose:
         second_deformation = Deformation(field_y=field_y.copy(), field_x=field_x.copy())
         result = first_deformation.compose(other=second_deformation)
         # For small uniform displacements, composition ≈ addition at interior pixels.
-        np.testing.assert_allclose(result[0][5:-5, 5:-5], 0.6, atol=0.05)
-        np.testing.assert_allclose(result[1][5:-5, 5:-5], 0.4, atol=0.05)
+        np.testing.assert_allclose(result.get_field(dimension=0)[5:-5, 5:-5], 0.6, atol=0.05)
+        np.testing.assert_allclose(result.get_field(dimension=1)[5:-5, 5:-5], 0.4, atol=0.05)
 
 
 class TestDeformationResizeField:
@@ -457,7 +408,7 @@ class TestDeformationApply:
 
     def test_zero_displacement_preserves_image(self) -> None:
         """Verifies that zero displacement fields preserve the image."""
-        generator = np.random.default_rng(42)
+        generator = np.random.default_rng(seed=42)
         data = generator.standard_normal((20, 20)).astype(np.float32)
         field_y = np.zeros((20, 20), dtype=np.float32)
         field_x = np.zeros((20, 20), dtype=np.float32)
@@ -492,8 +443,8 @@ class TestDeformationInverse:
         inverse = deformation.inverse()
         # A uniform field translates every pixel identically, so its inverse is the exact negation. The observed
         # error is 3e-08, which this bound holds to within a factor of thirty.
-        np.testing.assert_allclose(inverse[0][5:-5, 5:-5], -0.3, atol=1e-6)
-        np.testing.assert_allclose(inverse[1][5:-5, 5:-5], 0.2, atol=1e-6)
+        np.testing.assert_allclose(inverse.get_field(dimension=0)[5:-5, 5:-5], -0.3, atol=1e-6)
+        np.testing.assert_allclose(inverse.get_field(dimension=1)[5:-5, 5:-5], 0.2, atol=1e-6)
 
     def test_inverse_of_spatially_varying_field(self) -> None:
         """Verifies that the inverse of a linearly varying displacement matches its analytic inverse."""
@@ -512,8 +463,8 @@ class TestDeformationInverse:
         # the inverse displacement at q is -slope * (q - center) / (1 + slope).
         analytic_x = -slope * (columns - center) / (1.0 + slope)
         interior = (slice(8, -8), slice(8, -8))
-        np.testing.assert_allclose(inverse[1][interior], analytic_x[interior], atol=1e-5)
-        np.testing.assert_allclose(inverse[0][interior], 0.0, atol=1e-5)
+        np.testing.assert_allclose(inverse.get_field(dimension=1)[interior], analytic_x[interior], atol=1e-5)
+        np.testing.assert_allclose(inverse.get_field(dimension=0)[interior], 0.0, atol=1e-5)
 
         # Confirms the bound above discriminates: simply negating the field, which a uniform displacement would make
         # correct, misses the analytic inverse by more than three orders of magnitude beyond that bound.
@@ -585,8 +536,8 @@ class TestDeformationCrop:
 
         # The crop must fit inside the field, so the origin clamps to (40 - 10, 40 - 6).
         assert origin == (30, 34)
-        np.testing.assert_array_equal(cropped[0], field_y[30:40, 34:40])
-        np.testing.assert_array_equal(cropped[1], field_x[30:40, 34:40])
+        np.testing.assert_array_equal(cropped.get_field(dimension=0), field_y[30:40, 34:40])
+        np.testing.assert_array_equal(cropped.get_field(dimension=1), field_x[30:40, 34:40])
 
     def test_crop_extracts_the_asymmetric_slice(self) -> None:
         """Verifies that an in-bounds asymmetric crop returns exactly the field slice its origin and size name."""
@@ -600,6 +551,6 @@ class TestDeformationCrop:
         assert cropped.field_shape == (8, 6)
         # The crop origin is (row, column), so the Y field's first element is field_y[7, 11] = 7 * 40 + 11 = 291.
         # Transposing the origin would read field_y[11, 7] = 447 instead.
-        assert float(cropped[0][0, 0]) == 291.0
-        np.testing.assert_array_equal(cropped[0], field_y[7:15, 11:17])
-        np.testing.assert_array_equal(cropped[1], field_x[7:15, 11:17])
+        assert float(cropped.get_field(dimension=0)[0, 0]) == 291.0
+        np.testing.assert_array_equal(cropped.get_field(dimension=0), field_y[7:15, 11:17])
+        np.testing.assert_array_equal(cropped.get_field(dimension=1), field_x[7:15, 11:17])
