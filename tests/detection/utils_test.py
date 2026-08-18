@@ -6,7 +6,7 @@ import numpy as np
 
 from cindra.detection.utils import (
     downsample,
-    mean_centered_meshgrid,
+    _mean_centered_meshgrid,
     _apply_gaussian_high_pass,
     compute_spatial_taper_mask,
     compute_registration_blocks,
@@ -390,35 +390,35 @@ class TestComputeRegistrationBlocks:
 
 
 class TestMeanCenteredMeshgrid:
-    """Tests mean_centered_meshgrid."""
+    """Tests _mean_centered_meshgrid."""
 
     def test_shape(self) -> None:
         """Verifies meshgrid output shapes match input dimensions."""
-        column_distances, row_distances = mean_centered_meshgrid(height=10, width=20)
+        column_distances, row_distances = _mean_centered_meshgrid(height=10, width=20)
         assert column_distances.shape == (10, 20)
         assert row_distances.shape == (10, 20)
 
     def test_center_zero_for_odd_dimensions(self) -> None:
         """Verifies center values are zero for odd dimensions."""
-        column_distances, row_distances = mean_centered_meshgrid(height=11, width=11)
+        column_distances, row_distances = _mean_centered_meshgrid(height=11, width=11)
         np.testing.assert_allclose(row_distances[5, 5], 0.0)
         np.testing.assert_allclose(column_distances[5, 5], 0.0)
 
     def test_symmetry(self) -> None:
         """Verifies the meshgrid is symmetric."""
-        column_distances, row_distances = mean_centered_meshgrid(height=10, width=10)
+        column_distances, row_distances = _mean_centered_meshgrid(height=10, width=10)
         np.testing.assert_allclose(column_distances, np.flip(column_distances, axis=1))
         np.testing.assert_allclose(row_distances, np.flip(row_distances, axis=0))
 
     def test_dtype(self) -> None:
         """Verifies the meshgrid dtype is float32."""
-        column_distances, row_distances = mean_centered_meshgrid(height=8, width=8)
+        column_distances, row_distances = _mean_centered_meshgrid(height=8, width=8)
         assert column_distances.dtype == np.float32
         assert row_distances.dtype == np.float32
 
     def test_max_distance_at_corners(self) -> None:
         """Verifies maximum distances occur at corners."""
-        column_distances, row_distances = mean_centered_meshgrid(height=10, width=10)
+        column_distances, row_distances = _mean_centered_meshgrid(height=10, width=10)
         # Corner should have max distance from center.
         assert row_distances[0, 0] == row_distances.max()
         assert column_distances[0, 0] == column_distances.max()
