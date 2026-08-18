@@ -222,7 +222,7 @@ phase-correlation accuracy in 1P recordings.
 |---------------------------|-------|---------|------------------------------------------------------------------------|
 | `enabled`                 | bool  | False   | Enable 1P preprocessing (high-pass filtering, tapering). False for 2P. |
 | `spatial_highpass_window` | int   | 42      | Spatial high-pass filter window (pixels).                              |
-| `pre_smoothing_sigma`     | float | 0.0     | Box filter window (pixels), truncated to an even int. 0 = off.         |
+| `pre_smoothing_sigma`     | float | 0.0     | Box filter window (pixels); the truncated int must be even. 0 = off.   |
 | `edge_taper_pixels`       | float | 40.0    | Sigmoid taper falloff scale. The taper starts ~2x this inward.         |
 
 Enable this section only for widefield or miniscope (1-photon) data. The preprocessing removes background fluorescence

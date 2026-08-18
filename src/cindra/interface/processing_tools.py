@@ -1922,8 +1922,9 @@ def check_threading_runtime_tool() -> dict[str, object]:
         'detail' sentence describing the outcome. A host that is not ready also carries a 'remedy' naming the command
         that resolves it. On macOS, the report additionally carries 'discovered_runtimes' holding the single runtime the
         discovery would link, which is the first candidate that resolves to a file, and 'searched_paths' listing the
-        candidates examined. Both are empty when no runtime was found and also when the runtime already loads, because
-        a host that already loads one runs no discovery.
+        candidates examined. When no runtime was found, 'discovered_runtimes' is empty while 'searched_paths' still
+        lists every candidate the discovery examined. Both are empty only when the runtime already loads, because a
+        host that already loads one runs no discovery.
     """
     platform_name = sys.platform
 

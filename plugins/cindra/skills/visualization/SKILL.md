@@ -353,15 +353,17 @@ Common multi-viewer patterns:
 classify mode is active, and which traces are visible.
 
 **"Are these good ROIs?"**. Query `roi_color_mode` from state. If it is not `cell_classification` or `cell_probability`,
-suggest switching to one of those color modes to see classifier output. Use `query_roi_statistics_tool` to retrieve
-compactness, solidity, and skewness statistics for the visible ROIs. Explain what each statistic means:
+suggest switching to one of those color modes to see classifier output. Both are hidden when `active_dataset` is
+non-null, because the multi-recording tracked-ROI view carries no classifier output, so fall back to
+`query_roi_statistics_tool` alone there. Use `query_roi_statistics_tool` to retrieve compactness, solidity, and skewness
+statistics for the visible ROIs. Explain what each statistic means:
 - **Compactness** near 1.0 indicates circular footprints (typical neurons)
 - **Solidity** near 1.0 indicates filled footprints without holes
 - **Skewness** > 0 indicates right-skewed fluorescence (active cells tend to have positive skew)
 
 **"Show me the most active cells"**. Suggest coloring by `skewness` (high skewness correlates with activity) or by
-`cell_probability` to see classifier confidence. Use `query_roi_statistics_tool` sorted by skewness descending to
-identify the top ROIs.
+`cell_probability` to see classifier confidence (unavailable in multi-recording tracked-ROI mode). Use
+`query_roi_statistics_tool` sorted by skewness descending to identify the top ROIs.
 
 **"What do the traces look like?"**. Check `trace_visibility` and `selected_roi_indices` from state. If no ROIs are
 selected, tell the user they can select one by clicking it in the image panel or by typing its index into the ROI index

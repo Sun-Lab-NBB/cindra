@@ -249,8 +249,10 @@ native coordinates for fluorescence extraction.
   `mask_prevalence` (30) and `pixel_prevalence` (40) to accept ROIs present in fewer recordings, and increase
   `maximum_distance` (25) to tolerate larger centroid shifts.
 - **Small ROIs lost**: Lower `minimum_size` (15-20) to retain templates with fewer non-overlapping pixels.
-- **Dense labeling**: Decrease `step_sizes` (e.g., (150, 150)) and increase `bin_size` (60-80) to improve clustering
-  accuracy in crowded fields by using smaller spatial bins with wider overlap margins.
+- **Dense labeling**: Tune `threshold` (0.65-0.70) and `maximum_distance` (15) to keep crowded neighbours from merging,
+  and raise `mask_prevalence` and `pixel_prevalence` to demand more cross-recording agreement. `step_sizes` and
+  `bin_size` govern peak memory and per-bin overhead rather than clustering accuracy, so leave them at their defaults
+  unless memory is the constraint.
 
 ---
 

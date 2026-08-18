@@ -98,7 +98,8 @@ found. Available: ...".
 
 | Argument            | Tools                                       | Accepted values                                                                                             |
 |---------------------|---------------------------------------------|-------------------------------------------------------------------------------------------------------------|
-| `plane_index`       | the four single-recording query tools       | `-1` combined view, `0`+ a specific plane                                                                   |
+| `plane_index`       | detection summary, ROI statistics, traces   | `-1` combined view, `0`+ a specific plane                                                                   |
+| `plane_index`       | `query_registration_quality_tool`           | `0`+ a specific plane. `-1` always fails, because no combined `registration_data/` exists                   |
 | `trace_type`        | `query_traces_tool`, cross-recording traces | `fluorescence`, `neuropil`, `corrected`, `spikes`                                                           |
 | `downsample_factor` | `query_traces_tool`, cross-recording traces | `1` none, `N` every Nth sample. Below 1 clamps to 1                                                         |
 | `start_frame`       | `query_traces_tool`, cross-recording traces | inclusive, applied before downsampling, default `0`                                                         |
@@ -281,6 +282,10 @@ Combined extraction data (cindra/):
 
 Per-plane directories (cindra/plane_0/ through cindra/plane_{N-1}/):
 - [ ] Each expected plane directory exists
+- [ ] A plane named by `main.ignored_flyback_planes` is binarized and never registered or processed, so only its
+      `runtime_data.yaml`, `channel_1_data.bin`, and `detection_data/mean_image.npy` are required.
+      `verify_single_recording_output_tool` reports those indices under `flyback_planes` and treats every registration,
+      projection, and extraction item below as optional for them
 - [ ] Each plane contains `runtime_data.yaml` with non-zero `io.frame_count` and `io.sampling_rate`
 - [ ] Each plane contains `channel_1_data.bin` (registered binary)
 - [ ] Each plane contains `channel_2_data.bin` if `main.two_channels` is True

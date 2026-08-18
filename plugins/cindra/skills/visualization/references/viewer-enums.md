@@ -31,6 +31,8 @@ never has it. The tracking viewer offers `rois_only`, `mean_image`, `enhanced_me
 
 Reported in `roi_color_mode` state field. Values correspond to the statistic used to color ROI overlays. The ROI viewer
 shows `colocalization_probability` for dual-channel recordings and `recording_count` for multi-recording tracked ROIs.
+In multi-recording tracked-ROI mode it also hides `footprint`, `cell_probability`, and `cell_classification`, because
+tracked recordings reuse the backward-transformed source masks and carry no classifier output of their own.
 
 | Value                        | Dropdown label       | Description                                                 |
 |------------------------------|----------------------|-------------------------------------------------------------|
