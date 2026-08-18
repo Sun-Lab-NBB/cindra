@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING, Any
 from concurrent.futures import Future, ThreadPoolExecutor, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 
 import pytest
+from ataraxis_time import Timeout, PrecisionTimer, TimerPrecisions
+from ataraxis_base_utilities import error_format
 from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 
 from cindra.orchestration import (
     RESOURCE_CLASS_BY_JOB_NAME,
     PendingJob,
-    JobExecutionState,
     MultiRecordingJobNames,
     SingleRecordingJobNames,
     execution,
@@ -30,6 +30,7 @@ from cindra.orchestration.jobs import (
     UNREACHABLE_PREREQUISITE_MESSAGE,
 )
 from cindra.orchestration.execution import (
+    JobExecutionState,
     _committed_cores,
     _pipeline_worker,
     _admit_ready_jobs,
@@ -48,138 +49,14 @@ if TYPE_CHECKING:
 _JOIN_TIMEOUT: float = 30.0
 """The number of seconds a test waits for a worker or manager thread to terminate before failing."""
 
-_DRAIN_TIMEOUT: float = 60.0
-"""The number of seconds a test waits for a started execution session to drain before failing."""
+_DRAIN_TIMEOUT_MILLISECONDS: int = 60000
+"""The number of milliseconds a test waits for a started execution session to drain before failing."""
 
-_DRAIN_POLL_SECONDS: float = 0.05
-"""The interval at which a test re-checks whether the started execution session has cleared its state."""
+_DRAIN_POLL_MILLISECONDS: int = 50
+"""The number of milliseconds between the checks a test makes for the started execution session clearing its state."""
 
 _TERMINAL_STATE_MESSAGE: str = "Unable to complete job. Worker terminated without reaching a terminal state."
 """The tracker error message the pipeline worker records when the pipeline returns without a terminal tracker state."""
-
-
-def _build_single_recording_tracker(tracker_path: Path, *, plane_count: int = 1) -> ProcessingTracker:
-    """Creates a single-recording tracker whose registry holds the full job universe of the given plane count."""
-    universe = resolve_single_recording_jobs(plane_count=plane_count)
-    tracker = ProcessingTracker(file_path=tracker_path)
-    tracker.align_jobs(jobs=universe, universe=universe)
-    return tracker
-
-
-def _build_multi_recording_tracker(tracker_path: Path, *, recording_ids: Sequence[str]) -> ProcessingTracker:
-    """Creates a multi-recording tracker whose registry holds the full job universe of the given recordings."""
-    universe = resolve_multi_recording_jobs(recording_ids=recording_ids)
-    tracker = ProcessingTracker(file_path=tracker_path)
-    tracker.align_jobs(jobs=universe, universe=universe)
-    return tracker
-
-
-def _make_job(tracker_path: Path, job_name: str, specifier: str = "", *, single_recording: bool = True) -> PendingJob:
-    """Builds a queued job addressing the named tracker entry through the resource class of its pipeline stage."""
-    return PendingJob(
-        configuration_path=tracker_path.parent / "configuration.yaml",
-        tracker_path=tracker_path,
-        job_id=ProcessingTracker.generate_job_id(job_name=job_name, specifier=specifier),
-        single_recording=single_recording,
-        resource_class=RESOURCE_CLASS_BY_JOB_NAME[job_name],
-    )
-
-
-def _make_state(
-    jobs: Sequence[PendingJob],
-    *,
-    admitted: bool = False,
-    capacity: int = 4,
-    workers: int = 1,
-    cpu_budget: int = 64,
-) -> JobExecutionState:
-    """Builds an execution state holding the given jobs in the admission pool or in their resource class queues."""
-    class_names = {job.resource_class.name for job in jobs}
-    queues: dict[str, list[PendingJob]] = {class_name: [] for class_name in class_names}
-    if admitted:
-        for job in jobs:
-            queues[job.resource_class.name].append(job)
-
-    return JobExecutionState(
-        all_jobs={job.dispatch_key: job for job in jobs},
-        admission_pool=[] if admitted else list(jobs),
-        pending_queues=queues,
-        active_futures={class_name: {} for class_name in class_names},
-        class_capacities=dict.fromkeys(class_names, capacity),
-        class_workers=dict.fromkeys(class_names, workers),
-        cpu_budget=cpu_budget,
-    )
-
-
-def _use_same_process_pool(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Replaces the session's worker pool with a same-process one, so a patched worker stays reachable."""
-    monkeypatch.setattr(execution, "_create_job_pool", lambda max_workers: ThreadPoolExecutor(max_workers=max_workers))
-
-
-def _make_completing_worker(observed: list[str]) -> Callable[..., None]:
-    """Returns a pipeline worker stub that records the dispatched job identifier and marks that job succeeded."""
-
-    def _worker(
-        configuration_path: Path,
-        job_id: str,
-        tracker_path: Path,
-        *,
-        single_recording: bool = True,
-        workers: int | None = None,
-    ) -> None:
-        observed.append(job_id)
-        ProcessingTracker(file_path=tracker_path).complete_job(job_id=job_id)
-
-    return _worker
-
-
-def _make_recording_worker(observed: list[dict[str, Any]]) -> Callable[..., None]:
-    """Returns a pipeline worker stub that records the keyword arguments the dispatcher hands it."""
-
-    def _worker(**kwargs: Any) -> None:
-        observed.append(kwargs)
-
-    return _worker
-
-
-def _refuse_submission(*args: Any, **kwargs: Any) -> Future[None]:
-    """Refuses a submission the way a pool that lost a worker outside that worker's control refuses every later one."""
-    raise BrokenProcessPool
-
-
-def _make_finished_future() -> Future[None]:
-    """Returns a resolved future, which the reaper treats as a completed job."""
-    future: Future[None] = Future()
-    future.set_result(None)
-    return future
-
-
-def _make_failed_future(error: BaseException) -> Future[None]:
-    """Returns a future carrying the given error, which is how a pool reports a worker that raised out of its job."""
-    future: Future[None] = Future()
-    future.set_exception(error)
-    return future
-
-
-def _make_canceled_future() -> Future[None]:
-    """Returns a canceled future, which is how a pool reports a job no worker ever started."""
-    future: Future[None] = Future()
-    future.cancel()
-    return future
-
-
-def _drain_active_futures(state: JobExecutionState) -> None:
-    """Waits for every job the dispatcher submitted to finish."""
-    for futures in state.active_futures.values():
-        for future in futures.values():
-            future.result(timeout=_JOIN_TIMEOUT)
-
-
-def _wait_for_session_end() -> None:
-    """Blocks until the execution manager clears the module-global session state or the drain timeout elapses."""
-    deadline = time.monotonic() + _DRAIN_TIMEOUT
-    while get_execution_state() is not None and time.monotonic() < deadline:
-        time.sleep(_DRAIN_POLL_SECONDS)
 
 
 @pytest.fixture(autouse=True)
@@ -300,7 +177,13 @@ class TestStartExecutionSession:
         tracker_path = tmp_path / "single_recording_tracker.yaml"
         job = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.BINARIZE)
 
-        with pytest.raises(ValueError, match=f"The '{override_name}' override must be a positive integer"):
+        message = (
+            f"Unable to start the execution session. The '{override_name}' override must be a positive integer, "
+            f"-1 to request every available core, or None to accept the measured default, but encountered "
+            f"{workers_per_job if override_name == 'workers_per_job' else max_parallel_jobs}."
+        )
+
+        with pytest.raises(ValueError, match=error_format(message=message)):
             start_execution_session(
                 all_jobs={job.dispatch_key: job},
                 workers_per_job=workers_per_job,
@@ -566,7 +449,7 @@ class TestAdmitReadyJobs:
     @pytest.mark.xdist_group(name="execution_state")
     def test_empty_pool_reports_no_admission(self) -> None:
         """Verifies that scanning an empty admission pool reads no tracker and reports no admission."""
-        assert _admit_ready_jobs(state=JobExecutionState()) is False
+        assert not _admit_ready_jobs(state=JobExecutionState())
 
     @pytest.mark.xdist_group(name="execution_state")
     def test_ready_job_is_queued_while_a_waiting_job_stays_pooled(self, tmp_path: Path) -> None:
@@ -579,7 +462,7 @@ class TestAdmitReadyJobs:
 
         admitted = _admit_ready_jobs(state=state)
 
-        assert admitted is True
+        assert admitted
         assert state.pending_queues[binarize_job.resource_class.name] == [binarize_job]
         assert state.pending_queues[combine_job.resource_class.name] == []
         assert state.admission_pool == [combine_job]
@@ -597,7 +480,7 @@ class TestAdmitReadyJobs:
 
         admitted = _admit_ready_jobs(state=state)
 
-        assert admitted is True
+        assert admitted
         assert state.admission_pool == []
         assert state.pending_queues[job.resource_class.name] == []
         assert tracker.get_job_status(job_id=job.job_id) == ProcessingStatus.FAILED
@@ -615,7 +498,7 @@ class TestAdmitReadyJobs:
 
         admitted = _admit_ready_jobs(state=state)
 
-        assert admitted is True
+        assert admitted
         assert state.admission_pool == []
         assert tracker.get_job_status(job_id=job.job_id) == ProcessingStatus.FAILED
         assert "prerequisite 'binarization' phase" in str(tracker.get_job_info(job_id=job.job_id).error_message)
@@ -628,7 +511,7 @@ class TestAdmitReadyJobs:
         job = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.REGISTER, specifier="plane_0")
         state = _make_state(jobs=[job])
 
-        assert _admit_ready_jobs(state=state) is False
+        assert not _admit_ready_jobs(state=state)
         assert state.admission_pool == [job]
 
 
@@ -655,7 +538,7 @@ class TestDispatchAdmittedJobs:
 
         _drain_active_futures(state=state)
 
-        assert dispatched is True
+        assert dispatched
         assert list(state.active_futures[first.resource_class.name]) == [first.dispatch_key]
         assert state.pending_queues[first.resource_class.name] == [second]
         assert observed == [
@@ -733,11 +616,10 @@ class TestDispatchAdmittedJobs:
         # that waits on no other job. The second pass then finds the budget spent and releases nothing. A dispatcher
         # that released the reservations first, or dropped the reservation clamp, would instead spend six cores on
         # registration alone and leave both conversions queued behind it.
-        assert dispatched is True
+        assert dispatched
         assert len(state.active_futures[registration_class]) == 4
         assert len(state.active_futures[binarization_class]) == 2
 
-        # The dispatched jobs are the heads of their queue, in order, and the rest keep their places behind them.
         assert list(state.active_futures[registration_class]) == [job.dispatch_key for job in registrations[:4]]
         assert state.pending_queues[registration_class] == registrations[4:]
         assert state.pending_queues[binarization_class] == []
@@ -781,7 +663,7 @@ class TestDispatchAdmittedJobs:
 
         _drain_active_futures(state=state)
 
-        assert dispatched is True
+        assert dispatched
         assert list(state.active_futures[first.resource_class.name]) == [first.dispatch_key]
         assert state.pending_queues[first.resource_class.name] == [second]
 
@@ -802,7 +684,7 @@ class TestDispatchAdmittedJobs:
 
         _drain_active_futures(state=state)
 
-        assert dispatched is True
+        assert dispatched
         assert list(state.active_futures[job.resource_class.name]) == [job.dispatch_key]
         assert state.pending_queues[job.resource_class.name] == []
 
@@ -859,7 +741,7 @@ class TestDispatchAdmittedJobs:
 
         _drain_active_futures(state=state)
 
-        assert dispatched is True
+        assert dispatched
         assert state.pending_queues[first.resource_class.name] == []
         assert len(state.active_futures[first.resource_class.name]) == 2
         assert [entry["job_id"] for entry in observed] == [first.job_id, second.job_id]
@@ -878,7 +760,7 @@ class TestDispatchAdmittedJobs:
         with ThreadPoolExecutor(max_workers=4) as pool:
             dispatched = _dispatch_admitted_jobs(state=state, pool=pool)
 
-        assert dispatched is False
+        assert not dispatched
         assert state.pending_queues[queued.resource_class.name] == [queued]
         assert observed == []
 
@@ -1239,3 +1121,128 @@ class TestJobExecutionManager:
         assert state.admission_pool == []
         assert state.active_futures[job.resource_class.name] == {}
         assert tracker.get_job_status(job_id=job.job_id) == ProcessingStatus.SUCCEEDED
+
+
+def _build_single_recording_tracker(tracker_path: Path, *, plane_count: int = 1) -> ProcessingTracker:
+    """Creates a single-recording tracker whose registry holds the full job universe of the given plane count."""
+    universe = resolve_single_recording_jobs(plane_count=plane_count)
+    tracker = ProcessingTracker(file_path=tracker_path)
+    tracker.align_jobs(jobs=universe, universe=universe)
+    return tracker
+
+
+def _build_multi_recording_tracker(tracker_path: Path, *, recording_ids: Sequence[str]) -> ProcessingTracker:
+    """Creates a multi-recording tracker whose registry holds the full job universe of the given recordings."""
+    universe = resolve_multi_recording_jobs(recording_ids=recording_ids)
+    tracker = ProcessingTracker(file_path=tracker_path)
+    tracker.align_jobs(jobs=universe, universe=universe)
+    return tracker
+
+
+def _make_job(tracker_path: Path, job_name: str, specifier: str = "", *, single_recording: bool = True) -> PendingJob:
+    """Builds a queued job addressing the named tracker entry through the resource class of its pipeline stage."""
+    return PendingJob(
+        configuration_path=tracker_path.parent / "configuration.yaml",
+        tracker_path=tracker_path,
+        job_id=ProcessingTracker.generate_job_id(job_name=job_name, specifier=specifier),
+        single_recording=single_recording,
+        resource_class=RESOURCE_CLASS_BY_JOB_NAME[job_name],
+    )
+
+
+def _make_state(
+    jobs: Sequence[PendingJob],
+    *,
+    admitted: bool = False,
+    capacity: int = 4,
+    workers: int = 1,
+    cpu_budget: int = 64,
+) -> JobExecutionState:
+    """Builds an execution state holding the given jobs in the admission pool or in their resource class queues."""
+    class_names = {job.resource_class.name for job in jobs}
+    queues: dict[str, list[PendingJob]] = {class_name: [] for class_name in class_names}
+    if admitted:
+        for job in jobs:
+            queues[job.resource_class.name].append(job)
+
+    return JobExecutionState(
+        all_jobs={job.dispatch_key: job for job in jobs},
+        admission_pool=[] if admitted else list(jobs),
+        pending_queues=queues,
+        active_futures={class_name: {} for class_name in class_names},
+        class_capacities=dict.fromkeys(class_names, capacity),
+        class_workers=dict.fromkeys(class_names, workers),
+        cpu_budget=cpu_budget,
+    )
+
+
+def _use_same_process_pool(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replaces the session's worker pool with a same-process one, so a patched worker stays reachable."""
+    monkeypatch.setattr(execution, "_create_job_pool", lambda max_workers: ThreadPoolExecutor(max_workers=max_workers))
+
+
+def _make_completing_worker(observed: list[str]) -> Callable[..., None]:
+    """Returns a pipeline worker stub that records the dispatched job identifier and marks that job succeeded."""
+
+    def _worker(
+        configuration_path: Path,
+        job_id: str,
+        tracker_path: Path,
+        *,
+        single_recording: bool = True,
+        workers: int | None = None,
+    ) -> None:
+        observed.append(job_id)
+        ProcessingTracker(file_path=tracker_path).complete_job(job_id=job_id)
+
+    return _worker
+
+
+def _make_recording_worker(observed: list[dict[str, Any]]) -> Callable[..., None]:
+    """Returns a pipeline worker stub that records the keyword arguments the dispatcher hands it."""
+
+    def _worker(**kwargs: Any) -> None:
+        observed.append(kwargs)
+
+    return _worker
+
+
+def _refuse_submission(*args: Any, **kwargs: Any) -> Future[None]:
+    """Refuses a submission the way a pool that lost a worker outside that worker's control refuses every later one."""
+    raise BrokenProcessPool
+
+
+def _make_finished_future() -> Future[None]:
+    """Returns a resolved future, which the reaper treats as a completed job."""
+    future: Future[None] = Future()
+    future.set_result(None)
+    return future
+
+
+def _make_failed_future(error: BaseException) -> Future[None]:
+    """Returns a future carrying the given error, which is how a pool reports a worker that raised out of its job."""
+    future: Future[None] = Future()
+    future.set_exception(error)
+    return future
+
+
+def _make_canceled_future() -> Future[None]:
+    """Returns a canceled future, which is how a pool reports a job no worker ever started."""
+    future: Future[None] = Future()
+    future.cancel()
+    return future
+
+
+def _drain_active_futures(state: JobExecutionState) -> None:
+    """Waits for every job the dispatcher submitted to finish."""
+    for futures in state.active_futures.values():
+        for future in futures.values():
+            future.result(timeout=_JOIN_TIMEOUT)
+
+
+def _wait_for_session_end() -> None:
+    """Blocks until the execution manager clears the module-global session state or the drain timeout elapses."""
+    timeout = Timeout(duration=_DRAIN_TIMEOUT_MILLISECONDS, precision=TimerPrecisions.MILLISECOND)
+    timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
+    while get_execution_state() is not None and not timeout.expired:
+        timer.delay(delay=_DRAIN_POLL_MILLISECONDS, allow_sleep=True)

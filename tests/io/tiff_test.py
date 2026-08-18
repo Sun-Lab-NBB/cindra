@@ -253,15 +253,9 @@ class TestReadTiff:
 class TestSourceFrameGeometry:
     """Tests resolve_source_frame_geometry."""
 
-    def _write_stack(self, directory: Path, name: str, pages: int, height: int, width: int) -> None:
-        """Writes one TIFF file holding the requested number of int16 pages."""
-        with TiffWriter(directory / name) as writer:
-            for _ in range(pages):
-                writer.write(np.zeros((height, width), dtype=np.int16))
-
     def test_geometry_follows_the_first_page_header(self, tmp_path: Path) -> None:
         """Verifies that the frame shape and element width are read from the first source file."""
-        self._write_stack(directory=tmp_path, name="frames_001.tif", pages=4, height=12, width=9)
+        TestSourceFrameGeometry._write_stack(directory=tmp_path, name="frames_001.tif", pages=4, height=12, width=9)
 
         geometry = resolve_source_frame_geometry(data_directory=tmp_path)
 
@@ -271,9 +265,9 @@ class TestSourceFrameGeometry:
 
     def test_frame_count_scales_the_first_file_over_the_whole_directory(self, tmp_path: Path) -> None:
         """Verifies that the frame count is the first file's page count taken across every file."""
-        self._write_stack(directory=tmp_path, name="frames_001.tif", pages=5, height=8, width=8)
-        self._write_stack(directory=tmp_path, name="frames_002.tif", pages=5, height=8, width=8)
-        self._write_stack(directory=tmp_path, name="frames_003.tif", pages=2, height=8, width=8)
+        TestSourceFrameGeometry._write_stack(directory=tmp_path, name="frames_001.tif", pages=5, height=8, width=8)
+        TestSourceFrameGeometry._write_stack(directory=tmp_path, name="frames_002.tif", pages=5, height=8, width=8)
+        TestSourceFrameGeometry._write_stack(directory=tmp_path, name="frames_003.tif", pages=2, height=8, width=8)
 
         geometry = resolve_source_frame_geometry(data_directory=tmp_path)
 
@@ -282,8 +276,8 @@ class TestSourceFrameGeometry:
 
     def test_ignored_stems_are_excluded_from_the_geometry(self, tmp_path: Path) -> None:
         """Verifies that an ignored file neither supplies the shape nor counts toward the frames."""
-        self._write_stack(directory=tmp_path, name="zstack.tif", pages=1, height=64, width=64)
-        self._write_stack(directory=tmp_path, name="frames_001.tif", pages=3, height=8, width=8)
+        TestSourceFrameGeometry._write_stack(directory=tmp_path, name="zstack.tif", pages=1, height=64, width=64)
+        TestSourceFrameGeometry._write_stack(directory=tmp_path, name="frames_001.tif", pages=3, height=8, width=8)
 
         geometry = resolve_source_frame_geometry(data_directory=tmp_path, ignored_file_names=("zstack",))
 
@@ -296,3 +290,10 @@ class TestSourceFrameGeometry:
 
         with pytest.raises(FileNotFoundError, match=error_format(message=message)):
             resolve_source_frame_geometry(data_directory=tmp_path)
+
+    @staticmethod
+    def _write_stack(directory: Path, name: str, pages: int, height: int, width: int) -> None:
+        """Writes one TIFF file holding the requested number of int16 pages."""
+        with TiffWriter(directory / name) as writer:
+            for _ in range(pages):
+                writer.write(np.zeros((height, width), dtype=np.int16))

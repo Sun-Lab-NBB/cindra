@@ -53,14 +53,14 @@ def pca_denoise(
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
 
-    num_frames, height, width = frames.shape
+    frame_count, height, width = frames.shape
     y_blocks, x_blocks, _, (block_height, block_width), _ = compute_registration_blocks(
         height=height, width=width, block_size=block_size
     )
 
     frame_mean = frames.mean(axis=0)
-    max_components = int(min(block_height, block_width) * component_fraction)
-    num_components = min(block_height * block_width, num_frames, max_components)
+    maximum_components = int(min(block_height, block_width) * component_fraction)
+    component_count = min(block_height * block_width, frame_count, maximum_components)
     taper_mask = compute_spatial_taper_mask(sigma=block_height // 4, height=block_height, width=block_width)
 
     normalization = np.zeros((height, width), dtype=np.float32)
@@ -74,24 +74,24 @@ def pca_denoise(
     def _center_and_reconstruct(block_slice: tuple[slice, slice]) -> NDArray[np.float32]:
         """Centers one block against the frame mean and returns its low-rank reconstruction."""
         y_slice, x_slice = block_slice
-        centered = frames[:, y_slice, x_slice].reshape(num_frames, -1) - frame_mean[y_slice, x_slice].ravel()
-        return _fit_and_reconstruct_block(block=centered, num_components=num_components)
+        centered = frames[:, y_slice, x_slice].reshape(frame_count, -1) - frame_mean[y_slice, x_slice].ravel()
+        return _fit_and_reconstruct_block(block=centered, component_count=component_count)
 
     def _accumulate(block_slice: tuple[slice, slice], block_reconstruction: NDArray[np.float32]) -> None:
         """Adds one tapered block reconstruction into the running totals."""
         y_slice, x_slice = block_slice
         reconstruction[:, y_slice, x_slice] += (
-            block_reconstruction.reshape(num_frames, block_height, block_width) * taper_mask
+            block_reconstruction.reshape(frame_count, block_height, block_width) * taper_mask
         )
         normalization[y_slice, x_slice] += taper_mask
 
     # Fits PCA and reconstructs each block. When multiple workers are available, the fitting runs in parallel across
-    # blocks since each block's SVD is independent. LAPACK releases the GIL during SVD computation.
-    # Limits each block fit to a single BLAS thread. The worker budget is already spent on the block pool below, so
-    # leaving the BLAS thread count unconstrained would multiply the two and oversubscribe the host. The limit also
-    # encloses the accumulation, because the BLAS width the fits run at decides their summation order.
-    # Each block is centered inside the worker that fits it and accumulated as soon as it returns, so the resident
-    # set holds one block per worker rather than a centered and a reconstructed copy of every block at once.
+    # blocks since each block's SVD is independent. LAPACK releases the GIL during SVD computation. Limits each block
+    # fit to a single BLAS thread. The worker budget is already spent on the block pool below, so leaving the BLAS
+    # thread count unconstrained would multiply the two and oversubscribe the host. The limit also encloses the
+    # accumulation, because the BLAS width the fits run at decides their summation order. Each block is centered inside
+    # the worker that fits it and accumulated as soon as it returns, so the resident set holds one block per worker
+    # rather than a centered and a reconstructed copy of every block at once.
     with threadpool_limits(limits=1):
         if parallel_workers == 1:
             for block_slice in block_slices:
@@ -105,7 +105,6 @@ def pca_denoise(
                 for block_slice, future in zip(block_slices, futures, strict=True):
                     _accumulate(block_slice=block_slice, block_reconstruction=future.result())
 
-    # Normalizes and restores the mean.
     reconstruction /= normalization
     reconstruction += frame_mean
 
@@ -118,13 +117,13 @@ def pca_denoise(
 
 def _fit_and_reconstruct_block(
     block: NDArray[np.float32],
-    num_components: int,
+    component_count: int,
 ) -> NDArray[np.float32]:
     """Fits a PCA model to a single spatial block and returns the low-rank reconstruction.
 
     Args:
         block: The centered block data with shape (num_frames, num_pixels).
-        num_components: The number of PCA components to retain.
+        component_count: The number of PCA components to retain.
 
     Returns:
         The reconstructed block data with shape (num_frames, num_pixels).
@@ -135,6 +134,6 @@ def _fit_and_reconstruct_block(
         return block.copy()
 
     # A float32 block yields float32 components, so the projection and its back-projection stay float32 throughout.
-    model = PCA(n_components=num_components, random_state=0).fit(block)
+    model = PCA(n_components=component_count, random_state=0).fit(block)
     reconstructed: NDArray[np.float32] = (block @ model.components_.T) @ model.components_
     return reconstructed

@@ -97,10 +97,10 @@ class BinaryPlayer(QMainWindow):
         self._average_rigid_y_offsets: NDArray[np.float32] = np.zeros(1, dtype=np.float32)
         self._average_rigid_x_offsets: NDArray[np.float32] = np.zeros(1, dtype=np.float32)
 
-        # Row 0: Toolbar with file menu and recording controls on a single line.
+        # Builds row 0, the toolbar holding the file menu and recording controls on a single line.
         toolbar = QHBoxLayout()
 
-        # File menu button with dropdown for loading recordings.
+        # Creates the file menu button with a dropdown for loading recordings.
         self._file_button: QPushButton = QPushButton("File")
         self._file_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self._file_button.setToolTip("Load a recording for visualization.")
@@ -112,7 +112,7 @@ class BinaryPlayer(QMainWindow):
         self._file_button.setMenu(file_menu)
         toolbar.addWidget(self._file_button)
 
-        # Channel 2 toggle button. Hidden until a recording with two channels is loaded.
+        # Creates the channel 2 toggle button, which stays hidden until a recording with two channels is loaded.
         self._channel_2_button: QPushButton = QPushButton("View Channel 2")
         self._channel_2_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self._channel_2_button.setVisible(False)
@@ -120,7 +120,7 @@ class BinaryPlayer(QMainWindow):
         self._channel_2_button.clicked.connect(self._toggle_channel_2)
         toolbar.addWidget(self._channel_2_button)
 
-        # Hint label for keyboard shortcuts.
+        # Adds the hint label listing the keyboard shortcuts.
         hint_label = QLabel(
             "Hint: Use arrows to navigate recording's frames / adjust frame step size, "
             "use space to toggle recording playback."
@@ -131,8 +131,7 @@ class BinaryPlayer(QMainWindow):
         toolbar.addStretch()
         self._layout.addLayout(toolbar, 0, 0, 1, 6)
 
-        # Row 1: Graphics widget spanning the full width. Contains the main image view and the
-        # registration offset plots.
+        # Builds row 1, the full-width graphics widget holding the main image view and the registration offset plots.
         self._graphics_widget: pg.GraphicsLayoutWidget = pg.GraphicsLayoutWidget()
         self._layout.addWidget(self._graphics_widget, 1, 0, 1, 6)
         self._layout.setRowStretch(1, 1)
@@ -156,7 +155,7 @@ class BinaryPlayer(QMainWindow):
         self._graphics_widget.ci.layout.setRowStretchFactor(0, BINARY_STYLE.image_plot_stretch[0])
         self._graphics_widget.ci.layout.setRowStretchFactor(1, BINARY_STYLE.image_plot_stretch[1])
 
-        # Row 2: Frame navigation step editor and current frame label.
+        # Builds row 2, holding the frame navigation step editor and the current frame label.
         info_bar = QHBoxLayout()
         bold_font = FONTS.large_bold
         big_font = FONTS.large
@@ -182,7 +181,7 @@ class BinaryPlayer(QMainWindow):
         info_bar.addStretch()
         self._layout.addLayout(info_bar, 2, 0, 1, 6)
 
-        # Row 3: Playback controls and frame slider.
+        # Builds row 3, holding the playback controls and the frame slider.
         self._create_buttons()
         self._frame_slider: QSlider = QSlider(QtCore.Qt.Orientation.Horizontal)
         self._frame_slider.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
@@ -211,17 +210,14 @@ class BinaryPlayer(QMainWindow):
         # Forces the combined view so the binary viewer always shows the stitched multi-plane movie.
         data.switch_view(view_index=-1)
 
-        # Updates the window title to reflect the loaded recording path.
         self.setWindowTitle(f"Registered Recording — {data.recording_label}")
-
-        # Configures all plot views and display parameters for the stitched display.
         self._setup_views()
 
     def get_state(self) -> dict[str, Any]:
         """Returns the current display state of the binary player for cross-process state exchange.
 
         Returns:
-            A dictionary containing the current frame, playback status, and channel settings.
+            The current frame, playback status, and channel settings.
         """
         return {
             "current_frame": self._current_frame,
@@ -333,8 +329,8 @@ class BinaryPlayer(QMainWindow):
 
     def _load_recording(self) -> None:
         """Displays a file dialog that allows users to select a new recording to visualize."""
-        # Defaults the file dialog to the parent of the currently loaded recording's output
-        # directory, so the user can easily navigate to a sibling recording.
+        # Defaults the file dialog to the parent of the currently loaded recording's output directory, so the user can
+        # easily navigate to a sibling recording.
         start_directory = ""
         output = self.data.output_path
         if output is not None:
@@ -383,7 +379,6 @@ class BinaryPlayer(QMainWindow):
             [-BINARY_CONFIG.display_range_low_sigma, BINARY_CONFIG.display_range_high_sigma], dtype=np.float32
         )
 
-        # Loads aspect ratio from recording data.
         self._main_view_box.setAspectLocked(lock=True, ratio=self.data.aspect_ratio)
 
         # Configures the frame display slider.
@@ -461,7 +456,6 @@ class BinaryPlayer(QMainWindow):
 
     def _render_frame(self) -> None:
         """Reads and displays the frame at ``_current_frame`` and updates all navigation controls."""
-        # Reads the current stitched frame combining all planes.
         self._image = np.asarray(self.data.read_stitched_frame(frame_index=self._current_frame))
 
         # If channel 2 overlay is active, composites both channels into an RGB image with channel 1 in
@@ -541,7 +535,7 @@ class BinaryPlayer(QMainWindow):
         zoom = False
         seek_to_frame = False
         for item in items:
-            # Click landed on a time-series plot: maps the scene position to a frame index.
+            # Maps the scene position to a frame index when the click lands on a time-series plot.
             if item == self._offset_plot:
                 view_box = self._offset_plot.vb
                 position = view_box.mapSceneToView(event.scenePos())  # type: ignore[attr-defined]
@@ -551,8 +545,8 @@ class BinaryPlayer(QMainWindow):
             elif item == self._main_view_box:
                 if event.button() == QtCore.Qt.MouseButton.LeftButton and event.double():  # type: ignore[attr-defined]
                     self._zoom_image()
-            # For time-series plots, a single click seeks to that frame. A double click resets the
-            # x-axis zoom to the full recording range.
+            # For time-series plots, a single click seeks to that frame. A double click resets the x-axis zoom to the
+            # full recording range.
             if is_time_plot and event.button() == QtCore.Qt.MouseButton.LeftButton:  # type: ignore[attr-defined]
                 if event.double():  # type: ignore[attr-defined]
                     zoom = True

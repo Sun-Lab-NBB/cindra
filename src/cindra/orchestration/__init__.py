@@ -1,6 +1,4 @@
-"""Provides the orchestration layer: the pipeline job model and its prerequisite graph, the measured CPU worker and
-resource-class allocation, the local batch execution engine, and the pipeline entry points.
-"""
+"""Provides the pipeline job model, the worker allocation, the batch execution engine, and the pipeline entry points."""
 
 from .jobs import (
     MULTI_RECORDING_PHASES,
@@ -19,7 +17,7 @@ from .jobs import (
     resolve_multi_recording_prerequisites,
     resolve_single_recording_prerequisites,
 )
-from .openmp import OpenMpStatus, OpenMpSummary, resolve_openmp_runtime
+from .openmp import OpenMpStatus, resolve_openmp_runtime
 from .worker import (
     prime_dataset,
     prime_recording,
@@ -44,7 +42,6 @@ from .discovery import (
 )
 from .execution import (
     PendingJob,
-    JobExecutionState,
     get_execution_state,
     set_execution_state,
     resolve_session_load,
@@ -93,12 +90,10 @@ __all__ = [
     "SINGLE_RECORDING_TRACKER_FILENAME",
     "SPAWNED_CHILD_MEMORY_MB",
     "WORKER_MEMORY_MB",
-    "JobExecutionState",
     "JobSizing",
     "MultiRecordingJobNames",
     "MultiRecordingJobs",
     "OpenMpStatus",
-    "OpenMpSummary",
     "PendingJob",
     "PipelinePhase",
     "PlaneGeometry",

@@ -286,7 +286,7 @@ directory = "reports/coverage_html"
 # measurement above. The lines carrying a 'pragma: no cover' comment, such as the Numba JIT bodies and the defensive
 # branches guarding degenerate geometry, do not count against the gate.
 [tool.coverage.report]
-fail_under = 100     # Requires the test suite to cover every measured statement
+fail_under = 100     # Requires the test suite to cover every measured statement and branch
 show_missing = true  # Lists the statements missed by the test suite, so a failed check names the lines to cover
 
 # Every entry is an unanchored regular expression matched against each source line, and a match on a 'def' or on any

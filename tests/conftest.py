@@ -37,16 +37,6 @@ _DEFAULT_FRAME_COUNT: int = 40
 """The default synthetic frame count for single-recording fixtures."""
 
 
-def write_binary_movie(file_path: Path, movie: NDArray[np.int16]) -> None:
-    """Writes a synthetic movie array to a raw int16 binary file readable by BinaryFile.
-
-    Args:
-        file_path: The destination path for the binary file.
-        movie: The synthetic movie with shape (frames, height, width). Cast to int16 before writing.
-    """
-    movie.astype(np.int16).tofile(file_path)
-
-
 @pytest.fixture
 def single_recording_context() -> Callable[..., RuntimeContext]:
     """Returns a factory that builds a minimal single-recording RuntimeContext backed by a synthetic binary movie.
@@ -77,12 +67,12 @@ def single_recording_context() -> Callable[..., RuntimeContext]:
                 np.int16
             )
         binary_path = plane_directory / "channel_1_data.bin"
-        write_binary_movie(file_path=binary_path, movie=movie)
+        _write_binary_movie(file_path=binary_path, movie=movie)
 
         binary_path_channel_2: Path | None = None
         if movie_channel_2 is not None:
             binary_path_channel_2 = plane_directory / "channel_2_data.bin"
-            write_binary_movie(file_path=binary_path_channel_2, movie=movie_channel_2)
+            _write_binary_movie(file_path=binary_path_channel_2, movie=movie_channel_2)
 
         configuration = SingleRecordingConfiguration()
         configuration.file_io.output_path = output_root
@@ -152,3 +142,13 @@ def read_binary_movie() -> Callable[[Path, int, int], NDArray[np.int16]]:
             return np.array(binary_file.data, dtype=np.int16)
 
     return _read
+
+
+def _write_binary_movie(file_path: Path, movie: NDArray[np.int16]) -> None:
+    """Writes a synthetic movie array to a raw int16 binary file readable by BinaryFile.
+
+    Args:
+        file_path: The destination path for the binary file.
+        movie: The synthetic movie with shape (frames, height, width). Cast to int16 before writing.
+    """
+    movie.astype(np.int16).tofile(file_path)

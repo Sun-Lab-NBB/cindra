@@ -20,11 +20,6 @@ if TYPE_CHECKING:
 def discover_multi_recording_cells(configuration: MultiRecordingConfiguration, *, workers: int) -> None:
     """Discovers reliably identifiable ROIs and tracks them across the processed set of recordings.
 
-    Notes:
-        This function executes the first phase of the multi-recording pipeline: it discovers and tracks stable ROIs
-        across the processed set of recordings. This process generates the ROIs used during the second processing
-        phase (extraction) to iteratively extract the fluorescence of each tracked ROI from each processed recording.
-
     Args:
         configuration: The multi-recording pipeline configuration.
         workers: The number of parallel workers allocated to this discovery job. Must be a positive integer, which the
@@ -43,26 +38,21 @@ def discover_multi_recording_cells(configuration: MultiRecordingConfiguration, *
 
     # Confines the linear-algebra backends to the allocated worker budget for the whole stage. The batch engine pins
     # every worker process to one backend thread, so the demons registration and the cross-recording clustering would
-    # otherwise run their matrix work single-threaded, while the same code invoked outside that engine would size
-    # those backends to the whole host instead of to the job.
+    # otherwise run their matrix work single-threaded. Invoked outside that engine, the same code would size those
+    # backends to the whole host rather than to the job.
     with threadpool_limits(limits=workers):
-        # Filters ROIs from each recording's single-recording outputs based on the configured selection criteria.
         # Respects the repeat_selection flag to skip recordings with existing selections.
         select_recording_rois(contexts=contexts)
 
-        # Registers all recordings to a shared visual space using diffeomorphic demons registration and applies the
-        # deformation fields to transform reference images and ROI masks.
+        # Uses diffeomorphic demons registration to align every recording to a shared visual space.
         register_recordings(contexts=contexts, workers=workers)
 
         # Clusters ROIs across recordings in the shared deformed visual space and generates template masks for ROIs
         # that can be reliably identified across recordings.
         track_rois_across_recordings(contexts=contexts)
 
-        # Projects template masks from the shared visual space back to each recording's original coordinate system for
-        # fluorescence extraction.
         project_templates_to_recordings(contexts=contexts, workers=workers)
 
-    # Records total discovery time and processing timestamp for each context.
     total_discovery_time = int(timer.elapsed)
     for context in contexts:
         context.runtime.timing.total_discovery_time = total_discovery_time
@@ -84,10 +74,8 @@ def extract_multi_recording_fluorescence(
     """Extracts fluorescence data from ROIs tracked across imaging recordings for the specified recording.
 
     Notes:
-        This function executes the second phase of the multi-recording pipeline: it locates the runtime context
-        matching the input recording_id and extracts the fluorescence of the ROIs tracked across recordings from
-        the processed recording. The discovery phase must have completed before attempting extraction. Multiple
-        recordings can be processed in parallel, but each recording may use significant memory and CPU resources.
+        The discovery phase must have completed before attempting extraction. Multiple recordings can be processed in
+        parallel, but each recording may use significant memory and CPU resources.
 
     Args:
         configuration: The multi-recording pipeline configuration.

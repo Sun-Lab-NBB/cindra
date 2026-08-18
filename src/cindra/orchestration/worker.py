@@ -1,10 +1,4 @@
-"""Provides the per-job entry points of the two pipelines, which run exactly one job against a tracker the caller
-owns.
-
-Each entry point takes the caller's tracker and delegates the job's state transitions to that tracker's job context, so
-a scheduler owning its own tracker dispatches these functions unchanged. The sequential pipeline entry points in the
-pipeline module drive the same dispatchers over a whole recording.
-"""
+"""Provides the per-job entry points of the two pipelines, which run exactly one job against a caller-owned tracker."""
 
 from __future__ import annotations
 
@@ -57,22 +51,17 @@ def execute_single_recording_job(
     """Executes one single-recording job and records its state on a caller-provided tracker.
 
     Notes:
-        This is the tracker-injection entry point. Unlike run_single_recording_pipeline, it neither constructs its own
-        tracker nor aligns the tracker's job universe. The caller owns the tracker, aligns it with a universe that
-        contains job_id, and passes both in, so cindra stages this job into a foreign tracker whose job names and
-        granularity the caller controls. The job's start, completion, and failure are recorded onto the provided
-        tracker under job_id.
+        This is the tracker-injection entry point. The caller owns the tracker, aligns it with a universe that contains
+        job_id, and passes both in, so cindra stages this job into a foreign tracker whose job names and granularity the
+        caller controls. The job's start, completion, and failure are recorded onto the provided tracker under job_id.
 
         Every stage reads the shared bootstrap rather than writing it, so prime_recording must have written it before
         any job runs. Priming is a separate call rather than a flag on this one, because a job that wrote the
         bootstrap while its peers ran would overwrite each peer plane's runtime data with its own stale snapshot.
 
-        The worker count travels through this parameter, so a batch dispatcher can give every job a different
-        allocation while every job shares one immutable configuration file.
-
     Args:
         configuration_path: The path to the single-recording configuration YAML file.
-        job_name: The single-recording job to run, a member of the SingleRecordingJobNames enumeration.
+        job_name: The single-recording job to run.
         specifier: The job specifier. For a REGISTER or PROCESS job this encodes the plane index as 'plane_{index}',
             and for a BINARIZE or COMBINE job it is an empty string.
         job_id: The unique hexadecimal identifier under which the job's state is recorded on the provided tracker. It
@@ -111,11 +100,9 @@ def execute_multi_recording_job(
     """Executes one multi-recording job and records its state on a caller-provided tracker.
 
     Notes:
-        This is the tracker-injection entry point. Unlike run_multi_recording_pipeline, it neither constructs its own
-        tracker nor aligns the tracker's job universe. The caller owns the tracker, aligns it with a universe that
-        contains job_id, and passes both in, so cindra stages this job into a foreign tracker whose job names and
-        granularity the caller controls. The job's start, completion, and failure are recorded onto the provided
-        tracker under job_id.
+        This is the tracker-injection entry point. The caller owns the tracker, aligns it with a universe that contains
+        job_id, and passes both in, so cindra stages this job into a foreign tracker whose job names and granularity the
+        caller controls. The job's start, completion, and failure are recorded onto the provided tracker under job_id.
 
         Every stage reads the shared bootstrap rather than writing it, so prime_dataset must have written it before
         any job runs. Priming is a separate call rather than a flag on this one, because a job that wrote the
@@ -123,7 +110,7 @@ def execute_multi_recording_job(
 
     Args:
         configuration_path: The path to the multi-recording configuration YAML file.
-        job_name: The multi-recording job to run, a member of the MultiRecordingJobNames enumeration.
+        job_name: The multi-recording job to run.
         specifier: The job specifier. For an EXTRACT job this is the recording identifier, and for a DISCOVER job it is
             an empty string.
         job_id: The unique hexadecimal identifier under which the job's state is recorded on the provided tracker. It
@@ -154,10 +141,6 @@ def execute_multi_recording_job(
 def load_single_recording_configuration(configuration_path: Path) -> tuple[SingleRecordingConfiguration, Path]:
     """Loads, validates, and runtime-configures a single-recording configuration from a YAML file.
 
-    Notes:
-        Shared by the whole-pipeline entry point and the single-job executor so both apply identical path validation,
-        dataclass loading, progress configuration, and output-path checks.
-
     Args:
         configuration_path: The path to the single-recording configuration YAML file.
 
@@ -170,7 +153,6 @@ def load_single_recording_configuration(configuration_path: Path) -> tuple[Singl
             configuration.
         ValueError: If the configuration does not configure an output path.
     """
-    # Ensures the input configuration file is valid.
     if not configuration_path.exists() or configuration_path.suffix != ".yaml":
         message = (
             "Unable to run the single-recording cindra processing pipeline. Expected the configuration file to "
@@ -178,7 +160,6 @@ def load_single_recording_configuration(configuration_path: Path) -> tuple[Singl
         )
         console.error(message=message, error=FileNotFoundError)
 
-    # Loads configuration data from the provided file.
     try:
         configuration: SingleRecordingConfiguration = SingleRecordingConfiguration.from_yaml(
             file_path=configuration_path,
@@ -192,13 +173,11 @@ def load_single_recording_configuration(configuration_path: Path) -> tuple[Singl
         )
         console.error(message=message, error=FileNotFoundError)
 
-    # Configures the console's progress bar display state based on the configuration flag.
     if configuration.runtime.display_progress_bars:
         console.enable_progress()
     else:
         console.disable_progress()
 
-    # Validates that the output_path is configured.
     if configuration.file_io.output_path is None:
         message = (
             "Unable to run the single-recording cindra processing pipeline. The output_path must be configured in the "
@@ -212,10 +191,6 @@ def load_single_recording_configuration(configuration_path: Path) -> tuple[Singl
 def load_multi_recording_configuration(configuration_path: Path) -> MultiRecordingConfiguration:
     """Loads, validates, and runtime-configures a multi-recording configuration from a YAML file.
 
-    Notes:
-        Shared by the whole-pipeline entry point and the single-job executor so both apply identical path validation,
-        dataclass loading, progress configuration, and required-field checks.
-
     Args:
         configuration_path: The path to the multi-recording configuration YAML file.
 
@@ -227,7 +202,6 @@ def load_multi_recording_configuration(configuration_path: Path) -> MultiRecordi
             configuration.
         ValueError: If the configuration specifies fewer than two recording directories or no dataset name.
     """
-    # Ensures the input configuration file is valid.
     if not configuration_path.exists() or configuration_path.suffix != ".yaml":
         message = (
             "Unable to run the multi-recording cindra processing pipeline. "
@@ -236,7 +210,6 @@ def load_multi_recording_configuration(configuration_path: Path) -> MultiRecordi
         )
         console.error(message=message, error=FileNotFoundError)
 
-    # Loads configuration data from the provided file.
     try:
         configuration: MultiRecordingConfiguration = MultiRecordingConfiguration.from_yaml(file_path=configuration_path)
     except Exception:
@@ -259,7 +232,6 @@ def load_multi_recording_configuration(configuration_path: Path) -> MultiRecordi
         )
         console.error(message=message, error=ValueError)
 
-    # Validates that the configuration contains a dataset name.
     if not configuration.recording_io.dataset_name:
         message = (
             "Unable to run the multi-recording cindra processing pipeline. The "
@@ -269,7 +241,6 @@ def load_multi_recording_configuration(configuration_path: Path) -> MultiRecordi
         )
         console.error(message=message, error=ValueError)
 
-    # Configures the console's progress bar display state based on the configuration flag.
     if configuration.runtime.display_progress_bars:
         console.enable_progress()
     else:
@@ -289,13 +260,12 @@ def dispatch_single_recording_job(
     """Executes a single processing job of the single-recording pipeline.
 
     Args:
-        configuration: The SingleRecordingConfiguration instance for the pipeline.
-        job_name: The job name identifying the job to run. Must be a valid member of the
-            SingleRecordingJobNames enumeration.
+        configuration: The loaded configuration the dispatched stage reads.
+        job_name: The job to run.
         specifier: The job specifier string. For REGISTER and PROCESS jobs, this encodes the plane index as
             'plane_{index}'. For BINARIZE and COMBINE jobs, this is an empty string.
         job_id: The unique hexadecimal identifier for this processing job.
-        tracker: The ProcessingTracker instance used to track the pipeline's runtime status.
+        tracker: The tracker that records this job's state transitions.
         workers: The number of parallel workers to allocate to this job. Use None to accept the measured default for
             the job's stage and -1 to request every available core. The combination job ignores this parameter.
 
@@ -331,7 +301,6 @@ def dispatch_single_recording_job(
             )
 
         elif job_name == SingleRecordingJobNames.COMBINE:
-            # Validates that output_path is configured before loading contexts.
             if configuration.file_io.output_path is None:
                 message = (
                     "Unable to execute the combination job. The output_path must be configured in the FileIO section "
@@ -374,13 +343,12 @@ def dispatch_multi_recording_job(
     """Executes a single processing job of the multi-recording pipeline.
 
     Args:
-        configuration: The MultiRecordingConfiguration instance for the pipeline.
-        job_name: The job name identifying the job to run. Must be a valid member of the
-            MultiRecordingJobNames enumeration.
+        configuration: The loaded configuration the dispatched stage reads.
+        job_name: The job to run.
         specifier: The job specifier string. For EXTRACT jobs, this is the recording ID. For DISCOVER jobs, this is an
             empty string.
         job_id: The unique hexadecimal identifier for this processing job.
-        tracker: The ProcessingTracker instance used to track the pipeline's runtime status.
+        tracker: The tracker that records this job's state transitions.
         workers: The number of parallel workers to allocate to this job. Use None to accept the measured default for the
             job's stage and -1 to request every available core.
 
@@ -391,8 +359,8 @@ def dispatch_multi_recording_job(
 
     # The tracker's run_job() context owns the job's state transitions, matching the single-recording executor. Each
     # stage resolves its worker budget inside its own dispatch branch, so an unrecognized job name reports the
-    # job-name error below rather than a worker-resolution error, and an invalid worker request is still recorded as a
-    # job failure instead of escaping untracked.
+    # job-name error below rather than a worker-resolution error. An invalid worker request is still recorded as a job
+    # failure instead of escaping untracked.
     with tracker.run_job(job_id=job_id):
         if job_name == MultiRecordingJobNames.DISCOVER:
             discover_multi_recording_cells(
@@ -422,9 +390,6 @@ def prime_recording(configuration_path: Path) -> RecordingPlanes:
         Every per-job entry point re-loads this bootstrap with persistence disabled, so this call must precede the
         first job dispatched against a configuration. Priming is single-threaded by contract, because it writes one
         runtime data file per plane and a peer job writing them concurrently would overwrite each other's snapshot.
-
-        The returned inventory names the planes the recording holds, so a caller primes and enumerates its own jobs in
-        one step rather than resolving the plane count separately.
 
     Args:
         configuration_path: The path to the single-recording configuration file.

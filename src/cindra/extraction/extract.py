@@ -32,10 +32,9 @@ def extract_traces(context: RuntimeContext | MultiRecordingRuntimeContext, *, wo
     """Extracts fluorescence traces, classifies ROIs, and deconvolves spikes from registered binary data.
 
     Notes:
-        Serves as the unified extraction entry point for both single-recording and multi-recording pipelines. It
-        dispatches to the appropriate internal handler based on the runtime context type. For single-recording
-        contexts, the full extraction pipeline runs including classification and interleaved extraction statistics.
-        For multi-recording contexts, backward-transformed tracked ROI masks are used without reclassification.
+        Dispatches to the appropriate internal handler based on the runtime context type. For single-recording contexts,
+        the full extraction pipeline runs including classification and interleaved extraction statistics. For
+        multi-recording contexts, backward-transformed tracked ROI masks are used without reclassification.
 
         Extraction and deconvolution run entirely inside Numba kernels parallelized over ROIs, so the worker count is
         applied as the Numba thread mask before dispatch and covers both branches. The mask is thread-local, so
@@ -221,8 +220,7 @@ def _extract_fluorescence_traces(
         If neuropil masks are not provided, the neuropil fluorescence traces are returned as an array of zeroes.
 
     Args:
-        frames: The raw activity data (movie) to process. Accepts either a single-plane BinaryFile or a
-            multi-plane BinaryFileCombined instance.
+        frames: The raw activity data (movie) to process.
         roi_masks: The cell masks for each ROI, where each element is a tuple of (flattened pixel indices,
             normalized lambda weights).
         neuropil_masks: The neuropil masks for each ROI, or None to skip neuropil extraction.
@@ -237,8 +235,8 @@ def _extract_fluorescence_traces(
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
 
-    # Resolves frame dimensions from the binary source. BinaryFileCombined stores the combined height and width as
-    # direct attributes, while BinaryFile exposes them through the shape tuple.
+    # BinaryFileCombined stores the combined height and width as direct attributes, while BinaryFile exposes them
+    # through the shape tuple.
     if isinstance(frames, BinaryFileCombined):
         frame_count = frames.frame_number
         height = frames.height
@@ -248,7 +246,6 @@ def _extract_fluorescence_traces(
     roi_count = len(roi_masks)
     pixel_count = height * width
 
-    # Pre-allocates the arrays to store the extracted cell and neuropil fluorescence traces.
     fluorescence = np.zeros((roi_count, frame_count), dtype=np.float32)
     neuropil_fluorescence = np.zeros((roi_count, frame_count), dtype=np.float32)
 
@@ -297,22 +294,18 @@ def _extract_fluorescence_traces(
     # C-contiguous, which is the layout both kernels read.
     batch_buffer = np.empty((min(batch_size, frame_count), pixel_count), dtype=np.float32)
 
-    # Extracts the cell fluorescence from all frames of the processed cell activity movie.
     for batch_start in range(0, frame_count, batch_size):
         batch_end = min(batch_start + batch_size, frame_count)
 
-        # Reshapes each batch from [frames, height, width] to [frames, pixels].
         batch_source = frames[batch_start:batch_end]
         batch_frames = batch_source.shape[0]
         batch_pixels = batch_buffer[:batch_frames]
-        np.copyto(batch_pixels, batch_source.reshape(batch_frames, pixel_count))
+        np.copyto(dst=batch_pixels, src=batch_source.reshape(batch_frames, pixel_count))
         batch_slice = slice(batch_start, batch_start + batch_frames)
 
-        # Re-allocates the buffer for the last batch if it is smaller than the standard batch size.
         if batch_frames < output_prototype.shape[1]:
             output_prototype = np.empty((roi_count, batch_frames), dtype=np.float32)
 
-        # Extracts the cell fluorescence from all frames of the currently processed batch.
         fluorescence[:, batch_slice] = _extract_cell_fluorescence(
             output_prototype=output_prototype,
             data=batch_pixels,
@@ -321,7 +314,6 @@ def _extract_fluorescence_traces(
             mask_offsets=roi_mask_offsets,
         )
 
-        # If neuropil masks are provided, extracts the neuropil fluorescence from the current batch.
         if neuropil_masks is not None:
             neuropil_fluorescence[:, batch_slice] = _extract_neuropil_fluorescence(
                 output_prototype=output_prototype,
@@ -384,12 +376,10 @@ def _extract_single_recording(context: RuntimeContext) -> None:
         RuntimeError: If detection has not been run (no ROI statistics available) or if the registered binary path is
             not set.
     """
-    # Extracts configuration.
     extraction_config = context.configuration.signal_extraction
     deconvolution_config = context.configuration.spike_deconvolution
     main_config = context.configuration.main
 
-    # Extracts runtime data.
     io_data = context.runtime.io
     extraction_data = context.runtime.extraction
     timing = context.runtime.timing
@@ -397,14 +387,13 @@ def _extract_single_recording(context: RuntimeContext) -> None:
     # Loads extraction arrays from the previous stage (detection) if not in memory.
     output_path = context.runtime.io.output_path
     if output_path is not None and extraction_data.roi_statistics is None:
-        extraction_data.load_arrays(output_path)
+        extraction_data.load_arrays(output_path=output_path)
 
     plane_index = io_data.plane_index if io_data.plane_index is not None else 0
     frame_height = io_data.frame_height
     frame_width = io_data.frame_width
     batch_size = extraction_config.batch_size
 
-    # Validates that detection has been run and the registered binary path is available.
     if extraction_data.roi_statistics is None:
         message = (
             f"Unable to run extraction for plane {plane_index}. ROI detection must run before extraction, but "
@@ -423,7 +412,6 @@ def _extract_single_recording(context: RuntimeContext) -> None:
     roi_statistics = extraction_data.roi_statistics
     channel_1_label = f"plane {plane_index} channel 1"
 
-    # Creates cell and neuropil masks for channel 1.
     roi_masks, neuropil_masks = _create_and_unpack_masks(
         roi_statistics=roi_statistics,
         frame_height=frame_height,
@@ -436,7 +424,6 @@ def _extract_single_recording(context: RuntimeContext) -> None:
         channel_label=channel_1_label,
     )
 
-    # Extracts channel 1 fluorescence traces.
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
 
@@ -456,7 +443,6 @@ def _extract_single_recording(context: RuntimeContext) -> None:
 
     timing.extraction_time = int(timer.elapsed)
 
-    # Computes neuropil-corrected skewness for channel 1 ROIs.
     _update_roi_extraction_statistics(
         roi_statistics=roi_statistics,
         cell_fluorescence=extraction_data.cell_fluorescence,
@@ -464,7 +450,6 @@ def _extract_single_recording(context: RuntimeContext) -> None:
         neuropil_coefficient=deconvolution_config.neuropil_coefficient,
     )
 
-    # Classifies channel 1 ROIs.
     timer.reset()
     extraction_data.cell_classification = classify(
         roi_statistics=roi_statistics,
@@ -480,7 +465,6 @@ def _extract_single_recording(context: RuntimeContext) -> None:
         level=LogLevel.SUCCESS,
     )
 
-    # Computes delta fluorescence and spike deconvolution for channel 1.
     timer.reset()
     if deconvolution_config.extract_spikes:
         extraction_data.subtracted_fluorescence = compute_delta_fluorescence(
@@ -524,10 +508,8 @@ def _extract_single_recording(context: RuntimeContext) -> None:
     # holds non-functional data and receives structural extraction instead.
     if main_config.two_channels and io_data.registered_binary_path_channel_2 is not None:
         if main_config.first_channel_functional and main_config.second_channel_functional:
-            # Functional channel 2: creates independent masks from channel 2 ROI statistics.
             _extract_functional_channel_2(context=context, batch_size=batch_size)
         else:
-            # Structural channel 2: reuses channel 1 masks for extraction and computes intensity colocalization.
             _extract_structural_channel_2(
                 context=context,
                 batch_size=batch_size,
@@ -535,10 +517,8 @@ def _extract_single_recording(context: RuntimeContext) -> None:
                 neuropil_masks=neuropil_masks,
             )
 
-    # Saves updated runtime data to disk.
     context.save_runtime()
 
-    # Releases extraction arrays to free memory.
     context.runtime.extraction.release_arrays()
 
 
@@ -556,6 +536,9 @@ def _extract_structural_channel_2(
         batch_size: The number of frames to process at the same time.
         roi_masks: The channel 1 cell masks to reuse for channel 2 extraction.
         neuropil_masks: The channel 1 neuropil masks to reuse for channel 2 extraction.
+
+    Raises:
+        RuntimeError: If the registered binary file path is not set for channel 2.
     """
     io_data = context.runtime.io
     detection_data = context.runtime.detection
@@ -574,7 +557,6 @@ def _extract_structural_channel_2(
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
 
-    # Extracts channel 2 fluorescence using channel 1 masks.
     with BinaryFile(
         height=io_data.frame_height,
         width=io_data.frame_width,
@@ -600,7 +582,6 @@ def _extract_structural_channel_2(
     if output_path is not None and (detection_data.mean_image is None or detection_data.mean_image_channel_2 is None):
         detection_data.memory_map_arrays(output_path=output_path)
 
-    # Computes intensity colocalization between functional channel 1 ROIs and the structural channel 2 image.
     extraction_config = context.configuration.signal_extraction
     if (
         extraction_data.roi_statistics is not None
@@ -647,6 +628,10 @@ def _extract_functional_channel_2(
         context: The RuntimeContext containing configuration and mutable runtime data. Modified in-place to store
             channel 2 extraction results and colocalization data.
         batch_size: The number of frames to process at the same time.
+
+    Raises:
+        RuntimeError: If the registered binary file path is not set for channel 2 or if channel 2 ROI detection has not
+            been run (no channel 2 ROI statistics available).
     """
     extraction_config = context.configuration.signal_extraction
     deconvolution_config = context.configuration.spike_deconvolution
@@ -667,7 +652,6 @@ def _extract_functional_channel_2(
         )
         console.error(message=message, error=RuntimeError)
 
-    # Validates that channel 2 ROI statistics exist from detection.
     roi_statistics_channel_2 = extraction_data.roi_statistics_channel_2
     if roi_statistics_channel_2 is None:
         message = (
@@ -676,7 +660,6 @@ def _extract_functional_channel_2(
         )
         console.error(message=message, error=RuntimeError)
 
-    # Creates independent masks from channel 2 ROI statistics.
     channel_2_roi_masks, channel_2_neuropil_masks = _create_and_unpack_masks(
         roi_statistics=roi_statistics_channel_2,
         frame_height=frame_height,
@@ -689,7 +672,6 @@ def _extract_functional_channel_2(
         channel_label=channel_2_label,
     )
 
-    # Extracts channel 2 fluorescence traces using channel 2 masks.
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
 
@@ -711,7 +693,6 @@ def _extract_functional_channel_2(
 
     timing.extraction_time_channel_2 = int(timer.elapsed)
 
-    # Computes neuropil-corrected skewness for channel 2 ROIs.
     _update_roi_extraction_statistics(
         roi_statistics=roi_statistics_channel_2,
         cell_fluorescence=extraction_data.cell_fluorescence_channel_2,
@@ -719,7 +700,6 @@ def _extract_functional_channel_2(
         neuropil_coefficient=deconvolution_config.neuropil_coefficient,
     )
 
-    # Classifies channel 2 ROIs.
     timer.reset()
     extraction_data.cell_classification_channel_2 = classify(
         roi_statistics=roi_statistics_channel_2,
@@ -735,7 +715,6 @@ def _extract_functional_channel_2(
         level=LogLevel.SUCCESS,
     )
 
-    # Computes delta fluorescence and spike deconvolution for channel 2.
     timer.reset()
     if deconvolution_config.extract_spikes:
         extraction_data.subtracted_fluorescence_channel_2 = compute_delta_fluorescence(
@@ -773,7 +752,6 @@ def _extract_functional_channel_2(
         extraction_data.subtracted_fluorescence_channel_2 = np.zeros_like(extraction_data.cell_fluorescence_channel_2)
         extraction_data.spikes_channel_2 = np.zeros_like(extraction_data.cell_fluorescence_channel_2)
 
-    # Computes spatial colocalization between channel 1 and channel 2 ROIs.
     # Channel 1 ROI statistics always exist at this point, so the guard never takes the negative branch.
     if extraction_data.roi_statistics is not None:  # pragma: no branch
         extraction_data.cell_colocalization = compute_spatial_colocalization(
@@ -797,9 +775,8 @@ def _extract_multi_recording_channel(
     """Extracts fluorescence, computes delta-F, and deconvolves spikes for one channel of a multi-recording extraction.
 
     Notes:
-        Serves as the generic multi-recording channel worker used by both channel 1 and channel 2. It always uses
-        ``allow_overlap=True`` since multi-recording template masks are spatially distinct by construction. No
-        reclassification is performed because tracked ROIs are already known cells.
+        Always uses ``allow_overlap=True`` since multi-recording template masks are spatially distinct by construction.
+        No reclassification is performed because tracked ROIs are already known cells.
 
     Args:
         frames: The combined multi-plane binary data source for the channel being processed.
@@ -816,7 +793,6 @@ def _extract_multi_recording_channel(
         each with shape (roi_count, frame_count). If spike extraction is disabled, the delta fluorescence and spikes
         arrays are filled with zeroes and the reported time is zero.
     """
-    # Creates cell and neuropil masks from backward-transformed tracked ROI statistics.
     roi_masks, neuropil_masks = _create_and_unpack_masks(
         roi_statistics=roi_statistics,
         frame_height=frames.height,
@@ -829,7 +805,6 @@ def _extract_multi_recording_channel(
         channel_label=channel_label,
     )
 
-    # Extracts fluorescence traces from the combined multi-plane binary.
     cell_fluorescence, neuropil_fluorescence = _extract_fluorescence_traces(
         frames=frames,
         roi_masks=roi_masks,
@@ -838,8 +813,8 @@ def _extract_multi_recording_channel(
         channel_label=channel_label,
     )
 
-    # Computes delta fluorescence and spike deconvolution. The segment is timed separately from the trace extraction
-    # above, because the caller persists the two durations as disjoint fields of the recording's timing data.
+    # The deconvolution is timed separately from the trace extraction above, because the caller persists the two
+    # durations as disjoint fields of the recording's timing data.
     deconvolution_time = 0
     if deconvolution_config.extract_spikes:
         timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
@@ -887,9 +862,7 @@ def _validate_registered_binaries(binary_paths: list[Path], recording_id: str) -
     Notes:
         The binarization stage fills each plane binary and the registration stage rewrites it in place, and both mark
         the binary for the duration of that write, each under its own phase name. A run that dies partway therefore
-        leaves finished frames up to an unknown point and unfinished frames after it. The multi-recording pipeline
-        resolves those binaries through the combined metadata rather than through the plane runtime data, so this is
-        the only point at which it consults the markers.
+        leaves finished frames up to an unknown point and unfinished frames after it.
 
     Args:
         binary_paths: The paths of the plane binaries the extraction reads.
@@ -915,8 +888,8 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
     """Extracts fluorescence traces from ROIs tracked across multiple recordings for a single recording.
 
     Notes:
-        Expects that the multi-recording discovery phase has already been completed, meaning
-        backward-transformed ROI statistics are available in the recording's extraction data.
+        Expects that the multi-recording discovery phase has already been completed, meaning backward-transformed ROI
+        statistics are available in the recording's extraction data.
 
     Args:
         context: The MultiRecordingRuntimeContext for the recording being processed. Modified in-place to
@@ -927,7 +900,6 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
         RuntimeError: If the combined single-recording data is not loaded, if backward-transformed ROI statistics are
             not available, or if an interrupted registration left one of the recording's plane binaries marked.
     """
-    # Resolves configuration and runtime references.
     extraction_config = context.configuration.signal_extraction
     deconvolution_config = context.configuration.spike_deconvolution
     extraction_data = context.runtime.extraction
@@ -937,9 +909,8 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
     # Loads extraction arrays from the previous stage (backward projection) if not in memory.
     output_path = context.runtime.output_path
     if output_path is not None and extraction_data.roi_statistics is None:
-        extraction_data.load_arrays(output_path)
+        extraction_data.load_arrays(output_path=output_path)
 
-    # Validates that combined data is available.
     if combined_data is None:
         message = (
             f"Unable to extract multi-recording traces for recording {recording_id}. The combined "
@@ -960,7 +931,6 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
     y_offsets = combined_data.plane_y_offsets
     x_offsets = combined_data.plane_x_offsets
 
-    # Validates that backward-transformed ROI statistics exist from the discovery phase.
     roi_statistics = extraction_data.roi_statistics
     if roi_statistics is None:
         message = (
@@ -971,11 +941,9 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
         )
         console.error(message=message, error=RuntimeError)
 
-    # Reads channel 1 registered binary paths from combined data.
     channel_1_binary_paths: list[Path] = list(combined_data.registered_binary_paths)
     _validate_registered_binaries(binary_paths=channel_1_binary_paths, recording_id=recording_id)
 
-    # Extracts channel 1 fluorescence, delta-F, and spikes via the generic channel worker.
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
 
@@ -1004,7 +972,6 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
             sampling_rate=sampling_rate,
         )
 
-    # Computes neuropil-corrected skewness for channel 1 tracked ROIs.
     _update_roi_extraction_statistics(
         roi_statistics=roi_statistics,
         cell_fluorescence=extraction_data.cell_fluorescence,
@@ -1018,11 +985,10 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
     timing.deconvolution_time = deconvolution_time
     timing.extraction_time = int(timer.elapsed) - deconvolution_time
 
-    # Processes channel 2 if backward-transformed channel 2 tracked ROI statistics are available. This indicates a
-    # dual-channel recording where both channels were functional during single-recording processing.
+    # Backward-transformed channel 2 tracked ROI statistics exist only for a dual-channel recording whose channels were
+    # both functional during single-recording processing.
     roi_statistics_channel_2 = extraction_data.roi_statistics_channel_2
     if roi_statistics_channel_2 is not None:
-        # Reads channel 2 registered binary paths from combined data.
         channel_2_binary_paths: list[Path] = list(
             combined_data.registered_binary_paths_channel_2  # type: ignore[arg-type]
         )
@@ -1055,7 +1021,6 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
                 sampling_rate=sampling_rate,
             )
 
-        # Computes neuropil-corrected skewness for channel 2 tracked ROIs.
         _update_roi_extraction_statistics(
             roi_statistics=roi_statistics_channel_2,
             cell_fluorescence=extraction_data.cell_fluorescence_channel_2,
@@ -1066,7 +1031,6 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
         timing.deconvolution_time += deconvolution_time_channel_2
         timing.extraction_time += int(timer.elapsed) - deconvolution_time_channel_2
 
-        # Computes spatial colocalization between channel 1 and channel 2 tracked ROIs.
         extraction_data.cell_colocalization = compute_spatial_colocalization(
             rois_channel_1=roi_statistics,
             rois_channel_2=roi_statistics_channel_2,
@@ -1079,10 +1043,8 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
     total_extraction_time = timing.extraction_time + timing.deconvolution_time
     timing.total_extraction_time = total_extraction_time
 
-    # Saves updated runtime data to disk.
     context.save_runtime()
 
-    # Releases extraction arrays to free memory.
     context.runtime.extraction.release_arrays()
 
     console.echo(

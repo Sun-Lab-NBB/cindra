@@ -21,36 +21,31 @@ if TYPE_CHECKING:
 def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
     """Combines processed data from multiple planes into a unified dataset.
 
-    Combines multi-plane and multi-ROI recording data into a unified dataset, reassembling the original
-    recording from individually processed planes. The combined data is returned as a CombinedData instance containing
-    detection images, extraction data for both channels, the per-plane geometry, the registered binary paths, tau, and
-    the sampling rate. Planes that did not complete detection or extraction contribute nothing, and the combined traces
-    are trimmed to the frame count of the shortest contributing plane, which is stored as CombinedData.frame_count
-    alongside each plane's own count in CombinedData.plane_frame_counts.
+    The combined product carries the detection images, the extraction data of both channels, the per-plane geometry,
+    the registered binary paths, tau, and the sampling rate. Planes that did not complete detection or extraction
+    contribute nothing, and the combined traces are trimmed to the frame count of the shortest contributing plane,
+    which is stored as CombinedData.frame_count alongside each plane's own count in CombinedData.plane_frame_counts.
 
     Args:
-        plane_contexts: A list of RuntimeContext instances, one for each plane being combined.
+        plane_contexts: The runtime context of every plane being combined.
 
     Returns:
-        A CombinedData instance containing the combined detection and extraction data.
+        The combined detection and extraction data.
 
     Raises:
         ValueError: If no valid planes with ROI statistics are found.
         RuntimeError: If a plane's registered binary path (or channel 2 registered binary path, when the second
             channel is functional) is not set, indicating registration did not complete successfully.
     """
-    # Extracts plane directories from the RuntimeContext instances.
     plane_directories = [context.runtime.io.output_path for context in plane_contexts]
 
     # Computes the y-axis and x-axis displacement for each plane. These displacement values are used to arrange
     # individual planes back into the original recording movie.
     y_offsets, x_offsets = _compute_plane_offsets(plane_contexts=plane_contexts)
 
-    # Queries the height and width for each plane.
     heights = np.array([context.runtime.io.frame_height for context in plane_contexts], dtype=np.uint16)
     widths = np.array([context.runtime.io.frame_width for context in plane_contexts], dtype=np.uint16)
 
-    # Calculates the overall height and width of the entire combined plane after accounting for plane displacement.
     combined_height = int(np.amax(y_offsets + heights))
     combined_width = int(np.amax(x_offsets + widths))
 
@@ -67,7 +62,6 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
     combined_enhanced_mean_image = np.zeros((combined_height, combined_width), dtype=np.float32)
     combined_correlation_map = np.zeros((combined_height, combined_width), dtype=np.float32)
 
-    # Checks if maximum projection images are available in any plane.
     has_maximum_projection = any(context.runtime.detection.maximum_projection is not None for context in plane_contexts)
     combined_maximum_projection: NDArray[np.float32] | None = None
     if has_maximum_projection:
@@ -82,7 +76,6 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
     if has_corrected_structural:
         combined_corrected_structural_mean_image = np.zeros((combined_height, combined_width), dtype=np.float32)
 
-    # Initializes channel 2 image arrays if two channels are present.
     combined_mean_image_channel_2: NDArray[np.float32] | None = None
     combined_enhanced_mean_image_channel_2: NDArray[np.float32] | None = None
     combined_correlation_map_channel_2: NDArray[np.float32] | None = None
@@ -95,7 +88,6 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
             if has_maximum_projection:
                 combined_maximum_projection_channel_2 = np.zeros((combined_height, combined_width), dtype=np.float32)
 
-    # Logs the combining operation.
     channel_count = 2 if has_two_channels else 1
     directory_names = [directory.name for directory in plane_directories if directory is not None]
     console.echo(
@@ -137,7 +129,6 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
     combined_cell_classification_channel_2_list: list[NDArray[np.float32]] = []
 
     for plane_index, context in enumerate(plane_contexts):
-        # Skips planes without ROI statistics (no detected ROIs).
         if context.runtime.extraction.roi_statistics is None:
             continue
 
@@ -152,7 +143,6 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         ):
             continue
 
-        # Calculates the pixel ranges for placing this plane's data in the combined view.
         y_start = y_offsets[plane_index]
         y_end = y_offsets[plane_index] + heights[plane_index]
         x_start = x_offsets[plane_index]
@@ -160,7 +150,6 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         y_range = np.arange(y_start, y_end, dtype=np.int32)
         x_range = np.arange(x_start, x_end, dtype=np.int32)
 
-        # Updates combined images with this plane's data.
         if context.runtime.detection.mean_image is not None:
             combined_mean_image[np.ix_(y_range, x_range)] = context.runtime.detection.mean_image
         if context.runtime.detection.enhanced_mean_image is not None:
@@ -209,7 +198,6 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
                 context.runtime.detection.maximum_projection_channel_2
             )
 
-        # Updates corrected structural mean image if available for this plane.
         if (
             has_corrected_structural
             and combined_corrected_structural_mean_image is not None
@@ -232,7 +220,6 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
             roi_copy.mask.frame_width = combined_width
             combined_roi_statistics.append(roi_copy)
 
-        # Processes channel 2 ROI statistics if second channel is functional.
         if second_channel_functional and context.runtime.extraction.roi_statistics_channel_2 is not None:
             for roi in context.runtime.extraction.roi_statistics_channel_2:
                 roi_copy = copy.deepcopy(roi)
@@ -246,7 +233,6 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
                 roi_copy.mask.frame_width = combined_width
                 combined_roi_statistics_channel_2.append(roi_copy)
 
-        # Extracts fluorescence and classification data from the RuntimeContext.
         plane_cell_fluorescence = context.runtime.extraction.cell_fluorescence
         plane_neuropil_fluorescence = context.runtime.extraction.neuropil_fluorescence
         plane_subtracted_fluorescence = context.runtime.extraction.subtracted_fluorescence
@@ -265,11 +251,9 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         combined_spikes_list.append(plane_spikes)
         combined_cell_classification_list.append(plane_cell_classification)
 
-        # Extracts and appends colocalization data if available.
         if context.runtime.extraction.cell_colocalization is not None:
             combined_cell_colocalization_list.append(context.runtime.extraction.cell_colocalization)
 
-        # Extracts and appends channel 2 extraction data if second channel is functional.
         if second_channel_functional:
             plane_cell_fluorescence_channel_2 = context.runtime.extraction.cell_fluorescence_channel_2
             plane_neuropil_fluorescence_channel_2 = context.runtime.extraction.neuropil_fluorescence_channel_2
@@ -427,20 +411,15 @@ def _compute_plane_offsets(
     z-plane to prevent overlap.
 
     Notes:
-        The output of this function is used to properly arrange the data from multiple planes in the 'shared' recording
-        space, re-assembling the recording from individually processed planes. This is used as part of outputting the
-        cindra-processed data as a 'combined' dataset that integrates the data from all available planes.
-
         The plane contexts are expected in the order produced by the single-recording context resolver. For MROI
         recordings, that order is ROI-major, so a virtual plane's index equals its ROI index times the z-plane count
         plus its z-plane index.
 
     Args:
-        plane_contexts: A list of RuntimeContext instances, one for each plane being processed.
+        plane_contexts: The runtime context of every plane being processed.
 
     Returns:
-        A tuple of two elements. The first element is an array of y-displacement values, and the second element is an
-        array of x-displacement values.
+        The y-displacement values and the x-displacement values, one of each per plane.
     """
     first_context = plane_contexts[0]
     plane_number = len(plane_contexts)
@@ -456,7 +435,6 @@ def _compute_plane_offsets(
         # Calculates the number of columns needed to arrange planes in a roughly square grid.
         column_number = int(np.ceil(np.sqrt(height * width * plane_number) / width))
 
-        # Assigns each plane to a grid position based on its index.
         for plane_index in range(plane_number):
             x_displacement[plane_index] = (plane_index % column_number) * width
             y_displacement[plane_index] = (plane_index // column_number) * height
@@ -476,7 +454,6 @@ def _compute_plane_offsets(
         # requires two-level tiling: ROI positions are preserved within each tile, and entire tiles are offset for
         # each z-plane.
         if roi_number < plane_number:
-            # Computes the number of z-planes (total virtual planes divided by unique ROI positions).
             z_plane_number = plane_number // roi_number
 
             heights_array = np.array([context.runtime.io.frame_height for context in plane_contexts])

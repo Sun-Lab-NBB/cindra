@@ -105,8 +105,8 @@ def discover_recordings_tool(root_directory: str) -> dict[str, object]:
     Notes:
         The marker search keeps only the entries that resolve to files, so a directory carrying a marker's name is not
         reported as a recording. A subtree the process cannot read falls back to a tolerant recursive glob that skips
-        it and applies no file check, so an unreadable subtree lowers the candidate counts without surfacing a
-        distinct diagnostic and can let a directory carrying a marker's name through.
+        it and applies no file check. An unreadable subtree therefore lowers the candidate counts without surfacing a
+        distinct diagnostic, and can let a directory carrying a marker's name through.
 
     Args:
         root_directory: The absolute path to the root directory to search.
@@ -131,7 +131,7 @@ def discover_recordings_tool(root_directory: str) -> dict[str, object]:
         }
 
     # Discovers single-recording candidates via cindra_parameters.json marker files. The marker-root discoverer keeps
-    # only the entries that resolve to files, so a directory carrying a marker's name is no longer mistaken for a
+    # only the entries that resolve to files, so a directory carrying a marker's name is not reported as a
     # recording. It refuses a subtree it cannot read, and this tool surveys a root the caller chose rather than a path
     # the pipeline owns, so a denial falls back to the tolerant scan rather than reporting no candidate at all.
     single_marker_parents = _discover_marker_parents(root_path=root_path, marker_name=PARAMETERS_FILENAME)
@@ -142,7 +142,6 @@ def discover_recordings_tool(root_directory: str) -> dict[str, object]:
         else []
     )
 
-    # Discovers multi-recording candidates via combined_metadata.npz marker files.
     multi_marker_parents = _discover_marker_parents(root_path=root_path, marker_name=COMBINED_METADATA_FILENAME)
 
     multi_recording_paths = (
@@ -207,7 +206,6 @@ def resolve_dataset_name_tool(
             "error": "Unable to resolve dataset name. At least one recording path is required.",
         }
 
-    # Derives specifier from the common parent directory when not explicitly provided.
     if not specifier:
         resolved_paths = [Path(path) for path in recording_paths]
         if len(resolved_paths) == 1:
@@ -300,7 +298,6 @@ def read_config_file_tool(file_path: str) -> dict[str, str | bool | list[str] | 
             ),
         }
 
-    # Attempts to detect the pipeline type from the raw YAML data.
     raw_pipeline_type = data.get("pipeline_type")
     detected_type: str | None = None
     if raw_pipeline_type in ("single-recording", "multi-recording"):
@@ -454,7 +451,7 @@ def _convert_to_json_compatible(value: object) -> object:
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, tuple):
-        return [_convert_to_json_compatible(item) for item in value]
+        return [_convert_to_json_compatible(value=item) for item in value]
     return value
 
 
@@ -485,8 +482,8 @@ def _identify_non_default_parameters(config: object, default: object, prefix: st
             differences.update(nested)
         elif current_value != default_value:
             differences[full_path] = {
-                "current": _convert_to_json_compatible(current_value),
-                "default": _convert_to_json_compatible(default_value),
+                "current": _convert_to_json_compatible(value=current_value),
+                "default": _convert_to_json_compatible(value=default_value),
             }
 
     return differences
@@ -507,25 +504,22 @@ def _validate_single_recording(
     errors: list[str] = []
     warnings: list[str] = []
 
-    # Main section validations.
     if config.main.tau <= 0:
         errors.append(f"main.tau must be positive (current: {config.main.tau}).")
     if not config.main.first_channel_functional and not config.main.second_channel_functional:
         errors.append(
-            "Both main.first_channel_functional and main.second_channel_functional are False — no functional "
+            "Both main.first_channel_functional and main.second_channel_functional are False. No functional "
             "channel available."
         )
 
-    # File I/O section warnings for pipeline-set parameters.
     if config.file_io.data_path is not None:
-        warnings.append("file_io.data_path is set (pipeline-set parameter — will be overwritten at runtime).")
+        warnings.append("file_io.data_path is set (pipeline-set parameter, overwritten at runtime).")
     if config.file_io.output_path is not None:
-        warnings.append("file_io.output_path is set (pipeline-set parameter — will be overwritten at runtime).")
+        warnings.append("file_io.output_path is set (pipeline-set parameter, overwritten at runtime).")
 
-    # Registration section validations.
     if not config.main.two_channels and not config.registration.align_by_first_channel:
         warnings.append(
-            "registration.align_by_first_channel is False but main.two_channels is False — no second channel "
+            "registration.align_by_first_channel is False but main.two_channels is False. No second channel "
             "available for alignment."
         )
     if config.registration.reference_frame_count <= 0:
@@ -560,7 +554,6 @@ def _validate_single_recording(
             f"(current: {config.registration.registration_metric_principal_components})."
         )
 
-    # One-photon registration section validations.
     if config.one_photon_registration.enabled:
         if config.one_photon_registration.spatial_highpass_window <= 0:
             errors.append(
@@ -591,7 +584,6 @@ def _validate_single_recording(
                 f"is enabled (current: {config.one_photon_registration.edge_taper_pixels})."
             )
 
-    # Nonrigid registration section validations.
     if config.nonrigid_registration.enabled:
         if config.nonrigid_registration.signal_to_noise_threshold <= 0:
             errors.append(
@@ -609,7 +601,6 @@ def _validate_single_recording(
                 f"(current: {list(config.nonrigid_registration.block_size)})."
             )
 
-    # ROI detection section validations.
     if config.roi_detection.enabled:
         if not 0 <= config.roi_detection.preclassification_threshold <= 1:
             errors.append(
@@ -645,7 +636,6 @@ def _validate_single_recording(
                 f"(current: {config.roi_detection.maximum_binned_frames})."
             )
 
-    # Signal extraction section validations.
     if config.signal_extraction.minimum_neuropil_pixels <= 0:
         errors.append(
             f"signal_extraction.minimum_neuropil_pixels must be positive "
@@ -676,7 +666,6 @@ def _validate_single_recording(
             f"(current: {config.signal_extraction.colocalization_threshold})."
         )
 
-    # Spike deconvolution section validations.
     if not 0 <= config.spike_deconvolution.neuropil_coefficient <= 1:
         warnings.append(
             f"spike_deconvolution.neuropil_coefficient is outside the typical [0, 1] range "
@@ -722,7 +711,6 @@ def _validate_multi_recording(
     errors: list[str] = []
     warnings: list[str] = []
 
-    # Recording I/O section validations.
     if not config.recording_io.dataset_name:
         errors.append("recording_io.dataset_name must be a non-empty string.")
     else:
@@ -734,11 +722,8 @@ def _validate_multi_recording(
         if dataset_name_error is not None:
             errors.append(dataset_name_error)
     if config.recording_io.recording_directories:
-        warnings.append(
-            "recording_io.recording_directories is set (pipeline-set parameter — will be overwritten at runtime)."
-        )
+        warnings.append("recording_io.recording_directories is set (pipeline-set parameter, overwritten at runtime).")
 
-    # ROI selection section validations.
     if not 0 <= config.roi_selection.probability_threshold <= 1:
         errors.append(
             f"roi_selection.probability_threshold must be in [0, 1] "
@@ -773,7 +758,6 @@ def _validate_multi_recording(
             f"(current: {config.roi_selection.mroi_region_margin_channel_2})."
         )
 
-    # Diffeomorphic registration section validations.
     if not 0 < config.diffeomorphic_registration.grid_sampling_factor <= 1:
         errors.append(
             f"diffeomorphic_registration.grid_sampling_factor must be in (0, 1] "
@@ -806,7 +790,6 @@ def _validate_multi_recording(
             f"(current: {config.diffeomorphic_registration.image_type})."
         )
 
-    # ROI tracking section validations.
     if not 0 <= config.roi_tracking.threshold <= 1:
         errors.append(f"roi_tracking.threshold must be in [0, 1] (current: {config.roi_tracking.threshold}).")
     if not 0 <= config.roi_tracking.mask_prevalence <= _MAXIMUM_PERCENTAGE:
@@ -832,7 +815,6 @@ def _validate_multi_recording(
     if config.roi_tracking.minimum_size <= 0:
         errors.append(f"roi_tracking.minimum_size must be positive (current: {config.roi_tracking.minimum_size}).")
 
-    # Signal extraction section validations.
     if config.signal_extraction.minimum_neuropil_pixels <= 0:
         errors.append(
             f"signal_extraction.minimum_neuropil_pixels must be positive "
@@ -863,7 +845,6 @@ def _validate_multi_recording(
             f"(current: {config.signal_extraction.colocalization_threshold})."
         )
 
-    # Spike deconvolution section validations.
     if not 0 <= config.spike_deconvolution.neuropil_coefficient <= 1:
         warnings.append(
             f"spike_deconvolution.neuropil_coefficient is outside the typical [0, 1] range "
@@ -913,7 +894,6 @@ def _validate_filesystem_name(name: str, field_label: str, action: str = "resolv
         display = ", ".join(repr(character) for character in found)
         return f"Unable to {action}. The {field_label} contains filesystem-unsafe characters: {display}."
 
-    # Rejects names with control characters (ordinal < 32).
     control_characters = [character for character in name if ord(character) < _MAXIMUM_CONTROL_CHARACTER_ORDINAL]
     if control_characters:
         return f"Unable to {action}. The {field_label} contains control characters."

@@ -61,86 +61,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _write_raw_recording(
-    data_path: Path,
-    pages: int = 600,
-    height: int = 24,
-    width: int = 16,
-    roi_lines: str = "[]",
-    roi_number: int = 1,
-    plane_number: int = 1,
-    channel_number: int = 1,
-) -> None:
-    """Writes the acquisition metadata and one source file of a recording, which is all a sizing pass reads."""
-    data_path.mkdir(parents=True, exist_ok=True)
-    (data_path / PARAMETERS_FILENAME).write_text(
-        json.dumps(
-            {
-                "frame_rate": 30.0,
-                "plane_number": plane_number,
-                "channel_number": channel_number,
-                "roi_number": roi_number,
-                "roi_lines": json.loads(roi_lines),
-                "roi_x_coordinates": [0] * roi_number,
-                "roi_y_coordinates": [0] * roi_number,
-            }
-        )
-    )
-    with TiffWriter(data_path / "frames_001.tif") as writer:
-        for _ in range(pages):
-            writer.write(np.zeros((height, width), dtype=np.int16))
-
-
-def _write_recording(
-    output_root: Path, plane_count: int = 1, frame_count: int = 6000, height: int = 512, width: int = 512
-) -> None:
-    """Writes the acquisition parameters and per-plane runtime data a converted recording carries."""
-    output_path = resolve_output_path(output_root=output_root)
-    output_path.mkdir(parents=True, exist_ok=True)
-    (output_path / ACQUISITION_PARAMETERS_FILENAME).write_text(
-        f"frame_rate: 30.0\nplane_number: {plane_count}\nchannel_number: 1\nroi_number: 1\n"
-        f"roi_lines: []\nroi_x_coordinates: []\nroi_y_coordinates: []\n"
-    )
-    for plane_index in range(plane_count):
-        plane_path = resolve_plane_path(output_root=output_root, plane_index=plane_index)
-        plane_path.mkdir(parents=True, exist_ok=True)
-        runtime = SingleRecordingRuntimeData()
-        runtime.io.frame_height = height
-        runtime.io.frame_width = width
-        runtime.io.frame_count = frame_count
-        runtime.io.sampling_rate = 30.0
-        runtime.io.plane_index = plane_index
-        runtime.io.output_path = plane_path
-        runtime.save(output_path=plane_path)
-
-
-def _write_combined(output_root: Path, height: int = 512, width: int = 512, frame_count: int = 6000) -> None:
-    """Writes the combined metadata archive that marks a recording processed."""
-    output_path = resolve_output_path(output_root=output_root)
-    output_path.mkdir(parents=True, exist_ok=True)
-    np.savez(
-        output_path / COMBINED_METADATA_FILENAME,
-        combined_height=np.array([height], dtype=np.uint16),
-        combined_width=np.array([width], dtype=np.uint16),
-        frame_count=np.array([frame_count], dtype=np.uint32),
-    )
-
-
-def _write_traces(root_path: Path, regions: int, samples: int) -> None:
-    """Writes a trace array whose header reports the given region and sample counts."""
-    root_path.mkdir(parents=True, exist_ok=True)
-    np.save(
-        resolve_array_path(root_path=root_path, array=RecordingArrays.CELL_FLUORESCENCE),
-        np.zeros((regions, samples), dtype=np.float32),
-    )
-
-
-def _write_tracked_recording(output_root: Path, height: int, width: int, frame_count: int, regions: int) -> None:
-    """Writes the combined archive and trace array a completed single-recording pipeline leaves for the tracker."""
-    _write_combined(output_root=output_root, height=height, width=width, frame_count=frame_count)
-    _write_traces(root_path=resolve_output_path(output_root=output_root), regions=regions, samples=frame_count)
-
-
 class TestTolerance:
     """Tests the shared reporting scale."""
 
@@ -302,7 +222,7 @@ class TestRecordingGeometry:
         """Verifies that a recording carrying nothing resolves rather than raising."""
         geometry = resolve_recording_geometry(output_root=tmp_path)
 
-        assert geometry.resolved is False
+        assert not geometry.resolved
         assert geometry.planes == ()
         assert geometry.raw_frame_pixels == 0
 
@@ -313,7 +233,7 @@ class TestRecordingGeometry:
 
         geometry = resolve_recording_geometry(output_root=tmp_path / "out", data_path=data_path)
 
-        assert geometry.resolved is True
+        assert geometry.resolved
         assert [(plane.height, plane.width) for plane in geometry.planes] == [(24, 16)]
         assert geometry.planes[0].frame_count == 600
         assert geometry.raw_frame_pixels == 24 * 16
@@ -357,7 +277,7 @@ class TestRecordingGeometry:
 
         geometry = resolve_recording_geometry(output_root=tmp_path / "out", data_path=data_path)
 
-        assert geometry.resolved is False
+        assert not geometry.resolved
         assert geometry.planes == ()
 
 
@@ -567,13 +487,13 @@ class TestTrackedRecordingGeometry:
         geometry = _read_tracked_recording_geometry(cindra_root=resolve_output_path(output_root=tmp_path))
 
         assert geometry.region_count == 321
-        assert geometry.resolved is True
+        assert geometry.resolved
 
     def test_a_recording_without_combined_output_resolves_nothing(self, tmp_path: Path) -> None:
         """Verifies that a recording carrying no metadata archive contributes no geometry."""
         geometry = _read_tracked_recording_geometry(cindra_root=resolve_output_path(output_root=tmp_path))
 
-        assert geometry.resolved is False
+        assert not geometry.resolved
         assert geometry.combined_pixels == 0
 
     def test_an_absent_trace_array_reports_no_regions(self, tmp_path: Path) -> None:
@@ -624,7 +544,7 @@ class TestTrackedRecordingGeometry:
             registered_binary_paths_channel_2=np.array(["a.bin"]),
         )
 
-        assert _read_tracked_recording_geometry(cindra_root=output_path).two_channels is True
+        assert _read_tracked_recording_geometry(cindra_root=output_path).two_channels
 
 
 class TestJobSizing:
@@ -916,7 +836,7 @@ class TestDualChannelRecordings:
 
         geometry = resolve_recording_geometry(output_root=tmp_path / "out", data_path=data_path)
 
-        assert geometry.two_channels is True
+        assert geometry.two_channels
         # The interleave cycle carries one frame per plane and channel, so each plane receives half the source pages.
         assert geometry.planes[0].frame_count == 300
 
@@ -1072,3 +992,83 @@ class TestDatasetDirectoryResolution:
         )
 
         assert memory_mb > 0
+
+
+def _write_raw_recording(
+    data_path: Path,
+    pages: int = 600,
+    height: int = 24,
+    width: int = 16,
+    roi_lines: str = "[]",
+    roi_number: int = 1,
+    plane_number: int = 1,
+    channel_number: int = 1,
+) -> None:
+    """Writes the acquisition metadata and one source file of a recording, which is all a sizing pass reads."""
+    data_path.mkdir(parents=True, exist_ok=True)
+    (data_path / PARAMETERS_FILENAME).write_text(
+        json.dumps(
+            {
+                "frame_rate": 30.0,
+                "plane_number": plane_number,
+                "channel_number": channel_number,
+                "roi_number": roi_number,
+                "roi_lines": json.loads(roi_lines),
+                "roi_x_coordinates": [0] * roi_number,
+                "roi_y_coordinates": [0] * roi_number,
+            }
+        )
+    )
+    with TiffWriter(data_path / "frames_001.tif") as writer:
+        for _ in range(pages):
+            writer.write(np.zeros((height, width), dtype=np.int16))
+
+
+def _write_recording(
+    output_root: Path, plane_count: int = 1, frame_count: int = 6000, height: int = 512, width: int = 512
+) -> None:
+    """Writes the acquisition parameters and per-plane runtime data a converted recording carries."""
+    output_path = resolve_output_path(output_root=output_root)
+    output_path.mkdir(parents=True, exist_ok=True)
+    (output_path / ACQUISITION_PARAMETERS_FILENAME).write_text(
+        f"frame_rate: 30.0\nplane_number: {plane_count}\nchannel_number: 1\nroi_number: 1\n"
+        f"roi_lines: []\nroi_x_coordinates: []\nroi_y_coordinates: []\n"
+    )
+    for plane_index in range(plane_count):
+        plane_path = resolve_plane_path(output_root=output_root, plane_index=plane_index)
+        plane_path.mkdir(parents=True, exist_ok=True)
+        runtime = SingleRecordingRuntimeData()
+        runtime.io.frame_height = height
+        runtime.io.frame_width = width
+        runtime.io.frame_count = frame_count
+        runtime.io.sampling_rate = 30.0
+        runtime.io.plane_index = plane_index
+        runtime.io.output_path = plane_path
+        runtime.save(output_path=plane_path)
+
+
+def _write_combined(output_root: Path, height: int = 512, width: int = 512, frame_count: int = 6000) -> None:
+    """Writes the combined metadata archive that marks a recording processed."""
+    output_path = resolve_output_path(output_root=output_root)
+    output_path.mkdir(parents=True, exist_ok=True)
+    np.savez(
+        output_path / COMBINED_METADATA_FILENAME,
+        combined_height=np.array([height], dtype=np.uint16),
+        combined_width=np.array([width], dtype=np.uint16),
+        frame_count=np.array([frame_count], dtype=np.uint32),
+    )
+
+
+def _write_traces(root_path: Path, regions: int, samples: int) -> None:
+    """Writes a trace array whose header reports the given region and sample counts."""
+    root_path.mkdir(parents=True, exist_ok=True)
+    np.save(
+        resolve_array_path(root_path=root_path, array=RecordingArrays.CELL_FLUORESCENCE),
+        np.zeros((regions, samples), dtype=np.float32),
+    )
+
+
+def _write_tracked_recording(output_root: Path, height: int, width: int, frame_count: int, regions: int) -> None:
+    """Writes the combined archive and trace array a completed single-recording pipeline leaves for the tracker."""
+    _write_combined(output_root=output_root, height=height, width=width, frame_count=frame_count)
+    _write_traces(root_path=resolve_output_path(output_root=output_root), regions=regions, samples=frame_count)

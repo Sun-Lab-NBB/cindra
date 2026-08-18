@@ -8,25 +8,6 @@ from cindra.io.select import _filter_channel_rois
 from cindra.dataclasses import ROIMask, ROIStatistics
 
 
-def _make_roi(
-    centroid: tuple[int, int] = (10, 10),
-    pixel_count: int = 50,
-) -> ROIStatistics:
-    """Creates a minimal ROIStatistics instance for testing."""
-    y_pixels = np.arange(pixel_count, dtype=np.int32) % 10
-    x_pixels = np.arange(pixel_count, dtype=np.int32) // 10
-    mask = ROIMask(
-        y_pixels=y_pixels,
-        x_pixels=x_pixels,
-        pixel_weights=np.ones(pixel_count, dtype=np.float32),
-        centroid=centroid,
-        frame_width=100,
-    )
-    roi = ROIStatistics(mask=mask)
-    roi.pixel_count = pixel_count
-    return roi
-
-
 class TestFilterChannelRois:
     """Tests _filter_channel_rois."""
 
@@ -118,3 +99,22 @@ class TestFilterChannelRois:
             region_margin=0,
         )
         assert result == ()
+
+
+def _make_roi(
+    centroid: tuple[int, int] = (10, 10),
+    pixel_count: int = 50,
+) -> ROIStatistics:
+    """Creates a minimal ROIStatistics instance for testing."""
+    y_pixels = np.arange(pixel_count, dtype=np.int32) % 10
+    x_pixels = np.arange(pixel_count, dtype=np.int32) // 10
+    mask = ROIMask(
+        y_pixels=y_pixels,
+        x_pixels=x_pixels,
+        pixel_weights=np.ones(pixel_count, dtype=np.float32),
+        centroid=centroid,
+        frame_width=100,
+    )
+    roi = ROIStatistics(mask=mask)
+    roi.pixel_count = pixel_count
+    return roi

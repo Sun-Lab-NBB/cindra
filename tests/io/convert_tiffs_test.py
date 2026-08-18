@@ -50,99 +50,6 @@ _FRAME_WIDTH: int = 6
 """The base frame width in pixels for the synthetic TIFF inputs."""
 
 
-def _write_parameters_json(directory: Path, *, plane_number: int, channel_number: int) -> None:
-    """Writes a minimal cindra_parameters.json file into the given data directory."""
-    directory.mkdir(parents=True, exist_ok=True)
-    data = {"frame_rate": 30.0, "plane_number": plane_number, "channel_number": channel_number}
-    (directory / PARAMETERS_FILENAME).write_text(json.dumps(data))
-
-
-def _write_constant_tiff(file_path: Path, frame_values: list[int], height: int, width: int) -> None:
-    """Writes a multi-page TIFF where page k is a constant int16 image filled with frame_values[k]."""
-    with TiffWriter(file_path) as writer:
-        for value in frame_values:
-            writer.write(np.full((height, width), fill_value=value, dtype=np.int16))
-
-
-def _constant_stack(frame_values: list[int], height: int, width: int) -> NDArray[np.int16]:
-    """Builds the int16 frame stack expected on disk for a sequence of constant frame values."""
-    return np.stack([np.full((height, width), fill_value=value, dtype=np.int16) for value in frame_values])
-
-
-def _build_configuration(*, data_path: Path | None, output_path: Path) -> SingleRecordingConfiguration:
-    """Builds a single-recording configuration wired to the given data and output directories."""
-    configuration = SingleRecordingConfiguration()
-    configuration.file_io.data_path = data_path
-    configuration.file_io.output_path = output_path
-    configuration.runtime.display_progress_bars = False
-    return configuration
-
-
-def _build_context(
-    *,
-    output_path: Path,
-    configuration: SingleRecordingConfiguration,
-    acquisition: AcquisitionParameters,
-    plane_index: int,
-    two_channels: bool = False,
-    mroi_lines: tuple[int, ...] = (),
-) -> RuntimeContext:
-    """Builds a RuntimeContext whose binary paths point into a fresh per-plane output directory."""
-    plane_directory = output_path / "cindra" / f"plane_{plane_index}"
-    plane_directory.mkdir(parents=True, exist_ok=True)
-    io_data = IOData(
-        output_path=plane_directory,
-        plane_index=plane_index,
-        mroi_lines=mroi_lines,
-        registered_binary_path=plane_directory / "channel_1_data.bin",
-    )
-    if two_channels:
-        io_data.registered_binary_path_channel_2 = plane_directory / "channel_2_data.bin"
-    runtime = SingleRecordingRuntimeData(output_path=plane_directory, io=io_data)
-    return RuntimeContext(configuration=configuration, acquisition=acquisition, runtime=runtime)
-
-
-def _build_plan(*, context: RuntimeContext) -> TiffConversionPlan:
-    """Builds a conversion plan that writes a single frame into every binary the given context names."""
-    channel_2_path = context.runtime.io.registered_binary_path_channel_2
-    return TiffConversionPlan(
-        contexts=(context,),
-        tiff_files=(),
-        total_frames=1,
-        converted_frames=1,
-        batch_size=1,
-        decode_workers=1,
-        frame_heights=(_FRAME_HEIGHT,),
-        frame_widths=(_FRAME_WIDTH,),
-        channel_1_paths=(context.runtime.io.registered_binary_path,),
-        channel_2_paths=() if channel_2_path is None else (channel_2_path,),
-        channel_1_frame_counts=(1,),
-        channel_2_frame_counts=() if channel_2_path is None else (1,),
-    )
-
-
-def _record_geometry_at_marker_clear(
-    monkeypatch: pytest.MonkeyPatch, *, plane_directories: tuple[Path, ...]
-) -> list[tuple[Path, tuple[tuple[int, int, int], ...]]]:
-    """Wraps the marker clear so that every call records the frame geometry every plane has persisted to disk."""
-    records: list[tuple[Path, tuple[tuple[int, int, int], ...]]] = []
-
-    def _persisted_geometry(plane_directory: Path) -> tuple[int, int, int]:
-        """Reads one plane's durable frame geometry, reporting a geometry no finished plane can hold when absent."""
-        if not (plane_directory / SINGLE_RECORDING_RUNTIME_DATA_FILENAME).exists():
-            return (-1, -1, -1)
-        persisted = SingleRecordingRuntimeData.load(output_path=plane_directory).io
-        return (persisted.frame_count, persisted.frame_height, persisted.frame_width)
-
-    def _recording_clear(binary_path: Path) -> None:
-        """Reads every plane's runtime data file off disk before delegating to the real marker clear."""
-        records.append((binary_path, tuple(_persisted_geometry(directory) for directory in plane_directories)))
-        clear_binarization_marker(binary_path=binary_path)
-
-    monkeypatch.setattr("cindra.io.tiff.clear_binarization_marker", _recording_clear)
-    return records
-
-
 class TestConvertTiffsToBinary:
     """Tests convert_tiffs_to_binary."""
 
@@ -518,7 +425,7 @@ class TestConvertTiffsToBinary:
         data_path = tmp_path / "data"
         output_path = tmp_path / "output"
         _write_parameters_json(directory=data_path, plane_number=2, channel_number=2)
-        # Six pages followed by five pages carries the interleave offset across the file boundary, and the four-frame
+        # Six pages followed by five pages carry the interleave offset across the file boundary, and the four-frame
         # batch the two planes and two channels impose splits both files mid-cycle.
         _write_constant_tiff(
             file_path=data_path / "recording_0.tif",
@@ -1265,3 +1172,96 @@ class TestCreateBinaryFiles:
         io_data = context.runtime.io
         assert _resolve_binarization_marker_path(binary_path=io_data.registered_binary_path).exists()
         assert _resolve_binarization_marker_path(binary_path=io_data.registered_binary_path_channel_2).exists()
+
+
+def _write_parameters_json(directory: Path, *, plane_number: int, channel_number: int) -> None:
+    """Writes a minimal cindra_parameters.json file into the given data directory."""
+    directory.mkdir(parents=True, exist_ok=True)
+    data = {"frame_rate": 30.0, "plane_number": plane_number, "channel_number": channel_number}
+    (directory / PARAMETERS_FILENAME).write_text(json.dumps(data))
+
+
+def _write_constant_tiff(file_path: Path, frame_values: list[int], height: int, width: int) -> None:
+    """Writes a multi-page TIFF where page k is a constant int16 image filled with frame_values[k]."""
+    with TiffWriter(file_path) as writer:
+        for value in frame_values:
+            writer.write(np.full((height, width), fill_value=value, dtype=np.int16))
+
+
+def _constant_stack(frame_values: list[int], height: int, width: int) -> NDArray[np.int16]:
+    """Builds the int16 frame stack expected on disk for a sequence of constant frame values."""
+    return np.stack([np.full((height, width), fill_value=value, dtype=np.int16) for value in frame_values])
+
+
+def _build_configuration(*, data_path: Path | None, output_path: Path) -> SingleRecordingConfiguration:
+    """Builds a single-recording configuration wired to the given data and output directories."""
+    configuration = SingleRecordingConfiguration()
+    configuration.file_io.data_path = data_path
+    configuration.file_io.output_path = output_path
+    configuration.runtime.display_progress_bars = False
+    return configuration
+
+
+def _build_context(
+    *,
+    output_path: Path,
+    configuration: SingleRecordingConfiguration,
+    acquisition: AcquisitionParameters,
+    plane_index: int,
+    two_channels: bool = False,
+    mroi_lines: tuple[int, ...] = (),
+) -> RuntimeContext:
+    """Builds a RuntimeContext whose binary paths point into a fresh per-plane output directory."""
+    plane_directory = output_path / "cindra" / f"plane_{plane_index}"
+    plane_directory.mkdir(parents=True, exist_ok=True)
+    io_data = IOData(
+        output_path=plane_directory,
+        plane_index=plane_index,
+        mroi_lines=mroi_lines,
+        registered_binary_path=plane_directory / "channel_1_data.bin",
+    )
+    if two_channels:
+        io_data.registered_binary_path_channel_2 = plane_directory / "channel_2_data.bin"
+    runtime = SingleRecordingRuntimeData(output_path=plane_directory, io=io_data)
+    return RuntimeContext(configuration=configuration, acquisition=acquisition, runtime=runtime)
+
+
+def _build_plan(*, context: RuntimeContext) -> TiffConversionPlan:
+    """Builds a conversion plan that writes a single frame into every binary the given context names."""
+    channel_2_path = context.runtime.io.registered_binary_path_channel_2
+    return TiffConversionPlan(
+        contexts=(context,),
+        tiff_files=(),
+        total_frames=1,
+        converted_frames=1,
+        batch_size=1,
+        decode_workers=1,
+        frame_heights=(_FRAME_HEIGHT,),
+        frame_widths=(_FRAME_WIDTH,),
+        channel_1_paths=(context.runtime.io.registered_binary_path,),
+        channel_2_paths=() if channel_2_path is None else (channel_2_path,),
+        channel_1_frame_counts=(1,),
+        channel_2_frame_counts=() if channel_2_path is None else (1,),
+    )
+
+
+def _record_geometry_at_marker_clear(
+    monkeypatch: pytest.MonkeyPatch, *, plane_directories: tuple[Path, ...]
+) -> list[tuple[Path, tuple[tuple[int, int, int], ...]]]:
+    """Wraps the marker clear so that every call records the frame geometry every plane has persisted to disk."""
+    records: list[tuple[Path, tuple[tuple[int, int, int], ...]]] = []
+
+    def _persisted_geometry(plane_directory: Path) -> tuple[int, int, int]:
+        """Reads one plane's durable frame geometry, reporting a geometry no finished plane can hold when absent."""
+        if not (plane_directory / SINGLE_RECORDING_RUNTIME_DATA_FILENAME).exists():
+            return (-1, -1, -1)
+        persisted = SingleRecordingRuntimeData.load(output_path=plane_directory).io
+        return (persisted.frame_count, persisted.frame_height, persisted.frame_width)
+
+    def _recording_clear(binary_path: Path) -> None:
+        """Reads every plane's runtime data file off disk before delegating to the real marker clear."""
+        records.append((binary_path, tuple(_persisted_geometry(directory) for directory in plane_directories)))
+        clear_binarization_marker(binary_path=binary_path)
+
+    monkeypatch.setattr("cindra.io.tiff.clear_binarization_marker", _recording_clear)
+    return records

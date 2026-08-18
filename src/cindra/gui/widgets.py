@@ -120,9 +120,8 @@ def add_plot_legend(plot: pg.PlotItem, *, column_count: int) -> pg.LegendItem:
 class TraceBox(pg.PlotItem):
     """Displays fluorescence time series with support for custom mouse interactions.
 
-    Extends pyqtgraph's PlotItem class with stored trace range values that are updated after each
-    call to ``plot_trace`` via ``update_range``. Double-clicking the plot resets the view to the
-    full data range.
+    Extends pyqtgraph's PlotItem class with stored trace range values that are updated after each call to ``plot_trace``
+    via ``update_range``. Double-clicking the plot resets the view to the full data range.
 
     Attributes:
         _frame_count: Total number of frames in the current trace data.
@@ -158,8 +157,8 @@ class TraceBox(pg.PlotItem):
         """Zooms the managed trace plot to fit the full data range.
 
         Notes:
-            Overrides the pyqtgraph/Qt virtual method. The camelCase name and unused ``event``
-            parameter are required to match the parent signature.
+            Overrides the pyqtgraph/Qt virtual method. The camelCase name and unused ``event`` parameter are required to
+            match the parent signature.
         """
         view_box = self.getViewBox()
         view_box.setXRange(0, self._frame_count)
@@ -169,11 +168,10 @@ class TraceBox(pg.PlotItem):
 class ViewBox(pg.ViewBox):
     """Displays field-of-view images with support for custom keyboard and mouse interactions.
 
-    Extends pyqtgraph's ViewBox class with left-click ROI selection, shift/ctrl-click multi-ROI
-    merge selection, and double-click zoom-to-fit functionality. Right-clicks are forwarded to the
-    installed handler as well and fall through to the default context menu whenever the handler
-    leaves them unconsumed and the menu is enabled. All click logic is delegated to the orchestrator
-    via installed callback handlers.
+    Extends pyqtgraph's ViewBox class with left-click ROI selection, shift/ctrl-click multi-ROI merge selection, and
+    double-click zoom-to-fit functionality. Right-clicks are forwarded to the installed handler as well and fall through
+    to the default context menu whenever the handler leaves them unconsumed and the menu is enabled. All click logic is
+    delegated to the orchestrator via installed callback handlers.
 
     Args:
         border: The panel border frame pen specification forwarded to ``mkPen``.
@@ -201,11 +199,10 @@ class ViewBox(pg.ViewBox):
             self.menu = ViewBoxMenu(self)
         self.name = name
 
-        # Configures view state.
         self.state["enableMenu"] = enable_menu
         self.state["yInverted"] = invert_y
 
-        # Callbacks installed by the orchestrator after construction.
+        # Holds the callbacks the orchestrator installs after construction.
         self._click_handler: ClickHandler | None = None
         self._zoom_handler: ZoomHandler | None = None
 
@@ -229,8 +226,8 @@ class ViewBox(pg.ViewBox):
         """Zooms the image view to fit the full field of view.
 
         Notes:
-            Overrides the pyqtgraph/Qt virtual method. The camelCase name and unused ``event``
-            parameter are required to match the parent signature.
+            Overrides the pyqtgraph/Qt virtual method. The camelCase name and unused ``event`` parameter are required to
+            match the parent signature.
         """
         if self._zoom_handler is not None:
             self._zoom_handler()
@@ -238,23 +235,20 @@ class ViewBox(pg.ViewBox):
     def mouseClickEvent(self, event: MouseClickEvent) -> None:  # noqa: N802
         """Dispatches mouse click events to the installed click handler.
 
-        Left-click selects the targeted ROI. Shift/ctrl-click toggles multi-ROI merge selection.
-        Right-clicks are dispatched to the handler too. When the handler leaves them unconsumed and
-        the context menu is enabled, they raise the default context menu.
+        Left-click selects the targeted ROI. Shift/ctrl-click toggles multi-ROI merge selection. Right-clicks are
+        dispatched to the handler too. When the handler leaves them unconsumed and the context menu is enabled, they
+        raise the default context menu.
 
         Notes:
-            Overrides the pyqtgraph/Qt virtual method. The camelCase name is required to match
-            the parent signature.
+            Overrides the pyqtgraph/Qt virtual method. The camelCase name is required to match the parent signature.
         """
         if self._click_handler is None:
             return
 
-        # Converts the scene-space click position to image-space pixel coordinates.
         position = self.mapSceneToView(event.scenePos())
         click_x = int(position.x())
         click_y = int(position.y())
 
-        # Extracts modifier state for the click handler.
         is_right_button = event.button() == QtCore.Qt.MouseButton.RightButton
         is_multi_select = event.modifiers() in (
             QtCore.Qt.KeyboardModifier.ShiftModifier,
@@ -287,9 +281,9 @@ def plot_trace(
 ) -> tuple[float, float]:
     """Draws fluorescence traces for the selected ROIs.
 
-    For a single selected ROI, overlays the enabled trace types on the same axes using the
-    visibility flags. For multiple selected ROIs, stacks normalized traces vertically using a
-    single exclusive trace type determined by activity_mode.
+    For a single selected ROI, overlays the enabled trace types on the same axes using the visibility flags. For
+    multiple selected ROIs, stacks normalized traces vertically using a single exclusive trace type determined by
+    activity_mode.
 
     Args:
         trace_box: The pyqtgraph PlotItem to draw traces on.
@@ -358,7 +352,6 @@ def plot_trace(
         y_minimum=y_minimum,
         y_maximum=y_maximum,
     )
-    # Rescales both axes to fit the new data range.
     view_box = trace_box.getViewBox()
     view_box.autoRange()
     return y_minimum, y_maximum
@@ -436,8 +429,8 @@ def _plot_single_trace(
 ) -> tuple[float, float]:
     """Plots overlaid traces for a single selected ROI.
 
-    Draws each enabled trace type on the same axes, allowing the user to compare raw fluorescence,
-    neuropil, neuropil-corrected, and deconvolved spike signals simultaneously.
+    Draws each enabled trace type on the same axes, allowing the user to compare raw fluorescence, neuropil,
+    neuropil-corrected, and deconvolved spike signals simultaneously.
 
     Args:
         trace_box: The plot item to draw on.
@@ -461,7 +454,6 @@ def _plot_single_trace(
     corrected = subtracted_fluorescence[roi_index, :]
     spike_trace = spikes[roi_index, :].copy()
 
-    # Computes the y-range from fluorescence and neuropil bounds.
     if np.ptp(neuropil) == 0:
         y_maximum = float(fluorescence.max())
         y_minimum = float(fluorescence.min())
@@ -529,7 +521,6 @@ def _plot_multi_trace(
     average = np.zeros((cell_fluorescence.shape[1],), dtype=np.float32)
 
     for index in selected[::-1]:
-        # Selects trace based on activity mode.
         if activity_mode == TraceMode.RAW_FLUORESCENCE:
             trace = cell_fluorescence[index, :]
         elif activity_mode == TraceMode.NEUROPIL:
@@ -540,11 +531,11 @@ def _plot_multi_trace(
             trace = spikes[index, :]
 
         average += trace.ravel()
-        trace_max = float(trace.max())
-        trace_min = float(trace.min())
+        trace_maximum = float(trace.max())
+        trace_minimum = float(trace.min())
 
-        if trace_max > trace_min:  # noqa: SIM108
-            normalized = (trace - trace_min) / (trace_max - trace_min)
+        if trace_maximum > trace_minimum:
+            normalized = (trace - trace_minimum) / (trace_maximum - trace_minimum)
         else:
             normalized = np.zeros_like(trace)
 
@@ -556,14 +547,13 @@ def _plot_multi_trace(
 
     average_scale = len(selected) / ROI_CONFIG.average_scale_divisor + 1
     average -= average.min()
-    average_max = average.max()
-    if average_max > 0:
-        average /= average_max
+    average_maximum = average.max()
+    if average_maximum > 0:
+        average /= average_maximum
 
     y_minimum = 0.0
     average_pen = COLORS.silver
 
-    # Plots average trace at bottom when enough ROIs are selected.
     if len(selected) > ROI_CONFIG.average_threshold:
         trace_box.plot(
             frame_indices,

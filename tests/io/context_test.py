@@ -22,20 +22,6 @@ from cindra.io.context import (
 from cindra.dataclasses.single_recording_configuration import AcquisitionParameters
 
 
-def _write_parameters_json(directory: Path, data: dict[str, object]) -> Path:
-    """Writes a cindra_parameters.json file to the given directory."""
-    directory.mkdir(parents=True, exist_ok=True)
-    file_path = directory / PARAMETERS_FILENAME
-    file_path.write_text(json.dumps(data))
-    return file_path
-
-
-def _write_acquisition_yaml(directory: Path, acquisition: AcquisitionParameters) -> None:
-    """Saves an AcquisitionParameters instance as acquisition_parameters.yaml in the given directory."""
-    directory.mkdir(parents=True, exist_ok=True)
-    acquisition.to_yaml(file_path=directory / "acquisition_parameters.yaml")
-
-
 class TestFindDataDirectory:
     """Tests find_data_directory."""
 
@@ -561,3 +547,17 @@ class TestComputeMroiRegionBorders:
         result = _compute_mroi_region_borders(data_path=tmp_path)
 
         assert result == (50, 100)
+
+
+def _write_parameters_json(directory: Path, data: dict[str, object]) -> Path:
+    """Writes a cindra_parameters.json file to the given directory."""
+    directory.mkdir(parents=True, exist_ok=True)
+    file_path = directory / PARAMETERS_FILENAME
+    file_path.write_text(json.dumps(data))
+    return file_path
+
+
+def _write_acquisition_yaml(directory: Path, acquisition: AcquisitionParameters) -> None:
+    """Saves an AcquisitionParameters instance as acquisition_parameters.yaml in the given directory."""
+    directory.mkdir(parents=True, exist_ok=True)
+    acquisition.to_yaml(file_path=directory / "acquisition_parameters.yaml")

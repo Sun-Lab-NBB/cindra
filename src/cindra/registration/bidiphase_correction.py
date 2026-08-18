@@ -1,4 +1,4 @@
-"""Provides bidirectional phase offset correction algorithm for line-scanned imaging data."""
+"""Provides the bidirectional phase offset correction algorithm for line-scanned imaging data."""
 
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ def compute_bidirectional_phase_offset(frames: NDArray[np.float32], workers: int
     """Computes the bidirectional phase offset from a sample of imaging frames.
 
     Bidirectional scanning microscopes acquire alternating lines in opposite directions, which can introduce a
-    horizontal offset between odd and even lines. This function estimates that offset by computing the phase
-    correlation between odd and even lines across all provided frames.
+    horizontal offset between odd and even lines. Estimates that offset by computing the phase correlation between odd
+    and even lines across all provided frames.
 
     Args:
         frames: A 3D array of imaging frames with shape (frame_count, height, width). The frames should be a
@@ -36,7 +36,6 @@ def compute_bidirectional_phase_offset(frames: NDArray[np.float32], workers: int
     odd_lines_fft = fft.rfft(x=frames[:, 1::2, :], axis=2, workers=workers).astype(np.complex64)
     odd_lines_fft /= np.abs(odd_lines_fft) + np.float32(NORMALIZATION_EPSILON)
 
-    # Computes the conjugate FFT of even lines (0, 2, 4, ...) along the x-axis.
     even_lines_fft = fft.rfft(x=frames[:, ::2, :], axis=2, workers=workers).astype(np.complex64)
     np.conj(even_lines_fft, out=even_lines_fft)
     even_lines_fft /= np.abs(even_lines_fft) + np.float32(NORMALIZATION_EPSILON)
@@ -44,16 +43,14 @@ def compute_bidirectional_phase_offset(frames: NDArray[np.float32], workers: int
     # Truncates even lines to match odd lines count (in case of odd height).
     even_lines_fft = even_lines_fft[:, : odd_lines_fft.shape[1], :]
 
-    # Computes the cross-correlation via inverse FFT of the product and averages across all frames and lines.
     cross_correlation = fft.irfft(x=odd_lines_fft * even_lines_fft, n=width, axis=2, workers=workers).astype(np.float32)
     cross_correlation = cross_correlation.mean(axis=(0, 1))
     cross_correlation = fft.fftshift(x=cross_correlation)
 
-    # Finds the peak in a small window around zero to determine the offset.
     search_window_half_width = 10
     window_start = -search_window_half_width + width // 2
     window_end = search_window_half_width + 1 + width // 2
-    bidirectional_phase_offset = -(np.argmax(cross_correlation[window_start:window_end]) - search_window_half_width)
+    bidirectional_phase_offset = -(np.argmax(a=cross_correlation[window_start:window_end]) - search_window_half_width)
 
     return int(bidirectional_phase_offset)
 

@@ -32,14 +32,14 @@ class RecordingIO:
 
     recording_directories: tuple[Path, ...] = ()
     """Specifies the recordings to include in multi-recording processing as absolute paths to their root directories.
-    Recordings are natural-sorted, and the first recording after sorting becomes the 'main recording' which stores
-    the processing tracker file. Each recording directory is expected to contain the combined_metadata.npz file created
-    by the single-recording processing pipeline."""
+    Recordings are natural-sorted, and the first recording after sorting becomes the 'main recording' which stores the
+    processing tracker file. Each recording directory is expected to contain the combined_metadata.npz file created by
+    the single-recording processing pipeline."""
 
     dataset_name: str = ""
-    """Specifies the name of the multi_recording dataset. The name is lowercased and used to create the output
-    directory under each recording's cindra directory (e.g., recording/cindra/multi_recording/{dataset_name}/) and to
-    identify the dataset in the tracker file."""
+    """Specifies the name of the multi_recording dataset. The name is lowercased and used to create the output directory
+    under each recording's cindra directory (e.g., recording/cindra/multi_recording/{dataset_name}/) and to identify the
+    dataset in the tracker file."""
 
     repeat_selection: bool = False
     """Determines whether to repeat the ROI selection step when processing. When True, the pipeline re-runs ROI
@@ -79,18 +79,17 @@ class ROISelection:
 
     maximum_size_channel_2: int | None = None
     """The maximum allowed ROI size for channel 2, in pixels. When set to None (default), channel 2 ROIs use the same
-    maximum_size as channel 1. Set this to a different value when channel 2 ROIs have different size
-    characteristics."""
+    maximum_size as channel 1. Set this to a different value when channel 2 ROIs have different size characteristics."""
 
     mroi_region_margin_channel_2: int | None = None
-    """The minimum required distance from MROI region borders for channel 2 ROIs, in pixels. When set to None
-    (default), channel 2 ROIs use the same mroi_region_margin as channel 1."""
+    """The minimum required distance from MROI region borders for channel 2 ROIs, in pixels. When set to None (default),
+    channel 2 ROIs use the same mroi_region_margin as channel 1."""
 
 
 @dataclass(slots=True)
 class DiffeomorphicRegistration:
-    """Stores parameters for diffeomorphic demons registration that aligns multiple recordings to the same
-    visual (sampling) space.
+    """Stores parameters for diffeomorphic demons registration that aligns multiple recordings to the same visual
+    (sampling) space.
     """
 
     image_type: ReferenceImageType | str = ReferenceImageType.ENHANCED_MEAN
@@ -98,15 +97,15 @@ class DiffeomorphicRegistration:
     calculate the deformation fields that register all recordings to a common visual space."""
 
     grid_sampling_factor: float = 1
-    """Controls how the B-spline grid spacing scales with image scale during the multi-scale registration process.
-    Must be between 0 and 1. Lower values produce a relatively finer grid at coarser scales, allowing for more
-    detailed deformations at those scales."""
+    """Controls how the B-spline grid spacing scales with image scale during the multi-scale registration process. Must
+    be between 0 and 1. Lower values produce a relatively finer grid at coarser scales, allowing for more detailed
+    deformations at those scales."""
 
     final_grid_sampling: float = 16.0
     """The spacing, in pixels, between the B-spline control points of the grid used at the finest scale level of the
-    multi-scale registration. Registration requires the reference images to span more than twice this spacing along
-    both dimensions. Lowering the value therefore supports smaller reference images and resolves finer local
-    deformations, at the cost of a less constrained deformation field."""
+    multi-scale registration. Registration requires the reference images to span more than twice this spacing along both
+    dimensions. Lowering the value therefore supports smaller reference images and resolves finer local deformations, at
+    the cost of a less constrained deformation field."""
 
     scale_sampling: int = 30
     """The number of registration iterations to perform at each scale level of the multi-scale pyramid. Values between
@@ -118,11 +117,11 @@ class DiffeomorphicRegistration:
     This is the most important parameter to tune. For most cases, a value between 1 and 5 is reasonable."""
 
     repeat_registration: bool = False
-    """Determines whether to repeat diffeomorphic registration when existing registration data is found. When True,
-    the pipeline clears existing deformation fields, transformed images, and deformed ROI masks before re-running
-    registration, and it additionally re-runs the dependent cross-recording tracking and template projection steps.
-    When False (default), existing registration results, template masks, and projected ROI statistics are all reused
-    if present."""
+    """Determines whether to repeat diffeomorphic registration when existing registration data is found. When True, the
+    pipeline clears existing deformation fields, transformed images, and deformed ROI masks before re-running
+    registration, and it additionally re-runs the dependent cross-recording tracking and template projection steps. When
+    False (default), existing registration results, template masks, and projected ROI statistics are all reused if
+    present."""
 
 
 @dataclass(slots=True)
@@ -139,9 +138,9 @@ class ROITracking:
     tracked ROI set. Clusters with members in fewer recordings than this threshold are discarded."""
 
     pixel_prevalence: int = 50
-    """The minimum percentage of a cluster's member ROIs in which a pixel must appear for it to be included in the
-    ROI's cross-recording template mask. Pixels below this threshold are excluded, so only spatially stable regions of
-    each tracked ROI contribute to the template used for fluorescence extraction across recordings."""
+    """The minimum percentage of a cluster's member ROIs in which a pixel must appear for it to be included in the ROI's
+    cross-recording template mask. Pixels below this threshold are excluded, so only spatially stable regions of each
+    tracked ROI contribute to the template used for fluorescence extraction across recordings."""
 
     step_sizes: tuple[int, int] = (200, 200)
     """The block size, in pixels, as (height, width) used to partition the deformed visual space into spatial bins for
@@ -150,13 +149,12 @@ class ROITracking:
     differ."""
 
     bin_size: int = 50
-    """The extension, in pixels, added to each spatial bin boundary in both directions when collecting ROI masks
-    for clustering. This overlap between neighboring bins ensures that ROIs near bin borders are clustered
-    correctly."""
+    """The extension, in pixels, added to each spatial bin boundary in both directions when collecting ROI masks for
+    clustering. This overlap between neighboring bins ensures that ROIs near bin borders are clustered correctly."""
 
     maximum_distance: int = 20
-    """The maximum centroid distance, in pixels, between two ROI masks for them to be considered a candidate pair.
-    Only pairs that pass this spatial pre-filter proceed to the Jaccard overlap comparison controlled by threshold."""
+    """The maximum centroid distance, in pixels, between two ROI masks for them to be considered a candidate pair. Only
+    pairs that pass this spatial pre-filter proceed to the Jaccard overlap comparison controlled by threshold."""
 
     minimum_size: int = 25
     """The minimum number of non-overlapping pixels a cross-recording template mask must contain after removing pixels

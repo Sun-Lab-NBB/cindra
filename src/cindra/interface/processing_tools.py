@@ -89,79 +89,6 @@ _SECONDS_PER_HOUR: float = 3600.0
 """The number of seconds in one hour, which scales an elapsed second count into the reported job throughput."""
 
 
-def _resolve_job_identifiers(tracker: ProcessingTracker, jobs: list[tuple[str, str]]) -> dict[tuple[str, str], str]:
-    """Initializes a tracker's jobs and keys every returned identifier by the job it belongs to.
-
-    Notes:
-        The tracker returns its identifiers in the order the job list carries them. Keying them by name and specifier
-        keeps a manifest entry bound to its own job, so inserting or reordering a pipeline phase cannot shift an
-        identifier onto a different job.
-
-    Args:
-        tracker: The tracker to initialize the jobs on.
-        jobs: The job universe, as job name and specifier pairs.
-
-    Returns:
-        The identifier of every job, keyed by its name and specifier.
-    """
-    job_ids = tracker.initialize_jobs(jobs=jobs)
-    return dict(zip(jobs, job_ids, strict=True))
-
-
-def _manifest_entry(identifiers: dict[tuple[str, str], str], job_name: str, specifier: str) -> dict[str, object]:
-    """Builds the manifest entry describing one scheduled job.
-
-    Args:
-        identifiers: The identifier of every job, keyed by its name and specifier.
-        job_name: The name of the job the entry describes.
-        specifier: The specifier of the job the entry describes.
-
-    Returns:
-        The manifest entry holding the job's identifier, name, specifier, and scheduled status.
-    """
-    return {
-        "job_id": identifiers[str(job_name), specifier],
-        "name": str(job_name),
-        "specifier": specifier,
-        "status": "scheduled",
-    }
-
-
-def _estimate_pending_job_memory(configuration_path: Path, job_name: str, specifier: str, *, single: bool) -> int:
-    """Estimates the memory one queued job holds, from the recording or dataset it will process.
-
-    Args:
-        configuration_path: The path to the job's pipeline configuration file.
-        job_name: The name of the pipeline stage the job runs.
-        specifier: The job's tracker specifier.
-        single: Determines whether the job belongs to the single-recording or the multi-recording pipeline.
-
-    Returns:
-        The memory the job holds in megabytes.
-
-    Raises:
-        FileNotFoundError: If the recording or dataset the job runs on carries nothing its stage can be sized
-            against.
-    """
-    if single:
-        configuration, output_path = load_single_recording_configuration(configuration_path=configuration_path)
-        return estimate_single_recording_job_memory_mb(
-            job_name=SingleRecordingJobNames(job_name),
-            specifier=specifier,
-            output_root=output_path,
-            configuration=configuration,
-            data_path=configuration.file_io.data_path,
-        )
-
-    dataset_configuration = load_multi_recording_configuration(configuration_path=configuration_path)
-    return estimate_multi_recording_job_memory_mb(
-        job_name=MultiRecordingJobNames(job_name),
-        specifier=specifier,
-        recording_directories=dataset_configuration.recording_io.recording_directories,
-        configuration=dataset_configuration,
-    )
-
-
 @mcp.tool()
 def get_recording_status_tool(recording_path: str) -> dict[str, object]:
     """Gets the processing status for a recording by reading all available ProcessingTracker files.
@@ -275,8 +202,8 @@ def get_batch_status_overview_tool(root_directory: str) -> dict[str, object]:
     # Indexes both tracker names in a single traversal of the tree, which halves the walk a two-name search would
     # otherwise cost over a whole data root. The indexer refuses to narrow its result to the readable subset, so a
     # single unreadable directory anywhere under the root fails the whole scan. This tool surveys a root the caller
-    # chose rather than a path the pipeline owns, and reporting no recording at all because one sibling directory is
-    # unreadable would be the wrong answer, so the denial is recorded and the tolerant scan supplies the rest.
+    # chose rather than a path the pipeline owns, so reporting no recording at all because one sibling directory is
+    # unreadable would be the wrong answer. The denial is recorded and the tolerant scan supplies the rest.
     try:
         tracker_index = index_marker_files(
             directory=root, marker_names=(SINGLE_RECORDING_TRACKER_FILENAME, MULTI_RECORDING_TRACKER_FILENAME)
@@ -304,7 +231,6 @@ def get_batch_status_overview_tool(root_directory: str) -> dict[str, object]:
         entry["dataset_name"] = dataset_name
         multi_recordings.append(entry)
 
-    # Aggregates summary counts from synthesized status strings.
     completed = 0
     failed = 0
     in_progress = 0
@@ -383,18 +309,18 @@ def prepare_single_recording_batch_tool(
             file_io.output_path). Must match the length of recording_paths.
 
     Returns:
-        On success, contains per-recording manifests in 'recordings' keyed by recording path, with each entry listing
-        its configuration_path, tracker_path, output_path, pipeline_type, and per-phase job entries (binarize_job,
+        On success, contains per-recording manifests in 'recordings' keyed by recording path. Each entry lists its
+        configuration_path, tracker_path, output_path, pipeline_type, and per-phase job entries (binarize_job,
         register_jobs, process_jobs, combine_job) including job_id, name, specifier, and current status, plus
-        executor_id for a tracker that already existed. The output_path
-        is the absolute output directory and the parent of the cindra/ directory, where configuration_path equals
-        <output_path>/cindra/configuration.yaml, so downstream verify, status, and clean tools need no re-derivation.
-        Also includes 'total_recordings' and 'total_jobs' counts, plus 'migrated_recordings' listing any recording
-        whose tracker gained the missing register jobs and 'invalid_paths' listing any provided path that is not an
-        existing directory. A recording whose preparation fails, such as one holding no acquisition parameters file,
-        is reported with its reason under 'invalid_recordings' while every other recording keeps its manifest, so a
-        caller MUST read that key rather than treat the absence of an 'error' as full preparation. On failure,
-        contains an 'error' describing the issue.
+        executor_id for a tracker that already existed. The output_path is the absolute output directory and the parent
+        of the cindra/ directory, where configuration_path equals <output_path>/cindra/configuration.yaml, so downstream
+        verify, status, and clean tools need no re-derivation. Also includes 'total_recordings' and 'total_jobs' counts,
+        plus 'migrated_recordings' listing any recording whose tracker gained the missing register jobs and
+        'invalid_paths' listing any provided path that is not an existing directory. A recording whose preparation
+        fails, such as one holding no acquisition parameters file, is reported with its reason under
+        'invalid_recordings' while every other recording keeps its manifest. A caller MUST therefore read that key
+        rather than treat the absence of an 'error' as full preparation. On failure, contains an 'error' describing the
+        issue.
     """
     if not recording_paths:
         return {"success": False, "error": "Unable to prepare batch. At least one recording path is required."}
@@ -421,7 +347,6 @@ def prepare_single_recording_batch_tool(
             "error": f"Unable to prepare batch. Configuration file must be a .yaml file: {configuration_path}.",
         }
 
-    # Validates recording paths.
     valid_indices: list[int] = []
     valid_paths: list[Path] = []
     invalid_paths: list[str] = []
@@ -441,10 +366,8 @@ def prepare_single_recording_batch_tool(
             "invalid_paths": invalid_paths,
         }
 
-    # Resolves per-recording output paths from the provided list.
     resolved_output_paths: list[Path] = [Path(recording_output_paths[index]) for index in valid_indices]
 
-    # Builds the manifest for each recording.
     recordings_manifest: dict[str, dict[str, object]] = {}
     migrated_recordings: list[str] = []
     invalid_recordings: list[str] = []
@@ -651,15 +574,14 @@ def prepare_multi_recording_batch_tool(
             are required.
 
     Returns:
-        On success, contains per-dataset manifests in 'datasets' keyed by the lowercased dataset name, with each entry
-        listing its configuration_path, tracker_path, dataset_name, pipeline_type, and per-phase job entries
-        (discover_job, extract_jobs) including job_id, name, specifier, and current status, plus executor_id for a
-        tracker that already existed. The dataset_name field is
-        the resolved lowercased dataset name. To verify a dataset, call verify_multi_recording_output_tool with the
-        dataset_name plus any recording_path belonging to the dataset (one of the input recording_paths, whose cindra/
-        subdirectory is resolved automatically). Also includes 'total_datasets' and 'total_jobs' counts, plus
-        'invalid_configurations' listing every rejected dataset entry with its reason. On failure, contains an 'error'
-        describing the issue.
+        On success, contains per-dataset manifests in 'datasets' keyed by the lowercased dataset name. Each entry lists
+        its configuration_path, tracker_path, dataset_name, pipeline_type, and per-phase job entries (discover_job,
+        extract_jobs) including job_id, name, specifier, and current status, plus executor_id for a tracker that already
+        existed. The dataset_name field is the resolved lowercased dataset name. To verify a dataset, call
+        verify_multi_recording_output_tool with the dataset_name plus any recording_path belonging to the dataset (one
+        of the input recording_paths, whose cindra/ subdirectory is resolved automatically). Also includes
+        'total_datasets' and 'total_jobs' counts, plus 'invalid_configurations' listing every rejected dataset entry
+        with its reason. On failure, contains an 'error' describing the issue.
     """
     if not dataset_configurations:
         return {
@@ -667,7 +589,6 @@ def prepare_multi_recording_batch_tool(
             "error": "Unable to prepare multi-recording batch. At least one dataset configuration is required.",
         }
 
-    # Validates dataset configurations.
     valid_datasets: list[tuple[str, Path, list[Path]]] = []
     invalid_configurations: list[str] = []
 
@@ -701,7 +622,6 @@ def prepare_multi_recording_batch_tool(
             invalid_configurations.append(f"Invalid recordings for {dataset_configuration_path}: {invalid_recordings}")
             continue
 
-        # Validates the configuration file format.
         try:
             MultiRecordingConfiguration.from_yaml(file_path=dataset_configuration_path)
         except Exception as error:
@@ -718,18 +638,15 @@ def prepare_multi_recording_batch_tool(
             "invalid_configurations": invalid_configurations,
         }
 
-    # Builds the manifest for each dataset.
     datasets_manifest: dict[str, dict[str, object]] = {}
     total_jobs = 0
 
     for dataset_key, dataset_configuration_path, dataset_recording_paths in valid_datasets:
-        # Loads the template configuration and applies runtime-specific overrides.
         configuration = MultiRecordingConfiguration.from_yaml(file_path=dataset_configuration_path)
         configuration.recording_io.dataset_name = dataset_key
         configuration.recording_io.recording_directories = tuple(natsorted(dataset_recording_paths))
         configuration.runtime.display_progress_bars = False
 
-        # Resolves contexts to determine recording IDs and the output path.
         contexts = resolve_multi_recording_contexts(configuration=configuration)
         recording_ids = [context.runtime.io.recording_id for context in contexts]
         main_recording_path = contexts[0].runtime.output_path
@@ -869,7 +786,6 @@ def reset_processing_phases_tool(
             ),
         }
 
-    # Validates phase names against the pipeline type.
     if pipeline_type == "single-recording":
         valid_phases = {member.value for member in SingleRecordingJobNames}
     else:
@@ -890,7 +806,7 @@ def reset_processing_phases_tool(
     requested_phases = list(phases)
     single_recording = pipeline_type == "single-recording"
     phases = order_phases_by_execution(
-        resolve_downstream_phases(phase_names=phases, single_recording=single_recording),
+        phase_names=resolve_downstream_phases(phase_names=phases, single_recording=single_recording),
         single_recording=single_recording,
     )
 
@@ -988,7 +904,6 @@ def clean_processing_output_tool(
             ),
         }
 
-    # Validates phase names against the pipeline type.
     if pipeline_type == "single-recording":
         valid_phases = {member.value for member in SingleRecordingJobNames}
     else:
@@ -1004,11 +919,10 @@ def clean_processing_output_tool(
             ),
         }
 
-    # Expands the requested phases to include all downstream dependents.
     requested_phases = list(phases)
     single_recording = pipeline_type == "single-recording"
     effective_phases = order_phases_by_execution(
-        resolve_downstream_phases(phase_names=phases, single_recording=single_recording),
+        phase_names=resolve_downstream_phases(phase_names=phases, single_recording=single_recording),
         single_recording=single_recording,
     )
 
@@ -1126,7 +1040,6 @@ def clean_processing_output_tool(
                 "error": f"Unable to clean processing output. Dataset directory not found: {dataset_path}.",
             }
 
-        # Loads runtime data to discover all recording output paths.
         runtime = _load_runtime_yaml(path=dataset_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
         if runtime is None:
             return {
@@ -1235,11 +1148,10 @@ def execute_processing_jobs_tool(
             hexadecimal job identifier from the prepare manifest), and 'pipeline_type' ('single-recording' or
             'multi-recording').
         workers_per_job: CPU cores per job, overriding the measured default of every class that carries no hard
-        concurrency ceiling. Leave
-            as None to accept the measured defaults, which are 3 cores for binarization, 4 for registration, 10 for
-            processing, 1 for combination, 2 for multi-recording discovery, and 16 for multi-recording extraction.
-            Set to -1 to give every job the whole session core budget. The override is a single scalar applied to
-            every non-fixed class alike.
+            concurrency ceiling. Leave as None to accept the measured defaults, which are 3 cores for binarization, 4
+            for registration, 10 for processing, 1 for combination, 2 for multi-recording discovery, and 16 for
+            multi-recording extraction. Set to -1 to give every job the whole session core budget. The override is a
+            single scalar applied to every non-fixed class alike.
         max_parallel_jobs: Maximum concurrent jobs per resource class, overriding the derived concurrency cap of every
             non-fixed resource class. Leave as None to accept the derived caps, or set to -1 to lift them so that only
             the job count bounds concurrency.
@@ -1247,10 +1159,9 @@ def execute_processing_jobs_tool(
     Returns:
         Always contains a 'success' flag indicating the tool ran. On a started session, also contains a 'started' flag,
         'total_jobs' dispatched, and the session 'cpu_budget' and 'memory_budget_mb' that bound the classes in
-        aggregate. A started session
-        further reports a 'resource_classes' mapping with the resolved workers_per_job, max_parallel_jobs, and
-        job_count of every class present in the session, and 'invalid_jobs' listing any jobs that failed validation
-        with reasons. On failure, contains success:False and an 'error' describing the issue.
+        aggregate. A started session further reports a 'resource_classes' mapping with the resolved workers_per_job,
+        max_parallel_jobs, and job_count of every class present in the session, and 'invalid_jobs' listing any jobs that
+        failed validation with reasons. On failure, contains success:False and an 'error' describing the issue.
     """
     if not jobs:
         return {"success": False, "error": "Unable to execute jobs. At least one job descriptor is required."}
@@ -1259,7 +1170,6 @@ def execute_processing_jobs_tool(
     if active_session_error is not None:
         return active_session_error
 
-    # Validates each job entry and resolves the resource class that governs its allocation.
     required_keys = {"configuration_path", "tracker_path", "job_id", "pipeline_type"}
     candidate_jobs: list[PendingJob] = []
     submitted_by_tracker: dict[str, set[str]] = {}
@@ -1288,7 +1198,6 @@ def execute_processing_jobs_tool(
             invalid_jobs.append({"job_id": job_id, "reason": f"Invalid pipeline_type: {pipeline_type}"})
             continue
 
-        # Validates that the job_id exists in the tracker and reads its job name to resolve the resource class.
         tracker = ProcessingTracker(file_path=tracker_file)
         try:
             job_info = tracker.get_job_info(job_id=job_id)
@@ -1594,11 +1503,10 @@ def cancel_processing_jobs_tool() -> dict[str, object]:
     """Cancels the active job execution session.
 
     Clears the admission pool and every resource class queue to prevent new jobs from starting and resets the execution
-    state. Already-dispatched jobs keep running in their worker processes, because cancellation only empties the
-    queues and never cancels a running job. The agent should therefore poll get_recording_status_tool on the affected
-    recordings or datasets until previously-RUNNING jobs
-    leave RUNNING before starting a new session, to avoid colliding with still-running cancelled jobs. Calling cancel
-    when no session is active is a safe no-op.
+    state. Already-dispatched jobs keep running in their worker processes, because cancellation only empties the queues
+    and never cancels a running job. The agent should therefore poll get_recording_status_tool on the affected
+    recordings or datasets until previously-RUNNING jobs leave RUNNING before starting a new session, to avoid colliding
+    with still-running cancelled jobs. Calling cancel when no session is active is a safe no-op.
 
     Returns:
         Always contains a 'success' flag indicating the tool ran. On an active session, also contains a 'canceled'
@@ -1650,170 +1558,6 @@ def cancel_processing_jobs_tool() -> dict[str, object]:
     }
 
 
-def _resolve_recording_phase_jobs(
-    manifest_dict: dict[str, Any], configuration_path: Path, tracker_path: Path
-) -> tuple[list[PendingJob], list[PendingJob], list[PendingJob], list[PendingJob]]:
-    """Builds the pending jobs of one recording, grouped by the phase each belongs to.
-
-    Notes:
-        Sizing every job of the recording here rather than at each phase group lets the caller admit or exclude a
-        recording whole. A recording that cannot be sized contributes no job at all, so the batch never runs a
-        recording's early phases against an estimate its later phases could not produce.
-
-    Args:
-        manifest_dict: The recording's entry in the prepared batch manifest.
-        configuration_path: The path to the recording's pipeline configuration file.
-        tracker_path: The path to the recording's processing tracker.
-
-    Returns:
-        The binarization, registration, processing, and combination jobs the recording contributes, in that order.
-
-    Raises:
-        FileNotFoundError: If the recording carries nothing its stages can be sized against.
-    """
-    binarize_jobs: list[PendingJob] = []
-    register_jobs: list[PendingJob] = []
-    process_jobs: list[PendingJob] = []
-    combine_jobs: list[PendingJob] = []
-
-    binarize = manifest_dict.get("binarize_job", {})
-    if binarize and binarize.get("status") != "succeeded":
-        binarize_jobs.append(
-            PendingJob(
-                configuration_path=configuration_path,
-                tracker_path=tracker_path,
-                job_id=binarize["job_id"],
-                single_recording=True,
-                resource_class=RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.BINARIZE],
-                memory_megabytes=_estimate_pending_job_memory(
-                    configuration_path=configuration_path,
-                    job_name=str(binarize["name"]),
-                    specifier=str(binarize["specifier"]),
-                    single=True,
-                ),
-            )
-        )
-
-    register_jobs.extend(
-        PendingJob(
-            configuration_path=configuration_path,
-            tracker_path=tracker_path,
-            job_id=register["job_id"],
-            single_recording=True,
-            resource_class=RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.REGISTER],
-            memory_megabytes=_estimate_pending_job_memory(
-                configuration_path=configuration_path,
-                job_name=str(register["name"]),
-                specifier=str(register["specifier"]),
-                single=True,
-            ),
-        )
-        for register in manifest_dict.get("register_jobs", [])
-        if register.get("status") != "succeeded"
-    )
-
-    process_jobs.extend(
-        PendingJob(
-            configuration_path=configuration_path,
-            tracker_path=tracker_path,
-            job_id=process["job_id"],
-            single_recording=True,
-            resource_class=RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.PROCESS],
-            memory_megabytes=_estimate_pending_job_memory(
-                configuration_path=configuration_path,
-                job_name=str(process["name"]),
-                specifier=str(process["specifier"]),
-                single=True,
-            ),
-        )
-        for process in manifest_dict.get("process_jobs", [])
-        if process.get("status") != "succeeded"
-    )
-
-    combine = manifest_dict.get("combine_job", {})
-    if combine and combine.get("status") != "succeeded":
-        combine_jobs.append(
-            PendingJob(
-                configuration_path=configuration_path,
-                tracker_path=tracker_path,
-                job_id=combine["job_id"],
-                single_recording=True,
-                resource_class=RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.COMBINE],
-                memory_megabytes=_estimate_pending_job_memory(
-                    configuration_path=configuration_path,
-                    job_name=str(combine["name"]),
-                    specifier=str(combine["specifier"]),
-                    single=True,
-                ),
-            )
-        )
-
-    return binarize_jobs, register_jobs, process_jobs, combine_jobs
-
-
-def _resolve_dataset_phase_jobs(
-    manifest_dict: dict[str, Any], configuration_path: Path, tracker_path: Path
-) -> tuple[list[PendingJob], list[PendingJob]]:
-    """Builds the pending jobs of one tracked dataset, grouped by the phase each belongs to.
-
-    Notes:
-        Sizing every job of the dataset here rather than at each phase group lets the caller admit or exclude a
-        dataset whole, which matches the pipeline, since it refuses a dataset whose recordings do not all carry the
-        combined output a completed single-recording run leaves behind.
-
-    Args:
-        manifest_dict: The dataset's entry in the prepared batch manifest.
-        configuration_path: The path to the dataset's pipeline configuration file.
-        tracker_path: The path to the dataset's processing tracker.
-
-    Returns:
-        The discovery and extraction jobs the dataset contributes, in that order.
-
-    Raises:
-        FileNotFoundError: If any recording the dataset spans carries nothing its stages can be sized against.
-    """
-    discover_jobs: list[PendingJob] = []
-    extract_jobs: list[PendingJob] = []
-
-    discover = manifest_dict.get("discover_job", {})
-    if discover and discover.get("status") != "succeeded":
-        discover_jobs.append(
-            PendingJob(
-                configuration_path=configuration_path,
-                tracker_path=tracker_path,
-                job_id=discover["job_id"],
-                single_recording=False,
-                resource_class=RESOURCE_CLASS_BY_JOB_NAME[MultiRecordingJobNames.DISCOVER],
-                memory_megabytes=_estimate_pending_job_memory(
-                    configuration_path=configuration_path,
-                    job_name=str(discover["name"]),
-                    specifier=str(discover["specifier"]),
-                    single=False,
-                ),
-            )
-        )
-
-    extract_jobs.extend(
-        PendingJob(
-            configuration_path=configuration_path,
-            tracker_path=tracker_path,
-            job_id=extract["job_id"],
-            single_recording=False,
-            resource_class=RESOURCE_CLASS_BY_JOB_NAME[MultiRecordingJobNames.EXTRACT],
-            memory_megabytes=_estimate_pending_job_memory(
-                configuration_path=configuration_path,
-                job_name=str(extract["name"]),
-                specifier=str(extract["specifier"]),
-                single=False,
-            ),
-        )
-        for extract in manifest_dict.get("extract_jobs", [])
-        if extract.get("status") != "succeeded"
-    )
-
-    return discover_jobs, extract_jobs
-
-
 @mcp.tool()
 def execute_full_pipeline_tool(
     pipeline_type: str,
@@ -1844,10 +1588,9 @@ def execute_full_pipeline_tool(
         dataset_configurations: List of dataset configuration dictionaries. Required for multi-recording pipelines.
             Each must contain 'configuration_path', 'recording_paths', and 'dataset_name'.
         workers_per_job: CPU cores per job, overriding the measured default of every class that carries no hard
-        concurrency ceiling. Leave
-            as None to accept the measured defaults of 3 cores for binarization, 1 for combination, 4 for
-            registration, 10 for processing, 2 for multi-recording discovery, and 16 for multi-recording extraction.
-            Set to -1 to give every job the whole session core budget.
+            concurrency ceiling. Leave as None to accept the measured defaults of 3 cores for binarization, 1 for
+            combination, 4 for registration, 10 for processing, 2 for multi-recording discovery, and 16 for
+            multi-recording extraction. Set to -1 to give every job the whole session core budget.
         max_parallel_jobs: Maximum concurrent jobs per resource class, overriding the derived concurrency cap of every
             non-fixed resource class. Leave as None to accept the derived caps, or set to -1 to lift them so that only
             the job count bounds concurrency.
@@ -1856,20 +1599,18 @@ def execute_full_pipeline_tool(
         Always contains a 'success' flag indicating the tool ran, and callers MUST also check the 'started' flag rather
         than 'success' alone. When jobs are dispatched, contains started:True, 'total_jobs', 'phase_count', per-phase
         'phases' with job counts and IDs, the session 'cpu_budget' and 'memory_budget_mb' that bound the classes in
-        aggregate, and a
-        'resource_classes' mapping with the resolved allocation of every class in the session. When all phases are
-        already complete, returns {success:True, started:False, message:"All pipeline phases are already completed.",
-        pipeline_type:<the requested type>, total_jobs:0, phase_count:0, phases:[]} plus a 'next_step' string. Every
-        outcome carries 'pipeline_type'. The rejection lists the preparation step produces, 'invalid_paths',
-        'invalid_recordings', and 'invalid_configurations', and the lists this step's own sizing pass produces,
-        'unsizable_recordings' and 'unsizable_datasets', are forwarded when non-empty and together name every
-        recording or dataset the session omits. A batch whose preparation accepted no input at all
-        returns success:False alongside those lists, because it holds no phase to report as complete. On failure,
-        contains success:False and an 'error' describing the issue. Cascade-aborted downstream jobs are recorded in
-        their trackers as FAILED with the exact message "Unable to execute job. A preceding pipeline phase failed.",
-        distinguishing them from genuine per-job failures. A job aborted because its prerequisite phase is absent from
-        the tracker instead records a message naming that phase and asking for the prepare tool to be re-run, because no
-        phase failed in that case.
+        aggregate, and a 'resource_classes' mapping with the resolved allocation of every class in the session. When all
+        phases are already complete, returns {success:True, started:False, message:"All pipeline phases are already
+        completed.", pipeline_type:<the requested type>, total_jobs:0, phase_count:0, phases:[]} plus a 'next_step'
+        string. Every outcome carries 'pipeline_type'. The rejection lists the preparation step produces,
+        'invalid_paths', 'invalid_recordings', and 'invalid_configurations', and the lists this step's own sizing pass
+        produces, 'unsizable_recordings' and 'unsizable_datasets', are forwarded when non-empty and together name every
+        recording or dataset the session omits. A batch whose preparation accepted no input at all returns success:False
+        alongside those lists, because it holds no phase to report as complete. On failure, contains success:False and
+        an 'error' describing the issue. Cascade-aborted downstream jobs are recorded in their trackers as FAILED with
+        the exact message "Unable to execute job. A preceding pipeline phase failed.", distinguishing them from genuine
+        per-job failures. A job aborted because its prerequisite phase is absent from the tracker instead records a
+        message naming that phase and asking for the prepare tool to be re-run, because no phase failed in that case.
     """
     if pipeline_type not in ("single-recording", "multi-recording"):
         return {
@@ -1884,7 +1625,6 @@ def execute_full_pipeline_tool(
     if active_session_error is not None:
         return active_session_error
 
-    # Calls the appropriate prepare tool to build the execution manifest.
     manifest: dict[str, object]
     if pipeline_type == "single-recording":
         if not recording_paths:
@@ -2056,7 +1796,6 @@ def execute_full_pipeline_tool(
         for job in phase_jobs:
             all_jobs_map[job.dispatch_key] = job
 
-    # Builds phase summary for response before delegating to shared execution setup.
     phases_summary: list[dict[str, object]] = [
         {
             "phase_name": phase_name,
@@ -2119,9 +1858,9 @@ def _start_session(
         extra_result_fields: Additional key-value pairs to include in the result dictionary.
 
     Returns:
-        A result dictionary containing 'success', 'started', the session 'cpu_budget' and 'memory_budget_mb',
-        per-class resource allocation
-        details, and any extra fields. A rejected override yields success:False and an 'error' instead.
+        A result dictionary containing 'success', 'started', the session 'cpu_budget' and 'memory_budget_mb', per-class
+        resource allocation details, and any extra fields. A rejected override yields success:False and an 'error'
+        instead.
     """
     try:
         session = start_execution_session(
@@ -2259,7 +1998,6 @@ def _read_multi_recording_tracker(tracker_path: Path) -> dict[str, object]:
         job_state.specifier: job_state.status.name.lower() for job_state in extract_jobs.values()
     }
 
-    # Synthesizes overall status from tracker state.
     statuses = [job_state.status for job_state in registry.values()]
     if statuses and all(status == ProcessingStatus.SUCCEEDED for status in statuses):
         overall_status = "completed"
@@ -2355,3 +2093,240 @@ def _load_runtime_yaml(path: Path) -> dict[str, Any] | None:
             return yaml.safe_load(yaml_file)
     except Exception:
         return None
+
+
+def _resolve_dataset_phase_jobs(
+    manifest_dict: dict[str, Any], configuration_path: Path, tracker_path: Path
+) -> tuple[list[PendingJob], list[PendingJob]]:
+    """Builds the pending jobs of one tracked dataset, grouped by the phase each belongs to.
+
+    Notes:
+        Sizing every job of the dataset here rather than at each phase group lets the caller admit or exclude a
+        dataset whole. That matches the pipeline, which refuses a dataset whose recordings do not all carry the
+        combined output a completed single-recording run leaves behind.
+
+    Args:
+        manifest_dict: The dataset's entry in the prepared batch manifest.
+        configuration_path: The path to the dataset's pipeline configuration file.
+        tracker_path: The path to the dataset's processing tracker.
+
+    Returns:
+        The discovery and extraction jobs the dataset contributes, in that order.
+
+    Raises:
+        FileNotFoundError: If any recording the dataset spans carries nothing its stages can be sized against.
+    """
+    discover_jobs: list[PendingJob] = []
+    extract_jobs: list[PendingJob] = []
+
+    discover = manifest_dict.get("discover_job", {})
+    if discover and discover.get("status") != "succeeded":
+        discover_jobs.append(
+            PendingJob(
+                configuration_path=configuration_path,
+                tracker_path=tracker_path,
+                job_id=discover["job_id"],
+                single_recording=False,
+                resource_class=RESOURCE_CLASS_BY_JOB_NAME[MultiRecordingJobNames.DISCOVER],
+                memory_megabytes=_estimate_pending_job_memory(
+                    configuration_path=configuration_path,
+                    job_name=str(discover["name"]),
+                    specifier=str(discover["specifier"]),
+                    single=False,
+                ),
+            )
+        )
+
+    extract_jobs.extend(
+        PendingJob(
+            configuration_path=configuration_path,
+            tracker_path=tracker_path,
+            job_id=extract["job_id"],
+            single_recording=False,
+            resource_class=RESOURCE_CLASS_BY_JOB_NAME[MultiRecordingJobNames.EXTRACT],
+            memory_megabytes=_estimate_pending_job_memory(
+                configuration_path=configuration_path,
+                job_name=str(extract["name"]),
+                specifier=str(extract["specifier"]),
+                single=False,
+            ),
+        )
+        for extract in manifest_dict.get("extract_jobs", [])
+        if extract.get("status") != "succeeded"
+    )
+
+    return discover_jobs, extract_jobs
+
+
+def _resolve_recording_phase_jobs(
+    manifest_dict: dict[str, Any], configuration_path: Path, tracker_path: Path
+) -> tuple[list[PendingJob], list[PendingJob], list[PendingJob], list[PendingJob]]:
+    """Builds the pending jobs of one recording, grouped by the phase each belongs to.
+
+    Notes:
+        Sizing every job of the recording here rather than at each phase group lets the caller admit or exclude a
+        recording whole. A recording that cannot be sized contributes no job at all, so the batch never runs a
+        recording's early phases against an estimate its later phases could not produce.
+
+    Args:
+        manifest_dict: The recording's entry in the prepared batch manifest.
+        configuration_path: The path to the recording's pipeline configuration file.
+        tracker_path: The path to the recording's processing tracker.
+
+    Returns:
+        The binarization, registration, processing, and combination jobs the recording contributes, in that order.
+
+    Raises:
+        FileNotFoundError: If the recording carries nothing its stages can be sized against.
+    """
+    binarize_jobs: list[PendingJob] = []
+    register_jobs: list[PendingJob] = []
+    process_jobs: list[PendingJob] = []
+    combine_jobs: list[PendingJob] = []
+
+    binarize = manifest_dict.get("binarize_job", {})
+    if binarize and binarize.get("status") != "succeeded":
+        binarize_jobs.append(
+            PendingJob(
+                configuration_path=configuration_path,
+                tracker_path=tracker_path,
+                job_id=binarize["job_id"],
+                single_recording=True,
+                resource_class=RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.BINARIZE],
+                memory_megabytes=_estimate_pending_job_memory(
+                    configuration_path=configuration_path,
+                    job_name=str(binarize["name"]),
+                    specifier=str(binarize["specifier"]),
+                    single=True,
+                ),
+            )
+        )
+
+    register_jobs.extend(
+        PendingJob(
+            configuration_path=configuration_path,
+            tracker_path=tracker_path,
+            job_id=register["job_id"],
+            single_recording=True,
+            resource_class=RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.REGISTER],
+            memory_megabytes=_estimate_pending_job_memory(
+                configuration_path=configuration_path,
+                job_name=str(register["name"]),
+                specifier=str(register["specifier"]),
+                single=True,
+            ),
+        )
+        for register in manifest_dict.get("register_jobs", [])
+        if register.get("status") != "succeeded"
+    )
+
+    process_jobs.extend(
+        PendingJob(
+            configuration_path=configuration_path,
+            tracker_path=tracker_path,
+            job_id=process["job_id"],
+            single_recording=True,
+            resource_class=RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.PROCESS],
+            memory_megabytes=_estimate_pending_job_memory(
+                configuration_path=configuration_path,
+                job_name=str(process["name"]),
+                specifier=str(process["specifier"]),
+                single=True,
+            ),
+        )
+        for process in manifest_dict.get("process_jobs", [])
+        if process.get("status") != "succeeded"
+    )
+
+    combine = manifest_dict.get("combine_job", {})
+    if combine and combine.get("status") != "succeeded":
+        combine_jobs.append(
+            PendingJob(
+                configuration_path=configuration_path,
+                tracker_path=tracker_path,
+                job_id=combine["job_id"],
+                single_recording=True,
+                resource_class=RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.COMBINE],
+                memory_megabytes=_estimate_pending_job_memory(
+                    configuration_path=configuration_path,
+                    job_name=str(combine["name"]),
+                    specifier=str(combine["specifier"]),
+                    single=True,
+                ),
+            )
+        )
+
+    return binarize_jobs, register_jobs, process_jobs, combine_jobs
+
+
+def _estimate_pending_job_memory(configuration_path: Path, job_name: str, specifier: str, *, single: bool) -> int:
+    """Estimates the memory one queued job holds, from the recording or dataset it will process.
+
+    Args:
+        configuration_path: The path to the job's pipeline configuration file.
+        job_name: The name of the pipeline stage the job runs.
+        specifier: The job's tracker specifier.
+        single: Determines whether the job belongs to the single-recording or the multi-recording pipeline.
+
+    Returns:
+        The memory the job holds in megabytes.
+
+    Raises:
+        FileNotFoundError: If the recording or dataset the job runs on carries nothing its stage can be sized
+            against.
+    """
+    if single:
+        configuration, output_path = load_single_recording_configuration(configuration_path=configuration_path)
+        return estimate_single_recording_job_memory_mb(
+            job_name=SingleRecordingJobNames(job_name),
+            specifier=specifier,
+            output_root=output_path,
+            configuration=configuration,
+            data_path=configuration.file_io.data_path,
+        )
+
+    dataset_configuration = load_multi_recording_configuration(configuration_path=configuration_path)
+    return estimate_multi_recording_job_memory_mb(
+        job_name=MultiRecordingJobNames(job_name),
+        specifier=specifier,
+        recording_directories=dataset_configuration.recording_io.recording_directories,
+        configuration=dataset_configuration,
+    )
+
+
+def _manifest_entry(identifiers: dict[tuple[str, str], str], job_name: str, specifier: str) -> dict[str, object]:
+    """Builds the manifest entry describing one scheduled job.
+
+    Args:
+        identifiers: The identifier of every job, keyed by its name and specifier.
+        job_name: The name of the job the entry describes.
+        specifier: The specifier of the job the entry describes.
+
+    Returns:
+        The manifest entry holding the job's identifier, name, specifier, and scheduled status.
+    """
+    return {
+        "job_id": identifiers[str(job_name), specifier],
+        "name": str(job_name),
+        "specifier": specifier,
+        "status": "scheduled",
+    }
+
+
+def _resolve_job_identifiers(tracker: ProcessingTracker, jobs: list[tuple[str, str]]) -> dict[tuple[str, str], str]:
+    """Initializes a tracker's jobs and keys every returned identifier by the job it belongs to.
+
+    Notes:
+        The tracker returns its identifiers in the order the job list carries them. Keying them by name and specifier
+        keeps a manifest entry bound to its own job, so inserting or reordering a pipeline phase cannot shift an
+        identifier onto a different job.
+
+    Args:
+        tracker: The tracker to initialize the jobs on.
+        jobs: The job universe, as job name and specifier pairs.
+
+    Returns:
+        The identifier of every job, keyed by its name and specifier.
+    """
+    job_ids = tracker.initialize_jobs(jobs=jobs)
+    return dict(zip(jobs, job_ids, strict=True))

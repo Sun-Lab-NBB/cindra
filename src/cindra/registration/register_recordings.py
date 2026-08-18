@@ -30,9 +30,7 @@ def register_recordings(contexts: list[MultiRecordingRuntimeContext], *, workers
     are stored in each recording's runtime registration data.
 
     Notes:
-        This is the entry point for multi-recording registration. It orchestrates the full registration workflow
-        including deformation field computation, image transformation, and mask deformation. The function modifies
-        the runtime data in each context in-place.
+        The function modifies the runtime data in each context in-place.
 
         When all recordings already have registration data (deformation fields and deformed ROI masks) and
         repeat_registration is False (default), the function returns early without re-running the expensive
@@ -60,7 +58,6 @@ def register_recordings(contexts: list[MultiRecordingRuntimeContext], *, workers
     # run under. The mask cannot exceed the number of cores Numba detected at import time.
     numba.set_num_threads(min(workers, numba.config.NUMBA_NUM_THREADS))
 
-    # Checks if registration should be skipped (all recordings already registered and not forcing re-registration).
     all_registered = all(
         context.runtime.registration.is_registered(output_path=context.runtime.output_path) for context in contexts
     )
@@ -74,7 +71,6 @@ def register_recordings(contexts: list[MultiRecordingRuntimeContext], *, workers
         )
         return
 
-    # Clears existing registration data if re-registering.
     if all_registered:
         console.echo(
             message="Multi-recording registration: forced. Clearing existing data and re-running registration.",
@@ -89,7 +85,6 @@ def register_recordings(contexts: list[MultiRecordingRuntimeContext], *, workers
         if combined is not None and context.runtime.io.data_path is not None:
             combined.detection.memory_map_arrays(context.runtime.io.data_path)
 
-    # Collects reference images from all recordings based on configured image type.
     image_type = registration_config.image_type
     reference_images: list[NDArray[np.float32]] = []
     for context in contexts:
@@ -115,7 +110,6 @@ def register_recordings(contexts: list[MultiRecordingRuntimeContext], *, workers
             console.error(message=message, error=ValueError)
         reference_images.append(image.astype(np.float32))
 
-    # Performs groupwise diffeomorphic registration.
     registration = DiffeomorphicDemonsRegistration(
         images=reference_images,
         final_grid_sampling=registration_config.final_grid_sampling,
@@ -125,7 +119,6 @@ def register_recordings(contexts: list[MultiRecordingRuntimeContext], *, workers
     )
     registration.register(progress=runtime_config.display_progress_bars)
 
-    # Applies deformation fields to each recording in parallel.
     if workers > 1:
         pool_width, pool_numba_threads = _resolve_pool_allocation(workers=workers, task_count=len(contexts))
         with ThreadPoolExecutor(
@@ -161,7 +154,6 @@ def register_recordings(contexts: list[MultiRecordingRuntimeContext], *, workers
                 deformation=registration.get_deformation(image_index=index),
             )
 
-    # Records registration timing and persists runtime data for each recording.
     registration_time = int(timer.elapsed)
     for context in contexts:
         context.runtime.timing.registration_time = registration_time
@@ -226,7 +218,6 @@ def project_templates_to_recordings(contexts: list[MultiRecordingRuntimeContext]
     # under. The mask cannot exceed the number of cores Numba detected at import time.
     numba.set_num_threads(min(workers, numba.config.NUMBA_NUM_THREADS))
 
-    # Loads registration and tracking arrays needed for backward deformation.
     for context in contexts:
         output_path = context.runtime.output_path
         # save_runtime() below raises when output_path is None, so every context carries a valid output path here.
@@ -262,7 +253,6 @@ def project_templates_to_recordings(contexts: list[MultiRecordingRuntimeContext]
         ):
             _apply_backward_deformation(context=context)
 
-    # Records backward transform timing and persists runtime data for each recording.
     backward_transform_time = int(timer.elapsed)
     for context in contexts:
         context.runtime.timing.backward_transform_time = backward_transform_time
@@ -387,8 +377,7 @@ def _backward_deform_masks(
 ) -> list[ROIStatistics]:
     """Applies an inverse deformation to project template masks back to a recording's native coordinate system.
 
-    Creates ROIStatistics instances with full shape statistics computed via compute_roi_statistics for downstream
-    extraction and GUI use.
+    Creates ROIStatistics instances with full shape statistics computed via compute_roi_statistics.
 
     Args:
         masks: The list of ROIMask instances (template masks) to transform.
@@ -452,11 +441,9 @@ def _apply_forward_deformation(context: MultiRecordingRuntimeContext, deformatio
         console.error(message=message, error=ValueError)
     detection = combined_data.detection
 
-    # Stores deformation field components.
     registration_data.deform_field_y = deformation.get_field(dimension=0)
     registration_data.deform_field_x = deformation.get_field(dimension=1)
 
-    # Transforms channel 1 reference images.
     if detection.mean_image is not None:
         registration_data.transformed_mean_image = deformation.apply_deformation(
             data=detection.mean_image.astype(np.float32)
@@ -470,7 +457,6 @@ def _apply_forward_deformation(context: MultiRecordingRuntimeContext, deformatio
             data=detection.maximum_projection.astype(np.float32)
         )
 
-    # Transforms channel 2 reference images if available.
     if detection.mean_image_channel_2 is not None:
         registration_data.transformed_mean_image_channel_2 = deformation.apply_deformation(
             data=detection.mean_image_channel_2.astype(np.float32)
@@ -484,10 +470,8 @@ def _apply_forward_deformation(context: MultiRecordingRuntimeContext, deformatio
             data=detection.maximum_projection_channel_2.astype(np.float32)
         )
 
-    # Gets frame dimensions for deformation.
     frame_width = combined_data.combined_width
 
-    # Loads single-recording ROI masks and slices by selected ROI indices for channel 1.
     selected_indices = tuple(index for index in context.runtime.io.selected_roi_indices if index is not None)
     single_recording_output = context.runtime.io.data_path
     if selected_indices and single_recording_output is not None:
@@ -501,7 +485,6 @@ def _apply_forward_deformation(context: MultiRecordingRuntimeContext, deformatio
                 frame_width=frame_width,
             )
 
-    # Loads single-recording ROI masks and slices by selected ROI indices for channel 2.
     selected_indices_channel_2 = tuple(
         index for index in context.runtime.io.selected_roi_indices_channel_2 if index is not None
     )
@@ -527,9 +510,8 @@ def _apply_backward_deformation(context: MultiRecordingRuntimeContext) -> None:
     if available.
 
     Args:
-        context: The MultiRecordingRuntimeContext for the recording to process. Must have
-            tracking.template_masks set and registration.deform_field_y/x populated from a prior forward
-            deformation.
+        context: The MultiRecordingRuntimeContext for the recording to process. Must have tracking.template_masks
+            set and registration.deform_field_y/x populated from a prior forward deformation.
     """
     registration_data = context.runtime.registration
     tracking_data = context.runtime.tracking
@@ -542,11 +524,9 @@ def _apply_backward_deformation(context: MultiRecordingRuntimeContext) -> None:
         console.error(message=message, error=ValueError)
     detection = combined_data.detection
 
-    # Gets frame dimensions for statistics computation.
     frame_height = combined_data.combined_height
     frame_width = combined_data.combined_width
 
-    # Validates deformation fields are available from prior forward deformation.
     if registration_data.deform_field_y is None or registration_data.deform_field_x is None:
         message = (
             f"Unable to project templates to recording '{context.runtime.io.recording_id}'. Deformation fields must be "
@@ -554,7 +534,6 @@ def _apply_backward_deformation(context: MultiRecordingRuntimeContext) -> None:
         )
         console.error(message=message, error=ValueError)
 
-    # Reconstructs the deformation and computes its inverse.
     deformation = Deformation(
         field_y=registration_data.deform_field_y,
         field_x=registration_data.deform_field_x,
@@ -575,7 +554,6 @@ def _apply_backward_deformation(context: MultiRecordingRuntimeContext) -> None:
             roi_diameter=template_diameter,
         )
 
-    # Transforms channel 2 template masks if available.
     if tracking_data.template_masks_channel_2 is not None:
         template_diameter_channel_2 = (
             tracking_data.template_diameter_channel_2 or detection.roi_diameter_channel_2 or detection.roi_diameter

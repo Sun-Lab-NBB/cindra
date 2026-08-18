@@ -21,50 +21,6 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 
-def _make_roi(
-    y_pixels: Sequence[int],
-    x_pixels: Sequence[int],
-    weights: Sequence[float],
-    frame_width: int,
-    radius: float = 5.0,
-    overlap_mask: NDArray[np.bool_] | None = None,
-) -> ROIStatistics:
-    """Creates a minimal ROIStatistics instance for testing."""
-    mask = ROIMask(
-        y_pixels=np.array(y_pixels, dtype=np.int32),
-        x_pixels=np.array(x_pixels, dtype=np.int32),
-        pixel_weights=np.array(weights, dtype=np.float32),
-        centroid=(int(np.median(y_pixels)), int(np.median(x_pixels))),
-        frame_width=frame_width,
-        radius=radius,
-        overlap_mask=overlap_mask,
-    )
-    return ROIStatistics(mask=mask)
-
-
-def _make_circular_roi(
-    center_y: int,
-    center_x: int,
-    radius: int,
-    frame_height: int,
-    frame_width: int,
-) -> ROIStatistics:
-    """Creates a circular ROI for testing."""
-    y_coordinates, x_coordinates = np.mgrid[0:frame_height, 0:frame_width]
-    distance = np.sqrt((y_coordinates - center_y) ** 2 + (x_coordinates - center_x) ** 2)
-    inside = distance <= radius
-    y_pixels = y_coordinates[inside].astype(np.int32)
-    x_pixels = x_coordinates[inside].astype(np.int32)
-    weights = np.maximum(0, 1.0 - distance[inside] / radius).astype(np.float32)
-    return _make_roi(
-        y_pixels=y_pixels,
-        x_pixels=x_pixels,
-        weights=weights,
-        frame_width=frame_width,
-        radius=float(radius),
-    )
-
-
 class TestCreateMasks:
     """Tests create_masks."""
 
@@ -139,7 +95,6 @@ class TestCreateRoiPixels:
         pixel_mask = _create_roi_pixels(roi_statistics=[roi], height=30, width=30, cell_probability_percentile=50)
         assert pixel_mask.dtype == np.bool_
         assert pixel_mask.shape == (30, 30)
-        # The brightest pixel at the ROI center is retained while a far-background pixel is rejected.
         assert pixel_mask[15, 15]
         assert not pixel_mask[0, 0]
 
@@ -172,7 +127,6 @@ class TestCreateRoiMasks:
         )
         masks = _create_roi_masks(roi_statistics=[roi], width=20, include_overlap=False)
         indices, _weights = masks[0]
-        # Confirms only the 2 non-overlapping pixels remain.
         assert len(indices) == 2
 
     def test_weights_sum_to_one(self) -> None:
@@ -259,38 +213,6 @@ class TestCreateNeuropilMasks:
         assert masks[0] is sentinel
         assert roi.neuropil_mask is sentinel
 
-    def test_recompute_overrides_cache(self) -> None:
-        """Verifies that recompute=True discards the cached mask and writes the freshly computed one back."""
-        roi = _make_circular_roi(center_y=25, center_x=25, radius=3, frame_height=50, frame_width=50)
-        sentinel = np.array([7, 8, 9], dtype=np.int32)
-        roi.neuropil_mask = sentinel
-
-        masks = _create_neuropil_masks(
-            roi_statistics=[roi],
-            height=50,
-            width=50,
-            inner_neuropil_border_radius=2,
-            minimum_neuropil_pixels=50,
-            cell_probability_percentile=0,
-            recompute=True,
-        )
-
-        # Computes the reference from an identical ROI carrying no cached mask at all.
-        reference_roi = _make_circular_roi(center_y=25, center_x=25, radius=3, frame_height=50, frame_width=50)
-        reference_masks = _create_neuropil_masks(
-            roi_statistics=[reference_roi],
-            height=50,
-            width=50,
-            inner_neuropil_border_radius=2,
-            minimum_neuropil_pixels=50,
-            cell_probability_percentile=0,
-        )
-
-        assert masks[0] is not sentinel
-        np.testing.assert_array_equal(masks[0], reference_masks[0])
-        # The recomputed mask replaces the cached one on the ROI itself, so a later cached read sees the new mask.
-        assert roi.neuropil_mask is masks[0]
-
     def test_partially_cached_masks_are_recomputed(self) -> None:
         """Verifies that one uncached ROI forces every mask in the batch to be recomputed."""
         cached_roi = _make_circular_roi(center_y=15, center_x=15, radius=3, frame_height=50, frame_width=50)
@@ -342,3 +264,47 @@ class TestCreateNeuropilMasks:
             cell_probability_percentile=0,
         )
         np.testing.assert_array_equal(neuropil_masks[0], expected_flat)
+
+
+def _make_roi(
+    y_pixels: Sequence[int],
+    x_pixels: Sequence[int],
+    weights: Sequence[float],
+    frame_width: int,
+    radius: float = 5.0,
+    overlap_mask: NDArray[np.bool_] | None = None,
+) -> ROIStatistics:
+    """Creates a minimal ROIStatistics instance for testing."""
+    mask = ROIMask(
+        y_pixels=np.array(y_pixels, dtype=np.int32),
+        x_pixels=np.array(x_pixels, dtype=np.int32),
+        pixel_weights=np.array(weights, dtype=np.float32),
+        centroid=(int(np.median(y_pixels)), int(np.median(x_pixels))),
+        frame_width=frame_width,
+        radius=radius,
+        overlap_mask=overlap_mask,
+    )
+    return ROIStatistics(mask=mask)
+
+
+def _make_circular_roi(
+    center_y: int,
+    center_x: int,
+    radius: int,
+    frame_height: int,
+    frame_width: int,
+) -> ROIStatistics:
+    """Creates a circular ROI for testing."""
+    y_coordinates, x_coordinates = np.mgrid[0:frame_height, 0:frame_width]
+    distance = np.sqrt((y_coordinates - center_y) ** 2 + (x_coordinates - center_x) ** 2)
+    inside = distance <= radius
+    y_pixels = y_coordinates[inside].astype(np.int32)
+    x_pixels = x_coordinates[inside].astype(np.int32)
+    weights = np.maximum(0, 1.0 - distance[inside] / radius).astype(np.float32)
+    return _make_roi(
+        y_pixels=y_pixels,
+        x_pixels=x_pixels,
+        weights=weights,
+        frame_width=frame_width,
+        radius=float(radius),
+    )

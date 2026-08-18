@@ -46,9 +46,8 @@ def _save_optional_array_field(
 
     Notes:
         This function handles the serialization pattern for optional array fields in dataclasses. It stores two arrays
-        in the save dictionary: a counts array with the length of each item's array (0 if None), and a concatenated
-        data array containing only the non-None values. This enables pickle-free serialization of variable-length
-        arrays.
+        in the save dictionary: a counts array with the length of each item's array (0 if None), and a concatenated data
+        array containing only the non-None values. This enables pickle-free serialization of variable-length arrays.
 
     Args:
         field_name: The base name for the field. The function stores '{field_name}_counts' and '{field_name}' keys.
@@ -118,8 +117,8 @@ class IOData:
     """The total number of frames written to the binary file during binarization."""
 
     sampling_rate: float = 0.0
-    """The per-plane sampling rate in Hertz, derived from the acquisition frame rate divided by the number of
-    imaging planes. This value is computed during binarization from the AcquisitionParameters."""
+    """The per-plane sampling rate in Hertz, derived from the acquisition frame rate divided by the number of imaging
+    planes. This value is computed during binarization from the AcquisitionParameters."""
 
     registered_binary_path: Path | None = None
     """The absolute path to the motion-corrected binary file for the primary imaging channel."""
@@ -131,12 +130,12 @@ class IOData:
     """The absolute path to the plane-specific output directory where all results are saved."""
 
     mroi_y_offset: int | None = None
-    """The vertical offset in pixels for positioning this ROI within the full combined field of view. Only used
-    for MROI recordings."""
+    """The vertical offset in pixels for positioning this ROI within the full combined field of view. Only used for MROI
+    recordings."""
 
     mroi_x_offset: int | None = None
-    """The horizontal offset in pixels for positioning this ROI within the full combined field of view. Only used
-    for MROI recordings."""
+    """The horizontal offset in pixels for positioning this ROI within the full combined field of view. Only used for
+    MROI recordings."""
 
     mroi_lines: tuple[int, ...] = ()
     """The tuple of scan line indices used for extracting this ROI from raw multi-ROI data. Only used for MROI
@@ -164,7 +163,7 @@ class RegistrationData:
     """The phase offset in pixels used to correct bidirectional scanning artifacts."""
 
     bidirectional_phase_corrected: bool = False
-    """Indicates whether bidirectional phase correction was applied during registration."""
+    """Determines whether bidirectional phase correction was applied during registration."""
 
     normalization_minimum: int = 0
     """The minimum intensity value used for normalizing frames during registration."""
@@ -200,9 +199,9 @@ class RegistrationData:
     registration quality in the GUI."""
 
     principal_component_projections: NDArray[np.float32] | None = None
-    """The projection of each sampled frame onto the principal components of the registered recording movie, with
-    shape (sampled_frames, num_components). The metrics stage subsamples evenly-spaced frames, so this holds one row
-    per sampled frame rather than per recording frame."""
+    """The projection of each sampled frame onto the principal components of the registered recording movie, with shape
+    (sampled_frames, num_components). The metrics stage subsamples evenly-spaced frames, so this holds one row per
+    sampled frame rather than per recording frame."""
 
     principal_component_shift_metrics: NDArray[np.float32] | None = None
     """The registration offset metrics computed by aligning PC extreme images of the registered recording movie, with
@@ -215,12 +214,12 @@ class RegistrationData:
 
         Notes:
             The on-disk check requires the same three arrays the in-memory check requires. ``save_arrays`` writes each
-            array as its own file, so an interrupted save leaves a subset of them behind, and accepting any single
-            file would report a plane registered while the offsets every later stage reads are absent.
+            array as its own file, so an interrupted save leaves a subset of them behind, and accepting any single file
+            would report a plane registered while the offsets every later stage reads are absent.
 
         Args:
-            output_path: The directory containing the ``registration_data/`` subdirectory. When provided and arrays
-                are not loaded in memory, checks for registration files on disk. The calling context is responsible for
+            output_path: The directory containing the ``registration_data/`` subdirectory. When provided and arrays are
+                not loaded in memory, checks for registration files on disk. The calling context is responsible for
                 resolving the correct path.
 
         Returns:
@@ -306,40 +305,42 @@ class RegistrationData:
         ensure_directory_exists(path=registration_directory, is_file=False)
 
         if self.bad_frames is not None and not is_memory_mapped(self.bad_frames):
-            np.save(registration_directory / RegistrationArrays.BAD_FRAMES, arr=self.bad_frames)
+            np.save(file=registration_directory / RegistrationArrays.BAD_FRAMES, arr=self.bad_frames)
         if self.reference_image is not None and not is_memory_mapped(self.reference_image):
-            np.save(registration_directory / RegistrationArrays.REFERENCE_IMAGE, arr=self.reference_image)
+            np.save(file=registration_directory / RegistrationArrays.REFERENCE_IMAGE, arr=self.reference_image)
         if self.rigid_y_offsets is not None and not is_memory_mapped(self.rigid_y_offsets):
-            np.save(registration_directory / RegistrationArrays.RIGID_Y_OFFSETS, arr=self.rigid_y_offsets)
+            np.save(file=registration_directory / RegistrationArrays.RIGID_Y_OFFSETS, arr=self.rigid_y_offsets)
         if self.rigid_x_offsets is not None and not is_memory_mapped(self.rigid_x_offsets):
-            np.save(registration_directory / RegistrationArrays.RIGID_X_OFFSETS, arr=self.rigid_x_offsets)
+            np.save(file=registration_directory / RegistrationArrays.RIGID_X_OFFSETS, arr=self.rigid_x_offsets)
         if self.rigid_correlations is not None and not is_memory_mapped(self.rigid_correlations):
-            np.save(registration_directory / RegistrationArrays.RIGID_CORRELATIONS, arr=self.rigid_correlations)
+            np.save(file=registration_directory / RegistrationArrays.RIGID_CORRELATIONS, arr=self.rigid_correlations)
         if self.nonrigid_y_offsets is not None and not is_memory_mapped(self.nonrigid_y_offsets):
-            np.save(registration_directory / RegistrationArrays.NONRIGID_Y_OFFSETS, arr=self.nonrigid_y_offsets)
+            np.save(file=registration_directory / RegistrationArrays.NONRIGID_Y_OFFSETS, arr=self.nonrigid_y_offsets)
         if self.nonrigid_x_offsets is not None and not is_memory_mapped(self.nonrigid_x_offsets):
-            np.save(registration_directory / RegistrationArrays.NONRIGID_X_OFFSETS, arr=self.nonrigid_x_offsets)
+            np.save(file=registration_directory / RegistrationArrays.NONRIGID_X_OFFSETS, arr=self.nonrigid_x_offsets)
         if self.nonrigid_correlations is not None and not is_memory_mapped(self.nonrigid_correlations):
-            np.save(registration_directory / RegistrationArrays.NONRIGID_CORRELATIONS, arr=self.nonrigid_correlations)
+            np.save(
+                file=registration_directory / RegistrationArrays.NONRIGID_CORRELATIONS, arr=self.nonrigid_correlations
+            )
         if self.principal_component_extreme_images is not None and not is_memory_mapped(
             self.principal_component_extreme_images
         ):
             np.save(
-                registration_directory / RegistrationArrays.PRINCIPAL_COMPONENT_EXTREME_IMAGES,
+                file=registration_directory / RegistrationArrays.PRINCIPAL_COMPONENT_EXTREME_IMAGES,
                 arr=self.principal_component_extreme_images,
             )
         if self.principal_component_projections is not None and not is_memory_mapped(
             self.principal_component_projections
         ):
             np.save(
-                registration_directory / RegistrationArrays.PRINCIPAL_COMPONENT_PROJECTIONS,
+                file=registration_directory / RegistrationArrays.PRINCIPAL_COMPONENT_PROJECTIONS,
                 arr=self.principal_component_projections,
             )
         if self.principal_component_shift_metrics is not None and not is_memory_mapped(
             self.principal_component_shift_metrics
         ):
             np.save(
-                registration_directory / RegistrationArrays.PRINCIPAL_COMPONENT_SHIFT_METRICS,
+                file=registration_directory / RegistrationArrays.PRINCIPAL_COMPONENT_SHIFT_METRICS,
                 arr=self.principal_component_shift_metrics,
             )
 
@@ -416,8 +417,7 @@ class RegistrationData:
         """Memory-maps registration arrays from individual .npy files in the ``registration_data/`` subdirectory.
 
         Uses ``r`` mode, so the mapped arrays are read-only. This avoids loading the full array contents into memory,
-        which is useful when reusing previously-generated data (e.g., single-recording outputs consumed by the
-        multi-recording pipeline).
+        which is useful when reusing previously-generated data.
 
         Args:
             output_path: The directory containing the ``registration_data/`` subdirectory.
@@ -485,8 +485,8 @@ class DetectionData:
     """The pixel-wise correlation map used to identify regions with correlated activity for ROI detection."""
 
     roi_diameter_channel_2: int = 0
-    """The estimated ROI diameter for the second imaging channel in pixels. Computed independently because channel 2
-    may label a different ROI population with different soma sizes."""
+    """The estimated ROI diameter for the second imaging channel in pixels. Computed independently because channel 2 may
+    label a different ROI population with different soma sizes."""
 
     mean_image_channel_2: NDArray[np.float32] | None = None
     """The temporal mean of all registered frames for the second imaging channel."""
@@ -534,36 +534,36 @@ class DetectionData:
         detection_directory = output_path / DETECTION_DATA_DIRECTORY_NAME
         ensure_directory_exists(path=detection_directory, is_file=False)
 
-        # Channel 1 arrays.
         if self.mean_image is not None and not is_memory_mapped(self.mean_image):
-            np.save(detection_directory / DetectionImages.MEAN_IMAGE, arr=self.mean_image)
+            np.save(file=detection_directory / DetectionImages.MEAN_IMAGE, arr=self.mean_image)
         if self.enhanced_mean_image is not None and not is_memory_mapped(self.enhanced_mean_image):
-            np.save(detection_directory / DetectionImages.ENHANCED_MEAN_IMAGE, arr=self.enhanced_mean_image)
+            np.save(file=detection_directory / DetectionImages.ENHANCED_MEAN_IMAGE, arr=self.enhanced_mean_image)
         if self.maximum_projection is not None and not is_memory_mapped(self.maximum_projection):
-            np.save(detection_directory / DetectionImages.MAXIMUM_PROJECTION, arr=self.maximum_projection)
+            np.save(file=detection_directory / DetectionImages.MAXIMUM_PROJECTION, arr=self.maximum_projection)
         if self.correlation_map is not None and not is_memory_mapped(self.correlation_map):
-            np.save(detection_directory / DetectionImages.CORRELATION_MAP, arr=self.correlation_map)
+            np.save(file=detection_directory / DetectionImages.CORRELATION_MAP, arr=self.correlation_map)
 
-        # Channel 2 arrays.
         if self.mean_image_channel_2 is not None and not is_memory_mapped(self.mean_image_channel_2):
             np.save(
-                detection_directory / resolve_array_name(array=DetectionImages.MEAN_IMAGE, second_channel=True),
+                file=detection_directory / resolve_array_name(array=DetectionImages.MEAN_IMAGE, second_channel=True),
                 arr=self.mean_image_channel_2,
             )
         if self.enhanced_mean_image_channel_2 is not None and not is_memory_mapped(self.enhanced_mean_image_channel_2):
             np.save(
-                detection_directory
+                file=detection_directory
                 / resolve_array_name(array=DetectionImages.ENHANCED_MEAN_IMAGE, second_channel=True),
                 arr=self.enhanced_mean_image_channel_2,
             )
         if self.maximum_projection_channel_2 is not None and not is_memory_mapped(self.maximum_projection_channel_2):
             np.save(
-                detection_directory / resolve_array_name(array=DetectionImages.MAXIMUM_PROJECTION, second_channel=True),
+                file=detection_directory
+                / resolve_array_name(array=DetectionImages.MAXIMUM_PROJECTION, second_channel=True),
                 arr=self.maximum_projection_channel_2,
             )
         if self.correlation_map_channel_2 is not None and not is_memory_mapped(self.correlation_map_channel_2):
             np.save(
-                detection_directory / resolve_array_name(array=DetectionImages.CORRELATION_MAP, second_channel=True),
+                file=detection_directory
+                / resolve_array_name(array=DetectionImages.CORRELATION_MAP, second_channel=True),
                 arr=self.correlation_map_channel_2,
             )
 
@@ -577,7 +577,6 @@ class DetectionData:
         if not detection_directory.exists():
             return
 
-        # Channel 1 arrays.
         path = detection_directory / DetectionImages.MEAN_IMAGE
         if path.exists():
             loaded_array = np.load(path, allow_pickle=False)
@@ -599,7 +598,6 @@ class DetectionData:
             loaded_array = np.load(path, allow_pickle=False)
             self.correlation_map = loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
 
-        # Channel 2 arrays.
         path = detection_directory / resolve_array_name(array=DetectionImages.MEAN_IMAGE, second_channel=True)
         if path.exists():
             loaded_array = np.load(path, allow_pickle=False)
@@ -629,8 +627,7 @@ class DetectionData:
         """Memory-maps detection arrays from individual .npy files in the ``detection_data/`` subdirectory.
 
         Uses ``r`` mode, so the mapped arrays are read-only. This avoids loading the full array contents into memory,
-        which is useful when reusing previously-generated data (e.g., single-recording outputs consumed by the
-        multi-recording pipeline).
+        which is useful when reusing previously-generated data.
 
         Args:
             output_path: The directory containing the ``detection_data/`` subdirectory.
@@ -639,7 +636,6 @@ class DetectionData:
         if not detection_directory.exists():
             return
 
-        # Channel 1 arrays.
         path = detection_directory / DetectionImages.MEAN_IMAGE
         if path.exists():
             self.mean_image = np.load(path, mmap_mode="r")
@@ -653,7 +649,6 @@ class DetectionData:
         if path.exists():
             self.correlation_map = np.load(path, mmap_mode="r")
 
-        # Channel 2 arrays.
         path = detection_directory / resolve_array_name(array=DetectionImages.MEAN_IMAGE, second_channel=True)
         if path.exists():
             self.mean_image_channel_2 = np.load(path, mmap_mode="r")
@@ -714,8 +709,8 @@ class ROIMask:
 
     @cached_property
     def circle_pixels(self) -> tuple[NDArray[np.int32], NDArray[np.int32]]:
-        """Computes unclipped (y_circle, x_circle) pixel coordinates of a circle with ``1.25 * radius`` and
-        100 sample points around the ROI centroid.
+        """Computes unclipped (y_circle, x_circle) pixel coordinates of a circle with ``1.25 * radius`` and 100 sample
+        points around the ROI centroid.
         """
         scaled_radius = self.radius * 1.25
         theta = np.linspace(start=0.0, stop=2 * np.pi, num=100)
@@ -807,24 +802,23 @@ class ROIStatistics:
     This dataclass represents the complete set of properties computed for each detected ROI during the detection,
     extraction, and optional multi-recording processing stages. The fields are organized into required core properties
     (always present after detection), shape statistics (computed during ROI detection, with defaults for staged
-    construction), optional extraction properties (added during signal extraction), and
-    multi-plane/multi-recording properties.
+    construction), optional extraction properties (added during signal extraction), and multi-plane/multi-recording
+    properties.
 
     Notes:
-        Shape statistics fields have default values to support staged construction where ROIStatistics is first
-        created during detection with only core fields, then updated with computed shape statistics.
+        Shape statistics fields have default values to support staged construction where ROIStatistics is first created
+        during detection with only core fields, then updated with computed shape statistics.
     """
 
-    # Spatial data composed from ROIMask.
     mask: ROIMask
     """The underlying ROIMask containing pixel coordinates, weights, centroid, frame dimensions, and tracking
     metadata."""
 
     footprint: int = 0
-    """The index of the multiscale detection level at which this ROI was found during sparse detection. Zero for
-    tracked multi-recording ROIs, which bypass multiscale detection."""
+    """The index of the multiscale detection level at which this ROI was found during sparse detection. Zero for tracked
+    multi-recording ROIs, which bypass multiscale detection."""
 
-    # Shape statistics (computed during ROI detection, with defaults for staged construction).
+    # Defines the shape statistics computed during ROI detection, which carry defaults for staged construction.
     compactness: float = 0.0
     """The ratio of actual to expected mean radius, where values near 1 indicate compact circular ROIs."""
 
@@ -843,7 +837,7 @@ class ROIStatistics:
     normalized_pixel_count: float = 0.0
     """The pixel count normalized by expected ROI size (soma region only)."""
 
-    # Optional extraction data (added during signal extraction).
+    # Defines the optional properties that signal extraction adds.
     skewness: float | None = None
     """The skewness of the neuropil-corrected fluorescence time series."""
 
@@ -852,7 +846,6 @@ class ROIStatistics:
     in the row-major flattened representation of the imaging plane (height * width). Use ``np.unravel_index`` with the
     plane dimensions to recover 2D coordinates if needed."""
 
-    # Multi-plane data.
     plane_index: int = 0
     """The index of the imaging plane this ROI belongs to. The IO layer populates this field during multi-plane
     combination, when ROIs from individual planes are merged into a single list."""
@@ -862,8 +855,7 @@ class ROIStatistics:
         """Saves a list of ROIStatistics instances to two companion .npz files without pickle.
 
         Spatial pixel data (coordinates, weights, centroid) is delegated to ``ROIMask.save_list`` and written to
-        ``masks_path``. Shape statistics and extraction statistics are written to
-        ``statistics_path``.
+        ``masks_path``. Shape statistics and extraction statistics are written to ``statistics_path``.
 
         Args:
             roi_list: The list of ROIStatistics instances to save.
@@ -923,14 +915,15 @@ class ROIStatistics:
 
     @staticmethod
     def load_list(masks_path: Path, statistics_path: Path) -> list[ROIStatistics]:
-        """Loads a list of ROIStatistics instances from companion masks and stats .npz files.
+        """Loads a list of ROIStatistics instances from companion masks and statistics .npz files.
 
         Args:
             masks_path: The path to the masks .npz file containing spatial pixel data.
             statistics_path: The path to the statistics .npz file containing shape and extraction data.
 
         Returns:
-            A list of ROIStatistics instances with pixel data from the masks file and statistics from the stats file.
+            A list of ROIStatistics instances with pixel data from the masks file and shape data from the statistics
+            file.
         """
         masks = ROIMask.load_list(file_path=masks_path)
         data = np.load(statistics_path, allow_pickle=False)
@@ -981,7 +974,6 @@ class ROIStatistics:
 class ExtractionData:
     """Stores runtime data from the extraction stage."""
 
-    # Channel 1 extraction data.
     roi_statistics: list[ROIStatistics] | None = None
     """The list of ROIStatistics instances containing spatial and shape statistics for each detected ROI."""
 
@@ -1000,10 +992,10 @@ class ExtractionData:
     cell_classification: NDArray[np.float32] | None = None
     """The cell classification results with shape (cells, 2) containing (is_cell_label, probability)."""
 
-    # Channel 2 extraction data (when both channels are functional).
+    # Defines the channel 2 extraction data, which is populated when both channels are functional.
     roi_statistics_channel_2: list[ROIStatistics] | None = None
-    """The list of ROIStatistics instances containing spatial and shape statistics for each detected ROI for channel
-    2 when both channels are functional."""
+    """The list of ROIStatistics instances containing spatial and shape statistics for each detected ROI for channel 2
+    when both channels are functional."""
 
     cell_fluorescence_channel_2: NDArray[np.float32] | None = None
     """The cell fluorescence traces for channel 2."""
@@ -1020,22 +1012,21 @@ class ExtractionData:
     cell_classification_channel_2: NDArray[np.float32] | None = None
     """The cell classification results for channel 2."""
 
-    # Colocalization data (channel 1 ROIs presence in channel 2).
+    # Defines the colocalization data that relates channel 1 ROIs to channel 2.
     cell_colocalization: NDArray[np.float32] | None = None
     """The colocalization results relating channel 1 ROIs to channel 2, with shape (cells, 2). When channel 2 is
-    structural, column 0 holds the is-colocalized flag and column 1 the colocalization probability. When both
-    channels are functional, column 0 holds the matched channel 2 ROI index (-1 when unmatched) and column 1 the
-    pixel overlap score."""
+    structural, column 0 holds the is-colocalized flag and column 1 the colocalization probability. When both channels
+    are functional, column 0 holds the matched channel 2 ROI index (-1 when unmatched) and column 1 the pixel overlap
+    score."""
 
     corrected_structural_mean_image: NDArray[np.float32] | None = None
     """The bleed-through-corrected mean image for the structural channel, computed during intensity-based
     colocalization. The import layer always routes the functional data into channel 1, so the structural channel is
-    always channel 2. This field is not computed when both channels are functional, as spatial colocalization is
-    used instead."""
+    always channel 2. This field is not computed when both channels are functional, as spatial colocalization is used
+    instead."""
 
     def prepare_for_saving(self) -> None:
         """Sets all array and list fields to None for YAML serialization."""
-        # Channel 1.
         self.roi_statistics = None
         self.cell_fluorescence = None
         self.neuropil_fluorescence = None
@@ -1043,7 +1034,6 @@ class ExtractionData:
         self.spikes = None
         self.cell_classification = None
 
-        # Channel 2.
         self.roi_statistics_channel_2 = None
         self.cell_fluorescence_channel_2 = None
         self.neuropil_fluorescence_channel_2 = None
@@ -1051,7 +1041,6 @@ class ExtractionData:
         self.spikes_channel_2 = None
         self.cell_classification_channel_2 = None
 
-        # Colocalization.
         self.cell_colocalization = None
         self.corrected_structural_mean_image = None
 
@@ -1062,7 +1051,6 @@ class ExtractionData:
         and ``load_results()`` or ``memory_map_results()`` to re-acquire the fluorescence traces and colocalization
         arrays.
         """
-        # Channel 1.
         self.roi_statistics = None
         self.cell_fluorescence = None
         self.neuropil_fluorescence = None
@@ -1070,7 +1058,6 @@ class ExtractionData:
         self.spikes = None
         self.cell_classification = None
 
-        # Channel 2.
         self.roi_statistics_channel_2 = None
         self.cell_fluorescence_channel_2 = None
         self.neuropil_fluorescence_channel_2 = None
@@ -1078,7 +1065,6 @@ class ExtractionData:
         self.spikes_channel_2 = None
         self.cell_classification_channel_2 = None
 
-        # Colocalization.
         self.cell_colocalization = None
         self.corrected_structural_mean_image = None
 
@@ -1088,7 +1074,6 @@ class ExtractionData:
         Args:
             output_path: The directory in which to save the extraction data files.
         """
-        # Channel 1 ROI statistics (split into masks + stats files).
         if self.roi_statistics is not None:
             ROIStatistics.save_list(
                 roi_list=self.roi_statistics,
@@ -1096,25 +1081,29 @@ class ExtractionData:
                 statistics_path=output_path / RecordingArrays.ROI_STATISTICS,
             )
 
-        # Channel 1 trace arrays.
         if self.cell_fluorescence is not None and not is_memory_mapped(self.cell_fluorescence):
-            np.save(output_path / RecordingArrays.CELL_FLUORESCENCE, arr=self.cell_fluorescence, allow_pickle=False)
+            np.save(
+                file=output_path / RecordingArrays.CELL_FLUORESCENCE, arr=self.cell_fluorescence, allow_pickle=False
+            )
         if self.neuropil_fluorescence is not None and not is_memory_mapped(self.neuropil_fluorescence):
             np.save(
-                output_path / RecordingArrays.NEUROPIL_FLUORESCENCE, arr=self.neuropil_fluorescence, allow_pickle=False
+                file=output_path / RecordingArrays.NEUROPIL_FLUORESCENCE,
+                arr=self.neuropil_fluorescence,
+                allow_pickle=False,
             )
         if self.subtracted_fluorescence is not None and not is_memory_mapped(self.subtracted_fluorescence):
             np.save(
-                output_path / RecordingArrays.SUBTRACTED_FLUORESCENCE,
+                file=output_path / RecordingArrays.SUBTRACTED_FLUORESCENCE,
                 arr=self.subtracted_fluorescence,
                 allow_pickle=False,
             )
         if self.spikes is not None and not is_memory_mapped(self.spikes):
-            np.save(output_path / RecordingArrays.SPIKES, arr=self.spikes, allow_pickle=False)
+            np.save(file=output_path / RecordingArrays.SPIKES, arr=self.spikes, allow_pickle=False)
         if self.cell_classification is not None and not is_memory_mapped(self.cell_classification):
-            np.save(output_path / RecordingArrays.CELL_CLASSIFICATION, arr=self.cell_classification, allow_pickle=False)
+            np.save(
+                file=output_path / RecordingArrays.CELL_CLASSIFICATION, arr=self.cell_classification, allow_pickle=False
+            )
 
-        # Channel 2 ROI statistics (split into masks + stats files).
         if self.roi_statistics_channel_2 is not None:
             ROIStatistics.save_list(
                 roi_list=self.roi_statistics_channel_2,
@@ -1123,10 +1112,9 @@ class ExtractionData:
                 / resolve_array_name(array=RecordingArrays.ROI_STATISTICS, second_channel=True),
             )
 
-        # Channel 2 trace arrays.
         if self.cell_fluorescence_channel_2 is not None and not is_memory_mapped(self.cell_fluorescence_channel_2):
             np.save(
-                output_path / resolve_array_name(array=RecordingArrays.CELL_FLUORESCENCE, second_channel=True),
+                file=output_path / resolve_array_name(array=RecordingArrays.CELL_FLUORESCENCE, second_channel=True),
                 arr=self.cell_fluorescence_channel_2,
                 allow_pickle=False,
             )
@@ -1134,7 +1122,7 @@ class ExtractionData:
             self.neuropil_fluorescence_channel_2
         ):
             np.save(
-                output_path / resolve_array_name(array=RecordingArrays.NEUROPIL_FLUORESCENCE, second_channel=True),
+                file=output_path / resolve_array_name(array=RecordingArrays.NEUROPIL_FLUORESCENCE, second_channel=True),
                 arr=self.neuropil_fluorescence_channel_2,
                 allow_pickle=False,
             )
@@ -1142,31 +1130,33 @@ class ExtractionData:
             self.subtracted_fluorescence_channel_2
         ):
             np.save(
-                output_path / resolve_array_name(array=RecordingArrays.SUBTRACTED_FLUORESCENCE, second_channel=True),
+                file=output_path
+                / resolve_array_name(array=RecordingArrays.SUBTRACTED_FLUORESCENCE, second_channel=True),
                 arr=self.subtracted_fluorescence_channel_2,
                 allow_pickle=False,
             )
         if self.spikes_channel_2 is not None and not is_memory_mapped(self.spikes_channel_2):
             np.save(
-                output_path / resolve_array_name(array=RecordingArrays.SPIKES, second_channel=True),
+                file=output_path / resolve_array_name(array=RecordingArrays.SPIKES, second_channel=True),
                 arr=self.spikes_channel_2,
                 allow_pickle=False,
             )
         if self.cell_classification_channel_2 is not None and not is_memory_mapped(self.cell_classification_channel_2):
             np.save(
-                output_path / resolve_array_name(array=RecordingArrays.CELL_CLASSIFICATION, second_channel=True),
+                file=output_path / resolve_array_name(array=RecordingArrays.CELL_CLASSIFICATION, second_channel=True),
                 arr=self.cell_classification_channel_2,
                 allow_pickle=False,
             )
 
-        # Colocalization arrays.
         if self.cell_colocalization is not None and not is_memory_mapped(self.cell_colocalization):
-            np.save(output_path / RecordingArrays.CELL_COLOCALIZATION, arr=self.cell_colocalization, allow_pickle=False)
+            np.save(
+                file=output_path / RecordingArrays.CELL_COLOCALIZATION, arr=self.cell_colocalization, allow_pickle=False
+            )
         if self.corrected_structural_mean_image is not None and not is_memory_mapped(
             self.corrected_structural_mean_image
         ):
             np.save(
-                output_path / RecordingArrays.CORRECTED_STRUCTURAL_MEAN_IMAGE,
+                file=output_path / RecordingArrays.CORRECTED_STRUCTURAL_MEAN_IMAGE,
                 arr=self.corrected_structural_mean_image,
                 allow_pickle=False,
             )
@@ -1174,38 +1164,35 @@ class ExtractionData:
     def load_arrays(self, output_path: Path) -> None:
         """Loads ROI statistics and classification results from disk.
 
-        This method loads only ROI statistics and cell classification arrays, which are the extraction data
-        needed during pipeline processing (specifically for multi-recording ROI selection and tracking).
-        Fluorescence traces and colocalization data are not loaded because they consume significant memory and are
-        not needed by the detection or extraction stages. The combination phase and the GUI load them explicitly
-        through ``load_results()`` or ``memory_map_results()``.
+        This method loads only ROI statistics and cell classification arrays. Fluorescence traces and colocalization
+        data are excluded, because they consume significant memory and are acquired through ``load_results()`` or
+        ``memory_map_results()``.
 
         Args:
             output_path: The directory containing the extraction data files.
         """
-        # Channel 1 ROI statistics (loaded from companion masks + stats files).
         roi_masks_path = output_path / RecordingArrays.ROI_MASKS
-        roi_stats_path = output_path / RecordingArrays.ROI_STATISTICS
-        if self.roi_statistics is None and roi_masks_path.exists() and roi_stats_path.exists():
-            self.roi_statistics = ROIStatistics.load_list(masks_path=roi_masks_path, statistics_path=roi_stats_path)
+        roi_statistics_path = output_path / RecordingArrays.ROI_STATISTICS
+        if self.roi_statistics is None and roi_masks_path.exists() and roi_statistics_path.exists():
+            self.roi_statistics = ROIStatistics.load_list(
+                masks_path=roi_masks_path, statistics_path=roi_statistics_path
+            )
 
-        # Channel 2 ROI statistics (loaded from companion masks + stats files).
         roi_masks_channel_2_path = output_path / resolve_array_name(
             array=RecordingArrays.ROI_MASKS, second_channel=True
         )
-        roi_stats_channel_2_path = output_path / resolve_array_name(
+        roi_statistics_channel_2_path = output_path / resolve_array_name(
             array=RecordingArrays.ROI_STATISTICS, second_channel=True
         )
         if (
             self.roi_statistics_channel_2 is None
             and roi_masks_channel_2_path.exists()
-            and roi_stats_channel_2_path.exists()
+            and roi_statistics_channel_2_path.exists()
         ):
             self.roi_statistics_channel_2 = ROIStatistics.load_list(
-                masks_path=roi_masks_channel_2_path, statistics_path=roi_stats_channel_2_path
+                masks_path=roi_masks_channel_2_path, statistics_path=roi_statistics_channel_2_path
             )
 
-        # Channel 1 classification.
         cell_classification_path = output_path / RecordingArrays.CELL_CLASSIFICATION
         if self.cell_classification is None and cell_classification_path.exists():
             loaded_array = np.load(cell_classification_path, allow_pickle=False)
@@ -1213,7 +1200,6 @@ class ExtractionData:
                 loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
             )
 
-        # Channel 2 classification.
         cell_classification_channel_2_path = output_path / resolve_array_name(
             array=RecordingArrays.CELL_CLASSIFICATION, second_channel=True
         )
@@ -1227,15 +1213,12 @@ class ExtractionData:
         """Loads all extraction result arrays from disk.
 
         This method loads fluorescence traces, classification results, and colocalization data. Classification arrays
-        may already be loaded by ``load_arrays()`` (which loads them for multi-recording pipeline use), in which case
-        the guarded loading here is a no-op. Fluorescence traces and colocalization data are not loaded by
-        ``load_arrays()`` because they consume significant memory and are not needed by the detection or extraction
-        stages. Call this method when result data is needed for analysis or visualization.
+        may already be loaded by ``load_arrays()``, in which case the guarded loading here is a no-op. Fluorescence
+        traces and colocalization data are not loaded by ``load_arrays()``, because they consume significant memory.
 
         Args:
             output_path: The directory containing the result .npy files.
         """
-        # Channel 1 traces.
         cell_fluorescence_path = output_path / RecordingArrays.CELL_FLUORESCENCE
         if self.cell_fluorescence is None and cell_fluorescence_path.exists():
             loaded_array = np.load(cell_fluorescence_path, allow_pickle=False)
@@ -1262,7 +1245,6 @@ class ExtractionData:
             loaded_array = np.load(spikes_path, allow_pickle=False)
             self.spikes = loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
 
-        # Channel 1 classification.
         cell_classification_path = output_path / RecordingArrays.CELL_CLASSIFICATION
         if self.cell_classification is None and cell_classification_path.exists():
             loaded_array = np.load(cell_classification_path, allow_pickle=False)
@@ -1270,7 +1252,6 @@ class ExtractionData:
                 loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
             )
 
-        # Channel 2 traces.
         cell_fluorescence_channel_2_path = output_path / resolve_array_name(
             array=RecordingArrays.CELL_FLUORESCENCE, second_channel=True
         )
@@ -1305,7 +1286,6 @@ class ExtractionData:
                 loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
             )
 
-        # Channel 2 classification.
         cell_classification_channel_2_path = output_path / resolve_array_name(
             array=RecordingArrays.CELL_CLASSIFICATION, second_channel=True
         )
@@ -1315,7 +1295,6 @@ class ExtractionData:
                 loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
             )
 
-        # Colocalization arrays.
         cell_colocalization_path = output_path / RecordingArrays.CELL_COLOCALIZATION
         if self.cell_colocalization is None and cell_colocalization_path.exists():
             loaded_array = np.load(cell_colocalization_path, allow_pickle=False)
@@ -1340,34 +1319,34 @@ class ExtractionData:
         Args:
             output_path: The directory containing the extraction data files.
         """
-        # Channel 1 ROI statistics, eagerly loaded from companion masks and stats files, as .npz cannot be mapped.
+        # Eagerly loads the channel 1 ROI statistics, because NumPy cannot memory-map the companion .npz files.
         roi_masks_path = output_path / RecordingArrays.ROI_MASKS
-        roi_stats_path = output_path / RecordingArrays.ROI_STATISTICS
-        if self.roi_statistics is None and roi_masks_path.exists() and roi_stats_path.exists():
-            self.roi_statistics = ROIStatistics.load_list(masks_path=roi_masks_path, statistics_path=roi_stats_path)
+        roi_statistics_path = output_path / RecordingArrays.ROI_STATISTICS
+        if self.roi_statistics is None and roi_masks_path.exists() and roi_statistics_path.exists():
+            self.roi_statistics = ROIStatistics.load_list(
+                masks_path=roi_masks_path, statistics_path=roi_statistics_path
+            )
 
-        # Channel 2 ROI statistics, eagerly loaded from companion masks and stats files, as .npz cannot be mapped.
+        # Eagerly loads the channel 2 ROI statistics, because NumPy cannot memory-map the companion .npz files.
         roi_masks_channel_2_path = output_path / resolve_array_name(
             array=RecordingArrays.ROI_MASKS, second_channel=True
         )
-        roi_stats_channel_2_path = output_path / resolve_array_name(
+        roi_statistics_channel_2_path = output_path / resolve_array_name(
             array=RecordingArrays.ROI_STATISTICS, second_channel=True
         )
         if (
             self.roi_statistics_channel_2 is None
             and roi_masks_channel_2_path.exists()
-            and roi_stats_channel_2_path.exists()
+            and roi_statistics_channel_2_path.exists()
         ):
             self.roi_statistics_channel_2 = ROIStatistics.load_list(
-                masks_path=roi_masks_channel_2_path, statistics_path=roi_stats_channel_2_path
+                masks_path=roi_masks_channel_2_path, statistics_path=roi_statistics_channel_2_path
             )
 
-        # Channel 1 classification.
         cell_classification_path = output_path / RecordingArrays.CELL_CLASSIFICATION
         if self.cell_classification is None and cell_classification_path.exists():
             self.cell_classification = np.load(cell_classification_path, mmap_mode="r")
 
-        # Channel 2 classification.
         cell_classification_channel_2_path = output_path / resolve_array_name(
             array=RecordingArrays.CELL_CLASSIFICATION, second_channel=True
         )
@@ -1379,12 +1358,11 @@ class ExtractionData:
 
         This method mirrors ``load_results()`` but uses read-only ``r`` memory mapping for all .npy files instead of
         eager loading. This avoids loading the full array contents into memory, which is useful when reusing
-        previously-generated data (e.g., single-recording outputs consumed by the multi-recording pipeline).
+        previously-generated data.
 
         Args:
             output_path: The directory containing the result .npy files.
         """
-        # Channel 1 traces.
         cell_fluorescence_path = output_path / RecordingArrays.CELL_FLUORESCENCE
         if self.cell_fluorescence is None and cell_fluorescence_path.exists():
             self.cell_fluorescence = np.load(cell_fluorescence_path, mmap_mode="r")
@@ -1401,12 +1379,10 @@ class ExtractionData:
         if self.spikes is None and spikes_path.exists():
             self.spikes = np.load(spikes_path, mmap_mode="r")
 
-        # Channel 1 classification.
         cell_classification_path = output_path / RecordingArrays.CELL_CLASSIFICATION
         if self.cell_classification is None and cell_classification_path.exists():
             self.cell_classification = np.load(cell_classification_path, mmap_mode="r")
 
-        # Channel 2 traces.
         cell_fluorescence_channel_2_path = output_path / resolve_array_name(
             array=RecordingArrays.CELL_FLUORESCENCE, second_channel=True
         )
@@ -1429,14 +1405,12 @@ class ExtractionData:
         if self.spikes_channel_2 is None and spikes_channel_2_path.exists():
             self.spikes_channel_2 = np.load(spikes_channel_2_path, mmap_mode="r")
 
-        # Channel 2 classification.
         cell_classification_channel_2_path = output_path / resolve_array_name(
             array=RecordingArrays.CELL_CLASSIFICATION, second_channel=True
         )
         if self.cell_classification_channel_2 is None and cell_classification_channel_2_path.exists():
             self.cell_classification_channel_2 = np.load(cell_classification_channel_2_path, mmap_mode="r")
 
-        # Colocalization arrays.
         cell_colocalization_path = output_path / RecordingArrays.CELL_COLOCALIZATION
         if self.cell_colocalization is None and cell_colocalization_path.exists():
             self.cell_colocalization = np.load(cell_colocalization_path, mmap_mode="r")
@@ -1547,37 +1521,34 @@ class SingleRecordingRuntimeData(YamlConfig):
     def load_arrays(self) -> None:
         """Eagerly loads the registration, detection, and extraction arrays that the pipeline stages need.
 
-        This method reads each array file in full and copies it into a contiguous in-memory buffer. Use this when the
-        data will be generated or modified during pipeline processing. Extraction fluorescence traces and
-        colocalization arrays are excluded. Load them with ``extraction.load_results()``.
+        This method reads each array file in full and copies it into a contiguous in-memory buffer. Extraction
+        fluorescence traces and colocalization arrays are excluded, and ``extraction.load_results()`` acquires them.
         """
         if self.output_path is None:
             return
-        self.registration.load_arrays(self.output_path)
-        self.detection.load_arrays(self.output_path)
-        self.extraction.load_arrays(self.output_path)
+        self.registration.load_arrays(output_path=self.output_path)
+        self.detection.load_arrays(output_path=self.output_path)
+        self.extraction.load_arrays(output_path=self.output_path)
 
     def memory_map_arrays(self) -> None:
         """Memory-maps the registration, detection, and extraction arrays the pipeline stages need, in ``r`` mode.
 
-        This method opens each .npy file as a read-only memory-mapped array, avoiding full materialization in RAM.
-        ROI statistics are eagerly loaded instead, because NumPy cannot memory-map .npz archives. Use this when
-        reusing previously-generated data that does not need to be copied into memory (e.g., single-recording outputs
-        consumed by the multi-recording pipeline). Extraction fluorescence traces and colocalization arrays are
-        excluded. Map them with ``extraction.memory_map_results()``.
+        This method opens each .npy file as a read-only memory-mapped array, avoiding full materialization in RAM. ROI
+        statistics are eagerly loaded instead, because NumPy cannot memory-map .npz archives. Extraction fluorescence
+        traces and colocalization arrays are excluded, and ``extraction.memory_map_results()`` maps them.
         """
         if self.output_path is None:
             return
-        self.registration.memory_map_arrays(self.output_path)
-        self.detection.memory_map_arrays(self.output_path)
-        self.extraction.memory_map_arrays(self.output_path)
+        self.registration.memory_map_arrays(output_path=self.output_path)
+        self.detection.memory_map_arrays(output_path=self.output_path)
+        self.extraction.memory_map_arrays(output_path=self.output_path)
 
     def save(self, output_path: Path) -> None:
         """Saves the runtime data to a YAML file and arrays to .npy files.
 
-        This method saves all NumPy arrays as separate .npy files in the output directory, then creates
-        a shallow copy of the instance and of each child dataclass, with arrays set to None, before writing
-        the YAML file. ``to_yaml()`` performs the Path-to-string conversion.
+        This method saves all NumPy arrays as separate .npy files in the output directory, then creates a shallow copy
+        of the instance and of each child dataclass, with arrays set to None, before writing the YAML file.
+        ``to_yaml()`` performs the Path-to-string conversion.
 
         Notes:
             This storage form avoids pickle serialization in favor of safer YAML and NumPy serialization.
@@ -1588,9 +1559,9 @@ class SingleRecordingRuntimeData(YamlConfig):
         ensure_directory_exists(path=output_path, is_file=False)
         self.output_path = output_path
 
-        self.registration.save_arrays(output_path)
-        self.detection.save_arrays(output_path)
-        self.extraction.save_arrays(output_path)
+        self.registration.save_arrays(output_path=output_path)
+        self.detection.save_arrays(output_path=output_path)
+        self.extraction.save_arrays(output_path=output_path)
 
         # Creates a shallow copy for YAML serialization. Child dataclasses are shallow-copied individually so that
         # prepare_for_saving() nulls array fields on the copies without affecting the originals in memory.
@@ -1613,16 +1584,12 @@ class SingleRecordingRuntimeData(YamlConfig):
     def load(cls, output_path: Path) -> SingleRecordingRuntimeData:
         """Deserializes runtime data from a YAML file without loading any NumPy arrays.
 
-        After calling this method, arrays can be loaded individually per-child dataclass using the ``load_arrays()``
-        or ``memory_map_arrays()`` methods on each child (registration, detection, extraction). Alternatively, the
-        convenience ``load_arrays()`` / ``memory_map_arrays()`` methods on this class load all children at once.
-
         Args:
             output_path: The directory containing the runtime_data.yaml file.
 
         Returns:
-            A SingleRecordingRuntimeData instance with all scalar fields deserialized. NumPy array fields
-            remain None until explicitly loaded.
+            A SingleRecordingRuntimeData instance with all scalar fields deserialized. NumPy array fields remain None
+            until explicitly loaded.
         """
         file_path = output_path / SINGLE_RECORDING_RUNTIME_DATA_FILENAME
         return cls.from_yaml(file_path=file_path)
@@ -1632,14 +1599,14 @@ class SingleRecordingRuntimeData(YamlConfig):
 class CombinedData:
     """Stores combined multi-plane detection and extraction data.
 
-    This class provides a container for the results of combining processed data from multiple imaging planes
-    into a unified dataset. It holds DetectionData (combined images) and ExtractionData (combined ROI statistics,
-    fluorescence traces, and classification results) along with metadata about the combined field of view.
+    This class provides a container for the results of combining processed data from multiple imaging planes into a
+    unified dataset. It holds DetectionData (combined images) and ExtractionData (combined ROI statistics, fluorescence
+    traces, and classification results) along with metadata about the combined field of view.
 
     Notes:
         Combined data is saved to the root cindra directory alongside configuration.yaml and
-        acquisition_parameters.yaml. The same filenames are used as per-plane data, but stored at the root
-        level rather than in plane subdirectories.
+        acquisition_parameters.yaml. The same filenames are used as per-plane data, but stored at the root level rather
+        than in plane subdirectories.
     """
 
     detection: DetectionData
@@ -1647,15 +1614,15 @@ class CombinedData:
     channels."""
 
     extraction: ExtractionData
-    """The combined extraction data including ROI statistics, fluorescence traces, and classification results for
-    both channels."""
+    """The combined extraction data including ROI statistics, fluorescence traces, and classification results for both
+    channels."""
 
     plane_count: int = 0
     """The number of planes that were combined."""
 
     frame_count: int = 0
-    """The number of frames the combined traces span, which is the frame count of the shortest plane that contributed
-    to them."""
+    """The number of frames the combined traces span, which is the frame count of the shortest plane that contributed to
+    them."""
 
     plane_frame_counts: NDArray[np.uint32] = field(default_factory=lambda: np.array([], dtype=np.uint32))
     """The number of frames each plane's binaries hold, which binarization makes identical for every plane of the
@@ -1668,12 +1635,12 @@ class CombinedData:
     """The width of the combined field of view in pixels."""
 
     tau: float = 0.0
-    """The timescale of the calcium indicator sensor in seconds, cached from the single-recording
-    configuration for use by the multi-recording extraction pipeline."""
+    """The timescale of the calcium indicator sensor in seconds, cached from the single-recording configuration for use
+    by the multi-recording extraction pipeline."""
 
     sampling_rate: float = 0.0
-    """The per-plane sampling rate in Hertz, cached from the single-recording runtime for use by the
-    multi-recording extraction pipeline."""
+    """The per-plane sampling rate in Hertz, cached from the single-recording runtime for use by the multi-recording
+    extraction pipeline."""
 
     plane_heights: NDArray[np.uint16] = field(default_factory=lambda: np.array([], dtype=np.uint16))
     """Per-plane frame heights in pixels."""
@@ -1696,22 +1663,22 @@ class CombinedData:
     def save(self, root_path: Path) -> None:
         """Saves combined data to the root cindra directory.
 
-        This method saves all combined detection and extraction arrays to the root cindra directory. Metadata
-        (plane count, dimensions) is saved to combined_metadata.npz.
+        This method saves all combined detection and extraction arrays to the root cindra directory. Metadata (plane
+        count, dimensions) is saved to combined_metadata.npz.
 
         Notes:
-            The combined_metadata.npz file doubles as the marker consumers check to decide whether the
-            single-recording pipeline completed. It is therefore written after the arrays it describes, and it is
-            published through the atomic writer so that it appears in one step. An interrupted run never leaves a
-            marker that describes a payload which is not on disk.
+            The combined_metadata.npz file doubles as the marker consumers check to decide whether the single-recording
+            pipeline completed. It is therefore written after the arrays it describes, and it is published through the
+            atomic writer so that it appears in one step. An interrupted run never leaves a marker that describes a
+            payload which is not on disk.
 
         Args:
             root_path: The root cindra output directory containing configuration.yaml.
         """
         ensure_directory_exists(path=root_path, is_file=False)
 
-        # Saves metadata using appropriate unsigned types for counts and dimensions. Binary paths are stored as
-        # strings relative to root_path to allow relocating processed data without breaking path references.
+        # Saves metadata using appropriate unsigned types for counts and dimensions. Binary paths are stored as strings
+        # relative to root_path to allow relocating processed data without breaking path references.
         relative_binary_paths = np.array(
             [str(path.relative_to(root_path)) for path in self.registered_binary_paths], dtype=str
         )
@@ -1739,10 +1706,10 @@ class CombinedData:
                 [str(path.relative_to(root_path)) for path in self.registered_binary_paths_channel_2], dtype=str
             )
 
-        # Saves combined detection and extraction arrays before the metadata file, so that the marker consumers rely
-        # on can never describe a payload that is still being written.
-        self.detection.save_arrays(root_path)
-        self.extraction.save_arrays(root_path)
+        # Saves combined detection and extraction arrays before the metadata file, so that the marker consumers rely on
+        # can never describe a payload that is still being written.
+        self.detection.save_arrays(output_path=root_path)
+        self.extraction.save_arrays(output_path=root_path)
 
         # Publishes the marker through the atomic writer, which writes a temporary file in the destination's own
         # directory, flushes it to disk, and renames it over the destination. Writing the destination directly would
@@ -1754,29 +1721,22 @@ class CombinedData:
     def load(cls, root_path: Path) -> CombinedData:
         """Loads combined metadata from the root cindra directory without loading any arrays.
 
-        After calling this method, detection and extraction arrays can be loaded individually using the
-        ``load_arrays()`` or ``memory_map_arrays()`` methods on the detection and extraction children.
-
         Args:
             root_path: The root cindra output directory containing combined_metadata.npz.
 
         Returns:
-            A CombinedData instance with metadata loaded and empty detection/extraction containers. NumPy array
-            fields remain None until explicitly loaded on the child dataclasses.
+            A CombinedData instance with metadata loaded and empty detection/extraction containers. NumPy array fields
+            remain None until explicitly loaded on the child dataclasses.
 
         Raises:
             FileNotFoundError: If the combined metadata file does not exist.
         """
-        kwargs = cls._load_metadata(root_path)
+        kwargs = cls._load_metadata(root_path=root_path)
         return cls(detection=DetectionData(), extraction=ExtractionData(), **kwargs)
 
     @classmethod
     def _load_metadata(cls, root_path: Path) -> dict[str, Any]:
         """Loads combined metadata from the .npz file and returns constructor keyword arguments.
-
-        This private helper extracts all metadata fields from combined_metadata.npz and returns them as a dictionary
-        suitable for passing to the CombinedData constructor. Detection and extraction fields are not included. They
-        must be loaded separately by the calling classmethod using the appropriate loading strategy.
 
         Args:
             root_path: The root cindra output directory containing combined_metadata.npz.

@@ -30,28 +30,26 @@ def run_tracking_viewer(
 ) -> None:
     """Launches the standalone multi-recording tracking viewer.
 
-    Creates a QApplication, shows the TrackingViewer window, and enters the event loop. The viewer
-    loads multi-recording tracking data from the provided directory on startup.
+    Creates a QApplication, shows the TrackingViewer window, and enters the event loop. The viewer loads multi-recording
+    tracking data from the provided directory on startup.
 
     Args:
-        recording_path: The path to the root data directory for any cindra-processed recording that
-            makes up the visualized multi-recording dataset. The loader uses that recording's data to
-            search and reconstruct the full dataset hierarchy.
+        recording_path: The path to the root data directory for any cindra-processed recording that makes up the
+            visualized multi-recording dataset. The loader uses that recording's data to search and reconstruct the full
+            dataset hierarchy.
         dataset: Multi-recording dataset name to load. Defaults to the first available dataset.
-        state_path: Optional path to a state file for cross-process state exchange with the GUI MCP
-            server. When provided, a StateWriter polls the viewer's display state and writes changes
-            to this file.
+        state_path: Optional path to a state file for cross-process state exchange with the GUI MCP server. When
+            provided, a StateWriter polls the viewer's display state and writes changes to this file.
     """
     console.echo(message="Initializing the Tracking GUI...")
     application, owns_application = _get_or_create_application()
 
-    # Loads recording data upfront so the viewer window receives a fully populated data instance.
-    # The tracking viewer requires a loaded dataset, so defaults to the first available one.
+    # Loads recording data upfront so the viewer window receives a fully populated data instance. The tracking viewer
+    # requires a loaded dataset, so defaults to the first available one.
     data = ViewerData.from_data(root_path=recording_path, dataset=dataset)
     if not data.is_multi_recording and data.available_datasets:
         data.load_dataset(dataset_name=data.available_datasets[0])
 
-    # Creates the viewer window with the loaded data.
     console.echo(message="Initializing Multi-Recording Tracking viewer...")
     window = TrackingViewer(data=data)
 
@@ -62,8 +60,8 @@ def run_tracking_viewer(
     window.show()
     console.echo(message="Tracking viewer: ready.", level=LogLevel.SUCCESS)
 
-    # Only enters the event loop if this function created the QApplication. When embedded in a
-    # larger GUI, the caller is responsible for running the event loop.
+    # Only enters the event loop if this function created the QApplication. When embedded in a larger GUI, the caller is
+    # responsible for running the event loop.
     if owns_application and application is not None:
         sys.exit(application.exec())
 
@@ -71,35 +69,31 @@ def run_tracking_viewer(
 def run_registration_viewer(recording_path: Path, *, state_path: Path | None = None) -> None:
     """Launches the standalone single-recording registration viewer.
 
-    Creates a QApplication, shows the BinaryPlayer and PCViewer windows, and enters the event
-    loop. The binary viewer always displays the stitched multi-plane movie while the PC viewer
-    receives an independent shallow copy of the data with its own plane selector.
+    Creates a QApplication, shows the BinaryPlayer and PCViewer windows, and enters the event loop. The binary viewer
+    always displays the stitched multi-plane movie while the PC viewer receives an independent shallow copy of the data
+    with its own plane selector.
 
     Args:
-        recording_path: The Path to a cindra-processed recording's root data directory containing
-            registration results.
-        state_path: Optional path to a state file for cross-process state exchange with the GUI MCP
-            server. When provided, a StateWriter polls both viewers' display states and writes the
-            combined state to this file.
+        recording_path: The path to a cindra-processed recording's root data directory containing registration results.
+        state_path: Optional path to a state file for cross-process state exchange with the GUI MCP server. When
+            provided, a StateWriter polls both viewers' display states and writes the combined state to this file.
     """
     console.echo(message="Initializing the Registration GUI...")
     application, owns_application = _get_or_create_application()
 
-    # Loads recording data upfront. The binary viewer uses the combined view (-1) for stitched
-    # playback, while the PC viewer gets a shallow copy with its own mutable _view_index set to
-    # plane 0 for per-plane PC metrics.
+    # Loads recording data upfront. The binary viewer uses the combined view (-1) for stitched playback, while the PC
+    # viewer gets a shallow copy with its own mutable _view_index set to plane 0 for per-plane PC metrics.
     data = SingleRecordingData.from_data(root_path=recording_path, view_index=-1)
     pc_data = copy.copy(data)
     pc_data.switch_view(view_index=0)
 
-    # Creates both viewer windows with independent SingleRecordingData copies.
     console.echo(message="Initializing Registered Recording viewer...")
     binary_player = BinaryPlayer(data=data)
     console.echo(message="Initializing Registration Quality Metrics viewer...")
     pc_viewer = PCViewer(data=pc_data)
 
-    # Starts the state writer if a state file path was provided by the MCP server. Combines both
-    # viewers' states into a single dictionary keyed by viewer type.
+    # Starts the state writer if a state file path was provided by the MCP server. Combines both viewers' states into a
+    # single dictionary keyed by viewer type.
     if state_path is not None:
 
         def _combined_state() -> dict[str, object]:
@@ -115,19 +109,18 @@ def run_registration_viewer(recording_path: Path, *, state_path: Path | None = N
             parent=binary_player,
         )
 
-    # Computes cascaded window positions so both title bars remain accessible regardless of screen
-    # size. The PC viewer is offset from the binary viewer by a fixed step in both axes.
+    # Computes cascaded window positions so both title bars remain accessible regardless of screen size. The PC viewer
+    # is offset from the binary viewer by a fixed step in both axes.
     screen = application.primaryScreen()
     available = screen.availableGeometry()
 
-    # Top-left corner of the binary viewer, in pixels from the screen's top-left corner.
+    # Anchors the binary viewer's top-left corner in pixels from the screen's top-left corner.
     binary_viewer_x, binary_viewer_y = 50, 50
     binary_viewer_width = BINARY_STYLE.window_geometry[2]
     binary_viewer_height = BINARY_STYLE.window_geometry[3]
     pc_viewer_width = PC_STYLE.window_geometry[2]
     pc_viewer_height = PC_STYLE.window_geometry[3]
 
-    # Cascade: PC viewer is offset so both title bars remain accessible.
     pc_viewer_x, pc_viewer_y = binary_viewer_x + 30, binary_viewer_y + 30
 
     # Clamps window dimensions to fit within the available screen area.
@@ -139,8 +132,8 @@ def run_registration_viewer(recording_path: Path, *, state_path: Path | None = N
     binary_player.setGeometry(binary_viewer_x, binary_viewer_y, binary_viewer_width, binary_viewer_height)
     pc_viewer.setGeometry(pc_viewer_x, pc_viewer_y, pc_viewer_width, pc_viewer_height)
 
-    # When the user loads a new recording in the binary player, creates a fresh shallow copy
-    # of the new data for the PC viewer so it can manage its own plane state independently.
+    # When the user loads a new recording in the binary player, creates a fresh shallow copy of the new data for the PC
+    # viewer so it can manage its own plane state independently.
     def _on_recording_changed() -> None:
         new_pc_data = copy.copy(binary_player.data)
         new_pc_data.switch_view(view_index=0)
@@ -148,9 +141,8 @@ def run_registration_viewer(recording_path: Path, *, state_path: Path | None = N
 
     binary_player.recording_changed.connect(_on_recording_changed)
 
-    # Links the two windows so closing either one closes the other. WA_DeleteOnClose ensures the
-    # Qt object is destroyed on close, which emits the destroyed signal that triggers close() on
-    # the partner window.
+    # Links the two windows so closing either one closes the other. WA_DeleteOnClose ensures the Qt object is destroyed
+    # on close, which emits the destroyed signal that triggers close() on the partner window.
     binary_player.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
     pc_viewer.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
     binary_player.destroyed.connect(pc_viewer.close)
@@ -160,8 +152,8 @@ def run_registration_viewer(recording_path: Path, *, state_path: Path | None = N
     pc_viewer.show()
     console.echo(message="Registration viewers: ready.", level=LogLevel.SUCCESS)
 
-    # Only enters the event loop if this function created the QApplication. When embedded in a
-    # larger GUI, the caller is responsible for running the event loop.
+    # Only enters the event loop if this function created the QApplication. When embedded in a larger GUI, the caller is
+    # responsible for running the event loop.
     if owns_application and application is not None:
         sys.exit(application.exec())
 
@@ -180,9 +172,8 @@ def run_roi_viewer(
     Args:
         recording_path: Path to a cindra output directory to load on startup.
         dataset: Multi-recording dataset name to load. Stays in single-recording mode if not provided.
-        state_path: Optional path to a state file for cross-process state exchange with the GUI MCP
-            server. When provided, a StateWriter polls the viewer's display state and writes changes
-            to this file.
+        state_path: Optional path to a state file for cross-process state exchange with the GUI MCP server. When
+            provided, a StateWriter polls the viewer's display state and writes changes to this file.
     """
     console.echo(message="Initializing the ROI GUI...")
     application, owns_application = _get_or_create_application()
@@ -208,8 +199,7 @@ def _get_or_create_application() -> tuple[QApplication, bool]:
     """Returns the current QApplication instance, creating one if none exists.
 
     Returns:
-        A tuple of (application, owns_application) where owns_application is True when a new
-        QApplication was created by this call.
+        The application instance, paired with True when this call created it.
     """
     application = QApplication.instance()
     owns_application = application is None

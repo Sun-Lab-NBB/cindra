@@ -1,9 +1,7 @@
 """Provides the on-disk contract of the cindra pipelines: the directory and file names every stage writes under a
-caller-supplied output root, and the pure resolvers that build a path from that root.
-
-This module imports nothing from cindra, so every layer from the configuration dataclasses upward reads the contract
-from one definition instead of respelling it. An external scheduler that locates a recording's inputs and outputs
-therefore names the same strings the pipeline writes, rather than a copy that drifts from them.
+caller-supplied output root, and the pure resolvers that build a path from that root. This module imports nothing from
+cindra, so every layer from the configuration dataclasses upward reads the contract from one definition instead of
+respelling it.
 """
 
 from enum import StrEnum
@@ -115,7 +113,7 @@ class RecordingArrays(StrEnum):
     Notes:
         The same names are written into a recording's output directory for the combined multi-plane results, into each
         plane's directory for that plane's results, and into a tracked dataset's directory for the multi-recording
-        results, so one name resolves against any of the three roots.
+        results. One name therefore resolves against any of the three roots.
     """
 
     CELL_FLUORESCENCE = "cell_fluorescence.npy"

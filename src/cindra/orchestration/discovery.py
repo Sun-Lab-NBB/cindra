@@ -1,7 +1,4 @@
-"""Provides the job universe of a recording or a tracked dataset, resolved from what its directories already hold.
-
-The job model names every job a pipeline can run. This module pairs that model with the inventory of what is on disk,
-so a scheduler learns both the jobs a recording declares and the subset whose own inputs exist right now. Every
+"""Provides the job universe of a recording or a tracked dataset, resolved from what its directories already hold. Every
 resolver is read-only, and a recording carrying nothing resolves to an empty universe rather than raising.
 """
 
@@ -78,9 +75,9 @@ def resolve_single_recording_job_universe(output_root: Path, data_path: Path | N
 
     Notes:
         The conversion job is ready whenever the recording's parameters resolve. A registration job is ready once its
-        plane carries the channel binary the conversion writes, a processing job once its plane carries the reference
-        image the registration writes, and the combination job once every plane carries the traces the processing
-        stage writes, which are the arrays the combination stage concatenates.
+        plane carries the channel binary the conversion writes, and a processing job once its plane carries the
+        reference image the registration writes. The combination job is ready once every plane carries the traces the
+        processing stage writes, which are the arrays the combination stage concatenates.
 
     Args:
         output_root: The output root the recording was configured with.

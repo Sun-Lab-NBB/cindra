@@ -20,31 +20,18 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _mroi_parameters(roi_lines: object, roi_x_coordinates: object, roi_y_coordinates: object) -> dict[str, object]:
-    """Builds a two-ROI acquisition parameter mapping around the supplied MROI fields."""
-    return {
-        "frame_rate": 30.0,
-        "plane_number": 1,
-        "channel_number": 1,
-        "roi_number": 2,
-        "roi_lines": roi_lines,
-        "roi_x_coordinates": roi_x_coordinates,
-        "roi_y_coordinates": roi_y_coordinates,
-    }
-
-
 class TestIntegerListGuard:
     """Tests the element check that the MROI validations share."""
 
     @pytest.mark.parametrize("value", [[0, 1, 2], []])
     def test_integer_lists_are_accepted(self, value: list[int]) -> None:
         """Verifies that a list holding integer elements alone passes the check."""
-        assert _is_integer_list(value=value) is True
+        assert _is_integer_list(value=value)
 
     @pytest.mark.parametrize("value", [["0"], [0.0], [True], (0, 1), "01", None])
     def test_every_other_value_is_rejected(self, value: object) -> None:
         """Verifies that a non-list, or a list holding a string, float, or boolean, fails the check."""
-        assert _is_integer_list(value=value) is False
+        assert not _is_integer_list(value=value)
 
 
 class TestAcquisitionParameterValidation:
@@ -105,3 +92,16 @@ class TestRecordingReadiness:
         assert result["success"] is True
         assert result["valid"] is False
         assert "'roi_lines' must be a list of lists of integers." in result["errors"]
+
+
+def _mroi_parameters(roi_lines: object, roi_x_coordinates: object, roi_y_coordinates: object) -> dict[str, object]:
+    """Builds a two-ROI acquisition parameter mapping around the supplied MROI fields."""
+    return {
+        "frame_rate": 30.0,
+        "plane_number": 1,
+        "channel_number": 1,
+        "roi_number": 2,
+        "roi_lines": roi_lines,
+        "roi_x_coordinates": roi_x_coordinates,
+        "roi_y_coordinates": roi_y_coordinates,
+    }

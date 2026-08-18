@@ -13,35 +13,6 @@ from cindra.dataclasses import (
 )
 
 
-def _make_context(
-    frame_height: int = 64,
-    frame_width: int = 64,
-    mroi_y_offset: int | None = None,
-    mroi_x_offset: int | None = None,
-) -> RuntimeContext:
-    """Creates a minimal RuntimeContext with the specified IO dimensions.
-
-    Args:
-        frame_height: The frame height in pixels.
-        frame_width: The frame width in pixels.
-        mroi_y_offset: The optional MROI y-offset.
-        mroi_x_offset: The optional MROI x-offset.
-
-    Returns:
-        The context populated with the requested frame geometry and MROI offsets.
-    """
-    runtime = SingleRecordingRuntimeData()
-    runtime.io.frame_height = frame_height
-    runtime.io.frame_width = frame_width
-    runtime.io.mroi_y_offset = mroi_y_offset
-    runtime.io.mroi_x_offset = mroi_x_offset
-    return RuntimeContext(
-        configuration=SingleRecordingConfiguration(),
-        acquisition=AcquisitionParameters(frame_rate=30.0),
-        runtime=runtime,
-    )
-
-
 class TestComputePlaneOffsets:
     """Tests _compute_plane_offsets."""
 
@@ -187,3 +158,32 @@ class TestComputePlaneOffsets:
         # grid of tiles.
         np.testing.assert_array_equal(x_displacement, [0, 32, 0, 32])
         np.testing.assert_array_equal(y_displacement, [0, 0, 32, 32])
+
+
+def _make_context(
+    frame_height: int = 64,
+    frame_width: int = 64,
+    mroi_y_offset: int | None = None,
+    mroi_x_offset: int | None = None,
+) -> RuntimeContext:
+    """Creates a minimal RuntimeContext with the specified IO dimensions.
+
+    Args:
+        frame_height: The frame height in pixels.
+        frame_width: The frame width in pixels.
+        mroi_y_offset: The optional MROI y-offset.
+        mroi_x_offset: The optional MROI x-offset.
+
+    Returns:
+        The context populated with the requested frame geometry and MROI offsets.
+    """
+    runtime = SingleRecordingRuntimeData()
+    runtime.io.frame_height = frame_height
+    runtime.io.frame_width = frame_width
+    runtime.io.mroi_y_offset = mroi_y_offset
+    runtime.io.mroi_x_offset = mroi_x_offset
+    return RuntimeContext(
+        configuration=SingleRecordingConfiguration(),
+        acquisition=AcquisitionParameters(frame_rate=30.0),
+        runtime=runtime,
+    )

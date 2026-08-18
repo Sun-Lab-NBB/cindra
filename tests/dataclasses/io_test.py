@@ -89,189 +89,6 @@ _MULTI_REGISTRATION_ARRAY_FIELDS: tuple[str, ...] = (
 """The names of every optional array and mask list field persisted by MultiRecordingRegistrationData."""
 
 
-def _make_roi_mask(
-    pixel_count: int = 5,
-    frame_width: int = 128,
-    cluster_id: int = 0,
-    recording_count: int = 0,
-) -> ROIMask:
-    """Creates a synthetic ROIMask with the given pixel count."""
-    generator = np.random.default_rng(seed=pixel_count + cluster_id)
-    y_pixels = generator.integers(low=0, high=64, size=pixel_count).astype(np.int32)
-    x_pixels = generator.integers(low=0, high=frame_width, size=pixel_count).astype(np.int32)
-    pixel_weights = generator.random(size=pixel_count).astype(np.float32)
-    centroid = (int(np.median(y_pixels)), int(np.median(x_pixels)))
-    return ROIMask(
-        y_pixels=y_pixels,
-        x_pixels=x_pixels,
-        pixel_weights=pixel_weights,
-        centroid=centroid,
-        frame_width=frame_width,
-        radius=5.5,
-        cluster_id=cluster_id,
-        recording_count=recording_count,
-    )
-
-
-def _make_roi_statistics(
-    pixel_count: int = 8,
-    frame_width: int = 128,
-    *,
-    include_soma: bool = True,
-    include_neuropil: bool = True,
-    include_overlap: bool = True,
-    skewness_value: float | None = 1.5,
-    plane_index: int = 0,
-) -> ROIStatistics:
-    """Creates a synthetic ROIStatistics instance."""
-    mask = _make_roi_mask(pixel_count=pixel_count, frame_width=frame_width)
-    generator = np.random.default_rng(seed=pixel_count + plane_index)
-    soma_mask = generator.choice(a=[True, False], size=pixel_count).astype(np.bool_) if include_soma else None
-    neuropil_mask = (
-        generator.integers(low=0, high=frame_width * 64, size=pixel_count * 3).astype(np.int32)
-        if include_neuropil
-        else None
-    )
-    overlap_mask = generator.choice(a=[True, False], size=pixel_count).astype(np.bool_) if include_overlap else None
-    mask.overlap_mask = overlap_mask
-    return ROIStatistics(
-        mask=mask,
-        footprint=4,
-        compactness=0.85,
-        solidity=0.92,
-        pixel_count=pixel_count,
-        soma_mask=soma_mask,
-        aspect_ratio=1.1,
-        normalized_pixel_count=0.75,
-        skewness=skewness_value,
-        neuropil_mask=neuropil_mask,
-        plane_index=plane_index,
-    )
-
-
-def _populate_registration_data() -> RegistrationData:
-    """Creates a RegistrationData instance with all arrays populated."""
-    frame_count = 20
-    height = 32
-    width = 32
-    block_count = 4
-    component_count = 3
-    return RegistrationData(
-        valid_y_range=(2, 30),
-        valid_x_range=(2, 30),
-        bad_frames=np.array([True, False] * (frame_count // 2), dtype=np.bool_),
-        bidirectional_phase_offset=3,
-        bidirectional_phase_corrected=True,
-        normalization_minimum=100,
-        normalization_maximum=5000,
-        reference_image=np.random.default_rng(seed=0).random(size=(height, width)).astype(np.float32),
-        rigid_y_offsets=np.arange(frame_count, dtype=np.int32),
-        rigid_x_offsets=np.arange(frame_count, dtype=np.int32) * 2,
-        rigid_correlations=np.linspace(start=0.8, stop=1.0, num=frame_count).astype(np.float32),
-        nonrigid_y_offsets=np.random.default_rng(seed=1).random(size=(frame_count, block_count)).astype(np.float32),
-        nonrigid_x_offsets=np.random.default_rng(seed=2).random(size=(frame_count, block_count)).astype(np.float32),
-        nonrigid_correlations=np.random.default_rng(seed=3).random(size=(frame_count, block_count)).astype(np.float32),
-        principal_component_extreme_images=np.random.default_rng(seed=4)
-        .random(size=(2, component_count, height, width))
-        .astype(np.float32),
-        principal_component_projections=np.random.default_rng(seed=5)
-        .random(size=(frame_count, component_count))
-        .astype(np.float32),
-        principal_component_shift_metrics=np.random.default_rng(seed=6)
-        .random(size=(component_count, 3))
-        .astype(np.float32),
-    )
-
-
-def _populate_detection_data() -> DetectionData:
-    """Creates a DetectionData instance with all arrays populated."""
-    height = 32
-    width = 32
-    generator = np.random.default_rng(seed=42)
-    return DetectionData(
-        roi_diameter=12,
-        aspect_ratio=1.2,
-        mean_image=generator.random(size=(height, width)).astype(np.float32),
-        enhanced_mean_image=generator.random(size=(height, width)).astype(np.float32),
-        maximum_projection=generator.random(size=(height, width)).astype(np.float32),
-        correlation_map=generator.random(size=(height, width)).astype(np.float32),
-        roi_diameter_channel_2=10,
-        mean_image_channel_2=generator.random(size=(height, width)).astype(np.float32),
-        enhanced_mean_image_channel_2=generator.random(size=(height, width)).astype(np.float32),
-        maximum_projection_channel_2=generator.random(size=(height, width)).astype(np.float32),
-        correlation_map_channel_2=generator.random(size=(height, width)).astype(np.float32),
-    )
-
-
-def _populate_extraction_data(
-    roi_count: int = 3,
-    frame_count: int = 50,
-) -> ExtractionData:
-    """Creates an ExtractionData instance with every channel 1 array and both colocalization arrays populated."""
-    generator = np.random.default_rng(seed=99)
-    roi_statistics = [_make_roi_statistics(pixel_count=5 + index) for index in range(roi_count)]
-    return ExtractionData(
-        roi_statistics=roi_statistics,
-        cell_fluorescence=generator.random(size=(roi_count, frame_count)).astype(np.float32),
-        neuropil_fluorescence=generator.random(size=(roi_count, frame_count)).astype(np.float32),
-        subtracted_fluorescence=generator.random(size=(roi_count, frame_count)).astype(np.float32),
-        spikes=generator.random(size=(roi_count, frame_count)).astype(np.float32),
-        cell_classification=generator.random(size=(roi_count, 2)).astype(np.float32),
-        cell_colocalization=generator.random(size=(roi_count, 2)).astype(np.float32),
-        corrected_structural_mean_image=generator.random(size=(32, 32)).astype(np.float32),
-    )
-
-
-def _assert_roi_masks_equal(original: ROIMask, loaded: ROIMask) -> None:
-    """Asserts that two ROIMask instances have identical data."""
-    np.testing.assert_array_equal(original.y_pixels, loaded.y_pixels)
-    np.testing.assert_array_equal(original.x_pixels, loaded.x_pixels)
-    np.testing.assert_allclose(original.pixel_weights, loaded.pixel_weights, rtol=1e-6)
-    assert original.centroid == loaded.centroid
-    assert original.frame_width == loaded.frame_width
-    assert original.radius == pytest.approx(loaded.radius, abs=1e-4)
-    assert original.cluster_id == loaded.cluster_id
-    assert original.recording_count == loaded.recording_count
-
-
-def _assert_roi_statistics_equal(original: ROIStatistics, loaded: ROIStatistics) -> None:
-    """Asserts that two ROIStatistics instances have identical data."""
-    _assert_roi_masks_equal(original=original.mask, loaded=loaded.mask)
-    assert original.footprint == loaded.footprint
-    assert original.compactness == pytest.approx(loaded.compactness, abs=1e-5)
-    assert original.solidity == pytest.approx(loaded.solidity, abs=1e-5)
-    assert original.pixel_count == loaded.pixel_count
-    assert original.aspect_ratio == pytest.approx(loaded.aspect_ratio, abs=1e-5)
-    assert original.normalized_pixel_count == pytest.approx(loaded.normalized_pixel_count, abs=1e-5)
-    assert original.plane_index == loaded.plane_index
-
-    # Skewness: both None or both equal.
-    if original.skewness is None:
-        assert loaded.skewness is None
-    else:
-        assert loaded.skewness is not None
-        assert original.skewness == pytest.approx(loaded.skewness, abs=1e-5)
-
-    # Optional array fields.
-    if original.soma_mask is not None:
-        assert loaded.soma_mask is not None
-        np.testing.assert_array_equal(original.soma_mask, loaded.soma_mask)
-    else:
-        assert loaded.soma_mask is None
-
-    if original.neuropil_mask is not None:
-        assert loaded.neuropil_mask is not None
-        np.testing.assert_array_equal(original.neuropil_mask, loaded.neuropil_mask)
-    else:
-        assert loaded.neuropil_mask is None
-
-    if original.mask.overlap_mask is not None:
-        assert loaded.mask.overlap_mask is not None
-        np.testing.assert_array_equal(original.mask.overlap_mask, loaded.mask.overlap_mask)
-    else:
-        assert loaded.mask.overlap_mask is None
-
-
 class TestRegistrationDataSaveLoad:
     """Tests RegistrationData save_arrays, load_arrays, and memory_map_arrays round-trips."""
 
@@ -569,13 +386,11 @@ class TestExtractionDataSaveLoad:
         assert loaded.cell_classification is not None
         np.testing.assert_allclose(original.cell_classification, loaded.cell_classification, rtol=1e-6)
 
-        # Traces should NOT be loaded by load_arrays.
         assert loaded.cell_fluorescence is None
         assert loaded.neuropil_fluorescence is None
         assert loaded.subtracted_fluorescence is None
         assert loaded.spikes is None
 
-        # Colocalization should NOT be loaded by load_arrays.
         assert loaded.cell_colocalization is None
         assert loaded.corrected_structural_mean_image is None
 
@@ -714,7 +529,6 @@ class TestSingleRecordingRuntimeDataSaveLoad:
         assert loaded.detection.roi_diameter == 12
         assert loaded.detection.aspect_ratio == pytest.approx(1.2)
 
-        # Arrays should be None after YAML-only load.
         assert loaded.registration.reference_image is None
         assert loaded.registration.rigid_y_offsets is None
         assert loaded.detection.mean_image is None
@@ -729,7 +543,6 @@ class TestSingleRecordingRuntimeDataSaveLoad:
 
         data.save(output_path=tmp_path)
 
-        # Original arrays should still be present.
         assert data.registration.reference_image is not None
         assert data.detection.mean_image is not None
         assert data.extraction.roi_statistics is not None
@@ -967,34 +780,6 @@ class TestMultiRecordingTrackingDataSaveLoad:
         assert not (tmp_path / "tracking_template_masks_channel_2.npz").exists()
 
 
-def _populate_extraction_data_with_channel_2(
-    roi_count: int = 3,
-    frame_count: int = 50,
-) -> ExtractionData:
-    """Creates an ExtractionData instance with both channel 1 and channel 2 data populated."""
-    generator = np.random.default_rng(seed=77)
-    roi_statistics = [_make_roi_statistics(pixel_count=5 + index) for index in range(roi_count)]
-    roi_statistics_channel_2 = [
-        _make_roi_statistics(pixel_count=6 + index, plane_index=1) for index in range(roi_count)
-    ]
-    return ExtractionData(
-        roi_statistics=roi_statistics,
-        cell_fluorescence=generator.random(size=(roi_count, frame_count)).astype(np.float32),
-        neuropil_fluorescence=generator.random(size=(roi_count, frame_count)).astype(np.float32),
-        subtracted_fluorescence=generator.random(size=(roi_count, frame_count)).astype(np.float32),
-        spikes=generator.random(size=(roi_count, frame_count)).astype(np.float32),
-        cell_classification=generator.random(size=(roi_count, 2)).astype(np.float32),
-        roi_statistics_channel_2=roi_statistics_channel_2,
-        cell_fluorescence_channel_2=generator.random(size=(roi_count, frame_count)).astype(np.float32),
-        neuropil_fluorescence_channel_2=generator.random(size=(roi_count, frame_count)).astype(np.float32),
-        subtracted_fluorescence_channel_2=generator.random(size=(roi_count, frame_count)).astype(np.float32),
-        spikes_channel_2=generator.random(size=(roi_count, frame_count)).astype(np.float32),
-        cell_classification_channel_2=generator.random(size=(roi_count, 2)).astype(np.float32),
-        cell_colocalization=generator.random(size=(roi_count, 2)).astype(np.float32),
-        corrected_structural_mean_image=generator.random(size=(32, 32)).astype(np.float32),
-    )
-
-
 class TestExtractionDataChannel2:
     """Tests ExtractionData save/load/memory_map round-trips with channel 2 data populated."""
 
@@ -1022,7 +807,6 @@ class TestExtractionDataChannel2:
             original.cell_classification_channel_2, loaded.cell_classification_channel_2, rtol=1e-6
         )
 
-        # Channel 2 traces should NOT be loaded by load_arrays.
         assert loaded.cell_fluorescence_channel_2 is None
         assert loaded.neuropil_fluorescence_channel_2 is None
         assert loaded.subtracted_fluorescence_channel_2 is None
@@ -1052,7 +836,6 @@ class TestExtractionDataChannel2:
         assert loaded.spikes_channel_2 is not None
         np.testing.assert_allclose(original.spikes_channel_2, loaded.spikes_channel_2, rtol=1e-6)
 
-        # Channel 2 classification should also be loaded by load_results.
         assert loaded.cell_classification_channel_2 is not None
         np.testing.assert_allclose(
             original.cell_classification_channel_2, loaded.cell_classification_channel_2, rtol=1e-6
@@ -1228,7 +1011,6 @@ class TestMultiRecordingRuntimeDataSaveLoad:
         assert loaded.timing.total_discovery_time == 300
         assert loaded.output_path == tmp_path
 
-        # Arrays should be None after YAML-only load.
         assert loaded.registration.deform_field_y is None
         assert loaded.tracking.template_masks is None
 
@@ -1246,7 +1028,6 @@ class TestMultiRecordingRuntimeDataSaveLoad:
 
         data.save(output_path=tmp_path)
 
-        # Original arrays should still be present.
         assert data.registration.deform_field_y is not None
         assert data.tracking.template_masks is not None
 
@@ -1323,36 +1104,6 @@ class TestMultiRecordingRuntimeDataSaveLoad:
         assert data.registration.deform_field_y is None
 
 
-def _make_marker_ordering_data(root_path: Path) -> CombinedData:
-    """Builds a minimal CombinedData instance for the completion-marker ordering tests.
-
-    Args:
-        root_path: The root directory the instance saves into. The referenced binary file is created inside it, so
-            that the relative path conversion performed by the save method succeeds.
-
-    Returns:
-        A CombinedData instance describing one plane.
-    """
-    binary_path = root_path / "plane0" / "registered.bin"
-    binary_path.parent.mkdir(parents=True, exist_ok=True)
-    binary_path.touch()
-
-    return CombinedData(
-        detection=_populate_detection_data(),
-        extraction=_populate_extraction_data(),
-        plane_count=1,
-        combined_height=32,
-        combined_width=64,
-        tau=1.5,
-        sampling_rate=15.0,
-        plane_heights=np.array([32], dtype=np.uint16),
-        plane_widths=np.array([64], dtype=np.uint16),
-        plane_y_offsets=np.array([0], dtype=np.int32),
-        plane_x_offsets=np.array([0], dtype=np.int32),
-        registered_binary_paths=(binary_path,),
-    )
-
-
 class TestCombinedDataSaveLoad:
     """Tests CombinedData save and load round-trips."""
 
@@ -1394,12 +1145,10 @@ class TestCombinedDataSaveLoad:
         np.testing.assert_array_equal(loaded.plane_y_offsets, np.array([0, 32], dtype=np.int32))
         np.testing.assert_array_equal(loaded.plane_x_offsets, np.array([0, 0], dtype=np.int32))
 
-        # Binary paths should be reconstructed as absolute paths.
         assert len(loaded.registered_binary_paths) == 2
         assert loaded.registered_binary_paths[0] == binary_path_1
         assert loaded.registered_binary_paths[1] == binary_path_2
 
-        # Arrays should be None after metadata-only load.
         assert loaded.detection.mean_image is None
         assert loaded.extraction.roi_statistics is None
 
@@ -1570,7 +1319,6 @@ class TestCombinedDataSaveLoad:
         assert loaded.tau == pytest.approx(1.5, abs=1e-5)
         assert loaded.sampling_rate == pytest.approx(15.0, abs=1e-5)
 
-        # Geometry and binary path fields fall back to their empty defaults.
         assert loaded.plane_heights.size == 0
         assert loaded.plane_widths.size == 0
         assert loaded.plane_y_offsets.size == 0
@@ -1595,7 +1343,6 @@ class TestOptionalArrayFieldSerialization:
             field_name="test_field", arrays=arrays, save_dictionary=save_dictionary, dtype=np.int32
         )
 
-        # Saves to npz to simulate the full workflow.
         file_path = tmp_path / "optional_test.npz"
         np.savez(file_path, allow_pickle=False, **save_dictionary)
         data = np.load(file=file_path, allow_pickle=False)
@@ -1654,25 +1401,6 @@ class TestOptionalArrayFieldSerialization:
         assert result[1] is not None
         np.testing.assert_array_equal(result[1], np.array([False, False], dtype=np.bool_))
         assert result[2] is None
-
-
-def _populate_multi_registration_data() -> MultiRecordingRegistrationData:
-    """Creates a MultiRecordingRegistrationData instance with all arrays and mask lists populated."""
-    generator = np.random.default_rng(seed=21)
-    height = 16
-    width = 16
-    return MultiRecordingRegistrationData(
-        deform_field_y=generator.random(size=(height, width)).astype(np.float32),
-        deform_field_x=generator.random(size=(height, width)).astype(np.float32),
-        transformed_mean_image=generator.random(size=(height, width)).astype(np.float32),
-        transformed_enhanced_mean_image=generator.random(size=(height, width)).astype(np.float32),
-        transformed_maximum_projection=generator.random(size=(height, width)).astype(np.float32),
-        transformed_mean_image_channel_2=generator.random(size=(height, width)).astype(np.float32),
-        transformed_enhanced_mean_image_channel_2=generator.random(size=(height, width)).astype(np.float32),
-        transformed_maximum_projection_channel_2=generator.random(size=(height, width)).astype(np.float32),
-        deformed_roi_masks=[_make_roi_mask(pixel_count=5)],
-        deformed_roi_masks_channel_2=[_make_roi_mask(pixel_count=4, cluster_id=2)],
-    )
 
 
 class TestArrayPersistenceSkipBranches:
@@ -1931,3 +1659,261 @@ class TestArrayPersistenceSkipBranches:
 
         assert data.template_masks is None
         assert data.template_masks_channel_2 is None
+
+
+def _make_roi_mask(
+    pixel_count: int = 5,
+    frame_width: int = 128,
+    cluster_id: int = 0,
+    recording_count: int = 0,
+) -> ROIMask:
+    """Creates a synthetic ROIMask with the given pixel count."""
+    generator = np.random.default_rng(seed=pixel_count + cluster_id)
+    y_pixels = generator.integers(low=0, high=64, size=pixel_count).astype(np.int32)
+    x_pixels = generator.integers(low=0, high=frame_width, size=pixel_count).astype(np.int32)
+    pixel_weights = generator.random(size=pixel_count).astype(np.float32)
+    centroid = (int(np.median(y_pixels)), int(np.median(x_pixels)))
+    return ROIMask(
+        y_pixels=y_pixels,
+        x_pixels=x_pixels,
+        pixel_weights=pixel_weights,
+        centroid=centroid,
+        frame_width=frame_width,
+        radius=5.5,
+        cluster_id=cluster_id,
+        recording_count=recording_count,
+    )
+
+
+def _make_roi_statistics(
+    pixel_count: int = 8,
+    frame_width: int = 128,
+    *,
+    include_soma: bool = True,
+    include_neuropil: bool = True,
+    include_overlap: bool = True,
+    skewness_value: float | None = 1.5,
+    plane_index: int = 0,
+) -> ROIStatistics:
+    """Creates a synthetic ROIStatistics instance."""
+    mask = _make_roi_mask(pixel_count=pixel_count, frame_width=frame_width)
+    generator = np.random.default_rng(seed=pixel_count + plane_index)
+    soma_mask = generator.choice(a=[True, False], size=pixel_count).astype(np.bool_) if include_soma else None
+    neuropil_mask = (
+        generator.integers(low=0, high=frame_width * 64, size=pixel_count * 3).astype(np.int32)
+        if include_neuropil
+        else None
+    )
+    overlap_mask = generator.choice(a=[True, False], size=pixel_count).astype(np.bool_) if include_overlap else None
+    mask.overlap_mask = overlap_mask
+    return ROIStatistics(
+        mask=mask,
+        footprint=4,
+        compactness=0.85,
+        solidity=0.92,
+        pixel_count=pixel_count,
+        soma_mask=soma_mask,
+        aspect_ratio=1.1,
+        normalized_pixel_count=0.75,
+        skewness=skewness_value,
+        neuropil_mask=neuropil_mask,
+        plane_index=plane_index,
+    )
+
+
+def _populate_registration_data() -> RegistrationData:
+    """Creates a RegistrationData instance with all arrays populated."""
+    frame_count = 20
+    height = 32
+    width = 32
+    block_count = 4
+    component_count = 3
+    return RegistrationData(
+        valid_y_range=(2, 30),
+        valid_x_range=(2, 30),
+        bad_frames=np.array([True, False] * (frame_count // 2), dtype=np.bool_),
+        bidirectional_phase_offset=3,
+        bidirectional_phase_corrected=True,
+        normalization_minimum=100,
+        normalization_maximum=5000,
+        reference_image=np.random.default_rng(seed=0).random(size=(height, width)).astype(np.float32),
+        rigid_y_offsets=np.arange(frame_count, dtype=np.int32),
+        rigid_x_offsets=np.arange(frame_count, dtype=np.int32) * 2,
+        rigid_correlations=np.linspace(start=0.8, stop=1.0, num=frame_count).astype(np.float32),
+        nonrigid_y_offsets=np.random.default_rng(seed=1).random(size=(frame_count, block_count)).astype(np.float32),
+        nonrigid_x_offsets=np.random.default_rng(seed=2).random(size=(frame_count, block_count)).astype(np.float32),
+        nonrigid_correlations=np.random.default_rng(seed=3).random(size=(frame_count, block_count)).astype(np.float32),
+        principal_component_extreme_images=np.random.default_rng(seed=4)
+        .random(size=(2, component_count, height, width))
+        .astype(np.float32),
+        principal_component_projections=np.random.default_rng(seed=5)
+        .random(size=(frame_count, component_count))
+        .astype(np.float32),
+        principal_component_shift_metrics=np.random.default_rng(seed=6)
+        .random(size=(component_count, 3))
+        .astype(np.float32),
+    )
+
+
+def _populate_detection_data() -> DetectionData:
+    """Creates a DetectionData instance with all arrays populated."""
+    height = 32
+    width = 32
+    generator = np.random.default_rng(seed=42)
+    return DetectionData(
+        roi_diameter=12,
+        aspect_ratio=1.2,
+        mean_image=generator.random(size=(height, width)).astype(np.float32),
+        enhanced_mean_image=generator.random(size=(height, width)).astype(np.float32),
+        maximum_projection=generator.random(size=(height, width)).astype(np.float32),
+        correlation_map=generator.random(size=(height, width)).astype(np.float32),
+        roi_diameter_channel_2=10,
+        mean_image_channel_2=generator.random(size=(height, width)).astype(np.float32),
+        enhanced_mean_image_channel_2=generator.random(size=(height, width)).astype(np.float32),
+        maximum_projection_channel_2=generator.random(size=(height, width)).astype(np.float32),
+        correlation_map_channel_2=generator.random(size=(height, width)).astype(np.float32),
+    )
+
+
+def _populate_extraction_data(
+    roi_count: int = 3,
+    frame_count: int = 50,
+) -> ExtractionData:
+    """Creates an ExtractionData instance with every channel 1 array and both colocalization arrays populated."""
+    generator = np.random.default_rng(seed=99)
+    roi_statistics = [_make_roi_statistics(pixel_count=5 + index) for index in range(roi_count)]
+    return ExtractionData(
+        roi_statistics=roi_statistics,
+        cell_fluorescence=generator.random(size=(roi_count, frame_count)).astype(np.float32),
+        neuropil_fluorescence=generator.random(size=(roi_count, frame_count)).astype(np.float32),
+        subtracted_fluorescence=generator.random(size=(roi_count, frame_count)).astype(np.float32),
+        spikes=generator.random(size=(roi_count, frame_count)).astype(np.float32),
+        cell_classification=generator.random(size=(roi_count, 2)).astype(np.float32),
+        cell_colocalization=generator.random(size=(roi_count, 2)).astype(np.float32),
+        corrected_structural_mean_image=generator.random(size=(32, 32)).astype(np.float32),
+    )
+
+
+def _assert_roi_masks_equal(original: ROIMask, loaded: ROIMask) -> None:
+    """Asserts that two ROIMask instances have identical data."""
+    np.testing.assert_array_equal(original.y_pixels, loaded.y_pixels)
+    np.testing.assert_array_equal(original.x_pixels, loaded.x_pixels)
+    np.testing.assert_allclose(original.pixel_weights, loaded.pixel_weights, rtol=1e-6)
+    assert original.centroid == loaded.centroid
+    assert original.frame_width == loaded.frame_width
+    assert original.radius == pytest.approx(loaded.radius, abs=1e-4)
+    assert original.cluster_id == loaded.cluster_id
+    assert original.recording_count == loaded.recording_count
+
+
+def _assert_roi_statistics_equal(original: ROIStatistics, loaded: ROIStatistics) -> None:
+    """Asserts that two ROIStatistics instances have identical data."""
+    _assert_roi_masks_equal(original=original.mask, loaded=loaded.mask)
+    assert original.footprint == loaded.footprint
+    assert original.compactness == pytest.approx(loaded.compactness, abs=1e-5)
+    assert original.solidity == pytest.approx(loaded.solidity, abs=1e-5)
+    assert original.pixel_count == loaded.pixel_count
+    assert original.aspect_ratio == pytest.approx(loaded.aspect_ratio, abs=1e-5)
+    assert original.normalized_pixel_count == pytest.approx(loaded.normalized_pixel_count, abs=1e-5)
+    assert original.plane_index == loaded.plane_index
+
+    if original.skewness is None:
+        assert loaded.skewness is None
+    else:
+        assert loaded.skewness is not None
+        assert original.skewness == pytest.approx(loaded.skewness, abs=1e-5)
+
+    if original.soma_mask is not None:
+        assert loaded.soma_mask is not None
+        np.testing.assert_array_equal(original.soma_mask, loaded.soma_mask)
+    else:
+        assert loaded.soma_mask is None
+
+    if original.neuropil_mask is not None:
+        assert loaded.neuropil_mask is not None
+        np.testing.assert_array_equal(original.neuropil_mask, loaded.neuropil_mask)
+    else:
+        assert loaded.neuropil_mask is None
+
+    if original.mask.overlap_mask is not None:
+        assert loaded.mask.overlap_mask is not None
+        np.testing.assert_array_equal(original.mask.overlap_mask, loaded.mask.overlap_mask)
+    else:
+        assert loaded.mask.overlap_mask is None
+
+
+def _populate_extraction_data_with_channel_2(
+    roi_count: int = 3,
+    frame_count: int = 50,
+) -> ExtractionData:
+    """Creates an ExtractionData instance with both channel 1 and channel 2 data populated."""
+    generator = np.random.default_rng(seed=77)
+    roi_statistics = [_make_roi_statistics(pixel_count=5 + index) for index in range(roi_count)]
+    roi_statistics_channel_2 = [
+        _make_roi_statistics(pixel_count=6 + index, plane_index=1) for index in range(roi_count)
+    ]
+    return ExtractionData(
+        roi_statistics=roi_statistics,
+        cell_fluorescence=generator.random(size=(roi_count, frame_count)).astype(np.float32),
+        neuropil_fluorescence=generator.random(size=(roi_count, frame_count)).astype(np.float32),
+        subtracted_fluorescence=generator.random(size=(roi_count, frame_count)).astype(np.float32),
+        spikes=generator.random(size=(roi_count, frame_count)).astype(np.float32),
+        cell_classification=generator.random(size=(roi_count, 2)).astype(np.float32),
+        roi_statistics_channel_2=roi_statistics_channel_2,
+        cell_fluorescence_channel_2=generator.random(size=(roi_count, frame_count)).astype(np.float32),
+        neuropil_fluorescence_channel_2=generator.random(size=(roi_count, frame_count)).astype(np.float32),
+        subtracted_fluorescence_channel_2=generator.random(size=(roi_count, frame_count)).astype(np.float32),
+        spikes_channel_2=generator.random(size=(roi_count, frame_count)).astype(np.float32),
+        cell_classification_channel_2=generator.random(size=(roi_count, 2)).astype(np.float32),
+        cell_colocalization=generator.random(size=(roi_count, 2)).astype(np.float32),
+        corrected_structural_mean_image=generator.random(size=(32, 32)).astype(np.float32),
+    )
+
+
+def _make_marker_ordering_data(root_path: Path) -> CombinedData:
+    """Builds a minimal CombinedData instance for the completion-marker ordering tests.
+
+    Args:
+        root_path: The root directory the instance saves into. The referenced binary file is created inside it, so
+            that the relative path conversion performed by the save method succeeds.
+
+    Returns:
+        A CombinedData instance describing one plane.
+    """
+    binary_path = root_path / "plane0" / "registered.bin"
+    binary_path.parent.mkdir(parents=True, exist_ok=True)
+    binary_path.touch()
+
+    return CombinedData(
+        detection=_populate_detection_data(),
+        extraction=_populate_extraction_data(),
+        plane_count=1,
+        combined_height=32,
+        combined_width=64,
+        tau=1.5,
+        sampling_rate=15.0,
+        plane_heights=np.array([32], dtype=np.uint16),
+        plane_widths=np.array([64], dtype=np.uint16),
+        plane_y_offsets=np.array([0], dtype=np.int32),
+        plane_x_offsets=np.array([0], dtype=np.int32),
+        registered_binary_paths=(binary_path,),
+    )
+
+
+def _populate_multi_registration_data() -> MultiRecordingRegistrationData:
+    """Creates a MultiRecordingRegistrationData instance with all arrays and mask lists populated."""
+    generator = np.random.default_rng(seed=21)
+    height = 16
+    width = 16
+    return MultiRecordingRegistrationData(
+        deform_field_y=generator.random(size=(height, width)).astype(np.float32),
+        deform_field_x=generator.random(size=(height, width)).astype(np.float32),
+        transformed_mean_image=generator.random(size=(height, width)).astype(np.float32),
+        transformed_enhanced_mean_image=generator.random(size=(height, width)).astype(np.float32),
+        transformed_maximum_projection=generator.random(size=(height, width)).astype(np.float32),
+        transformed_mean_image_channel_2=generator.random(size=(height, width)).astype(np.float32),
+        transformed_enhanced_mean_image_channel_2=generator.random(size=(height, width)).astype(np.float32),
+        transformed_maximum_projection_channel_2=generator.random(size=(height, width)).astype(np.float32),
+        deformed_roi_masks=[_make_roi_mask(pixel_count=5)],
+        deformed_roi_masks_channel_2=[_make_roi_mask(pixel_count=4, cluster_id=2)],
+    )

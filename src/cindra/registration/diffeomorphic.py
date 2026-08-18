@@ -97,7 +97,6 @@ class DiffeomorphicDemonsRegistration:
             image if image.dtype == np.float32 else image.astype(np.float32) for image in images
         ]
 
-        # Caches registration parameters to class attributes.
         self._speed_factor: float = speed_factor
         self._scale_sampling: int = scale_sampling
         self._grid_sampling_factor: float = grid_sampling_factor
@@ -166,7 +165,6 @@ class DiffeomorphicDemonsRegistration:
         # The iteration factor controls smooth scale transitions between levels.
         iteration_factor = 0.5 ** (1.0 / self._scale_sampling)
 
-        # Creates scale-space pyramids for each image.
         self._pyramids = [ScaleSpacePyramid(data=image, minimum_scale=self._final_scale) for image in self._images]
 
         # Rejects a run whose finest level cannot freeze the edges of its knot grid. The grid sampling grows with the
@@ -214,7 +212,6 @@ class DiffeomorphicDemonsRegistration:
                 unit="iteration",
             ) as progress_bar:
                 for level in reversed(range(scale_level_count)):
-                    # Computes the scale at the current level.
                     scale = self._final_scale * 2**level
                     if self._smooth_scale:
                         scale *= 2 * iteration_factor
@@ -255,7 +252,6 @@ class DiffeomorphicDemonsRegistration:
         # Computes the incremental deformation of every image in one pass over the image pairs.
         incremental_deformations = self._compute_groupwise_deformations(iteration_key=iteration_key)
 
-        # Applies incremental deformations to the running totals.
         for image_index in range(len(self._images)):
             self._apply_incremental_deformation(
                 image_index=image_index, incremental_deformation=incremental_deformations[image_index]
@@ -359,7 +355,6 @@ class DiffeomorphicDemonsRegistration:
         """
         scale = iteration_key[2]
 
-        # Gets images and their gradients at the current scale.
         source_image, source_gradient = self._get_image_and_gradient(
             image_index=source_index, iteration_key=iteration_key
         )
@@ -442,12 +437,11 @@ class DiffeomorphicDemonsRegistration:
         """
         # Validates that pyramids have been initialized (should always be true when this method is called).
         if self._pyramids is None:  # pragma: no cover, defensive guard because register() always initializes pyramids
-            message = "Unable to retrieve image. The pyramids have not been initialized, call register() first."
+            message = "Unable to retrieve the image. The pyramids have not been initialized. Call register() first."
             console.error(message=message, error=RuntimeError)
 
         image = self._pyramids[image_index].get_scale(scale=scale)
 
-        # Applies current accumulated deformation if one exists.
         deformation = self._deformations.get(image_index, None)
         if deformation is not None:
             deformation = deformation.resize_field(new_height=image.shape[0], new_width=image.shape[1])
@@ -468,13 +462,11 @@ class DiffeomorphicDemonsRegistration:
         if incremental_deformation is None:
             return
 
-        # Gets or creates the current accumulated deformation.
         current_deformation = self._deformations.get(image_index, None)
         if current_deformation is None:
             image_height, image_width = self._images[0].shape
             current_deformation = Deformation.identity(height=image_height, width=image_width)
 
-        # Resizes to match and composes the deformations.
         current_deformation = current_deformation.resize_field(
             new_height=incremental_deformation.field_shape[0], new_width=incremental_deformation.field_shape[1]
         )
@@ -557,7 +549,7 @@ class DiffeomorphicDemonsRegistration:
         """
         if self._pyramids is None:
             message = (
-                "Unable to resolve the field shape. The pyramids have not been initialized, call register() first."
+                "Unable to resolve the field shape. The pyramids have not been initialized. Call register() first."
             )
             console.error(message=message, error=RuntimeError)
 
@@ -648,16 +640,18 @@ def _compute_demons_force(  # pragma: no cover
         field_x: The pre-allocated output array receiving the horizontal force component.
     """
     height, width = source_image.shape
-    for y in numba.prange(height):
-        for x in range(width):
+    for row in numba.prange(height):
+        for column in range(width):
             source_gradient_magnitude_squared = (
-                source_gradient_y[y, x] * source_gradient_y[y, x] + source_gradient_x[y, x] * source_gradient_x[y, x]
+                source_gradient_y[row, column] * source_gradient_y[row, column]
+                + source_gradient_x[row, column] * source_gradient_x[row, column]
             )
             target_gradient_magnitude_squared = (
-                target_gradient_y[y, x] * target_gradient_y[y, x] + target_gradient_x[y, x] * target_gradient_x[y, x]
+                target_gradient_y[row, column] * target_gradient_y[row, column]
+                + target_gradient_x[row, column] * target_gradient_x[row, column]
             )
 
-            intensity_difference = source_image[y, x] - target_image[y, x]
+            intensity_difference = source_image[row, column] - target_image[row, column]
             regularization = noise_squared * (intensity_difference * intensity_difference)
 
             source_denominator = source_gradient_magnitude_squared + regularization
@@ -667,13 +661,19 @@ def _compute_demons_force(  # pragma: no cover
             if target_denominator == np.float32(0.0):
                 target_denominator = np.float32(np.inf)
 
-            field_y[y, x] = (
+            field_y[row, column] = (
                 intensity_difference
-                * (source_gradient_y[y, x] / source_denominator + target_gradient_y[y, x] / target_denominator)
+                * (
+                    source_gradient_y[row, column] / source_denominator
+                    + target_gradient_y[row, column] / target_denominator
+                )
                 * speed
             )
-            field_x[y, x] = (
+            field_x[row, column] = (
                 intensity_difference
-                * (source_gradient_x[y, x] / source_denominator + target_gradient_x[y, x] / target_denominator)
+                * (
+                    source_gradient_x[row, column] / source_denominator
+                    + target_gradient_x[row, column] / target_denominator
+                )
                 * speed
             )

@@ -137,9 +137,9 @@ from .orchestration import (  # noqa: E402
     estimate_single_recording_job_memory_mb,
 )
 
-# Ensures console output is enabled whenever the cindra library is imported. The 'Console' class is
-# used over 'print' for all terminal outputs. With minimal configuration, this class can be extended to log terminal
-# outputs instead of or in addition to sending them to the terminal.
+# Ensures console output is enabled whenever the cindra library is imported. The 'Console' class is used over 'print'
+# for all terminal outputs. With minimal configuration, this class can be extended to log terminal outputs instead of
+# or in addition to sending them to the terminal.
 if not console.enabled:  # pragma: no branch - the console-enabled state is only reachable as False on first import.
     console.enable()
 

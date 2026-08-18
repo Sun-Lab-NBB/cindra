@@ -1,11 +1,5 @@
 """Provides the local batch execution engine that admits queued pipeline jobs as their own prerequisites succeed and
 dispatches them under the per-class concurrency terms and the session core and memory budgets.
-
-Every submitted job first enters the admission pool. The manager admits a job into its resource class queue as soon as
-that job's own prerequisites have succeeded on its own tracker, so each recording advances independently of the others.
-Dispatch then runs in two passes over every class queue. The first honors each class's reservation, and the second
-releases those reservations over the capacity the first left unused. Both passes hold the cores and the estimated
-memory of every running job inside the session budgets.
 """
 
 from __future__ import annotations
@@ -19,6 +13,7 @@ from concurrent.futures import Executor, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 
 from ataraxis_time import PrecisionTimer, TimerPrecisions
+from ataraxis_base_utilities import console
 from ataraxis_data_structures import (
     JobState,
     ProcessingStatus,
@@ -63,11 +58,11 @@ _POOL_START_METHOD: str = "spawn"
 """The multiprocessing start method every worker process of an execution session is created with.
 
 Notes:
-    Spawn is the only method available on every platform the library supports, so requesting it explicitly gives a
-    Linux session the process semantics a macOS or Windows session gets by default rather than the platform default
-    of the host it happens to run on. The alternatives are also unsound for this pipeline. A forked worker inherits
-    the parent's already-sized numeric backends, which leaves the thread pin inert and hands every concurrent job a
-    host-wide backend pool, and it inherits the parent's Numba and threading state at whatever point the fork
+    Spawn is the only method available on every platform the library supports. Requesting it explicitly therefore
+    gives a Linux session the process semantics a macOS or Windows session gets by default, rather than the platform
+    default of the host it happens to run on. The alternatives are also unsound for this pipeline. A forked worker
+    inherits the parent's already-sized numeric backends, which leaves the thread pin inert and hands every concurrent
+    job a host-wide backend pool, and it inherits the parent's Numba and threading state at whatever point the fork
     interrupted it.
 """
 
@@ -147,7 +142,7 @@ class JobExecutionState:
         Each admitted job runs in its own worker process at the width its resource class was allocated, so a
         registration job and a processing job run side by side, each holding its own numeric-backend budget. Running
         them as threads of one process instead would let the later of the two overwrite the BLAS width the earlier one
-        set, because that width is a property of the process rather than of the thread that asked for it.
+        set. That width is a property of the process rather than of the thread that asked for it.
     """
 
     all_jobs: dict[tuple[str, str], PendingJob] = field(default_factory=dict)
@@ -258,7 +253,7 @@ def start_execution_session(
                 f"-1 to request every available core, or None to accept the measured default, but encountered "
                 f"{override_value}."
             )
-            raise ValueError(message)
+            console.error(message=message, error=ValueError)
 
     budget = resolve_core_budget()
     memory_budget = resolve_memory_budget_mb()
@@ -271,7 +266,6 @@ def start_execution_session(
         classes_by_name[class_name] = pending_job.resource_class
         class_job_counts[class_name] = class_job_counts.get(class_name, 0) + 1
 
-    # Resolves the allocation of every class and stamps the worker count onto its jobs.
     class_workers: dict[str, int] = {}
     class_capacities: dict[str, int] = {}
     for class_name, resource_class in classes_by_name.items():
@@ -324,6 +318,31 @@ def start_execution_session(
     }
 
 
+def cancel_execution_session() -> tuple[int, int]:
+    """Clears every queued job of the active session, leaving the running jobs to finish.
+
+    Notes:
+        Cancellation empties the admission pool and every resource class queue, so the manager terminates once the
+        running set drains. A job already dispatched keeps its worker process, since interrupting it partway would
+        leave its output directory holding a partial result the tracker reports as running.
+
+    Returns:
+        The number of jobs cleared from the queues and the number of jobs left running, in that order.
+    """
+    state = get_execution_state()
+    if state is None:
+        return 0, 0
+
+    with state.lock:
+        canceled_count = len(state.admission_pool) + sum(len(queue) for queue in state.pending_queues.values())
+        state.admission_pool.clear()
+        for pending_queue in state.pending_queues.values():
+            pending_queue.clear()
+        active_count = sum(len(futures) for futures in state.active_futures.values())
+
+    return canceled_count, active_count
+
+
 def _job_execution_manager(state: JobExecutionState) -> None:
     """Admits jobs whose prerequisites succeeded and dispatches them under their resource class concurrency caps.
 
@@ -343,8 +362,8 @@ def _job_execution_manager(state: JobExecutionState) -> None:
         own manager. The global is cleared only when it still names the session this manager owns.
 
         The worker pool lives for the whole session, and the pin on the numeric backends encloses its whole lifetime
-        rather than its construction alone, because a pool spawns each worker when work first reaches it rather than
-        when the pool is created.
+        rather than its construction alone. A pool spawns each worker when work first reaches it rather than when the
+        pool is created.
 
     Args:
         state: The execution state this manager owns. Mutated under its own lock as jobs move between the queues.
@@ -388,31 +407,6 @@ def _job_execution_manager(state: JobExecutionState) -> None:
                     return
 
             timer.delay(delay=_DISPATCH_POLL_MILLISECONDS, allow_sleep=True)
-
-
-def cancel_execution_session() -> tuple[int, int]:
-    """Clears every queued job of the active session, leaving the running jobs to finish.
-
-    Notes:
-        Cancellation empties the admission pool and every resource class queue, so the manager terminates once the
-        running set drains. A job already dispatched keeps its worker process, since interrupting it partway would
-        leave its output directory holding a partial result the tracker reports as running.
-
-    Returns:
-        The number of jobs cleared from the queues and the number of jobs left running, in that order.
-    """
-    state = get_execution_state()
-    if state is None:
-        return 0, 0
-
-    with state.lock:
-        canceled_count = len(state.admission_pool) + sum(len(queue) for queue in state.pending_queues.values())
-        state.admission_pool.clear()
-        for pending_queue in state.pending_queues.values():
-            pending_queue.clear()
-        active_count = sum(len(futures) for futures in state.active_futures.values())
-
-    return canceled_count, active_count
 
 
 def _clear_owned_session(state: JobExecutionState) -> None:
@@ -593,7 +587,6 @@ def _dispatch_admitted_jobs(state: JobExecutionState, pool: Executor) -> bool:
     """
     dispatched = False
 
-    # The first pass honors every reservation, and the second releases them over the capacity the first left unused.
     for release_reservations in (False, True):
         dispatched |= _dispatch_pass(state=state, pool=pool, release_reservations=release_reservations)
 
@@ -710,7 +703,7 @@ def _committed_memory(state: JobExecutionState) -> int:
 
     Notes:
         A job the caller sized at zero contributes nothing, so a session whose jobs carry no estimates admits on the
-        core budget alone and behaves exactly as it did before any job was sized.
+        core budget alone.
 
     Args:
         state: The current job execution state, accessed under its lock.

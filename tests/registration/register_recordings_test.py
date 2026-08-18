@@ -9,37 +9,6 @@ from cindra.registration.deformation import Deformation
 from cindra.registration.register_recordings import _warp_mask_pixels, _forward_deform_masks, _backward_deform_masks
 
 
-def _make_roi_mask(
-    centroid: tuple[int, int] = (50, 50),
-    radius: int = 5,
-    frame_width: int = 128,
-    cluster_id: int = 0,
-    recording_count: int = 1,
-) -> ROIMask:
-    """Creates a circular ROIMask instance for testing."""
-    y_pixels = []
-    x_pixels = []
-    for delta_y in range(-radius, radius + 1):
-        for delta_x in range(-radius, radius + 1):
-            if delta_y**2 + delta_x**2 <= radius**2:
-                y_pixels.append(centroid[0] + delta_y)
-                x_pixels.append(centroid[1] + delta_x)
-    y_array = np.array(y_pixels, dtype=np.int32)
-    x_array = np.array(x_pixels, dtype=np.int32)
-    pixel_weights = np.ones(len(y_pixels), dtype=np.float32)
-    pixel_weights /= np.linalg.norm(pixel_weights)
-    return ROIMask(
-        y_pixels=y_array,
-        x_pixels=x_array,
-        pixel_weights=pixel_weights,
-        centroid=centroid,
-        frame_width=frame_width,
-        radius=float(radius),
-        cluster_id=cluster_id,
-        recording_count=recording_count,
-    )
-
-
 class TestWarpMaskPixels:
     """Tests _warp_mask_pixels."""
 
@@ -49,7 +18,6 @@ class TestWarpMaskPixels:
         width = 128
         mask = _make_roi_mask(centroid=(50, 50), radius=5, frame_width=width)
 
-        # Creates a zero-displacement deformation (identity).
         field_y = np.zeros((height, width), dtype=np.float32)
         field_x = np.zeros((height, width), dtype=np.float32)
         deformation = Deformation(field_y=field_y, field_x=field_x)
@@ -67,7 +35,6 @@ class TestWarpMaskPixels:
         width = 128
         mask = _make_roi_mask(centroid=(60, 60), radius=4, frame_width=width)
 
-        # Creates a uniform translation of 5 pixels in y and 3 pixels in x.
         field_y = np.full((height, width), fill_value=5.0, dtype=np.float32)
         field_x = np.full((height, width), fill_value=3.0, dtype=np.float32)
         deformation = Deformation(field_y=field_y, field_x=field_x)
@@ -179,3 +146,29 @@ class TestBackwardDeformMasks:
         assert len(result) == 3
         for roi_statistics in result:
             assert roi_statistics.footprint == 0
+
+
+def _make_roi_mask(
+    centroid: tuple[int, int] = (50, 50),
+    radius: int = 5,
+    frame_width: int = 128,
+    cluster_id: int = 0,
+    recording_count: int = 1,
+) -> ROIMask:
+    """Creates a circular ROIMask instance for testing."""
+    delta_y, delta_x = np.mgrid[-radius : radius + 1, -radius : radius + 1]
+    inside_circle = delta_y**2 + delta_x**2 <= radius**2
+    y_array = (centroid[0] + delta_y[inside_circle]).astype(np.int32)
+    x_array = (centroid[1] + delta_x[inside_circle]).astype(np.int32)
+    pixel_weights = np.ones(y_array.size, dtype=np.float32)
+    pixel_weights /= np.linalg.norm(pixel_weights)
+    return ROIMask(
+        y_pixels=y_array,
+        x_pixels=x_array,
+        pixel_weights=pixel_weights,
+        centroid=centroid,
+        frame_width=frame_width,
+        radius=float(radius),
+        cluster_id=cluster_id,
+        recording_count=recording_count,
+    )

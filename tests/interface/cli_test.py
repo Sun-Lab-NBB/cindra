@@ -12,14 +12,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _configure(output_path: Path, name: str | None = None) -> Result:
-    """Runs the 'configure' command against the output directory, optionally naming the generated file."""
-    arguments = ["configure", "--pipeline", "single-recording", "--output-path", str(output_path)]
-    if name is not None:
-        arguments.extend(["--name", name])
-    return CliRunner().invoke(cli=cindra_cli, args=arguments)
-
-
 class TestConfigureCommand:
     """Tests the destination the configuration generation command resolves from its name option."""
 
@@ -53,3 +45,11 @@ class TestConfigureCommand:
         assert isinstance(result.exception, ValueError)
         assert list(tmp_path.iterdir()) == []
         assert not (tmp_path.parent / f"{tmp_path.name}.yaml").exists()
+
+
+def _configure(output_path: Path, name: str | None = None) -> Result:
+    """Runs the 'configure' command against the output directory, optionally naming the generated file."""
+    arguments = ["configure", "--pipeline", "single-recording", "--output-path", str(output_path)]
+    if name is not None:
+        arguments.extend(["--name", name])
+    return CliRunner().invoke(cli=cindra_cli, args=arguments)

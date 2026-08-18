@@ -64,7 +64,6 @@ def compute_delta_fluorescence(
     # The constant method reduces the baseline to a single value, while the other two keep it per-ROI.
     baseline: NDArray[np.float32] | np.float32
 
-    # Uses the requested method to calculate the baseline for the neuropil-subtracted fluorescence traces.
     if baseline_method == "maximin":
         # Uses truncate=3.0 to match the original suite2p's 3-sigma FIR Gaussian kernel, and mode='nearest'
         # (replicate edge values) for the min/max filters to match the original's boundary handling.
@@ -83,7 +82,6 @@ def compute_delta_fluorescence(
         )
         console.error(message=message, error=ValueError)
 
-    # Subtracts the computed baseline fluorescence from the neuropil-subtracted trace.
     subtracted -= baseline
     return subtracted
 
@@ -115,9 +113,7 @@ def apply_oasis_deconvolution(
     cell_fluorescence = np.ascontiguousarray(a=cell_fluorescence, dtype=np.float32)
     spike_traces: NDArray[np.float32] = np.zeros((roi_count, frame_count), dtype=np.float32)
 
-    # Runs the OASIS algorithm on all detected ROIs in batches.
     for start_index in range(0, roi_count, batch_size):
-        # Initializes worker arrays for the current batch.
         end_index = min(start_index + batch_size, roi_count)
         batch_count = end_index - start_index
         pool_amplitude = np.empty((batch_count, frame_count), dtype=np.float32)
