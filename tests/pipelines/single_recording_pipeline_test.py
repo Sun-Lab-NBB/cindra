@@ -13,11 +13,11 @@ from ataraxis_base_utilities import error_format, ensure_directory_exists
 from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 
 from cindra.io import (
-    create_binarization_marker,
     create_registration_marker,
     resolve_active_binary_marker,
     resolve_single_recording_contexts,
 )
+from cindra.io.binary import create_binarization_marker
 from cindra.io.context import PARAMETERS_FILENAME
 from cindra.dataclasses import RuntimeContext, AcquisitionParameters, SingleRecordingConfiguration
 from cindra.orchestration import SingleRecordingJobNames
@@ -66,153 +66,12 @@ _MAXIMUM_PIXEL_VALUE: int = 32766
 """The clipping ceiling for the synthetic movie, keeping intensities within the signed 16-bit range."""
 
 _TEST_WORKERS: int = 1
-"""The worker allocation every stage entry point receives in these tests, which keeps the synthetic runs serial."""
+"""The worker allocation the tests that invoke a stage entry point directly pass to it, which keeps those runs
+serial. The tests that drive the stages through run_single_recording_pipeline get the measured stage defaults
+instead."""
 
 _BINARY_ITEM_SIZE: int = 2
 """The number of bytes one pixel occupies inside a cindra binary, which stores int16 samples."""
-
-
-def _build_flickering_movie(*, frame_count: int, seed: int) -> NDArray[np.int16]:
-    """Builds a synthetic movie whose spatially fixed Gaussian blobs flicker independently across frames.
-
-    Notes:
-        Detection keys on temporal variance, so a movie of identical frames yields no detectable ROIs. Each blob is
-        therefore scaled by an independent positive random amplitude per frame to plant localized temporal signal.
-    """
-    generator = np.random.default_rng(seed=seed)
-    rows, columns = np.mgrid[0:_FRAME_HEIGHT, 0:_FRAME_WIDTH]
-    movie = np.full((frame_count, _FRAME_HEIGHT, _FRAME_WIDTH), fill_value=_BACKGROUND_LEVEL, dtype=np.float64)
-    for center_row, center_column in _BLOB_CENTERS:
-        blob = np.exp(-(((rows - center_row) ** 2 + (columns - center_column) ** 2) / (2.0 * _BLOB_SIGMA**2)))
-        amplitudes = _BLOB_AMPLITUDE * (0.5 + np.abs(generator.standard_normal(frame_count)))
-        movie += amplitudes[:, np.newaxis, np.newaxis] * blob[np.newaxis, :, :]
-    return np.clip(movie, 0, _MAXIMUM_PIXEL_VALUE).astype(np.int16)
-
-
-def _write_raw_recording(
-    data_directory: Path,
-    *,
-    frame_count: int = _FRAME_COUNT,
-    seed: int = 0,
-    plane_number: int = 1,
-    channel_number: int = 1,
-) -> None:
-    """Writes a multi-page TIFF and a raw acquisition parameters file describing the recording."""
-    ensure_directory_exists(data_directory)
-    source_frame_count = frame_count * channel_number
-    movie = _build_flickering_movie(frame_count=source_frame_count, seed=seed)
-    with TiffWriter(data_directory / "recording.tif") as writer:
-        for frame_index in range(source_frame_count):
-            writer.write(movie[frame_index])
-    parameters = {"frame_rate": 30.0, "plane_number": plane_number, "channel_number": channel_number}
-    (data_directory / PARAMETERS_FILENAME).write_text(json.dumps(parameters))
-
-
-def _declare_plane_count(root: Path, *, plane_count: int) -> None:
-    """Re-declares the imaging plane count in the recording's raw and saved acquisition parameter files."""
-    raw_path = root / "data" / PARAMETERS_FILENAME
-    parameters = json.loads(raw_path.read_text())
-    parameters["plane_number"] = plane_count
-    raw_path.write_text(json.dumps(parameters))
-
-    saved_path = root / "output" / "cindra" / "acquisition_parameters.yaml"
-    acquisition = AcquisitionParameters.from_yaml(file_path=saved_path)
-    acquisition.plane_number = plane_count
-    acquisition.to_yaml(file_path=saved_path)
-
-
-def _declare_channel_count(root: Path, *, channel_number: int) -> None:
-    """Re-declares the imaging channel count in the recording's raw and saved acquisition parameter files."""
-    raw_path = root / "data" / PARAMETERS_FILENAME
-    parameters = json.loads(raw_path.read_text())
-    parameters["channel_number"] = channel_number
-    raw_path.write_text(json.dumps(parameters))
-
-    saved_path = root / "output" / "cindra" / "acquisition_parameters.yaml"
-    acquisition = AcquisitionParameters.from_yaml(file_path=saved_path)
-    acquisition.channel_number = channel_number
-    acquisition.to_yaml(file_path=saved_path)
-
-
-def _write_mismatched_tiff(data_directory: Path) -> None:
-    """Writes a TIFF whose frames are shaped unlike the recording's, which the conversion refuses to bind together."""
-    with TiffWriter(data_directory / "zstack.tif") as writer:
-        writer.write(np.zeros((_FRAME_HEIGHT * 2, _FRAME_WIDTH * 2), dtype=np.int16))
-
-
-def _make_configuration(*, data_directory: Path | None, output_directory: Path | None) -> SingleRecordingConfiguration:
-    """Builds a tuned single-recording configuration that runs serially and detects the planted blobs."""
-    configuration = SingleRecordingConfiguration()
-    configuration.file_io.data_path = data_directory
-    configuration.file_io.output_path = output_directory
-    configuration.runtime.display_progress_bars = False
-    configuration.registration.registration_metric_principal_components = 0
-    configuration.nonrigid_registration.enabled = False
-    configuration.one_photon_registration.enabled = False
-    configuration.roi_detection.denoise = False
-    configuration.roi_detection.preclassification_threshold = 0.0
-    configuration.roi_detection.crop_to_soma = False
-    configuration.roi_detection.threshold_scaling = 0.5
-    configuration.main.tau = 0.01
-    return configuration
-
-
-def _prepare_pipeline_inputs(
-    root: Path, *, frame_count: int = _FRAME_COUNT, seed: int = 0, display_progress_bars: bool = False
-) -> tuple[Path, Path]:
-    """Writes a raw recording and a saved configuration file, returning the configuration path and output directory."""
-    data_directory = root / "data"
-    output_directory = root / "output"
-    _write_raw_recording(data_directory=data_directory, frame_count=frame_count, seed=seed)
-    configuration = _make_configuration(data_directory=data_directory, output_directory=output_directory)
-    configuration.runtime.display_progress_bars = display_progress_bars
-    configuration_path = root / "configuration.yaml"
-    configuration.save(file_path=configuration_path)
-    return configuration_path, output_directory
-
-
-def _bootstrap_recording(
-    root: Path, *, frame_count: int = _FRAME_COUNT, seed: int = 0, plane_number: int = 1, channel_number: int = 1
-) -> SingleRecordingConfiguration:
-    """Writes a raw recording and the filesystem bootstrap binarize_recording's load-only resolution depends on."""
-    data_directory = root / "data"
-    output_directory = root / "output"
-    _write_raw_recording(
-        data_directory=data_directory,
-        frame_count=frame_count,
-        seed=seed,
-        plane_number=plane_number,
-        channel_number=channel_number,
-    )
-    configuration = _make_configuration(data_directory=data_directory, output_directory=output_directory)
-    configuration.main.two_channels = channel_number > 1
-    resolve_single_recording_contexts(configuration=configuration, persist=True)
-    return configuration
-
-
-def _binarize_to_disk(
-    root: Path, *, frame_count: int = _FRAME_COUNT, seed: int = 0, plane_number: int = 1, channel_number: int = 1
-) -> SingleRecordingConfiguration:
-    """Writes a raw recording and binarizes it, returning the configuration bound to the on-disk binary outputs."""
-    configuration = _bootstrap_recording(
-        root=root, frame_count=frame_count, seed=seed, plane_number=plane_number, channel_number=channel_number
-    )
-    binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
-    return configuration
-
-
-def _register_to_disk(root: Path, *, frame_count: int = _FRAME_COUNT, seed: int = 0) -> SingleRecordingConfiguration:
-    """Binarizes and registers plane 0, returning the configuration bound to the registered on-disk outputs."""
-    configuration = _binarize_to_disk(root=root, frame_count=frame_count, seed=seed)
-    register_recording_plane(configuration=configuration, plane_index=0, workers=_TEST_WORKERS)
-    return configuration
-
-
-def _process_to_disk(root: Path) -> SingleRecordingConfiguration:
-    """Runs all four phases, returning a configuration bound to the fully processed on-disk outputs."""
-    configuration_path, output_directory = _prepare_pipeline_inputs(root)
-    run_single_recording_pipeline(configuration_path=configuration_path)
-    return _make_configuration(data_directory=root / "data", output_directory=output_directory)
 
 
 class TestRunSingleRecordingPipeline:
@@ -220,7 +79,7 @@ class TestRunSingleRecordingPipeline:
 
     def test_runs_all_phases_when_no_flags_set(self, tmp_path: Path) -> None:
         """Verifies that omitting every phase flag runs the four phases end-to-end in their dependency order."""
-        configuration_path, output_directory = _prepare_pipeline_inputs(tmp_path)
+        configuration_path, output_directory = _prepare_pipeline_inputs(root=tmp_path)
 
         run_single_recording_pipeline(configuration_path=configuration_path)
 
@@ -238,7 +97,7 @@ class TestRunSingleRecordingPipeline:
 
     def test_runs_all_four_phase_jobs_for_every_plane(self, tmp_path: Path) -> None:
         """Verifies that the tracker records a registration job per plane, sequenced before the processing job."""
-        configuration_path, output_directory = _prepare_pipeline_inputs(tmp_path)
+        configuration_path, output_directory = _prepare_pipeline_inputs(root=tmp_path)
 
         run_single_recording_pipeline(configuration_path=configuration_path)
 
@@ -279,7 +138,7 @@ class TestRunSingleRecordingPipeline:
 
     def test_out_of_range_target_plane_raises(self, tmp_path: Path) -> None:
         """Verifies that a target plane the recording does not hold raises a ValueError before the tracker is built."""
-        configuration_path, output_directory = _prepare_pipeline_inputs(tmp_path)
+        configuration_path, output_directory = _prepare_pipeline_inputs(root=tmp_path)
 
         # The synthetic recording holds a single plane, so index 1 falls outside the resolved plane range.
         expected_message = (
@@ -294,7 +153,7 @@ class TestRunSingleRecordingPipeline:
 
     def test_remote_mode_executes_individual_jobs(self, tmp_path: Path) -> None:
         """Verifies that remote mode executes each of the four phase jobs addressed by its own job ID."""
-        configuration_path, output_directory = _prepare_pipeline_inputs(tmp_path)
+        configuration_path, output_directory = _prepare_pipeline_inputs(root=tmp_path)
 
         # Bootstraps the per-plane runtime data and binaries so that the remote (load-only) resolutions succeed.
         run_single_recording_pipeline(configuration_path=configuration_path, binarize=True)
@@ -314,7 +173,7 @@ class TestRunSingleRecordingPipeline:
 
     def test_remote_mode_rejects_process_before_register(self, tmp_path: Path) -> None:
         """Verifies that addressing the processing job of an unregistered plane raises from the registration guard."""
-        configuration_path, _ = _prepare_pipeline_inputs(tmp_path)
+        configuration_path, _ = _prepare_pipeline_inputs(root=tmp_path)
 
         run_single_recording_pipeline(configuration_path=configuration_path, binarize=True)
 
@@ -330,7 +189,7 @@ class TestRunSingleRecordingPipeline:
 
     def test_invalid_job_id_raises(self, tmp_path: Path) -> None:
         """Verifies that a job identifier outside the configuration's job universe raises a ValueError."""
-        configuration_path, output_directory = _prepare_pipeline_inputs(tmp_path)
+        configuration_path, output_directory = _prepare_pipeline_inputs(root=tmp_path)
 
         # Bootstraps the runtime data so that the remote resolution reaches the job identifier validation.
         run_single_recording_pipeline(configuration_path=configuration_path, binarize=True)
@@ -434,7 +293,7 @@ class TestBinarizeRecording:
     def test_without_bootstrap_raises(self, tmp_path: Path) -> None:
         """Verifies that binarizing before the filesystem bootstrap exists raises a FileNotFoundError."""
         data_directory = tmp_path / "data"
-        _write_raw_recording(data_directory)
+        _write_raw_recording(data_directory=data_directory)
         configuration = _make_configuration(data_directory=data_directory, output_directory=tmp_path / "output")
 
         runtime_path = tmp_path / "output" / "cindra" / "plane_0" / "runtime_data.yaml"
@@ -458,7 +317,7 @@ class TestBinarizeRecording:
 
     def test_skips_existing_valid_binaries(self, tmp_path: Path) -> None:
         """Verifies that a second binarization is skipped when valid binaries already exist on disk."""
-        configuration = _binarize_to_disk(tmp_path)
+        configuration = _binarize_to_disk(root=tmp_path)
         binary_path = tmp_path / "output" / "cindra" / "plane_0" / "channel_1_data.bin"
         first_size = binary_path.stat().st_size
 
@@ -469,7 +328,7 @@ class TestBinarizeRecording:
 
     def test_repeat_binarization_recreates_binaries(self, tmp_path: Path) -> None:
         """Verifies that the repeat_binarization flag forces a fresh conversion over existing valid binaries."""
-        configuration = _binarize_to_disk(tmp_path)
+        configuration = _binarize_to_disk(root=tmp_path)
         configuration.file_io.repeat_binarization = True
         binary_path = tmp_path / "output" / "cindra" / "plane_0" / "channel_1_data.bin"
 
@@ -479,7 +338,7 @@ class TestBinarizeRecording:
 
     def test_recreates_missing_binaries(self, tmp_path: Path) -> None:
         """Verifies that binarization recreates the binaries when a previously written binary file is deleted."""
-        configuration = _binarize_to_disk(tmp_path)
+        configuration = _binarize_to_disk(root=tmp_path)
         binary_path = tmp_path / "output" / "cindra" / "plane_0" / "channel_1_data.bin"
         binary_path.unlink()
 
@@ -489,7 +348,7 @@ class TestBinarizeRecording:
 
     def test_truncated_binary_raises(self, tmp_path: Path) -> None:
         """Verifies that a binary whose size disagrees with its recorded frame geometry is refused."""
-        configuration = _binarize_to_disk(tmp_path)
+        configuration = _binarize_to_disk(root=tmp_path)
         binary_path = tmp_path / "output" / "cindra" / "plane_0" / "channel_1_data.bin"
         truncated_size = binary_path.stat().st_size // 2
 
@@ -506,8 +365,8 @@ class TestBinarizeRecording:
 
     def test_plane_without_recorded_geometry_skips_the_size_check(self, tmp_path: Path) -> None:
         """Verifies that a plane whose runtime record carries no frame geometry is exempt from the size check."""
-        # A freshly bootstrapped plane records a zero frame height, width, and count, and the conversion clears the
-        # binarization marker before it saves the geometry it measured. A conversion killed between those two writes
+        # A freshly bootstrapped plane records a zero frame height, width, and count, and the conversion saves the
+        # geometry it measured before it clears the binarization marker. A conversion killed before that save
         # therefore leaves a binary beside a runtime record that states no geometry, which is the state built here.
         configuration = _bootstrap_recording(root=tmp_path)
         plane_directory = tmp_path / "output" / "cindra" / "plane_0"
@@ -546,7 +405,7 @@ class TestBinarizeRecording:
     @pytest.mark.parametrize("create_marker", [create_binarization_marker, create_registration_marker])
     def test_marked_binary_raises(self, tmp_path: Path, create_marker: Callable[..., None]) -> None:
         """Verifies that a binary either phase left marked is refused and the failure names the interrupted phase."""
-        configuration = _binarize_to_disk(tmp_path)
+        configuration = _binarize_to_disk(root=tmp_path)
         binary_path = tmp_path / "output" / "cindra" / "plane_0" / "channel_1_data.bin"
         original_bytes = binary_path.read_bytes()
         create_marker(binary_path=binary_path)
@@ -563,7 +422,7 @@ class TestBinarizeRecording:
 
     def test_missing_second_channel_binary_raises(self, tmp_path: Path) -> None:
         """Verifies that a converted plane of a two-channel recording missing its second binary is refused."""
-        configuration = _binarize_to_disk(tmp_path, channel_number=2)
+        configuration = _binarize_to_disk(root=tmp_path, channel_number=2)
         plane_directory = tmp_path / "output" / "cindra" / "plane_0"
         channel_1_path = plane_directory / "channel_1_data.bin"
         channel_2_path = plane_directory / "channel_2_data.bin"
@@ -579,7 +438,7 @@ class TestBinarizeRecording:
 
     def test_plane_without_a_recorded_output_directory_holds_no_second_channel(self, tmp_path: Path) -> None:
         """Verifies that a plane naming neither a second binary nor an output directory escapes the channel check."""
-        configuration = _binarize_to_disk(tmp_path, channel_number=2)
+        configuration = _binarize_to_disk(root=tmp_path, channel_number=2)
         plane_directory = tmp_path / "output" / "cindra" / "plane_0"
         channel_2_path = plane_directory / "channel_2_data.bin"
         channel_2_path.unlink()
@@ -616,7 +475,7 @@ class TestBinarizeRecording:
 
     def test_second_channel_declared_after_conversion_raises(self, tmp_path: Path) -> None:
         """Verifies that raising the declared channel count refuses the planes converted under the previous count."""
-        configuration = _binarize_to_disk(tmp_path)
+        configuration = _binarize_to_disk(root=tmp_path)
         _declare_channel_count(root=tmp_path, channel_number=2)
 
         with pytest.raises(RuntimeError, match=r"channel_2_data\.bin"):
@@ -624,7 +483,7 @@ class TestBinarizeRecording:
 
     def test_skips_a_complete_two_channel_recording(self, tmp_path: Path) -> None:
         """Verifies that a two-channel recording holding both binaries of every plane is skipped."""
-        configuration = _binarize_to_disk(tmp_path, channel_number=2)
+        configuration = _binarize_to_disk(root=tmp_path, channel_number=2)
         plane_directory = tmp_path / "output" / "cindra" / "plane_0"
         sizes = {path.name: path.stat().st_size for path in plane_directory.glob("channel_*_data.bin")}
         assert len(sizes) == 2
@@ -635,7 +494,7 @@ class TestBinarizeRecording:
 
     def test_single_channel_recording_holding_no_second_binary_is_skipped(self, tmp_path: Path) -> None:
         """Verifies that the second channel refusal stays silent for a recording declaring a single channel."""
-        configuration = _binarize_to_disk(tmp_path)
+        configuration = _binarize_to_disk(root=tmp_path)
         plane_directory = tmp_path / "output" / "cindra" / "plane_0"
         binary_size = (plane_directory / "channel_1_data.bin").stat().st_size
         assert not (plane_directory / "channel_2_data.bin").exists()
@@ -647,7 +506,7 @@ class TestBinarizeRecording:
     @pytest.mark.parametrize("refusal", ["truncated_binary", "binarization_marker", "registration_marker"])
     def test_repeat_binarization_rebuilds_past_every_refusal(self, tmp_path: Path, refusal: str) -> None:
         """Verifies that the caller-requested rebuild converts a recording each refusal would otherwise reject."""
-        configuration = _binarize_to_disk(tmp_path)
+        configuration = _binarize_to_disk(root=tmp_path)
         binary_path = tmp_path / "output" / "cindra" / "plane_0" / "channel_1_data.bin"
         full_size = binary_path.stat().st_size
 
@@ -667,7 +526,7 @@ class TestBinarizeRecording:
 
     def test_repeat_binarization_restores_a_deleted_second_channel_binary(self, tmp_path: Path) -> None:
         """Verifies that the caller-requested rebuild writes back the second channel binary a refusal names."""
-        configuration = _binarize_to_disk(tmp_path, channel_number=2)
+        configuration = _binarize_to_disk(root=tmp_path, channel_number=2)
         channel_2_path = tmp_path / "output" / "cindra" / "plane_0" / "channel_2_data.bin"
         full_size = channel_2_path.stat().st_size
         channel_2_path.unlink()
@@ -800,7 +659,7 @@ class TestBinarizeRecording:
 
     def test_rebuild_clears_undeclared_plane_results(self, tmp_path: Path) -> None:
         """Verifies that a rebuild clears the results of every plane directory the output root holds."""
-        configuration = _binarize_to_disk(tmp_path, plane_number=2)
+        configuration = _binarize_to_disk(root=tmp_path, plane_number=2)
         root_directory = tmp_path / "output" / "cindra"
         undeclared_directory = root_directory / "plane_1"
         undeclared_binary = undeclared_directory / "channel_1_data.bin"
@@ -845,7 +704,7 @@ class TestBinarizeRecording:
 
     def test_skips_a_registered_binary(self, tmp_path: Path) -> None:
         """Verifies that a binary whose contents registration rewrote in place is treated as valid and left intact."""
-        configuration = _binarize_to_disk(tmp_path)
+        configuration = _binarize_to_disk(root=tmp_path)
         binary_path = tmp_path / "output" / "cindra" / "plane_0" / "channel_1_data.bin"
 
         # Registration rewrites a binary in place, so it changes the contents while preserving the size. Overwriting
@@ -912,7 +771,7 @@ class TestRegisterRecordingPlane:
 
     def test_registers_plane_and_records_allocation(self, tmp_path: Path) -> None:
         """Verifies that registering a binarized plane writes registration output and records the used allocation."""
-        _register_to_disk(tmp_path)
+        _register_to_disk(root=tmp_path)
 
         context = RuntimeContext.load(root_path=tmp_path / "output" / "cindra", plane_index=0)
         assert not isinstance(context, list)
@@ -977,7 +836,7 @@ class TestProcessPlane:
 
     def test_unregistered_plane_raises(self, tmp_path: Path) -> None:
         """Verifies that processing a binarized but unregistered plane raises from the registration guard."""
-        configuration = _binarize_to_disk(tmp_path)
+        configuration = _binarize_to_disk(root=tmp_path)
 
         expected_message = (
             "Unable to process plane 0. The plane must be registered before ROI detection, but no registration data "
@@ -994,7 +853,7 @@ class TestProcessPlane:
 
     def test_registered_plane_detects_rois(self, tmp_path: Path) -> None:
         """Verifies that processing a registered plane detects ROIs and records the used allocation."""
-        configuration = _register_to_disk(tmp_path)
+        configuration = _register_to_disk(root=tmp_path)
 
         process_plane(configuration=configuration, plane_index=0, workers=_TEST_WORKERS)
 
@@ -1181,7 +1040,7 @@ class TestExecuteSingleRecordingJobInjection:
 
     def test_injected_tracker_records_jobs_without_disturbing_foreign_entries(self, tmp_path: Path) -> None:
         """Verifies that all four phases stamp a foreign tracker while preserving its other jobs."""
-        configuration_path, output_directory = _prepare_pipeline_inputs(tmp_path)
+        configuration_path, output_directory = _prepare_pipeline_inputs(root=tmp_path)
 
         # Builds a caller-owned tracker whose universe uses the caller's own job names and includes a foreign job the
         # injected executor leaves in place, mirroring how an owning pipeline would drive cindra.
@@ -1252,7 +1111,7 @@ class TestExecuteSingleRecordingJobInjection:
 
     def test_injected_process_before_register_raises(self, tmp_path: Path) -> None:
         """Verifies that a caller that skips the registration job fails loudly at the registration guard."""
-        configuration_path, _ = _prepare_pipeline_inputs(tmp_path)
+        configuration_path, _ = _prepare_pipeline_inputs(root=tmp_path)
 
         universe = [("recording_binarize", ""), ("recording_process", "plane_0")]
         tracker = ProcessingTracker(file_path=tmp_path / "owner_tracker.yaml")
@@ -1304,3 +1163,146 @@ class TestExecuteSingleRecordingJobInjection:
                 job_id="deadbeefdeadbeef",
                 tracker=tracker,
             )
+
+
+def _build_flickering_movie(*, frame_count: int, seed: int) -> NDArray[np.int16]:
+    """Builds a synthetic movie whose spatially fixed Gaussian blobs flicker independently across frames.
+
+    Notes:
+        Detection keys on temporal variance, so a movie of identical frames yields no detectable ROIs. Each blob is
+        therefore scaled by an independent positive random amplitude per frame to plant localized temporal signal.
+    """
+    generator = np.random.default_rng(seed=seed)
+    rows, columns = np.mgrid[0:_FRAME_HEIGHT, 0:_FRAME_WIDTH]
+    movie = np.full((frame_count, _FRAME_HEIGHT, _FRAME_WIDTH), fill_value=_BACKGROUND_LEVEL, dtype=np.float64)
+    for center_row, center_column in _BLOB_CENTERS:
+        blob = np.exp(-(((rows - center_row) ** 2 + (columns - center_column) ** 2) / (2.0 * _BLOB_SIGMA**2)))
+        amplitudes = _BLOB_AMPLITUDE * (0.5 + np.abs(generator.standard_normal(frame_count)))
+        movie += amplitudes[:, np.newaxis, np.newaxis] * blob[np.newaxis, :, :]
+    return np.clip(movie, 0, _MAXIMUM_PIXEL_VALUE).astype(np.int16)
+
+
+def _write_raw_recording(
+    data_directory: Path,
+    *,
+    frame_count: int = _FRAME_COUNT,
+    seed: int = 0,
+    plane_number: int = 1,
+    channel_number: int = 1,
+) -> None:
+    """Writes a multi-page TIFF and a raw acquisition parameters file describing the recording."""
+    ensure_directory_exists(data_directory)
+    source_frame_count = frame_count * channel_number
+    movie = _build_flickering_movie(frame_count=source_frame_count, seed=seed)
+    with TiffWriter(data_directory / "recording.tif") as writer:
+        for frame_index in range(source_frame_count):
+            writer.write(movie[frame_index])
+    parameters = {"frame_rate": 30.0, "plane_number": plane_number, "channel_number": channel_number}
+    (data_directory / PARAMETERS_FILENAME).write_text(json.dumps(parameters))
+
+
+def _declare_plane_count(root: Path, *, plane_count: int) -> None:
+    """Re-declares the imaging plane count in the recording's raw and saved acquisition parameter files."""
+    raw_path = root / "data" / PARAMETERS_FILENAME
+    parameters = json.loads(raw_path.read_text())
+    parameters["plane_number"] = plane_count
+    raw_path.write_text(json.dumps(parameters))
+
+    saved_path = root / "output" / "cindra" / "acquisition_parameters.yaml"
+    acquisition = AcquisitionParameters.from_yaml(file_path=saved_path)
+    acquisition.plane_number = plane_count
+    acquisition.to_yaml(file_path=saved_path)
+
+
+def _declare_channel_count(root: Path, *, channel_number: int) -> None:
+    """Re-declares the imaging channel count in the recording's raw and saved acquisition parameter files."""
+    raw_path = root / "data" / PARAMETERS_FILENAME
+    parameters = json.loads(raw_path.read_text())
+    parameters["channel_number"] = channel_number
+    raw_path.write_text(json.dumps(parameters))
+
+    saved_path = root / "output" / "cindra" / "acquisition_parameters.yaml"
+    acquisition = AcquisitionParameters.from_yaml(file_path=saved_path)
+    acquisition.channel_number = channel_number
+    acquisition.to_yaml(file_path=saved_path)
+
+
+def _write_mismatched_tiff(data_directory: Path) -> None:
+    """Writes a TIFF whose frames are shaped unlike the recording's, which the conversion refuses to bind together."""
+    with TiffWriter(data_directory / "zstack.tif") as writer:
+        writer.write(np.zeros((_FRAME_HEIGHT * 2, _FRAME_WIDTH * 2), dtype=np.int16))
+
+
+def _make_configuration(*, data_directory: Path | None, output_directory: Path | None) -> SingleRecordingConfiguration:
+    """Builds a tuned single-recording configuration that detects the planted blobs."""
+    configuration = SingleRecordingConfiguration()
+    configuration.file_io.data_path = data_directory
+    configuration.file_io.output_path = output_directory
+    configuration.runtime.display_progress_bars = False
+    configuration.registration.registration_metric_principal_components = 0
+    configuration.nonrigid_registration.enabled = False
+    configuration.one_photon_registration.enabled = False
+    configuration.roi_detection.denoise = False
+    configuration.roi_detection.preclassification_threshold = 0.0
+    configuration.roi_detection.crop_to_soma = False
+    configuration.roi_detection.threshold_scaling = 0.5
+    configuration.main.tau = 0.01
+    return configuration
+
+
+def _prepare_pipeline_inputs(
+    root: Path, *, frame_count: int = _FRAME_COUNT, seed: int = 0, display_progress_bars: bool = False
+) -> tuple[Path, Path]:
+    """Writes a raw recording and a saved configuration file, returning the configuration path and output directory."""
+    data_directory = root / "data"
+    output_directory = root / "output"
+    _write_raw_recording(data_directory=data_directory, frame_count=frame_count, seed=seed)
+    configuration = _make_configuration(data_directory=data_directory, output_directory=output_directory)
+    configuration.runtime.display_progress_bars = display_progress_bars
+    configuration_path = root / "configuration.yaml"
+    configuration.save(file_path=configuration_path)
+    return configuration_path, output_directory
+
+
+def _bootstrap_recording(
+    root: Path, *, frame_count: int = _FRAME_COUNT, seed: int = 0, plane_number: int = 1, channel_number: int = 1
+) -> SingleRecordingConfiguration:
+    """Writes a raw recording and the filesystem bootstrap binarize_recording's load-only resolution depends on."""
+    data_directory = root / "data"
+    output_directory = root / "output"
+    _write_raw_recording(
+        data_directory=data_directory,
+        frame_count=frame_count,
+        seed=seed,
+        plane_number=plane_number,
+        channel_number=channel_number,
+    )
+    configuration = _make_configuration(data_directory=data_directory, output_directory=output_directory)
+    configuration.main.two_channels = channel_number > 1
+    resolve_single_recording_contexts(configuration=configuration, persist=True)
+    return configuration
+
+
+def _binarize_to_disk(
+    root: Path, *, frame_count: int = _FRAME_COUNT, seed: int = 0, plane_number: int = 1, channel_number: int = 1
+) -> SingleRecordingConfiguration:
+    """Writes a raw recording and binarizes it, returning the configuration bound to the on-disk binary outputs."""
+    configuration = _bootstrap_recording(
+        root=root, frame_count=frame_count, seed=seed, plane_number=plane_number, channel_number=channel_number
+    )
+    binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
+    return configuration
+
+
+def _register_to_disk(root: Path, *, frame_count: int = _FRAME_COUNT, seed: int = 0) -> SingleRecordingConfiguration:
+    """Binarizes and registers plane 0, returning the configuration bound to the registered on-disk outputs."""
+    configuration = _binarize_to_disk(root=root, frame_count=frame_count, seed=seed)
+    register_recording_plane(configuration=configuration, plane_index=0, workers=_TEST_WORKERS)
+    return configuration
+
+
+def _process_to_disk(root: Path) -> SingleRecordingConfiguration:
+    """Runs all four phases, returning a configuration bound to the fully processed on-disk outputs."""
+    configuration_path, output_directory = _prepare_pipeline_inputs(root=root)
+    run_single_recording_pipeline(configuration_path=configuration_path)
+    return _make_configuration(data_directory=root / "data", output_directory=output_directory)

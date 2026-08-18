@@ -68,7 +68,7 @@ dependencies = [
 
     # GUI
     "pyside6>=6,<7",
-    "pyqtgraph>=0.14,<1",  # 0.14 is the release whose bundled colormaps and PySide6 binding the viewers are built on
+    "pyqtgraph>=0.14,<1",  # 0.14 is the release whose PySide6 binding the viewers are built on
 
     # CLI and MCP Server
     "click>=8,<9",
@@ -121,7 +121,7 @@ dev = [
 
 # Specifies files that should not be included in the source-code distribution.
 [tool.hatch.build.targets.sdist]
-exclude = [".github", "recipe"]
+exclude = [".github"]
 
 # Specifies the library structure.
 [tool.hatch.build.targets.wheel]
@@ -228,7 +228,6 @@ exclude = [
     "dist/",
     "docs/",
     "stubs/",       # stubgen output target
-    "recipe/",      # grayskull output target
     "tests/",
 ]
 
@@ -287,7 +286,7 @@ directory = "reports/coverage_html"
 # measurement above. The lines carrying a 'pragma: no cover' comment, such as the Numba JIT bodies and the defensive
 # branches guarding degenerate geometry, do not count against the gate.
 [tool.coverage.report]
-fail_under = 100     # Requires the test suite to cover every measured statement
+fail_under = 100     # Requires the test suite to cover every measured statement and branch
 show_missing = true  # Lists the statements missed by the test suite, so a failed check names the lines to cover
 
 # Every entry is an unanchored regular expression matched against each source line, and a match on a 'def' or on any

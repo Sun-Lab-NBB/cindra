@@ -1,6 +1,5 @@
 """Provides configuration and runtime data classes for the single-recording and multi-recording cindra pipelines."""
 
-from .version import VERSION, PYTHON_VERSION
 from .runtime_contexts import RuntimeContext, MultiRecordingRuntimeContext
 from .multi_recording_data import (
     MultiRecordingIOData,
@@ -46,8 +45,6 @@ from .single_recording_configuration import (
 )
 
 __all__ = [
-    "PYTHON_VERSION",
-    "VERSION",
     "AcquisitionParameters",
     "BaselineMethod",
     "CombinedData",

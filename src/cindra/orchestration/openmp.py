@@ -302,7 +302,7 @@ def _verify_runtime_loadable() -> bool:
         True when the fresh interpreter loads the runtime, and False when it does not.
     """
     result = subprocess.run(  # noqa: S603 - The command is assembled from this module's constants alone.
-        [sys.executable, "-c", _VERIFICATION_SCRIPT],
+        args=[sys.executable, "-c", _VERIFICATION_SCRIPT],
         capture_output=True,
         check=False,
         timeout=_VERIFICATION_TIMEOUT,

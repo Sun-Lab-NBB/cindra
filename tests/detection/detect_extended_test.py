@@ -9,55 +9,6 @@ from cindra.detection.detect import _apply_preclassification
 from cindra.classification.classify import classify
 
 
-def _make_circular_roi(
-    centroid: tuple[int, int],
-    radius: int = 5,
-    frame_width: int = 64,
-) -> ROIStatistics:
-    """Creates an ROIStatistics instance with a circular mask for testing."""
-    y_pixels = []
-    x_pixels = []
-    for delta_y in range(-radius, radius + 1):
-        for delta_x in range(-radius, radius + 1):
-            if delta_y**2 + delta_x**2 <= radius**2:
-                y_pixels.append(centroid[0] + delta_y)
-                x_pixels.append(centroid[1] + delta_x)
-    y_array = np.array(y_pixels, dtype=np.int32)
-    x_array = np.array(x_pixels, dtype=np.int32)
-    pixel_weights = np.ones(len(y_pixels), dtype=np.float32)
-    pixel_weights /= np.linalg.norm(pixel_weights)
-    mask = ROIMask(
-        y_pixels=y_array,
-        x_pixels=x_array,
-        pixel_weights=pixel_weights,
-        centroid=centroid,
-        frame_width=frame_width,
-        radius=float(radius),
-    )
-    return ROIStatistics(mask=mask)
-
-
-def _make_line_roi(
-    centroid: tuple[int, int],
-    length: int,
-    frame_width: int = 64,
-) -> ROIStatistics:
-    """Creates an ROIStatistics instance with a one-pixel-wide horizontal mask for testing."""
-    y_array = np.full(length, fill_value=centroid[0], dtype=np.int32)
-    x_array = np.arange(centroid[1], centroid[1] + length, dtype=np.int32)
-    pixel_weights = np.ones(length, dtype=np.float32)
-    pixel_weights /= np.linalg.norm(pixel_weights)
-    mask = ROIMask(
-        y_pixels=y_array,
-        x_pixels=x_array,
-        pixel_weights=pixel_weights,
-        centroid=(centroid[0], int(np.median(x_array))),
-        frame_width=frame_width,
-        radius=float(length) / 2.0,
-    )
-    return ROIStatistics(mask=mask)
-
-
 class TestApplyPreclassification:
     """Tests _apply_preclassification."""
 
@@ -106,10 +57,10 @@ class TestApplyPreclassification:
 
     def test_threshold_keeps_the_compact_rois_and_drops_the_lines(self) -> None:
         """Verifies that the pass keeps exactly the ROIs whose classifier probability clears the threshold."""
-        # The preclassifier scores compactness and normalized pixel count alone, so a one-pixel-wide line, whose
-        # mean radius is four times the radius its pixel count would occupy if it were compact, scores far below a
-        # disk of the same pixel budget. Interleaving the two shapes means a pass that reversed, inverted, or
-        # misaligned its keep mask selects a different set rather than the same one.
+        # The preclassifier scores compactness and normalized pixel count alone. A one-pixel-wide line, whose mean
+        # radius is four times the radius its pixel count would occupy if it were compact, therefore scores far
+        # below a disk of the same pixel budget. Interleaving the two shapes means a pass that reversed, inverted,
+        # or misaligned its keep mask selects a different set rather than the same one.
         compact_roi = _make_circular_roi(centroid=(20, 20), radius=3)
         long_line_roi = _make_line_roi(centroid=(30, 10), length=40)
         small_compact_roi = _make_circular_roi(centroid=(10, 50), radius=2)
@@ -175,3 +126,47 @@ class TestApplyPreclassification:
         original_ids = {id(roi) for roi in roi_statistics}
         for roi in result:
             assert id(roi) in original_ids
+
+
+def _make_circular_roi(
+    centroid: tuple[int, int],
+    radius: int = 5,
+    frame_width: int = 64,
+) -> ROIStatistics:
+    """Creates an ROIStatistics instance with a circular mask for testing."""
+    row_offsets, column_offsets = np.mgrid[-radius : radius + 1, -radius : radius + 1]
+    inside = row_offsets**2 + column_offsets**2 <= radius**2
+    y_array = (centroid[0] + row_offsets[inside]).astype(np.int32)
+    x_array = (centroid[1] + column_offsets[inside]).astype(np.int32)
+    pixel_weights = np.ones(y_array.size, dtype=np.float32)
+    pixel_weights /= np.linalg.norm(pixel_weights)
+    mask = ROIMask(
+        y_pixels=y_array,
+        x_pixels=x_array,
+        pixel_weights=pixel_weights,
+        centroid=centroid,
+        frame_width=frame_width,
+        radius=float(radius),
+    )
+    return ROIStatistics(mask=mask)
+
+
+def _make_line_roi(
+    centroid: tuple[int, int],
+    length: int,
+    frame_width: int = 64,
+) -> ROIStatistics:
+    """Creates an ROIStatistics instance with a one-pixel-wide horizontal mask for testing."""
+    y_array = np.full(length, fill_value=centroid[0], dtype=np.int32)
+    x_array = np.arange(centroid[1], centroid[1] + length, dtype=np.int32)
+    pixel_weights = np.ones(length, dtype=np.float32)
+    pixel_weights /= np.linalg.norm(pixel_weights)
+    mask = ROIMask(
+        y_pixels=y_array,
+        x_pixels=x_array,
+        pixel_weights=pixel_weights,
+        centroid=(centroid[0], int(np.median(x_array))),
+        frame_width=frame_width,
+        radius=float(length) / 2.0,
+    )
+    return ROIStatistics(mask=mask)

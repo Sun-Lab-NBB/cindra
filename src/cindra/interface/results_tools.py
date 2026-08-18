@@ -54,6 +54,9 @@ _MAX_TRACE_ROIS: int = 50
 _MAX_STATS_ROIS: int = 500
 """Maximum number of ROIs whose statistics can be returned in a single request."""
 
+_MAX_TEMPLATE_ENTRIES: int = 200
+"""Maximum number of tracked ROI templates summarized in a single request."""
+
 _CELL_LABEL_THRESHOLD: float = 0.5
 """The threshold above which a classification label value is considered a cell."""
 
@@ -104,13 +107,12 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
         their indices. Those planes are binarized and never processed, so only their binarization output is required
         and their registration, projection, and extraction files count as optional.
     """
-    cindra_root, error = _find_cindra_root(recording_path)
+    cindra_root, error = _find_cindra_root(recording_path=recording_path)
     if cindra_root is None:
         return {"success": False, "error": f"Unable to verify output. {error}"}
 
     state = _VerificationState()
 
-    # Detects two-channel status from combined metadata if available.
     two_channels = False
     combined_metadata_path = cindra_root / COMBINED_METADATA_FILENAME
     if combined_metadata_path.exists():
@@ -120,7 +122,6 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
                 channel_2_paths = metadata["registered_binary_paths_channel_2"]
                 two_channels = len(channel_2_paths) > 0 and str(channel_2_paths[0]) != ""
 
-    # Root-level files.
     _check_file_exists(
         label=SINGLE_RECORDING_CONFIGURATION_FILENAME,
         path=cindra_root / SINGLE_RECORDING_CONFIGURATION_FILENAME,
@@ -144,7 +145,6 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
         state=state,
     )
 
-    # Combined detection images.
     detection_directory = cindra_root / DETECTION_DATA_DIRECTORY_NAME
     name: str
     for name in (
@@ -165,7 +165,6 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
                 label=f"detection_data/{name}", path=detection_directory / name, state=state, required=False
             )
 
-    # Combined extraction data.
     _check_file_exists(label=RecordingArrays.ROI_MASKS, path=cindra_root / RecordingArrays.ROI_MASKS, state=state)
     _check_npz_keys(
         label=RecordingArrays.ROI_MASKS,
@@ -203,7 +202,7 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
     # Per-plane directories. A flyback plane is binarized and never registered or processed, so only the files
     # binarization writes are required of it.
     flyback_planes = _resolve_flyback_planes(cindra_root=cindra_root)
-    planes = _list_plane_directories(cindra_root)
+    planes = _list_plane_directories(cindra_root=cindra_root)
     plane_count = len(planes)
     for plane_directory in planes:
         plane_name = plane_directory.name
@@ -224,7 +223,6 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
                 required=False,
             )
 
-        # Per-plane registration data.
         registration_directory = plane_directory / REGISTRATION_DATA_DIRECTORY_NAME
         for name in (
             RegistrationArrays.REFERENCE_IMAGE,
@@ -362,7 +360,7 @@ def verify_multi_recording_output_tool(recording_path: str, dataset: str) -> dic
         per-recording entry. The 'warnings' list holds non-fatal issues such as a registered-binary path that does
         not resolve on disk.
     """
-    cindra_root, error = _find_cindra_root(recording_path)
+    cindra_root, error = _find_cindra_root(recording_path=recording_path)
     if cindra_root is None:
         return {"success": False, "error": f"Unable to verify output. {error}"}
 
@@ -372,8 +370,7 @@ def verify_multi_recording_output_tool(recording_path: str, dataset: str) -> dic
 
     state = _VerificationState()
 
-    # Loads entry recording runtime data to discover all recordings in the dataset.
-    runtime_yaml = _load_yaml(dataset_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
+    runtime_yaml = _load_yaml(file_path=dataset_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
     if runtime_yaml is None:
         return {
             "success": False,
@@ -385,7 +382,7 @@ def verify_multi_recording_output_tool(recording_path: str, dataset: str) -> dic
     recording_count = len(dataset_output_paths)
     recording_results: list[dict[str, Any]] = []
 
-    # Shared configuration (main recording only, first in natural sort order).
+    # Checks the shared configuration once, because only the main recording, first in natural sort order, holds it.
     configuration_found = False
     for output_path_string in dataset_output_paths:
         output_path = Path(output_path_string)
@@ -401,12 +398,11 @@ def verify_multi_recording_output_tool(recording_path: str, dataset: str) -> dic
         state.missing.append(MULTI_RECORDING_CONFIGURATION_FILENAME)
         state.total_checks += 1
 
-    # Per-recording verification.
     for index, output_path_string in enumerate(dataset_output_paths):
         output_path = Path(output_path_string)
         recording_prefix = f"recording_{index}"
 
-        recording_runtime = _load_yaml(output_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
+        recording_runtime = _load_yaml(file_path=output_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
         recording_id = (
             recording_runtime.get("io", {}).get("recording_id", f"unknown_{index}")
             if recording_runtime is not None
@@ -434,7 +430,6 @@ def verify_multi_recording_output_tool(recording_path: str, dataset: str) -> dic
             state=state,
         )
 
-        # Registration data.
         registration_directory = output_path / MULTI_RECORDING_ARRAYS_DIRECTORY_NAME
         name: str
         for name in (
@@ -462,7 +457,6 @@ def verify_multi_recording_output_tool(recording_path: str, dataset: str) -> dic
             state=state,
         )
 
-        # Tracking data.
         _check_file_exists(
             label=f"{recording_prefix}/tracking_template_masks.npz",
             path=output_path / TRACKING_TEMPLATE_MASKS_FILENAME,
@@ -475,7 +469,6 @@ def verify_multi_recording_output_tool(recording_path: str, dataset: str) -> dic
             state=state,
         )
 
-        # Extraction data.
         _check_file_exists(
             label=f"{recording_prefix}/roi_masks.npz", path=output_path / RecordingArrays.ROI_MASKS, state=state
         )
@@ -492,7 +485,6 @@ def verify_multi_recording_output_tool(recording_path: str, dataset: str) -> dic
         ):
             _check_file_exists(label=f"{recording_prefix}/{name}", path=output_path / name, state=state)
 
-        # Channel 2 files (optional).
         for name in (
             resolve_channel_2_name(name=DEFORMED_MASKS_FILENAME),
             resolve_channel_2_name(name=TRACKING_TEMPLATE_MASKS_FILENAME),
@@ -555,7 +547,7 @@ def query_single_recording_metadata_tool(recording_path: str) -> dict[str, objec
         relevant source files exist, also contains 'roi_count', 'cell_count', 'non_cell_count', 'frame_count', and
         per-plane 'plane_timing' entries. On failure to resolve the recording, contains an 'error' message.
     """
-    cindra_root, error = _find_cindra_root(recording_path)
+    cindra_root, error = _find_cindra_root(recording_path=recording_path)
     if cindra_root is None:
         return {"success": False, "error": f"Unable to query metadata. {error}"}
 
@@ -587,7 +579,6 @@ def query_single_recording_metadata_tool(recording_path: str) -> dict[str, objec
     else:
         result["combined_metadata_available"] = False
 
-    # ROI count and cell classification summary.
     classification_path = cindra_root / RecordingArrays.CELL_CLASSIFICATION
     if classification_path.exists():
         with contextlib.suppress(Exception):
@@ -596,18 +587,17 @@ def query_single_recording_metadata_tool(recording_path: str) -> dict[str, objec
             result["cell_count"] = int(np.sum(classification[:, 0] > _CELL_LABEL_THRESHOLD))
             result["non_cell_count"] = result["roi_count"] - result["cell_count"]
 
-    # Frame count from fluorescence traces (memory-mapped for efficiency).
+    # Memory-maps the fluorescence traces, because only the length of their frame axis is read.
     fluorescence_path = cindra_root / RecordingArrays.CELL_FLUORESCENCE
     if fluorescence_path.exists():
         with contextlib.suppress(Exception):
             fluorescence = np.load(fluorescence_path, mmap_mode="r")
             result["frame_count"] = int(fluorescence.shape[1])
 
-    # Per-plane timing data from runtime_data.yaml files.
-    planes = _list_plane_directories(cindra_root)
+    planes = _list_plane_directories(cindra_root=cindra_root)
     timing_entries: list[dict[str, Any]] = []
     for plane_directory in planes:
-        runtime = _load_yaml(plane_directory / SINGLE_RECORDING_RUNTIME_DATA_FILENAME)
+        runtime = _load_yaml(file_path=plane_directory / SINGLE_RECORDING_RUNTIME_DATA_FILENAME)
         if runtime is None:
             continue
         timing = runtime.get("timing", {})
@@ -642,7 +632,7 @@ def query_single_recording_metadata_tool(recording_path: str) -> dict[str, objec
     if timing_entries:
         result["plane_timing"] = timing_entries
 
-    result["available_datasets"] = _discover_available_datasets(cindra_root)
+    result["available_datasets"] = _discover_available_datasets(cindra_root=cindra_root)
     return result
 
 
@@ -671,7 +661,7 @@ def query_registration_quality_tool(
         to load. Every other metric is silently omitted on failure. On failure, contains an 'error' message. Both
         cases include a 'success' flag.
     """
-    cindra_root, error = _find_cindra_root(recording_path)
+    cindra_root, error = _find_cindra_root(recording_path=recording_path)
     if cindra_root is None:
         return {"success": False, "error": f"Unable to query registration quality. {error}"}
 
@@ -694,7 +684,6 @@ def query_registration_quality_tool(
         "plane_index": plane_index,
     }
 
-    # Rigid registration offsets.
     for name, key in [
         (RegistrationArrays.RIGID_Y_OFFSETS, "rigid_y_offsets"),
         (RegistrationArrays.RIGID_X_OFFSETS, "rigid_x_offsets"),
@@ -703,19 +692,17 @@ def query_registration_quality_tool(
         if path.exists():
             try:
                 array = np.load(path, mmap_mode="r")
-                summary = _array_summary(array)
+                summary = _array_summary(array=array)
                 summary["shape"] = list(array.shape)
                 result[key] = summary
             except Exception as error:
                 result[f"{key}_error"] = str(error)
 
-    # Rigid correlations.
     correlation_path = registration_directory / RegistrationArrays.RIGID_CORRELATIONS
     if correlation_path.exists():
         with contextlib.suppress(Exception):
-            result["rigid_correlations"] = _array_summary(np.load(correlation_path, mmap_mode="r"))
+            result["rigid_correlations"] = _array_summary(array=np.load(correlation_path, mmap_mode="r"))
 
-    # Bad frames.
     bad_frames_path = registration_directory / RegistrationArrays.BAD_FRAMES
     if bad_frames_path.exists():
         with contextlib.suppress(Exception):
@@ -728,7 +715,6 @@ def query_registration_quality_tool(
                 round(100.0 * bad_count / total_frames, ndigits=2) if total_frames > 0 else 0.0
             )
 
-    # Nonrigid registration offsets (optional).
     for name, key in [
         (RegistrationArrays.NONRIGID_Y_OFFSETS, "nonrigid_y_offsets"),
         (RegistrationArrays.NONRIGID_X_OFFSETS, "nonrigid_x_offsets"),
@@ -737,7 +723,7 @@ def query_registration_quality_tool(
         if path.exists():
             with contextlib.suppress(Exception):
                 array = np.load(path, mmap_mode="r")
-                summary = _array_summary(array)
+                summary = _array_summary(array=array)
                 summary["shape"] = list(array.shape)
                 summary["num_blocks"] = int(array.shape[1]) if array.ndim > 1 else 0
                 result[key] = summary
@@ -745,9 +731,8 @@ def query_registration_quality_tool(
     nonrigid_correlation_path = registration_directory / RegistrationArrays.NONRIGID_CORRELATIONS
     if nonrigid_correlation_path.exists():
         with contextlib.suppress(Exception):
-            result["nonrigid_correlations"] = _array_summary(np.load(nonrigid_correlation_path, mmap_mode="r"))
+            result["nonrigid_correlations"] = _array_summary(array=np.load(nonrigid_correlation_path, mmap_mode="r"))
 
-    # Principal component shift metrics (optional).
     principal_component_metrics_path = registration_directory / RegistrationArrays.PRINCIPAL_COMPONENT_SHIFT_METRICS
     if principal_component_metrics_path.exists():
         with contextlib.suppress(Exception):
@@ -792,7 +777,7 @@ def query_detection_summary_tool(
         no detected-ROI count. Query query_roi_statistics_tool or query_single_recording_metadata_tool for ROI or
         cell counts. On failure, contains an 'error' message. Both cases include a 'success' flag.
     """
-    cindra_root, error = _find_cindra_root(recording_path)
+    cindra_root, error = _find_cindra_root(recording_path=recording_path)
     if cindra_root is None:
         return {"success": False, "error": f"Unable to query detection summary. {error}"}
 
@@ -814,7 +799,6 @@ def query_detection_summary_tool(
         "images": {},
     }
 
-    # Channel 1 and channel 2 detection images.
     image_files: dict[str, str] = {
         "mean_image": DetectionImages.MEAN_IMAGE,
         "enhanced_mean_image": DetectionImages.ENHANCED_MEAN_IMAGE,
@@ -834,16 +818,15 @@ def query_detection_summary_tool(
         if path.exists():
             try:
                 image = np.load(path, mmap_mode="r")
-                statistics = _array_summary(image)
+                statistics = _array_summary(array=image)
                 statistics["shape"] = list(image.shape)
                 result["images"][label] = statistics
             except Exception as error:
                 result["images"][label] = {"error": str(error)}
 
-    # ROI diameter and aspect ratio from per-plane runtime data.
-    source_plane = _list_plane_directories(cindra_root)[0] if plane_index == -1 else data_path
+    source_plane = _list_plane_directories(cindra_root=cindra_root)[0] if plane_index == -1 else data_path
     if source_plane is not None:
-        runtime = _load_yaml(source_plane / SINGLE_RECORDING_RUNTIME_DATA_FILENAME)
+        runtime = _load_yaml(file_path=source_plane / SINGLE_RECORDING_RUNTIME_DATA_FILENAME)
         if runtime is not None:
             detection_metadata = runtime.get("detection", {})
             if detection_metadata.get("roi_diameter") is not None:
@@ -902,11 +885,10 @@ def query_roi_statistics_tool(
         'recording_index', 'recording_id', 'has_template_metadata', and optional 'cluster_id' / 'recording_count'
         per ROI. On failure, contains an 'error' message. Both cases include a 'success' flag.
     """
-    cindra_root, error = _find_cindra_root(recording_path)
+    cindra_root, error = _find_cindra_root(recording_path=recording_path)
     if cindra_root is None:
         return {"success": False, "error": f"Unable to query ROI statistics. {error}"}
 
-    # Resolves the data path based on mode.
     if dataset is not None:
         data_path, recording_id, error = _resolve_multi_recording_data_path(
             cindra_root=cindra_root, dataset=dataset, recording_index=recording_index
@@ -940,9 +922,7 @@ def query_roi_statistics_tool(
         include_plane_index=(dataset is None),
     )
 
-    # Enriches entries with mode-specific metadata.
     if dataset is None:
-        # Single-recording mode: adds classification data.
         classification_path = data_path / RecordingArrays.CELL_CLASSIFICATION
         classification = None
         if classification_path.exists():
@@ -975,7 +955,6 @@ def query_roi_statistics_tool(
                         round(float(colocalization[roi_index, 1]), ndigits=4),
                     ]
     else:
-        # Multi-recording mode: adds tracking template metadata.
         template_data: dict[str, Any] | None = None
         template_path = data_path / TRACKING_TEMPLATE_MASKS_FILENAME
         with contextlib.suppress(Exception):
@@ -1099,11 +1078,10 @@ def query_traces_tool(
             ),
         }
 
-    cindra_root, error = _find_cindra_root(recording_path)
+    cindra_root, error = _find_cindra_root(recording_path=recording_path)
     if cindra_root is None:
         return {"success": False, "error": f"Unable to query traces. {error}"}
 
-    # Resolves the data path based on mode.
     if dataset is not None:
         data_path, recording_id, error = _resolve_multi_recording_data_path(
             cindra_root=cindra_root, dataset=dataset, recording_index=recording_index
@@ -1200,7 +1178,7 @@ def query_multi_recording_overview_tool(
         counts, timing, and completion flags. On failure, contains an 'error' message. Both cases include a
         'success' flag.
     """
-    cindra_root, error = _find_cindra_root(recording_path)
+    cindra_root, error = _find_cindra_root(recording_path=recording_path)
     if cindra_root is None:
         return {"success": False, "error": f"Unable to query multi-recording overview. {error}"}
 
@@ -1208,7 +1186,7 @@ def query_multi_recording_overview_tool(
     if dataset_path is None:
         return {"success": False, "error": f"Unable to query multi-recording overview. {error}"}
 
-    runtime = _load_yaml(dataset_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
+    runtime = _load_yaml(file_path=dataset_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
     if runtime is None:
         return {"success": False, "error": f"Unable to load runtime data from: {dataset_path}"}
 
@@ -1226,7 +1204,7 @@ def query_multi_recording_overview_tool(
             continue
 
         recording_entry["exists"] = True
-        recording_runtime = _load_yaml(output_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
+        recording_runtime = _load_yaml(file_path=output_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
         if recording_runtime is not None:
             recording_io = recording_runtime.get("io", {})
             recording_entry["recording_id"] = recording_io.get("recording_id", f"unknown_{index}")
@@ -1252,7 +1230,6 @@ def query_multi_recording_overview_tool(
                 if value is not None:
                     recording_entry[field_name] = round(value, ndigits=2) if isinstance(value, float) else value
 
-        # Mask counts from NPZ files.
         for npz_name, key_name in [
             (DEFORMED_MASKS_FILENAME, "deformed_mask_count"),
             (TRACKING_TEMPLATE_MASKS_FILENAME, "template_mask_count"),
@@ -1305,7 +1282,7 @@ def query_multi_recording_registration_quality_tool(
         pixels, to its {min, max, mean, std, shape} summary. A 'displacement_magnitude' {min, max, mean, std} summary
         combines both fields. On failure, contains an 'error' message. Both cases include a 'success' flag.
     """
-    cindra_root, error = _find_cindra_root(recording_path)
+    cindra_root, error = _find_cindra_root(recording_path=recording_path)
     if cindra_root is None:
         return {"success": False, "error": f"Unable to query registration quality. {error}"}
 
@@ -1313,7 +1290,7 @@ def query_multi_recording_registration_quality_tool(
     if dataset_path is None:
         return {"success": False, "error": f"Unable to query registration quality. {error}"}
 
-    runtime = _load_yaml(dataset_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
+    runtime = _load_yaml(file_path=dataset_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
     if runtime is None:
         return {"success": False, "error": f"Unable to load runtime data from: {dataset_path}"}
 
@@ -1324,7 +1301,7 @@ def query_multi_recording_registration_quality_tool(
         output_path = Path(output_path_string)
         recording_entry: dict[str, Any] = {"index": index}
 
-        recording_runtime = _load_yaml(output_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
+        recording_runtime = _load_yaml(file_path=output_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
         if recording_runtime is not None:
             recording_entry["recording_id"] = recording_runtime.get("io", {}).get("recording_id", f"unknown_{index}")
 
@@ -1336,7 +1313,6 @@ def query_multi_recording_registration_quality_tool(
 
         recording_entry["registration_available"] = True
 
-        # Deformation field statistics.
         for field_name, file_name in [
             ("deform_field_y", MultiRecordingArrays.DEFORM_FIELD_Y),
             ("deform_field_x", MultiRecordingArrays.DEFORM_FIELD_X),
@@ -1345,13 +1321,12 @@ def query_multi_recording_registration_quality_tool(
             if path.exists():
                 with contextlib.suppress(Exception):
                     field_array = np.load(path, mmap_mode="r")
-                    statistics = _array_summary(field_array)
+                    statistics = _array_summary(array=field_array)
                     statistics["shape"] = list(field_array.shape)
                     statistics["abs_mean"] = round(float(np.mean(np.abs(field_array))), ndigits=4)
                     statistics["abs_max"] = round(float(np.max(np.abs(field_array))), ndigits=4)
                     recording_entry[field_name] = statistics
 
-        # Combined displacement magnitude.
         y_path = registration_directory / MultiRecordingArrays.DEFORM_FIELD_Y
         x_path = registration_directory / MultiRecordingArrays.DEFORM_FIELD_X
         if y_path.exists() and x_path.exists():
@@ -1359,9 +1334,8 @@ def query_multi_recording_registration_quality_tool(
                 y_field = np.load(y_path, mmap_mode="r")
                 x_field = np.load(x_path, mmap_mode="r")
                 magnitude = np.sqrt(y_field**2 + x_field**2)
-                recording_entry["displacement_magnitude"] = _array_summary(magnitude)
+                recording_entry["displacement_magnitude"] = _array_summary(array=magnitude)
 
-        # Transformed image availability.
         recording_entry["transformed_images"] = {
             "mean_image": (registration_directory / MultiRecordingArrays.TRANSFORMED_MEAN_IMAGE).exists(),
             "enhanced_mean_image": (
@@ -1424,7 +1398,7 @@ def query_multi_recording_tracking_summary_tool(
         True and 'templates_shown' reports the cap. A 'channel_2_template_count' appears when channel-2 template
         masks exist. On failure, contains an 'error' message. Both cases include a 'success' flag.
     """
-    cindra_root, error = _find_cindra_root(recording_path)
+    cindra_root, error = _find_cindra_root(recording_path=recording_path)
     if cindra_root is None:
         return {"success": False, "error": f"Unable to query tracking summary. {error}"}
 
@@ -1454,8 +1428,6 @@ def query_multi_recording_tracking_summary_tool(
     unique_counts, histogram = np.unique(recording_counts, return_counts=True)
     distribution = {int(count): int(frequency) for count, frequency in zip(unique_counts, histogram, strict=True)}
 
-    # Per-template summary (capped for large datasets).
-    max_templates = 200
     templates: list[dict[str, Any]] = [
         {
             "index": template_index,
@@ -1464,7 +1436,7 @@ def query_multi_recording_tracking_summary_tool(
             "cluster_id": int(cluster_ids[template_index]),
             "recording_count": int(recording_counts[template_index]),
         }
-        for template_index in range(min(template_count, max_templates))
+        for template_index in range(min(template_count, _MAX_TEMPLATE_ENTRIES))
     ]
 
     result: dict[str, Any] = {
@@ -1477,16 +1449,15 @@ def query_multi_recording_tracking_summary_tool(
         "median_recording_count": int(np.median(recording_counts)),
         "min_recording_count": int(np.min(recording_counts)),
         "max_recording_count": int(np.max(recording_counts)),
-        "pixel_count_summary": _array_summary(pixel_counts.astype(np.float32)),
+        "pixel_count_summary": _array_summary(array=pixel_counts.astype(np.float32)),
         "cluster_id_range": [int(np.min(cluster_ids)), int(np.max(cluster_ids))],
         "templates": templates,
     }
 
-    if template_count > max_templates:
+    if template_count > _MAX_TEMPLATE_ENTRIES:
         result["templates_truncated"] = True
-        result["templates_shown"] = max_templates
+        result["templates_shown"] = _MAX_TEMPLATE_ENTRIES
 
-    # Channel 2 template masks.
     channel_2_path = dataset_path / resolve_channel_2_name(name=TRACKING_TEMPLATE_MASKS_FILENAME)
     if channel_2_path.exists():
         with contextlib.suppress(Exception):
@@ -1564,7 +1535,7 @@ def query_cross_recording_traces_tool(
             ),
         }
 
-    cindra_root, error = _find_cindra_root(recording_path)
+    cindra_root, error = _find_cindra_root(recording_path=recording_path)
     if cindra_root is None:
         return {"success": False, "error": f"Unable to query cross-recording traces. {error}"}
 
@@ -1572,7 +1543,7 @@ def query_cross_recording_traces_tool(
     if dataset_path is None:
         return {"success": False, "error": f"Unable to query cross-recording traces. {error}"}
 
-    runtime = _load_yaml(dataset_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
+    runtime = _load_yaml(file_path=dataset_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
     if runtime is None:
         return {
             "success": False,
@@ -1584,7 +1555,7 @@ def query_cross_recording_traces_tool(
     recording_information: list[tuple[int, str, Path]] = []
     for index, output_path_string in enumerate(dataset_output_paths):
         output_path = Path(output_path_string)
-        recording_runtime = _load_yaml(output_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
+        recording_runtime = _load_yaml(file_path=output_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
         recording_id = (
             recording_runtime.get("io", {}).get("recording_id", f"unknown_{index}")
             if recording_runtime is not None
@@ -1681,7 +1652,7 @@ def _resolve_multi_recording_data_path(
     if dataset_path is None:
         return None, None, error
 
-    runtime = _load_yaml(dataset_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
+    runtime = _load_yaml(file_path=dataset_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
     if runtime is None:
         return None, None, f"Unable to load runtime data from: {dataset_path / 'multi_recording_runtime_data.yaml'}"
 
@@ -1700,8 +1671,7 @@ def _resolve_multi_recording_data_path(
 
     output_path = Path(dataset_output_paths[effective_index])
 
-    # Resolves recording ID from per-recording runtime data.
-    recording_runtime = _load_yaml(output_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
+    recording_runtime = _load_yaml(file_path=output_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
     recording_id = (
         recording_runtime.get("io", {}).get("recording_id", f"unknown_{effective_index}")
         if recording_runtime is not None

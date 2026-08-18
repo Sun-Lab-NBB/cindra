@@ -15,11 +15,6 @@ if TYPE_CHECKING:
     from PySide6.QtWidgets import QApplication
 
 
-def _arrow_event(key: QtCore.Qt.Key) -> QtGui.QKeyEvent:
-    """Builds an unmodified key press event for the requested arrow key."""
-    return QtGui.QKeyEvent(QtCore.QEvent.Type.KeyPress, key, QtCore.Qt.KeyboardModifier.NoModifier)
-
-
 @pytest.mark.xdist_group("gui_viewers")
 class TestPrincipalComponentField:
     """Tests the principal component number field reads."""
@@ -48,7 +43,7 @@ class TestPrincipalComponentField:
         principal_component_stub: Callable[..., object],
     ) -> None:
         """Verifies that an empty or over-range field resolves to a number inside the available range."""
-        viewer = PCViewer(data=principal_component_stub(pc_count=3))
+        viewer = PCViewer(data=principal_component_stub(principal_component_count=3))
 
         viewer._pc_edit.setText("")
         assert viewer.get_state()["current_pc"] == 1
@@ -82,3 +77,8 @@ class TestAnimatedPanelLabel:
         assert viewer._title_labels[2].toPlainText() == "bottom"
 
         viewer.close()
+
+
+def _arrow_event(key: QtCore.Qt.Key) -> QtGui.QKeyEvent:
+    """Builds an unmodified key press event for the requested arrow key."""
+    return QtGui.QKeyEvent(QtCore.QEvent.Type.KeyPress, key, QtCore.Qt.KeyboardModifier.NoModifier)

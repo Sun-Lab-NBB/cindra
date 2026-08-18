@@ -23,82 +23,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _make_block_mask(
-    *,
-    y_origin: int,
-    x_origin: int,
-    size: int,
-    frame_width: int,
-    weight: float = 1.0,
-    radius: float = 5.0,
-    cluster_id: int = 0,
-) -> ROIMask:
-    """Creates a square block ROIMask spanning a size-by-size pixel region anchored at the given origin."""
-    rows, columns = np.meshgrid(
-        np.arange(y_origin, y_origin + size),
-        np.arange(x_origin, x_origin + size),
-        indexing="ij",
-    )
-    y_pixels = rows.ravel().astype(np.int32)
-    x_pixels = columns.ravel().astype(np.int32)
-    weights = np.full(shape=y_pixels.shape, fill_value=weight, dtype=np.float32)
-    centroid = (int(np.median(y_pixels)), int(np.median(x_pixels)))
-    return ROIMask(
-        y_pixels=y_pixels,
-        x_pixels=x_pixels,
-        pixel_weights=weights,
-        centroid=centroid,
-        frame_width=frame_width,
-        radius=radius,
-        cluster_id=cluster_id,
-    )
-
-
-def _make_combined_data(image_size: int) -> CombinedData:
-    """Builds a minimal CombinedData defining the shared visual space dimensions used by tracking."""
-    return CombinedData(
-        detection=DetectionData(),
-        extraction=ExtractionData(),
-        plane_count=1,
-        combined_height=image_size,
-        combined_width=image_size,
-        tau=1.0,
-        sampling_rate=15.0,
-    )
-
-
-def _make_context(
-    output_path: Path,
-    configuration: MultiRecordingConfiguration,
-    *,
-    image_size: int = 400,
-    deformed_masks: list[ROIMask] | None = None,
-    deformed_masks_channel_2: list[ROIMask] | None = None,
-    with_combined_data: bool = True,
-    set_output_path: bool = True,
-) -> MultiRecordingRuntimeContext:
-    """Builds a multi-recording runtime context wired with deformed masks and shared-space dimensions for tracking."""
-    runtime = MultiRecordingRuntimeData()
-    runtime.output_path = output_path if set_output_path else None
-    runtime.io.dataset_output_paths = (output_path,)
-    runtime.registration.deformed_roi_masks = deformed_masks
-    runtime.registration.deformed_roi_masks_channel_2 = deformed_masks_channel_2
-    if with_combined_data:
-        runtime.combined_data = _make_combined_data(image_size=image_size)
-    return MultiRecordingRuntimeContext(configuration=configuration, runtime=runtime)
-
-
-def _assert_valid_template(template: ROIMask, image_size: int) -> None:
-    """Asserts that a template mask exposes a consistent, in-bounds pixel set."""
-    assert template.y_pixels.shape == template.x_pixels.shape
-    assert template.pixel_weights.shape == template.y_pixels.shape
-    assert template.y_pixels.size > 0
-    assert int(template.y_pixels.min()) >= 0
-    assert int(template.x_pixels.min()) >= 0
-    assert int(template.y_pixels.max()) < image_size
-    assert int(template.x_pixels.max()) < image_size
-
-
 class TestTrackRoisAcrossRecordings:
     """Tests track_rois_across_recordings."""
 
@@ -440,3 +364,79 @@ class TestTrackRoisAcrossRecordings:
         assert templates is not None
         assert len(templates) == 1
         assert templates[0].recording_count == 2
+
+
+def _make_block_mask(
+    *,
+    y_origin: int,
+    x_origin: int,
+    size: int,
+    frame_width: int,
+    weight: float = 1.0,
+    radius: float = 5.0,
+    cluster_id: int = 0,
+) -> ROIMask:
+    """Creates a square block ROIMask spanning a size-by-size pixel region anchored at the given origin."""
+    rows, columns = np.meshgrid(
+        np.arange(y_origin, y_origin + size),
+        np.arange(x_origin, x_origin + size),
+        indexing="ij",
+    )
+    y_pixels = rows.ravel().astype(np.int32)
+    x_pixels = columns.ravel().astype(np.int32)
+    weights = np.full(shape=y_pixels.shape, fill_value=weight, dtype=np.float32)
+    centroid = (int(np.median(y_pixels)), int(np.median(x_pixels)))
+    return ROIMask(
+        y_pixels=y_pixels,
+        x_pixels=x_pixels,
+        pixel_weights=weights,
+        centroid=centroid,
+        frame_width=frame_width,
+        radius=radius,
+        cluster_id=cluster_id,
+    )
+
+
+def _make_combined_data(image_size: int) -> CombinedData:
+    """Builds a minimal CombinedData defining the shared visual space dimensions used by tracking."""
+    return CombinedData(
+        detection=DetectionData(),
+        extraction=ExtractionData(),
+        plane_count=1,
+        combined_height=image_size,
+        combined_width=image_size,
+        tau=1.0,
+        sampling_rate=15.0,
+    )
+
+
+def _make_context(
+    output_path: Path,
+    configuration: MultiRecordingConfiguration,
+    *,
+    image_size: int = 400,
+    deformed_masks: list[ROIMask] | None = None,
+    deformed_masks_channel_2: list[ROIMask] | None = None,
+    with_combined_data: bool = True,
+    set_output_path: bool = True,
+) -> MultiRecordingRuntimeContext:
+    """Builds a multi-recording runtime context wired with deformed masks and shared-space dimensions for tracking."""
+    runtime = MultiRecordingRuntimeData()
+    runtime.output_path = output_path if set_output_path else None
+    runtime.io.dataset_output_paths = (output_path,)
+    runtime.registration.deformed_roi_masks = deformed_masks
+    runtime.registration.deformed_roi_masks_channel_2 = deformed_masks_channel_2
+    if with_combined_data:
+        runtime.combined_data = _make_combined_data(image_size=image_size)
+    return MultiRecordingRuntimeContext(configuration=configuration, runtime=runtime)
+
+
+def _assert_valid_template(template: ROIMask, image_size: int) -> None:
+    """Asserts that a template mask exposes a consistent, in-bounds pixel set."""
+    assert template.y_pixels.shape == template.x_pixels.shape
+    assert template.pixel_weights.shape == template.y_pixels.shape
+    assert template.y_pixels.size > 0
+    assert int(template.y_pixels.min()) >= 0
+    assert int(template.x_pixels.min()) >= 0
+    assert int(template.y_pixels.max()) < image_size
+    assert int(template.x_pixels.max()) < image_size

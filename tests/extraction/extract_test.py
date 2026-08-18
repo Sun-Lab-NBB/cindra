@@ -15,21 +15,6 @@ from cindra.extraction.extract import (
 from cindra.dataclasses.single_recording_data import ROIMask, ROIStatistics
 
 
-def _make_roi_statistics(count: int) -> list[ROIStatistics]:
-    """Creates a list of minimal ROIStatistics instances backed by single-pixel ROIMask data."""
-    roi_list: list[ROIStatistics] = []
-    for index in range(count):
-        mask = ROIMask(
-            y_pixels=np.array([index], dtype=np.int32),
-            x_pixels=np.array([index], dtype=np.int32),
-            pixel_weights=np.array([1.0], dtype=np.float32),
-            centroid=(index, index),
-            frame_width=64,
-        )
-        roi_list.append(ROIStatistics(mask=mask))
-    return roi_list
-
-
 class TestExtractCellFluorescence:
     """Tests _extract_cell_fluorescence."""
 
@@ -76,7 +61,6 @@ class TestExtractCellFluorescence:
                 expected[cell_index, frame_index] = accumulator
 
         np.testing.assert_allclose(result, expected, rtol=1e-6, atol=1e-7)
-        # The kernel fills and returns the caller's buffer rather than allocating a new one.
         assert result is output_prototype
 
     def test_empty_mask_yields_zero_trace(self) -> None:
@@ -110,8 +94,8 @@ class TestExtractNeuropilFluorescence:
         pixel_count = 50
         data = generator.standard_normal((frame_count, pixel_count)).astype(np.float32)
 
-        # Three neuropil masks of 4, 9, and 6 pixels. The sizes are deliberately not powers of two and differ per
-        # ROI, so dropping the per-ROI offset or reusing one pixel count for every ROI changes the averages.
+        # Three neuropil masks of 4, 9, and 6 pixels. The sizes deliberately differ per ROI, so dropping the per-ROI
+        # offset or reusing one pixel count for every ROI changes the averages.
         masks = (
             np.array([1, 4, 8, 11], dtype=np.int32),
             np.array([13, 15, 16, 19, 22, 27, 31, 36, 41], dtype=np.int32),
@@ -136,7 +120,7 @@ class TestExtractNeuropilFluorescence:
                 expected[cell_index, frame_index] = np.mean(data[frame_index, masks[cell_index]])
 
         # The kernel accumulates sequentially and multiplies by a reciprocal, while np.mean sums pairwise and
-        # divides, so the two agree to about 1.5e-05 relative at these mask sizes.
+        # divides, so the two agree to about 1.3e-07 relative at these mask sizes.
         np.testing.assert_allclose(result, expected, rtol=1e-4)
         assert result is output_prototype
 
@@ -229,7 +213,6 @@ class TestUpdateRoiExtractionStatistics:
             neuropil_coefficient=0.0,
         )
 
-        # Expects at least one ROI to differ in skewness between the corrected and uncorrected runs.
         differences_found = False
         for corrected, uncorrected in zip(roi_statistics_corrected, roi_statistics_uncorrected, strict=True):
             assert corrected.skewness is not None
@@ -298,3 +281,19 @@ class TestUpdateRoiExtractionStatistics:
         for roi, expected in zip(roi_statistics, expected_skewness, strict=True):
             assert roi.skewness is not None
             np.testing.assert_allclose(roi.skewness, float(expected), atol=1e-5)
+
+
+def _make_roi_statistics(count: int) -> list[ROIStatistics]:
+    """Creates a list of minimal ROIStatistics instances backed by single-pixel ROIMask data."""
+    return [
+        ROIStatistics(
+            mask=ROIMask(
+                y_pixels=np.array([index], dtype=np.int32),
+                x_pixels=np.array([index], dtype=np.int32),
+                pixel_weights=np.array([1.0], dtype=np.float32),
+                centroid=(index, index),
+                frame_width=64,
+            )
+        )
+        for index in range(count)
+    ]

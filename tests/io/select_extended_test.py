@@ -18,68 +18,6 @@ from cindra.dataclasses import (
 )
 
 
-def _make_roi(centroid: tuple[int, int] = (20, 20), pixel_count: int = 50) -> ROIStatistics:
-    """Creates a minimal ROIStatistics instance for testing."""
-    y_pixels = np.arange(pixel_count, dtype=np.int32) % 10
-    x_pixels = np.arange(pixel_count, dtype=np.int32) // 10
-    mask = ROIMask(
-        y_pixels=y_pixels,
-        x_pixels=x_pixels,
-        pixel_weights=np.ones(pixel_count, dtype=np.float32),
-        centroid=centroid,
-        frame_width=100,
-    )
-    roi = ROIStatistics(mask=mask)
-    roi.pixel_count = pixel_count
-    return roi
-
-
-def _make_runtime_and_configuration(
-    roi_count: int = 3,
-    probabilities: list[float] | None = None,
-    probability_threshold: float = 0.5,
-    maximum_size: int = 10000,
-) -> tuple[MultiRecordingRuntimeData, MultiRecordingConfiguration]:
-    """Creates minimal MultiRecordingRuntimeData and MultiRecordingConfiguration for testing.
-
-    Args:
-        roi_count: The number of ROIs to create.
-        probabilities: The values written to the first classification column for each ROI. The second column, which
-            selection reads, holds 1.0 when the value exceeds 0.5 and 0.0 otherwise. Defaults to 0.9 for every ROI.
-        probability_threshold: The minimum probability threshold for ROI selection.
-        maximum_size: The maximum allowed ROI size in pixels.
-
-    Returns:
-        A tuple of (runtime, configuration) instances with combined_data populated.
-    """
-    rois = [_make_roi(centroid=(20 + index * 15, 20 + index * 15)) for index in range(roi_count)]
-    if probabilities is None:
-        probabilities = [0.9] * roi_count
-    classification = np.array(
-        [[probability, 1.0 if probability > 0.5 else 0.0] for probability in probabilities], dtype=np.float32
-    )
-
-    extraction = ExtractionData()
-    extraction.roi_statistics = rois
-    extraction.cell_classification = classification
-
-    combined_data = CombinedData(
-        detection=DetectionData(),
-        extraction=extraction,
-    )
-
-    runtime = MultiRecordingRuntimeData()
-    runtime.io.recording_id = "test_recording"
-    runtime.combined_data = combined_data
-
-    configuration = MultiRecordingConfiguration()
-    configuration.roi_selection.probability_threshold = probability_threshold
-    configuration.roi_selection.maximum_size = maximum_size
-    configuration.roi_selection.mroi_region_margin = 0
-
-    return runtime, configuration
-
-
 class TestFilterRois:
     """Tests _filter_rois."""
 
@@ -240,3 +178,65 @@ class TestFilterRois:
         )
         with pytest.raises(ValueError, match=error_format(expected_message)):
             _filter_rois(runtime=runtime, configuration=configuration)
+
+
+def _make_roi(centroid: tuple[int, int] = (20, 20), pixel_count: int = 50) -> ROIStatistics:
+    """Creates a minimal ROIStatistics instance for testing."""
+    y_pixels = np.arange(pixel_count, dtype=np.int32) % 10
+    x_pixels = np.arange(pixel_count, dtype=np.int32) // 10
+    mask = ROIMask(
+        y_pixels=y_pixels,
+        x_pixels=x_pixels,
+        pixel_weights=np.ones(pixel_count, dtype=np.float32),
+        centroid=centroid,
+        frame_width=100,
+    )
+    roi = ROIStatistics(mask=mask)
+    roi.pixel_count = pixel_count
+    return roi
+
+
+def _make_runtime_and_configuration(
+    roi_count: int = 3,
+    probabilities: list[float] | None = None,
+    probability_threshold: float = 0.5,
+    maximum_size: int = 10000,
+) -> tuple[MultiRecordingRuntimeData, MultiRecordingConfiguration]:
+    """Creates minimal MultiRecordingRuntimeData and MultiRecordingConfiguration for testing.
+
+    Args:
+        roi_count: The number of ROIs to create.
+        probabilities: The values written to the first classification column for each ROI. The second column, which
+            selection reads, holds 1.0 when the value exceeds 0.5 and 0.0 otherwise. Defaults to 0.9 for every ROI.
+        probability_threshold: The minimum probability threshold for ROI selection.
+        maximum_size: The maximum allowed ROI size in pixels.
+
+    Returns:
+        A tuple of (runtime, configuration) instances with combined_data populated.
+    """
+    rois = [_make_roi(centroid=(20 + index * 15, 20 + index * 15)) for index in range(roi_count)]
+    if probabilities is None:
+        probabilities = [0.9] * roi_count
+    classification = np.array(
+        [[probability, 1.0 if probability > 0.5 else 0.0] for probability in probabilities], dtype=np.float32
+    )
+
+    extraction = ExtractionData()
+    extraction.roi_statistics = rois
+    extraction.cell_classification = classification
+
+    combined_data = CombinedData(
+        detection=DetectionData(),
+        extraction=extraction,
+    )
+
+    runtime = MultiRecordingRuntimeData()
+    runtime.io.recording_id = "test_recording"
+    runtime.combined_data = combined_data
+
+    configuration = MultiRecordingConfiguration()
+    configuration.roi_selection.probability_threshold = probability_threshold
+    configuration.roi_selection.maximum_size = maximum_size
+    configuration.roi_selection.mroi_region_margin = 0
+
+    return runtime, configuration

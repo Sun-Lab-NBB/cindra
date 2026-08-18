@@ -4,7 +4,6 @@ import pytest
 from ataraxis_base_utilities import resolve_worker_count
 
 from cindra.orchestration import (
-    ALL_CORES_REQUEST,
     DISCOVERY_WORKERS,
     EXTRACTION_WORKERS,
     PROCESSING_WORKERS,
@@ -18,6 +17,7 @@ from cindra.orchestration import (
 )
 from cindra.orchestration.allocation import (
     _RESERVED_CORES,
+    ALL_CORES_REQUEST,
     COMBINATION_WORKERS,
     _BYTES_PER_MEGABYTE,
     _DISCOVERY_RESOURCES,
@@ -34,13 +34,6 @@ from cindra.orchestration.allocation import (
     resolve_memory_budget_mb,
     summarize_class_allocation,
 )
-
-
-class _VirtualMemory:
-    """Stands in for the psutil memory record, carrying only the available-byte counter the resolver reads."""
-
-    def __init__(self, available: int) -> None:
-        self.available = available
 
 
 class TestStageDefaults:
@@ -379,3 +372,10 @@ class TestSummarizeClassAllocation:
     def test_session_without_jobs_reports_no_classes(self) -> None:
         """Verifies that a session carrying no jobs publishes an empty report."""
         assert summarize_class_allocation(class_workers={}, class_capacities={}, class_job_counts={}) == {}
+
+
+class _VirtualMemory:
+    """Stands in for the psutil memory record, carrying only the available-byte counter the resolver reads."""
+
+    def __init__(self, available: int) -> None:
+        self.available = available

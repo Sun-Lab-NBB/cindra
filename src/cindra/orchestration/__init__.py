@@ -1,6 +1,4 @@
-"""Provides the orchestration layer: the pipeline job model and its prerequisite graph, the measured CPU worker and
-resource-class allocation, the local batch execution engine, and the pipeline entry points.
-"""
+"""Provides the pipeline job model, the worker allocation, the batch execution engine, and the pipeline entry points."""
 
 from .jobs import (
     MULTI_RECORDING_PHASES,
@@ -9,6 +7,7 @@ from .jobs import (
     PrerequisiteScope,
     MultiRecordingJobNames,
     SingleRecordingJobNames,
+    generate_job_ids,
     resolve_pipeline_jobs,
     order_phases_by_execution,
     resolve_downstream_phases,
@@ -43,7 +42,6 @@ from .discovery import (
 )
 from .execution import (
     PendingJob,
-    JobExecutionState,
     get_execution_state,
     set_execution_state,
     resolve_session_load,
@@ -51,7 +49,6 @@ from .execution import (
     cancel_execution_session,
 )
 from .allocation import (
-    ALL_CORES_REQUEST,
     DISCOVERY_WORKERS,
     EXTRACTION_WORKERS,
     PROCESSING_WORKERS,
@@ -78,7 +75,6 @@ from .footprints import (
 )
 
 __all__ = [
-    "ALL_CORES_REQUEST",
     "BINARIZATION_WORKERS",
     "COMBINATION_WORKERS",
     "DISCOVERY_WORKERS",
@@ -94,7 +90,6 @@ __all__ = [
     "SINGLE_RECORDING_TRACKER_FILENAME",
     "SPAWNED_CHILD_MEMORY_MB",
     "WORKER_MEMORY_MB",
-    "JobExecutionState",
     "JobSizing",
     "MultiRecordingJobNames",
     "MultiRecordingJobs",
@@ -112,6 +107,7 @@ __all__ = [
     "estimate_single_recording_job_memory_mb",
     "execute_multi_recording_job",
     "execute_single_recording_job",
+    "generate_job_ids",
     "get_execution_state",
     "load_multi_recording_configuration",
     "load_single_recording_configuration",

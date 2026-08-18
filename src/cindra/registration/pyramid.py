@@ -101,7 +101,6 @@ class ScaleSpacePyramid:
         """
         downsample_factor = 1.0
 
-        # Smooths to target scale if minimum_scale > 0.
         if minimum_scale > 0:
             data = diffuse(data=data, sigma=minimum_scale)
 
@@ -127,12 +126,10 @@ class ScaleSpacePyramid:
         Returns:
             The index of the level the requested scale resolves to.
         """
-        # Finds the appropriate pyramid level.
         level = 0
         while level < len(self._levels) - 1 and self._level_scales[level + 1] <= scale:
             level += 1
 
-        # Adds new levels if the current highest level is still below the target scale.
         while self._level_scales[level] < scale and level == len(self._levels) - 1:
             self._add_level()
             if self._level_scales[-1] <= scale:
@@ -146,7 +143,6 @@ class ScaleSpacePyramid:
         current_scale = self._level_scales[-1]
         current_factor = self._level_downsample_factors[-1]
 
-        # Computes the target scale for the new level.
         target_scale = max(self._LEVEL_FACTOR, current_scale * self._LEVEL_FACTOR)
 
         # Computes additional smoothing needed. Scales sigma by the current downsample factor to convert from
@@ -155,7 +151,6 @@ class ScaleSpacePyramid:
         adjusted_sigma = additional_sigma * current_factor
         data = diffuse(data=data, sigma=adjusted_sigma)
 
-        # Downsamples if the image is large enough.
         new_factor = current_factor
         if min(data.shape) > _MINIMUM_DOWNSAMPLE_DIMENSION:
             factor = 1.0 / self._LEVEL_FACTOR

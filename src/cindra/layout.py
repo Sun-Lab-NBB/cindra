@@ -1,9 +1,7 @@
 """Provides the on-disk contract of the cindra pipelines: the directory and file names every stage writes under a
-caller-supplied output root, and the pure resolvers that build a path from that root.
-
-This module imports nothing from cindra, so every layer from the configuration dataclasses upward reads the contract
-from one definition instead of respelling it. An external scheduler that locates a recording's inputs and outputs
-therefore names the same strings the pipeline writes, rather than a copy that drifts from them.
+caller-supplied output root, and the pure resolvers that build a path from that root. This module imports nothing from
+cindra, so every layer from the configuration dataclasses upward reads the contract from one definition instead of
+respelling it.
 """
 
 from enum import StrEnum
@@ -83,7 +81,7 @@ CHANNEL_1_BINARY_FILENAME: str = "channel_1_data.bin"
 CHANNEL_2_BINARY_FILENAME: str = "channel_2_data.bin"
 """The name of the binary holding the second channel frames of one imaging plane."""
 
-BINARIZATION_MARKER_SUFFIX: str = ".binarizing"
+_BINARIZATION_MARKER_SUFFIX: str = ".binarizing"
 """The suffix appended to a plane binary's name while the binarization stage fills that binary with converted frames.
 
 Notes:
@@ -94,7 +92,7 @@ Notes:
     status spells it.
 """
 
-REGISTRATION_MARKER_SUFFIX: str = ".registering"
+_REGISTRATION_MARKER_SUFFIX: str = ".registering"
 """The suffix appended to a plane binary's name while the registration stage rewrites that binary in place.
 
 Notes:
@@ -105,7 +103,7 @@ Notes:
     way the reported job status spells it.
 """
 
-CHANNEL_2_ARRAY_SUFFIX: str = "_channel_2"
+_CHANNEL_2_ARRAY_SUFFIX: str = "_channel_2"
 """The suffix distinguishing the second channel's copy of a result array from the functional channel's copy."""
 
 
@@ -115,7 +113,7 @@ class RecordingArrays(StrEnum):
     Notes:
         The same names are written into a recording's output directory for the combined multi-plane results, into each
         plane's directory for that plane's results, and into a tracked dataset's directory for the multi-recording
-        results, so one name resolves against any of the three roots.
+        results. One name therefore resolves against any of the three roots.
     """
 
     CELL_FLUORESCENCE = "cell_fluorescence.npy"
@@ -146,9 +144,11 @@ class DetectionImages(StrEnum):
     """Defines the names of the summary images the detection stage writes into its own subdirectory."""
 
     MEAN_IMAGE = "mean_image.npy"
-    """The mean of the temporally binned movie, which excludes the frames registration marked bad."""
+    """The mean of the temporally binned movie, which excludes the frames registration marked bad, zero outside the
+    valid registration crop."""
     ENHANCED_MEAN_IMAGE = "enhanced_mean_image.npy"
-    """The mean image filtered at the detected ROI scale."""
+    """The mean image filtered at the detected ROI scale, filled with the enhanced interior's minimum value outside the
+    valid registration crop."""
     MAXIMUM_PROJECTION = "maximum_projection.npy"
     """The maximum of every pixel across the temporally binned and high-pass filtered movie, zero outside the valid
     registration crop."""
@@ -261,7 +261,7 @@ def resolve_channel_2_name(name: str) -> str:
         The name of the second channel's copy, carrying the channel suffix before the extension.
     """
     stem, _, extension = name.rpartition(".")
-    return f"{stem}{CHANNEL_2_ARRAY_SUFFIX}.{extension}"
+    return f"{stem}{_CHANNEL_2_ARRAY_SUFFIX}.{extension}"
 
 
 def resolve_array_name(array: PipelineArray, *, second_channel: bool = False) -> str:
@@ -306,7 +306,7 @@ def resolve_binarization_marker_name(binary_name: str) -> str:
     Returns:
         The name of the marker file guarding the conversion.
     """
-    return f"{binary_name}{BINARIZATION_MARKER_SUFFIX}"
+    return f"{binary_name}{_BINARIZATION_MARKER_SUFFIX}"
 
 
 def resolve_registration_marker_name(binary_name: str) -> str:
@@ -318,7 +318,7 @@ def resolve_registration_marker_name(binary_name: str) -> str:
     Returns:
         The name of the marker file guarding the rewrite.
     """
-    return f"{binary_name}{REGISTRATION_MARKER_SUFFIX}"
+    return f"{binary_name}{_REGISTRATION_MARKER_SUFFIX}"
 
 
 def resolve_plane_specifier(plane_index: int) -> str:

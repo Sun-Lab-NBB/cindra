@@ -35,12 +35,12 @@ def track_rois_across_recordings(contexts: list[MultiRecordingRuntimeContext]) -
     is processed independently.
 
     Notes:
-        This function modifies the input contexts in-place, updating each context's ``runtime.tracking.template_masks``
-        and ``runtime.tracking.template_diameter`` (and the ``template_masks_channel_2`` and
-        ``template_diameter_channel_2`` fields for dual-channel recordings) with the generated template ROIs and their
-        estimated diameter, and recording ``runtime.timing.tracking_time``. When the first recording's output directory
-        already contains ``tracking_template_masks.npz`` and ``repeat_registration`` is disabled, tracking is skipped
-        and each context's stored tracking arrays are loaded from disk instead.
+        Modifies the input contexts in-place, updating each context's ``runtime.tracking.template_masks`` and
+        ``runtime.tracking.template_diameter`` (and the ``template_masks_channel_2`` and ``template_diameter_channel_2``
+        fields for dual-channel recordings) with the generated template ROIs and their estimated diameter, and recording
+        ``runtime.timing.tracking_time``. When the first recording's output directory already contains
+        ``tracking_template_masks.npz`` and ``repeat_registration`` is disabled, tracking is skipped and each context's
+        stored tracking arrays are loaded from disk instead.
 
     Args:
         contexts: The list of MultiRecordingRuntimeContext instances, one per recording. Each context must have
@@ -104,14 +104,12 @@ def track_rois_across_recordings(contexts: list[MultiRecordingRuntimeContext]) -
         if has_channel_1 or has_channel_2:
             break
 
-    # Processes each channel that has available data.
     if has_channel_1:
         _track_channel_rois(contexts=contexts, channel_2=False)
 
     if has_channel_2:
         _track_channel_rois(contexts=contexts, channel_2=True)
 
-    # Records tracking timing and persists runtime data for each recording.
     tracking_time = int(timer.elapsed)
     for context in contexts:
         context.runtime.timing.tracking_time = tracking_time
@@ -130,7 +128,6 @@ def _compute_overlap(rois: list[ROIMask]) -> None:
     Args:
         rois: The list of ROIMask instances to process. Each ROI's ``overlap_mask`` field is updated in-place.
     """
-    # Collects all pixel index arrays from the input ROIs.
     mask_pixel_indices = [roi.raveled_pixels for roi in rois]
     if not mask_pixel_indices:
         return
@@ -275,11 +272,9 @@ def _cluster_rois_in_bin(
         )
         jaccard_matrix[condensed_index] = jaccard_distance
 
-    # Performs hierarchical clustering and extracts cluster assignments.
     linkage_matrix = hierarchy.complete(jaccard_matrix)
     cluster_labels = hierarchy.fcluster(Z=linkage_matrix, t=threshold, criterion="distance")
 
-    # Groups ROIs by their cluster label.
     clustered_rois: list[tuple[list[ROIMask], list[int]]] = []
     for cluster_id in np.unique(cluster_labels):
         member_indices = np.where(cluster_labels == cluster_id)[0]
@@ -433,16 +428,16 @@ def _collect_bin_rois(
     # maximum boundary coordinate.
     grid_row_start = search_y_min // grid_roi_size
     grid_row_end = search_y_max // grid_roi_size + 1
-    grid_col_start = search_x_min // grid_roi_size
-    grid_col_end = search_x_max // grid_roi_size + 1
+    grid_column_start = search_x_min // grid_roi_size
+    grid_column_end = search_x_max // grid_roi_size + 1
 
     collected_rois: list[ROIMask] = []
     collected_recordings: list[int] = []
 
     # Iterates over all grid cells that could contain ROIs within the search region.
     for grid_row in range(grid_row_start, grid_row_end):
-        for grid_col in range(grid_col_start, grid_col_end):
-            grid_cell = roi_grid.get((grid_row, grid_col))
+        for grid_column in range(grid_column_start, grid_column_end):
+            grid_cell = roi_grid.get((grid_row, grid_column))
             if grid_cell is None:
                 continue
 

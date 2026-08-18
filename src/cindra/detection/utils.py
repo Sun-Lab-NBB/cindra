@@ -40,10 +40,6 @@ def apply_temporal_high_pass_filter(frames: NDArray[np.float32], kernel_size: in
 def compute_temporal_standard_deviation(frames: NDArray[np.float32]) -> NDArray[np.float32]:
     """Computes the standard deviation of frame-to-frame pixel differences across time.
 
-    Notes:
-        The result represents the temporal variability of each pixel, which is useful for identifying active regions
-        in calcium imaging data.
-
     Args:
         frames: The input frame array with shape (num_frames, height, width).
 
@@ -79,7 +75,6 @@ def downsample(data: NDArray[np.float32], *, taper_edge: bool = True) -> NDArray
     Returns:
         A downsampled array with shape (depth, ceil(height/2), ceil(width/2)).
     """
-    # Precomputes the downsampling parameters and the output array.
     depth, height, width = data.shape
     output_height = (height + 1) // 2
     output_width = (width + 1) // 2
@@ -134,9 +129,9 @@ def compute_spatial_taper_mask(sigma: float, height: int, width: int) -> NDArray
     """Creates a spatial taper mask with sigmoid falloff at the edges.
 
     Notes:
-        The mask smoothly transitions from 1.0 in the center to ~0 at the edges, suppressing border artifacts
-        during phase correlation. The transition follows a sigmoid curve controlled by sigma. Results are cached
-        since the same mask is reused across all frames in a recording.
+        The mask smoothly transitions from 1.0 in the center to ~0 at the edges, suppressing border artifacts. The
+        transition follows a sigmoid curve controlled by sigma. Results are cached since the same mask is reused
+        across all frames in a recording.
 
     Args:
         sigma: Controls the steepness of the edge falloff. Larger values produce a more gradual taper.
@@ -146,7 +141,6 @@ def compute_spatial_taper_mask(sigma: float, height: int, width: int) -> NDArray
     Returns:
         The multiplicative taper mask with shape (height, width), values in range [0, 1].
     """
-    # Creates grids of absolute distances from center for each axis.
     column_distances, row_distances = _mean_centered_meshgrid(height=height, width=width)
 
     # Computes where taper begins: 2*sigma pixels inward from the edge. This ensures the sigmoid reaches
@@ -164,39 +158,6 @@ def compute_spatial_taper_mask(sigma: float, height: int, width: int) -> NDArray
     return taper_mask
 
 
-@lru_cache(maxsize=5)
-def compute_block_smoothing_kernel(x_block_count: int, y_block_count: int) -> NDArray[np.float32]:
-    """Computes a normalized Gaussian kernel matrix for smoothing nonrigid block offsets.
-
-    Notes:
-        Creates a kernel that weights neighboring blocks based on their spatial distance, used to enforce smoothness
-        constraints in nonrigid registration. Results are cached since block counts don't change during a recording.
-
-    Args:
-        x_block_count: Number of blocks along the x-axis.
-        y_block_count: Number of blocks along the y-axis.
-
-    Returns:
-        The column-normalized Gaussian kernel matrix with shape (num_blocks, num_blocks).
-    """
-    # Creates 2D coordinate grids from block indices.
-    grid_y, grid_x = np.meshgrid(
-        np.arange(x_block_count, dtype=np.float32),
-        np.arange(y_block_count, dtype=np.float32),
-    )
-
-    # Reshapes to row vectors for pairwise distance computation via broadcasting.
-    grid_y = grid_y.reshape(1, -1)
-    grid_x = grid_x.reshape(1, -1)
-
-    # Computes pairwise Gaussian weights based on squared Euclidean distance.
-    kernel_matrix = np.exp(-((grid_y - grid_y.T) ** 2 + (grid_x - grid_x.T) ** 2), dtype=np.float32)
-
-    # Normalizes each column to sum to 1 for weighted averaging.
-    kernel_matrix /= kernel_matrix.sum(axis=0)
-    return kernel_matrix
-
-
 def compute_registration_blocks(
     height: int,
     width: int,
@@ -205,9 +166,8 @@ def compute_registration_blocks(
     """Computes overlapping blocks for nonrigid registration.
 
     Notes:
-        Divides the field of view into overlapping blocks that are registered independently. The blocks
-        are arranged in a regular grid with positions computed to provide approximately 50% overlap
-        between adjacent blocks.
+        Divides the field of view into overlapping blocks that are registered independently. The blocks are arranged
+        in a regular grid with positions computed to provide approximately 50% overlap between adjacent blocks.
 
     Args:
         height: The imaging field height in pixels.
@@ -216,14 +176,14 @@ def compute_registration_blocks(
             if the image dimensions are smaller than the requested block size.
 
     Returns:
-        A tuple of (y_blocks, x_blocks, block_counts, actual_block_size, smoothing_kernel). The
-        y_blocks and x_blocks are lists of 2-element arrays specifying the start and end indices for
-        each block. The block_counts tuple gives (y_count, x_count). The actual_block_size tuple gives
-        the final block dimensions. The smoothing_kernel is used for interpolating block offsets.
+        A tuple of (y_blocks, x_blocks, block_counts, actual_block_size, smoothing_kernel). The y_blocks and x_blocks
+        are lists of 2-element arrays specifying the start and end indices for each block. The block_counts tuple gives
+        (y_count, x_count). The actual_block_size tuple gives the final block dimensions. The smoothing_kernel is used
+        for SNR-based adaptive smoothing of correlation peaks across neighboring blocks.
     """
-    # Computes block dimensions and counts for each axis. If the requested block size exceeds the image
-    # dimension, uses the full dimension as a single block. Otherwise, the 1.5x multiplier produces
-    # approximately 50% overlap between adjacent blocks.
+    # Computes block dimensions and counts for each axis. If the requested block size exceeds the image dimension, uses
+    # the full dimension as a single block. Otherwise, the 1.5x multiplier produces approximately 50% overlap between
+    # adjacent blocks.
     if block_size[0] >= height:
         block_size_y, y_block_count = height, 1
     else:
@@ -237,8 +197,8 @@ def compute_registration_blocks(
     actual_block_size = (block_size_y, block_size_x)
 
     # Computes evenly-spaced block start positions spanning from 0 to the last valid position.
-    y_starts = np.linspace(0, height - block_size_y, y_block_count).astype(np.int32)
-    x_starts = np.linspace(0, width - block_size_x, x_block_count).astype(np.int32)
+    y_starts = np.linspace(start=0, stop=height - block_size_y, num=y_block_count).astype(np.int32)
+    x_starts = np.linspace(start=0, stop=width - block_size_x, num=x_block_count).astype(np.int32)
 
     # Creates block boundary arrays in row-major order (all x positions for each y position).
     y_blocks = [
@@ -253,7 +213,7 @@ def compute_registration_blocks(
     ]
 
     # Computes the smoothing kernel used for SNR-based adaptive smoothing during offset estimation.
-    smoothing_kernel = compute_block_smoothing_kernel(
+    smoothing_kernel = _compute_block_smoothing_kernel(
         x_block_count=x_block_count,
         y_block_count=y_block_count,
     ).T
@@ -265,8 +225,7 @@ def _mean_centered_meshgrid(height: int, width: int) -> tuple[NDArray[np.float32
     """Creates a mean-centered distance meshgrid of the specified dimensions.
 
     Notes:
-        Each coordinate value represents the absolute distance from the center of that axis. Used for creating spatial
-        taper masks.
+        Each coordinate value represents the absolute distance from the center of that axis.
 
     Args:
         height: The height of the frames or images to generate the meshgrid for, in pixels.
@@ -312,22 +271,54 @@ def _apply_rolling_mean_high_pass(frames: NDArray[np.float32], kernel_size: int)
         frames: The input frame array with shape (num_frames, height, width). Modified in-place.
         kernel_size: The rolling window size in frames.
     """
-    # Determines the number of complete windows based on the frame count.
-    num_frames, height, width = frames.shape
-    num_complete_windows = num_frames // kernel_size
-    remainder = num_frames % kernel_size
+    frame_count, height, width = frames.shape
+    complete_window_count = frame_count // kernel_size
+    remainder = frame_count % kernel_size
 
     # Withholds the last complete window from the batched pass when leftover frames have to be folded into it.
-    batched_windows = num_complete_windows - 1 if remainder > 0 and num_complete_windows > 0 else num_complete_windows
+    batched_windows = (
+        complete_window_count - 1 if remainder > 0 and complete_window_count > 0 else complete_window_count
+    )
 
     # Reshapes to (num_windows, kernel_size, height, width). This creates a view, not a copy.
     if batched_windows > 0:
-        # Applies the filter to all windows at once.
         complete = frames[: batched_windows * kernel_size].reshape(batched_windows, kernel_size, height, width)
         complete -= complete.mean(axis=1, keepdims=True)
 
     # Filters the trailing span, which holds the last complete window together with the leftover frames folded into
     # it, or the whole movie when it is shorter than one window.
-    trailing_frames = num_frames - batched_windows * kernel_size
+    trailing_frames = frame_count - batched_windows * kernel_size
     if trailing_frames > 0:
         frames[-trailing_frames:] -= frames[-trailing_frames:].mean(axis=0)
+
+
+@lru_cache(maxsize=5)
+def _compute_block_smoothing_kernel(x_block_count: int, y_block_count: int) -> NDArray[np.float32]:
+    """Computes a normalized Gaussian kernel matrix for smoothing nonrigid block offsets.
+
+    Notes:
+        Creates a kernel that weights neighboring blocks based on their spatial distance. Results are cached since
+        block counts don't change during a recording.
+
+    Args:
+        x_block_count: Number of blocks along the x-axis.
+        y_block_count: Number of blocks along the y-axis.
+
+    Returns:
+        The column-normalized Gaussian kernel matrix with shape (num_blocks, num_blocks).
+    """
+    grid_y, grid_x = np.meshgrid(
+        np.arange(x_block_count, dtype=np.float32),
+        np.arange(y_block_count, dtype=np.float32),
+    )
+
+    # Reshapes to row vectors for pairwise distance computation via broadcasting.
+    grid_y = grid_y.reshape(1, -1)
+    grid_x = grid_x.reshape(1, -1)
+
+    # Computes pairwise Gaussian weights based on squared Euclidean distance.
+    kernel_matrix = np.exp(-((grid_y - grid_y.T) ** 2 + (grid_x - grid_x.T) ** 2), dtype=np.float32)
+
+    # Normalizes each column to sum to 1 for weighted averaging.
+    kernel_matrix /= kernel_matrix.sum(axis=0)
+    return kernel_matrix

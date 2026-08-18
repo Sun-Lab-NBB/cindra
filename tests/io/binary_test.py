@@ -25,23 +25,6 @@ _FRAME_COUNT: int = 10
 """The number of frames stored in test binary files."""
 
 
-def _create_test_binary(file_path: Path, frame_count: int = _FRAME_COUNT) -> NDArray[np.int16]:
-    """Creates a test binary file with sequential int16 data and returns the written data array.
-
-    Args:
-        file_path: The absolute path where the binary file will be created.
-        frame_count: The number of frames to write into the binary file.
-
-    Returns:
-        The int16 data array that was written to the file, with shape (frame_count, height, width).
-    """
-    data = np.arange(frame_count * _FRAME_HEIGHT * _FRAME_WIDTH, dtype=np.int16).reshape(
-        frame_count, _FRAME_HEIGHT, _FRAME_WIDTH
-    )
-    data.tofile(file_path)
-    return data
-
-
 class TestBinaryFileInit:
     """Tests BinaryFile.__init__() constructor behavior."""
 
@@ -144,7 +127,8 @@ class TestBinaryFileRepresentation:
             f"BinaryFile(file_path={file_path}, height={reopened_height}, width={reopened_width}, dtype=int16, "
             f"read_only=True)"
         )
-        # The three instances differ from the first in one field each, so each field must move on its own.
+        # The writable instance differs from the read-only one in the read_only field alone, and the uint8
+        # instance differs in both dtype and read_only, so each field must move on its own.
         assert writable_representation == read_only_representation.replace("read_only=True", "read_only=False")
         assert narrow_representation == read_only_representation.replace("dtype=int16", "dtype=uint8").replace(
             "read_only=True", "read_only=False"
@@ -286,7 +270,6 @@ class TestBinaryFileSetItem:
         with BinaryFile(
             height=_FRAME_HEIGHT, width=_FRAME_WIDTH, file_path=file_path, frame_number=_FRAME_COUNT
         ) as binary_file:
-            # Uses float32 data with values exceeding int16 range.
             large_value_data = np.full((_FRAME_HEIGHT, _FRAME_WIDTH), fill_value=50000.0, dtype=np.float32)
             binary_file[0] = large_value_data
 
@@ -395,7 +378,6 @@ class TestBinMovie:
             result = binary_file.bin_movie(bin_size=5)
 
             assert result.dtype == np.float32
-            # 10 frames with bin_size=5 should produce 2 bins.
             assert result.shape == (2, _FRAME_HEIGHT, _FRAME_WIDTH)
             # The arange input is deterministic, so each bin equals the exact mean of its five source frames.
             np.testing.assert_allclose(result[0], data[0:5].mean(axis=0))
@@ -413,7 +395,6 @@ class TestBinMovie:
                 y_range=(0, 4),
             )
             assert result.shape == (2, 4, 4)
-            # Cropping selects the top-left 4x4 region of each frame before averaging the 5-frame bins.
             np.testing.assert_allclose(result[0], data[0:5, 0:4, 0:4].mean(axis=0))
             np.testing.assert_allclose(result[1], data[5:10, 0:4, 0:4].mean(axis=0))
 
@@ -431,7 +412,6 @@ class TestBinMovie:
             result = binary_file.bin_movie(bin_size=2, bad_frames=bad_frames)
 
             assert result.dtype == np.float32
-            # 8 good frames with bin_size=2 should produce 4 bins.
             assert result.shape[0] == 4
             # Bad frames 0 and 1 are dropped, leaving good frames 2..9 binned into pairs (2,3), (4,5), (6,7), (8,9).
             np.testing.assert_allclose(result[0], data[2:4].mean(axis=0))
@@ -445,7 +425,6 @@ class TestBinMovie:
         with BinaryFile(height=_FRAME_HEIGHT, width=_FRAME_WIDTH, file_path=file_path) as binary_file:
             result = binary_file.bin_movie(bin_size=2)
 
-            # 10 frames with bin_size=2 produces 5 bins.
             assert result.shape[0] == 5
 
     def test_bins_preserves_data_when_too_many_bad_frames(self, tmp_path: Path) -> None:
@@ -538,7 +517,6 @@ class TestWriteTiff:
         with BinaryFile(height=_FRAME_HEIGHT, width=_FRAME_WIDTH, file_path=file_path) as binary_file:
             binary_file.write_tiff(file_name=tiff_path, y_range=slice(1, 3), x_range=slice(2, 4))
 
-        # The explicit ranges crop each frame to rows 1:3 and columns 2:4, yielding a (5, 2, 2) stack on read-back.
         tiff_data = tifffile.imread(tiff_path)
         assert tiff_data.shape == (5, 2, 2)
         np.testing.assert_array_equal(tiff_data, data[:, 1:3, 2:4])
@@ -552,7 +530,23 @@ class TestWriteTiff:
         with BinaryFile(height=_FRAME_HEIGHT, width=_FRAME_WIDTH, file_path=file_path) as binary_file:
             binary_file.write_tiff(file_name=tiff_path, frame_range=slice(0, 3))
 
-        # Omitting y_range and x_range defaults to the full frame dimensions, exporting the first three frames in full.
         tiff_data = tifffile.imread(tiff_path)
         assert tiff_data.shape == (3, _FRAME_HEIGHT, _FRAME_WIDTH)
         np.testing.assert_array_equal(tiff_data, data[0:3])
+
+
+def _create_test_binary(file_path: Path, frame_count: int = _FRAME_COUNT) -> NDArray[np.int16]:
+    """Creates a test binary file with sequential int16 data and returns the written data array.
+
+    Args:
+        file_path: The absolute path where the binary file will be created.
+        frame_count: The number of frames to write into the binary file.
+
+    Returns:
+        The int16 data array that was written to the file, with shape (frame_count, height, width).
+    """
+    data = np.arange(frame_count * _FRAME_HEIGHT * _FRAME_WIDTH, dtype=np.int16).reshape(
+        frame_count, _FRAME_HEIGHT, _FRAME_WIDTH
+    )
+    data.tofile(file_path)
+    return data

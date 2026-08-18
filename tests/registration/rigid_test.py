@@ -111,7 +111,6 @@ class TestComputePhaseCorrelationKernel:
         reference = generator.standard_normal((32, 32)).astype(np.float32)
         kernel = compute_phase_correlation_kernel(reference_image=reference, smoothing_sigma=0.0)
         magnitudes = np.abs(kernel)
-        # Expects normalized magnitudes close to 1.0, within the epsilon tolerance.
         np.testing.assert_allclose(magnitudes, 1.0, atol=0.15)
 
 

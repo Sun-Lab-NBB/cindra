@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import pytest
 from scipy.interpolate import BSpline
@@ -14,23 +16,16 @@ from cindra.registration.spline_grid import (
     compute_cardinal_coefficients,
 )
 
-_CATMULL_ROM_BASIS: np.ndarray = 0.5 * np.array(
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
+_CATMULL_ROM_BASIS: NDArray[np.float64] = 0.5 * np.array(
     [[0.0, 2.0, 0.0, 0.0], [-1.0, 0.0, 1.0, 0.0], [2.0, -5.0, 4.0, -1.0], [-1.0, 3.0, -3.0, 1.0]], dtype=np.float64
 )
 """The standard Catmull-Rom basis matrix, whose rows weight the powers 1, t, t squared, and t cubed."""
 
-_UNIFORM_BSPLINE_KNOTS: np.ndarray = np.arange(-3, 5, dtype=np.float64)
+_UNIFORM_BSPLINE_KNOTS: NDArray[np.float64] = np.arange(-3, 5, dtype=np.float64)
 """The uniform knot vector spanning the four cubic B-spline basis functions that are non-zero on the unit interval."""
-
-
-def _reference_bspline_basis(interpolation_factor: float) -> np.ndarray:
-    """Evaluates the four non-zero uniform cubic B-spline basis functions through scipy's de Boor implementation."""
-    values = []
-    for basis_index in range(4):
-        coefficients = np.zeros(len(_UNIFORM_BSPLINE_KNOTS) - 4, dtype=np.float64)
-        coefficients[basis_index] = 1.0
-        values.append(float(BSpline(_UNIFORM_BSPLINE_KNOTS, coefficients, 3)(interpolation_factor)))
-    return np.array(values, dtype=np.float64)
 
 
 class TestComputeCardinalCoefficients:
@@ -313,7 +308,7 @@ class TestSplineGridUnfold:
     def test_unfold_limits_large_knots(self) -> None:
         """Verifies that unfold constrains large displacement values."""
         grid = SplineGrid(field_height=50, field_width=50, sampling=5.0)
-        # Sets very large displacement to test the constraint.
+        # A displacement this large engages the injectivity constraint.
         field_y = np.ones((50, 50), dtype=np.float32) * 100.0
         field_x = np.ones((50, 50), dtype=np.float32) * 100.0
         grid.set_from_fields(field_y=field_y, field_x=field_x, injective=True, freeze_edges=False)
@@ -321,3 +316,13 @@ class TestSplineGridUnfold:
         # Expects the injectivity constraint to bound the recovered values below the theoretical limit.
         limit = (1.0 / 2.046392675) * 5.0 * 0.9
         assert np.max(np.abs(recovered_y)) < limit * 2.0
+
+
+def _reference_bspline_basis(interpolation_factor: float) -> NDArray[np.float64]:
+    """Evaluates the four non-zero uniform cubic B-spline basis functions through scipy's de Boor implementation."""
+    values = []
+    for basis_index in range(4):
+        coefficients = np.zeros(len(_UNIFORM_BSPLINE_KNOTS) - 4, dtype=np.float64)
+        coefficients[basis_index] = 1.0
+        values.append(float(BSpline(_UNIFORM_BSPLINE_KNOTS, coefficients, 3)(interpolation_factor)))
+    return np.array(values, dtype=np.float64)

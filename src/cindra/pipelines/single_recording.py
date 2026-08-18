@@ -55,10 +55,8 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
     """Converts raw TIFF recording data into the internal binary format used by the processing pipeline.
 
     Notes:
-        This function executes the first phase of the single-recording pipeline: it converts the raw recording data
-        into the internal binary format and initializes the per-plane runtime data hierarchy. The conversion is
-        skipped when every plane already holds the channel binaries the recording declares and 'repeat_binarization'
-        is disabled in the FileIO configuration section.
+        The conversion is skipped when every plane already holds the channel binaries the recording declares and
+        'repeat_binarization' is disabled in the FileIO configuration section.
 
         An existing output that disagrees with what the recording declares is refused rather than repaired. The
         refusals cover a binary an interrupted conversion or registration left marked, a plane of a two-channel
@@ -90,7 +88,6 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
         FileNotFoundError: If a plane's runtime_data.yaml was not written by an earlier bootstrap step, or if no TIFF
             files are found in the data directory.
     """
-    # Validates that data_path is configured.
     if configuration.file_io.data_path is None:
         message = (
             "Unable to binarize the recording. The data_path must be configured in the FileIO section of the "
@@ -98,7 +95,6 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
         )
         console.error(message=message, error=ValueError)
 
-    # Validates that output_path is configured.
     if configuration.file_io.output_path is None:
         message = (
             "Unable to binarize the recording. The output_path must be configured in the FileIO section of the "
@@ -111,10 +107,10 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
     # every binary and every result it arrived with.
     output_root = configuration.file_io.output_path
     root_path = resolve_output_path(output_root=output_root)
-    config_path = root_path / SINGLE_RECORDING_CONFIGURATION_FILENAME
+    configuration_path = root_path / SINGLE_RECORDING_CONFIGURATION_FILENAME
     acquisition_path = root_path / ACQUISITION_PARAMETERS_FILENAME
-    if config_path.exists() and acquisition_path.exists():
-        console.echo(message=f"Found existing configuration at: {config_path}.", level=LogLevel.INFO)
+    if configuration_path.exists() and acquisition_path.exists():
+        console.echo(message=f"Found existing configuration at: {configuration_path}.", level=LogLevel.INFO)
 
         # Loads all existing contexts. Uses plane_index=-1 to load all planes, which always returns a list.
         loaded_contexts = RuntimeContext.load(root_path=root_path, plane_index=-1)
@@ -151,7 +147,6 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
                 level=LogLevel.WARNING,
             )
 
-    # Starts the binarization timer.
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
 
@@ -194,12 +189,8 @@ def register_recording_plane(configuration: SingleRecordingConfiguration, plane_
     """Removes motion from the target imaging plane and computes its registration quality metrics.
 
     Notes:
-        This function executes the second phase of the single-recording pipeline: it motion-corrects a single imaging
-        plane and computes the principal components used to assess the registration quality. Multiple planes can be
-        registered in parallel, but each plane may use significant memory and CPU resources.
-
-        This stage is the prerequisite for the processing stage. It writes the registration offsets, the valid pixel
-        ranges, and the bad-frame mask to disk, all of which the processing stage reads back before detecting ROIs.
+        The stage writes the registration offsets, the valid pixel ranges, and the bad-frame mask to disk. Multiple
+        planes can be registered in parallel, but each plane may use significant memory and CPU resources.
 
     Args:
         configuration: The single-recording pipeline configuration.
@@ -218,14 +209,13 @@ def register_recording_plane(configuration: SingleRecordingConfiguration, plane_
     if context is None:
         return
 
-    # Starts the overall plane registration timer.
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
 
     # Runs registration (motion correction) and the registration quality metrics computation.
     register_plane(context=context, workers=workers)
 
-    # Records the total plane registration time and the allocation the stage actually used.
+    # Records the allocation the stage actually used.
     context.runtime.timing.total_registration_time = timer.elapsed
     context.runtime.timing.registration_workers = workers
 
@@ -242,9 +232,7 @@ def process_plane(configuration: SingleRecordingConfiguration, plane_index: int,
     """Detects ROIs and extracts their fluorescence traces for the target imaging plane.
 
     Notes:
-        This function executes the third phase of the single-recording pipeline: it discovers the ROIs of a single
-        registered imaging plane and extracts, classifies, and deconvolves their fluorescence. Multiple planes can be
-        processed in parallel, but each plane may use significant memory and CPU resources.
+        Multiple planes can be processed in parallel, but each plane may use significant memory and CPU resources.
 
         The plane must be registered before it is processed. Detection reads the valid pixel ranges computed during
         registration, and an unregistered plane carries the (0, 0) defaults for those ranges, which silently produce a
@@ -273,7 +261,6 @@ def process_plane(configuration: SingleRecordingConfiguration, plane_index: int,
     if context is None:
         return
 
-    # Validates that the plane has been registered.
     if not context.runtime.registration.is_registered(output_path=context.runtime.io.output_path):
         message = (
             f"Unable to process plane {plane_index}. The plane must be registered before ROI detection, but no "
@@ -282,20 +269,17 @@ def process_plane(configuration: SingleRecordingConfiguration, plane_index: int,
         )
         console.error(message=message, error=RuntimeError)
 
-    # Starts the overall plane processing timer.
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
 
     # Confines the linear-algebra backends to the allocated worker budget for the whole stage, matching the Numba mask
     # the context resolver applied. The batch engine pins every worker process to one backend thread, so the classifier
-    # fits and the trace algebra outside detection's own limited block would otherwise run single-threaded, while the
-    # same code invoked outside that engine would size those backends to the whole host instead of to the job.
+    # fits and the trace algebra outside detection's own limited block would otherwise run single-threaded. Invoked
+    # outside that engine, the same code would size those backends to the whole host rather than to the job.
     with threadpool_limits(limits=workers):
-        # Runs ROI detection and trace extraction when detection is enabled.
         if configuration.roi_detection.enabled:
             detect_plane_rois(context=context, workers=workers)
 
-            # Extracts fluorescence traces when ROIs were detected.
             # pragma justification: detection always populates ROI statistics on success or raises beforehand.
             if context.runtime.extraction.roi_statistics is not None:  # pragma: no branch
                 extract_traces(context=context, workers=workers)
@@ -303,7 +287,7 @@ def process_plane(configuration: SingleRecordingConfiguration, plane_index: int,
             message = f"Skipping plane {plane_index} ROI detection (disabled via 'roi_detection.enabled' parameter)."
             console.echo(message=message, level=LogLevel.WARNING)
 
-    # Records the total plane processing time, the allocation the stage actually used, and the processing timestamp.
+    # Records the allocation the stage actually used.
     context.runtime.timing.total_processing_time = timer.elapsed
     context.runtime.timing.processing_workers = workers
     context.runtime.timing.date_processed = str(get_timestamp())
@@ -319,10 +303,6 @@ def process_plane(configuration: SingleRecordingConfiguration, plane_index: int,
 
 def save_combined_data(contexts: list[RuntimeContext]) -> None:
     """Combines processed data from all imaging planes into a unified dataset and saves it to disk.
-
-    Notes:
-        This function executes the final phase of the single-recording pipeline. The combined dataset is a
-        prerequisite for running the multi-recording processing pipeline.
 
     Args:
         contexts: A list of RuntimeContext instances, one per plane to combine. Each context must have valid runtime
@@ -364,12 +344,12 @@ def _validate_binaries_are_unmarked(contexts: list[RuntimeContext]) -> None:
     Raises:
         RuntimeError: If a marker sits beside any binary the given planes hold.
     """
-    marked_binaries: list[str] = []
-    for context in contexts:
-        for binary_path in _resolve_existing_plane_binaries(context=context):
-            marker_path = resolve_active_binary_marker(binary_path=binary_path)
-            if marker_path is not None:
-                marked_binaries.append(f"'{binary_path}' marked by '{marker_path.name}'")
+    marked_binaries: list[str] = [
+        f"'{binary_path}' marked by '{marker_path.name}'"
+        for context in contexts
+        for binary_path in _resolve_existing_plane_binaries(context=context)
+        if (marker_path := resolve_active_binary_marker(binary_path=binary_path)) is not None
+    ]
 
     if not marked_binaries:
         return
@@ -402,11 +382,11 @@ def _validate_second_channel_binaries(contexts: list[RuntimeContext]) -> None:
     Raises:
         RuntimeError: If a converted plane of a two-channel recording holds no second channel binary.
     """
-    missing_binaries: list[Path] = []
-    for context in contexts:
-        binary_path = _resolve_second_channel_binary(context=context)
-        if binary_path is not None and not binary_path.exists():
-            missing_binaries.append(binary_path)
+    missing_binaries: list[Path] = [
+        binary_path
+        for context in contexts
+        if (binary_path := _resolve_second_channel_binary(context=context)) is not None and not binary_path.exists()
+    ]
 
     if not missing_binaries:
         return
@@ -451,8 +431,9 @@ def _validate_binary_sizes(contexts: list[RuntimeContext]) -> None:
         frame_bytes = io_data.frame_height * io_data.frame_width * _BINARY_ITEM_SIZE
 
         # A bootstrapped plane records a zero frame geometry until its conversion saves the measured values, and the
-        # conversion clears the binarization marker before that save. A run interrupted between the two therefore
-        # leaves a plane holding no geometry to size its binary against, which this skips rather than misreports.
+        # conversion persists that save before it clears the binarization marker. A run interrupted before the save
+        # therefore leaves a plane holding no geometry to size its binary against, which this skips rather than
+        # misreports.
         if frame_bytes <= 0:
             continue
 
@@ -592,10 +573,6 @@ def _resolve_plane_context(
     """Loads and validates the runtime context for the target plane and applies the stage's worker budget.
 
     Notes:
-        This helper carries the preamble shared by the registration and processing plane stages. It skips flyback
-        planes, validates the configured output path, loads the plane's RuntimeContext from disk, applies the
-        allocated worker budget to the calling thread's Numba mask, and validates the plane's frame count.
-
         The stage labels are parameterized because the two stages report different actions to the user.
 
     Args:
@@ -618,13 +595,11 @@ def _resolve_plane_context(
         ValueError: If output_path is not configured or the plane contains too few frames to be processed.
         TypeError: If the runtime context loader returns multiple contexts for the target plane.
     """
-    # Skips flyback planes early.
     if plane_index in configuration.main.ignored_flyback_planes:
         message = f"Skipping the {stage_noun} of the flyback plane {plane_index}."
         console.echo(message=message, level=LogLevel.SUCCESS)
         return None
 
-    # Validates that output_path is configured.
     if configuration.file_io.output_path is None:
         message = (
             f"Unable to {stage_action} the target plane. The output_path must be configured in the FileIO section of "
@@ -648,7 +623,6 @@ def _resolve_plane_context(
     # detected at import time, so the requested budget is capped at that ceiling.
     numba.set_num_threads(min(workers, numba.config.NUMBA_NUM_THREADS))
 
-    # Validates the frame count meets minimum processing requirements.
     frame_count = context.runtime.io.frame_count
     if frame_count < _MINIMUM_PROCESSING_FRAMES:
         message = (

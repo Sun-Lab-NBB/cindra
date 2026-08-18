@@ -103,8 +103,8 @@ class BackgroundView(IntEnum):
     """Displays the maximum intensity projection (channel 1 or channel 2 depending on channel toggle)."""
 
     CORRECTED_STRUCTURAL = 5
-    """Displays the bleed-through-corrected structural channel mean image computed during
-    functional-to-structural channel colocalization. Only enabled when colocalization data exists."""
+    """Displays the bleed-through-corrected structural channel mean image computed during functional-to-structural
+    channel colocalization. Only enabled when colocalization data exists."""
 
 
 class BackgroundViewLabel(StrEnum):
@@ -168,8 +168,8 @@ class MaskLayer(IntEnum):
     """Displays the original ROI masks from single-recording extraction in native recording coordinates."""
 
     DEFORMED = 1
-    """Displays the original ROI masks warped to the shared cross-recording coordinate space via
-    multi-recording registration deformation fields."""
+    """Displays the original ROI masks warped to the shared cross-recording coordinate space via multi-recording
+    registration deformation fields."""
 
     TEMPLATE = 2
     """Displays the consensus template ROI masks derived from cross-recording clustering, defined in the shared
@@ -272,9 +272,9 @@ class _ROIViewerConstants:
     """The default and maximum number of ROIs selectable via top-n / bottom-n statistic ranking. Used as the initial
     value in the ranked count input field and the QIntValidator upper bound."""
     default_channel_2_threshold: float = 0.6
-    """The default colocalization probability threshold for classifying ROIs as channel 2 positive. ROIs with a
-    colocalization probability above this value are assigned to channel 2, and the threshold resets to this default
-    on each recording load."""
+    """The default value of the ROI viewer's colocalization probability threshold. The viewer reports this threshold in
+    its cross-process state and resets it to this default on each recording load. Channel 2 attribution in the random
+    color overlay is driven by column 0 of the cell colocalization array rather than by this threshold."""
     bin_size_divisor: int = 2
     """The divisor applied to the product of tau and sampling rate when computing the default temporal bin size. The
     bin size is calculated as max(1, int(tau * sampling_rate / divisor)) and controls the time window used for

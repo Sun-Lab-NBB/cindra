@@ -17,8 +17,7 @@ class PipelineType(StrEnum):
     """The within-recording pipeline that processes a single recording (binarize, register, process, combine)."""
 
     MULTI_RECORDING = "multi-recording"
-    """The across-recording pipeline that tracks and extracts ROIs across multiple recordings (discover,
-    extract)."""
+    """The across-recording pipeline that tracks and extracts ROIs across multiple recordings (discover, extract)."""
 
 
 class BaselineMethod(StrEnum):
@@ -88,20 +87,19 @@ class RuntimeSettings:
 class AcquisitionParameters(YamlConfig):
     """Stores the data acquisition parameters used by the system that recorded the processed ROI activity data.
 
-    This dataclass describes the acquisition parameters of the input TIFF files, supporting both single-ROI
-    (standard imaging) and multi-ROI (MROI line-scanning) data.
+    This dataclass describes the acquisition parameters of the input TIFF files, supporting both single-ROI (standard
+    imaging) and multi-ROI (MROI line-scanning) data.
 
     Notes:
-        For single-ROI data, only frame_rate, plane_number, and channel_number are required. For MROI data,
-        additional fields describe the geometry of each ROI.
+        For single-ROI data, only frame_rate, plane_number, and channel_number are required. For MROI data, additional
+        fields describe the geometry of each ROI.
 
-        The pipeline expects a cindra_parameters.json file in the data directory containing these parameters. Use the
-        is_mroi property to determine whether the data uses multi-ROI acquisition.
+        The pipeline expects a cindra_parameters.json file in the data directory containing these parameters.
     """
 
     frame_rate: float
-    """The acquisition frame rate in Hz. For multi-plane recordings, this is the volume rate (rate at which all
-    planes are acquired), not the rate per plane."""
+    """The acquisition frame rate in Hz. For multi-plane recordings, this is the volume rate (rate at which all planes
+    are acquired), not the rate per plane."""
 
     plane_number: int = 1
     """The number of imaging planes acquired per volume. For single-plane recordings, this is 1."""
@@ -115,19 +113,19 @@ class AcquisitionParameters(YamlConfig):
     line-scanning microscopes (e.g., 2-Photon Random Access Mesoscope), this can be greater than 1."""
 
     roi_lines: tuple[tuple[int, ...], ...] = ()
-    """The line indices for each ROI in MROI acquisitions. Each inner tuple contains the row indices in the raw
-    frame that belong to that ROI. The length of the outer tuple must equal roi_number. For single-ROI data, this
-    field is empty."""
+    """The line indices for each ROI in MROI acquisitions. Each inner tuple contains the row indices in the raw frame
+    that belong to that ROI. The length of the outer tuple must equal roi_number. For single-ROI data, this field is
+    empty."""
 
     roi_x_coordinates: tuple[int, ...] = ()
-    """The x-coordinates (in pixels) for positioning each ROI in MROI acquisitions. These define the horizontal
-    position of each ROI's top-left corner in the combined field of view. The length must equal roi_number. For
-    single-ROI data, this field is empty."""
+    """The x-coordinates (in pixels) for positioning each ROI in MROI acquisitions. These define the horizontal position
+    of each ROI's top-left corner in the combined field of view. The length must equal roi_number. For single-ROI data,
+    this field is empty."""
 
     roi_y_coordinates: tuple[int, ...] = ()
-    """The y-coordinates (in pixels) for positioning each ROI in MROI acquisitions. These define the vertical
-    position of each ROI's top-left corner in the combined field of view. The length must equal roi_number. For
-    single-ROI data, this field is empty."""
+    """The y-coordinates (in pixels) for positioning each ROI in MROI acquisitions. These define the vertical position
+    of each ROI's top-left corner in the combined field of view. The length must equal roi_number. For single-ROI data,
+    this field is empty."""
 
     @property
     def is_mroi(self) -> bool:
@@ -136,8 +134,8 @@ class AcquisitionParameters(YamlConfig):
 
     @property
     def virtual_plane_count(self) -> int:
-        """Returns the total number of virtual planes (roi_number * plane_number), where each ROI x plane
-        combination becomes a separate virtual plane for processing.
+        """Returns the total number of virtual planes (roi_number * plane_number), where each ROI x plane combination
+        becomes a separate virtual plane for processing.
         """
         return self.roi_number * self.plane_number
 
@@ -158,13 +156,13 @@ class Main:
 
     first_channel_functional: bool = True
     """Determines whether the first channel is used for ROI detection and signal extraction. This field is only
-    applicable when two_channels is True. When both first_channel_functional and second_channel_functional are True,
-    the pipeline performs independent ROI detection on both channels."""
+    applicable when two_channels is True. When both first_channel_functional and second_channel_functional are True, the
+    pipeline performs independent ROI detection on both channels."""
 
     second_channel_functional: bool = False
     """Determines whether the second channel is used for ROI detection and signal extraction. This field is only
-    applicable when two_channels is True. When both first_channel_functional and second_channel_functional are True,
-    the pipeline performs independent ROI detection on both channels."""
+    applicable when two_channels is True. When both first_channel_functional and second_channel_functional are True, the
+    pipeline performs independent ROI detection on both channels."""
 
     tau: float = 0.4
     """The timescale of the sensor in seconds, used for computing the deconvolution kernel. The kernel is fixed to have
@@ -177,8 +175,8 @@ class Main:
 
     custom_classifier_path: Path | None = None
     """The absolute path to a custom classifier file used for ROI classification. When set, this classifier is used
-    instead of the built-in classifier for both preclassification during detection and final classification after
-    signal extraction. Leave as None to use the built-in classifier bundled with cindra."""
+    instead of the built-in classifier for both preclassification during detection and final classification after signal
+    extraction. Leave as None to use the built-in classifier bundled with cindra."""
 
 
 @dataclass(slots=True)
@@ -205,9 +203,9 @@ class FileIO:
     binary conversion using the data_path from the current configuration, even if binary files already exist. This
     allows raw data to be relocated or updated without affecting other pipeline states. When False (default), an
     existing binary is reused when it carries no write marker, is sized to the frame geometry recorded for its plane,
-    and is accompanied by the second channel binary a two-channel recording declares. Binarization refuses a binary
-    that fails any of those checks and names this parameter as the remedy, because enabling it rebuilds every plane
-    binary from the source TIFF files."""
+    and is accompanied by the second channel binary a two-channel recording declares. Binarization refuses a binary that
+    fails any of those checks and names this parameter as the remedy, because enabling it rebuilds every plane binary
+    from the source TIFF files."""
 
 
 @dataclass(slots=True)
@@ -222,15 +220,15 @@ class Registration:
     current registration state."""
 
     align_by_first_channel: bool = True
-    """Determines whether to use the first channel for frame alignment (registration). When False, the second channel
-    is used instead. If the recording features both a functional and non-functional channel, it is recommended to use
-    the non-functional channel for alignment. This field is only applicable when two_channels is True in the Main
+    """Determines whether to use the first channel for frame alignment (registration). When False, the second channel is
+    used instead. If the recording features both a functional and non-functional channel, it is recommended to use the
+    non-functional channel for alignment. This field is only applicable when two_channels is True in the Main
     configuration."""
 
     reference_frame_count: int = 500
     """The number of frames to use to compute the reference image. During registration, each frame is registered to the
-    reference image to remove motion artifacts. The algorithm automatically selects the most stable (correlated) set
-    of frames when computing the reference image."""
+    reference image to remove motion artifacts. The algorithm automatically selects the most stable (correlated) set of
+    frames when computing the reference image."""
 
     batch_size: int = 100
     """The number of frames to keep in memory at the same time when registering them to the reference image. When
@@ -254,17 +252,17 @@ class Registration:
     stability for noisy recordings. Setting this to 0.0 disables temporal smoothing."""
 
     two_step_registration: bool = False
-    """Determines whether to perform a two-step registration. This process consists of the initial registration
-    (first step) followed by refinement (second step) registration. This procedure is helpful when working with low
+    """Determines whether to perform a two-step registration. This process consists of the initial registration (first
+    step) followed by refinement (second step) registration. This procedure is helpful when working with low
     signal-to-noise data."""
 
     bad_frame_threshold: float = 1.0
-    """The threshold for identifying frames with excessive motion or poor correlation quality. The algorithm computes
-    a ratio of motion deviation to phase correlation quality for each frame. Frames exceeding this threshold (scaled
-    by 100 internally) are marked as 'bad' and excluded when computing the valid pixel region (yrange, xrange) after
-    registration. This prevents a few frames with extreme motion from unnecessarily shrinking the usable field of view.
-    Bad frames may also be excluded during movie binning for ROI detection. Lower values are more strict and exclude
-    more frames."""
+    """The threshold for identifying frames with excessive motion or poor correlation quality. The algorithm computes a
+    ratio of motion deviation to phase correlation quality for each frame. Frames exceeding this threshold (scaled by
+    100 internally) are marked as 'bad' and excluded when computing the valid pixel region (valid_y_range,
+    valid_x_range) after registration. This prevents a few frames with extreme motion from unnecessarily shrinking the
+    usable field of view. Bad frames may also be excluded during movie binning for ROI detection. Lower values are more
+    strict and exclude more frames."""
 
     normalize_frames: bool = True
     """Determines whether to clip pixel intensities to the 1st-99th percentile range during registration. This removes
@@ -272,11 +270,11 @@ class Registration:
     offset detection accuracy by reducing the influence of anomalously bright or dark pixels."""
 
     registration_metric_principal_components: int = 5
-    """The number of Principal Components (PCs) used to compute the registration quality metrics. These metrics are
-    not used by the processing pipeline but are useful for assessing registration quality via the GUI. Computing
-    metrics is a fairly expensive operation that can take as long as the registration itself. The time to compute
-    scales with the number of computed PCs, so it is recommended to keep this as low as feasible. Set to 0 to disable
-    registration metrics computation entirely."""
+    """The number of Principal Components (PCs) used to compute the registration quality metrics. These metrics are not
+    used by the processing pipeline but are useful for assessing registration quality via the GUI. Computing metrics is
+    a fairly expensive operation that can take as long as the registration itself. The time to compute scales with the
+    number of computed PCs, so it is recommended to keep this as low as feasible. Set to 0 to disable registration
+    metrics computation entirely."""
 
     compute_bidirectional_phase_offset: bool = False
     """Determines whether to compute the bidirectional phase offset for misaligned line scanning in two-photon
@@ -298,32 +296,32 @@ class OnePhotonRegistration:
     """
 
     enabled: bool = False
-    """Determines whether to perform high-pass spatial filtering and tapering to improve one-photon image
-    registration. For two-photon datasets, this should be set to False."""
+    """Determines whether to perform high-pass spatial filtering and tapering to improve one-photon image registration.
+    For two-photon datasets, this should be set to False."""
 
     spatial_highpass_window: int = 42
-    """The window size, in pixels, for spatial high-pass filtering. This filter removes low-frequency spatial
-    variations such as uneven illumination that are common in one-photon imaging. The filter subtracts a spatially
-    smoothed version of the image (using this window size) from the original, preserving only high-frequency
-    features useful for registration."""
+    """The window size, in pixels, for spatial high-pass filtering. This filter removes low-frequency spatial variations
+    such as uneven illumination that are common in one-photon imaging. The filter subtracts a spatially smoothed version
+    of the image (using this window size) from the original, preserving only high-frequency features useful for
+    registration."""
 
     pre_smoothing_sigma: float = 0.0
-    """The window size, in pixels, of the uniform (box) filter applied before spatial high-pass filtering. The value
-    is cast to an integer window and must be even, because odd windows are rejected by apply_spatial_smoothing(). This
-    reduces high-frequency noise that would otherwise be amplified by the high-pass filter. Setting this to 0.0
-    disables pre-smoothing."""
+    """The window size, in pixels, of the uniform (box) filter applied before spatial high-pass filtering. The value is
+    cast to an integer window and must be even, because odd windows are rejected by apply_spatial_smoothing(). This
+    reduces high-frequency noise that would otherwise be amplified by the high-pass filter. Setting this to 0.0 disables
+    pre-smoothing."""
 
     edge_taper_pixels: float = 40.0
-    """The sigmoid falloff scale, in pixels, of the edge taper applied at image borders. The taper begins roughly
-    2 * this value inward from each edge and fades border pixels toward the image mean (not to zero) to prevent edge
-    artifacts during FFT-based phase correlation. Larger values provide smoother transitions but reduce the usable
-    image area."""
+    """The sigmoid falloff scale, in pixels, of the edge taper applied at image borders. The taper begins roughly 2 *
+    this value inward from each edge and fades border pixels toward the image mean (not to zero) to prevent edge
+    artifacts during FFT-based phase correlation. Larger values provide smoother transitions but reduce the usable image
+    area."""
 
 
 @dataclass(slots=True)
 class NonrigidRegistration:
-    """Stores parameters for nonrigid registration, which is used to improve motion registration in complex
-    datasets by dividing frames into subregions and shifting each subregion independently of other subregions.
+    """Stores parameters for nonrigid registration, which is used to improve motion registration in complex datasets by
+    dividing frames into subregions and shifting each subregion independently of other subregions.
     """
 
     enabled: bool = True
@@ -331,16 +329,16 @@ class NonrigidRegistration:
     primarily used for correcting non-uniform motion."""
 
     block_size: tuple[int, int] = (128, 128)
-    """The block size, in pixels, for nonrigid registration, defining the dimensions of subregions used in
-    the correction. It is recommended to keep this size a power of 2 and/or 3 for more efficient FFT computation.
-    During processing, each frame is tiled with blocks of these dimensions that overlap by approximately 50%, and the
+    """The block size, in pixels, for nonrigid registration, defining the dimensions of subregions used in the
+    correction. It is recommended to keep this size a power of 2 and/or 3 for more efficient FFT computation. During
+    processing, each frame is tiled with blocks of these dimensions that overlap by approximately 50%, and the
     registration is applied to each block independently. A dimension that matches or exceeds the corresponding frame
     dimension collapses to a single block spanning the whole frame."""
 
     signal_to_noise_threshold: float = 1.2
     """The signal-to-noise ratio threshold below which the block's phase correlation surface receives additional
-    smoothing from its neighboring blocks before the block offset is estimated. Block offsets are never rejected by
-    this threshold. Higher values simply apply more smoothing. Typical values range from 1.0 to 1.5."""
+    smoothing from its neighboring blocks before the block offset is estimated. Block offsets are never rejected by this
+    threshold. Higher values simply apply more smoothing. Typical values range from 1.0 to 1.5."""
 
     maximum_block_offset: float = 5.0
     """The maximum allowed offset, in pixels, for each block relative to the rigid registration offset."""
@@ -351,19 +349,20 @@ class ROIDetection:
     """Stores parameters for Region of Interest (ROI) detection."""
 
     enabled: bool = True
-    """Determines whether to perform ROI detection and classification."""
+    """Determines whether to perform ROI detection. When disabled, the plane's whole processing stage is skipped, so no
+    fluorescence traces are extracted, no ROIs are classified, and no spikes are deconvolved."""
 
     preclassification_threshold: float = 0.5
     """The classifier probability threshold used to pre-filter ROIs before signal extraction. This is the minimum
-    classifier confidence value (that the classified ROI is a cell) for the ROI to be processed further. Setting this
-    to 0.0 keeps all detected ROIs."""
+    classifier confidence value (that the classified ROI is a cell) for the ROI to be processed further. Setting this to
+    0.0 keeps all detected ROIs."""
 
     threshold_scaling: float = 2.0
     """The scaling factor for the ROI detection threshold. The final threshold multiplies this value by a fixed base
     multiplier of 5.0 and by the selected pyramid scale index, which is clamped to a minimum of 1. The product is then
     multiplied by a recording-length factor, the binned frame count divided by 1200, also clamped to a minimum of 1.
-    Higher values require ROIs to stand out more distinctly from background noise, resulting in fewer but more
-    confident detections. Lower values detect more ROIs but may include false positives."""
+    Higher values require ROIs to stand out more distinctly from background noise, resulting in fewer but more confident
+    detections. Lower values detect more ROIs but may include false positives."""
 
     spatial_highpass_window: int = 25
     """The window size, in pixels, for spatial high-pass filtering used during neuropil subtraction. The algorithm
@@ -377,30 +376,31 @@ class ROIDetection:
     ROIs."""
 
     temporal_highpass_window: int = 100
-    """The window size, in frames, for temporal high-pass filtering applied before ROI detection. This removes
-    slow fluorescence drifts (such as photobleaching or baseline changes) by subtracting a running mean computed
-    over this window. Larger values preserve slower transients but may retain more drift artifacts."""
+    """The window size, in frames, for temporal high-pass filtering applied before ROI detection. This removes slow
+    fluorescence drifts (such as photobleaching or baseline changes) by subtracting a running mean computed over this
+    window. Larger values preserve slower transients but may retain more drift artifacts."""
 
     maximum_iterations: int = 50
     """The iteration scaling factor for ROI extraction. The algorithm detects ROIs one at a time, subtracting each
-    detected ROI's contribution before searching for the next. The actual iteration limit is this value multiplied
-    by 250 internally (e.g., 50 allows up to 12,500 iterations). Higher values allow detecting more ROIs but
-    increase processing time."""
+    detected ROI's contribution before searching for the next. The actual iteration limit is this value multiplied by
+    250 internally (e.g., 50 allows up to 12,500 iterations). Higher values allow detecting more ROIs but increase
+    processing time."""
 
     maximum_binned_frames: int = 5000
-    """The maximum number of time-binned frames used for ROI detection. Temporal binning averages consecutive frames
-    to improve signal-to-noise ratio for detection. Higher values provide better averaging but increase memory usage
-    and processing time. The bin size is computed to produce at most this many binned frames."""
+    """The maximum number of time-binned frames used for ROI detection. Temporal binning averages consecutive frames to
+    improve signal-to-noise ratio for detection. The bin size is computed to produce at most this many binned frames, so
+    a higher value keeps more binned frames, each averaging fewer source frames, at the cost of increased memory usage
+    and processing time."""
 
     denoise: bool = False
     """Determines whether to apply PCA-based denoising to the binned movie before ROI detection. This can improve
     detection in noisy recordings by removing uncorrelated noise while preserving spatially coherent signals."""
 
     crop_to_soma: bool = True
-    """Determines whether to crop dendritic regions from detected ROIs before computing classification features.
-    When enabled, the algorithm analyzes the radial distribution of fluorescence from each ROI's centroid and
-    excludes pixels beyond where fluorescence contribution drops significantly. This focuses classification
-    on the cell body, improving accuracy for neurons with extensive dendritic arbors."""
+    """Determines whether to crop dendritic regions from detected ROIs before computing classification features. When
+    enabled, the algorithm analyzes the radial distribution of fluorescence from each ROI's centroid and excludes pixels
+    beyond where fluorescence contribution drops significantly. This focuses classification on the cell body, improving
+    accuracy for neurons with extensive dendritic arbors."""
 
 
 @dataclass(slots=True)
@@ -408,29 +408,29 @@ class SignalExtraction:
     """Stores parameters for extracting fluorescence signals from ROIs and surrounding neuropil regions."""
 
     extract_neuropil: bool = True
-    """Determines whether to extract neuropil activity. If disabled, neuropil fluorescence is assumed to be zero
-    during spike deconvolution."""
+    """Determines whether to extract neuropil activity. If disabled, neuropil fluorescence is assumed to be zero during
+    spike deconvolution."""
 
     allow_overlap: bool = False
     """Determines whether to include overlapping pixels (shared by multiple ROIs) in signal extraction. When disabled,
-    pixels belonging to multiple ROIs are excluded from all of them to prevent signal contamination between
-    neighboring ROIs. Enable this only if ROIs are sparse and overlap is minimal."""
+    pixels belonging to multiple ROIs are excluded from all of them to prevent signal contamination between neighboring
+    ROIs. Enable this only if ROIs are sparse and overlap is minimal."""
 
     minimum_neuropil_pixels: int = 350
-    """The minimum number of pixels required for each neuropil mask. The algorithm expands outward from the cell
-    border until it accumulates at least this many non-cell pixels. Larger values provide more stable neuropil
-    estimates but may include pixels from distant regions with different neuropil characteristics."""
+    """The minimum number of pixels required for each neuropil mask. The algorithm expands outward from the cell border
+    until it accumulates at least this many non-cell pixels. Larger values provide more stable neuropil estimates but
+    may include pixels from distant regions with different neuropil characteristics."""
 
     inner_neuropil_border_radius: int = 2
     """The width, in pixels, of the exclusion zone between the cell ROI and its neuropil mask. This gap prevents
-    contamination of the neuropil signal by the cell's own fluorescence. Larger values provide better separation
-    but reduce the neuropil sampling area near the cell."""
+    contamination of the neuropil signal by the cell's own fluorescence. Larger values provide better separation but
+    reduce the neuropil sampling area near the cell."""
 
     cell_probability_percentile: int = 50
     """The percentile threshold for classifying pixels as belonging to a cell versus neuropil. Each pixel has a
-    probability weight indicating how likely it belongs to a cell. Pixels with weights above this percentile
-    (computed locally) are excluded from neuropil masks. Higher values are more permissive, including more
-    pixels in neuropil masks but risking cell contamination."""
+    probability weight indicating how likely it belongs to a cell. Pixels with weights above this percentile (computed
+    locally) are excluded from neuropil masks. Higher values are more permissive, including more pixels in neuropil
+    masks but risking cell contamination."""
 
     classification_threshold: float = 0.5
     """The classifier probability threshold used to classify ROIs after signal extraction. This is the minimum
@@ -439,8 +439,9 @@ class SignalExtraction:
 
     batch_size: int = 500
     """The number of frames to process at the same time during fluorescence extraction. This controls memory usage
-    during the extraction step. Larger values may improve throughput on fast storage but increase RAM consumption.
-    This is independent of the registration batch size."""
+    during the extraction step. Larger values may improve throughput on fast storage but increase RAM consumption. This
+    is independent of the registration batch size. The same value is reused as the number of ROIs per batch during OASIS
+    spike deconvolution, where it bounds the four (batch, frames) workspace arrays that stage allocates."""
 
     colocalization_threshold: float = 0.65
     """The threshold for determining whether ROIs from one channel correspond to ROIs or signals in the other channel.
@@ -461,9 +462,9 @@ class SpikeDeconvolution:
 
     neuropil_coefficient: float = 0.7
     """The scaling factor applied to neuropil fluorescence before subtracting it from cell fluorescence. The corrected
-    signal is computed as F_corrected = F_cell - coefficient * F_neuropil. Values typically range from 0.5 to 1.0,
-    with 0.7 being a common default. Higher values apply stronger neuropil correction but risk over-subtracting
-    signal from cells with weak neuropil contamination."""
+    signal is computed as F_corrected = F_cell - coefficient * F_neuropil. Values typically range from 0.5 to 1.0, with
+    0.7 being a common default. Higher values apply stronger neuropil correction but risk over-subtracting signal from
+    cells with weak neuropil contamination."""
 
     baseline_method: BaselineMethod | str = BaselineMethod.MAXIMIN
     """The method for computing baseline fluorescence to subtract before deconvolution. See BaselineMethod enumeration
@@ -506,8 +507,8 @@ class SingleRecordingConfiguration(YamlConfig):
     main: Main = field(default_factory=Main)
     """Stores global parameters that broadly define the cindra single-recording processing configuration."""
     file_io: FileIO = field(default_factory=FileIO)
-    """Stores general I/O parameters that specify the input data location, the ignored input file names, and the
-    output directory."""
+    """Stores general I/O parameters that specify the input data location, the ignored input file names, and the output
+    directory."""
     registration: Registration = field(default_factory=Registration)
     """Stores parameters for rigid registration, which is used to correct motion artifacts between frames by
     counter-shifting the entire frame."""
@@ -515,8 +516,7 @@ class SingleRecordingConfiguration(YamlConfig):
     """Stores parameters for additional pre-registration processing used to improve the registration of 1-photon
     datasets."""
     nonrigid_registration: NonrigidRegistration = field(default_factory=NonrigidRegistration)
-    """Stores parameters for nonrigid registration, which is used to improve motion registration in complex
-    datasets."""
+    """Stores parameters for nonrigid registration, which is used to improve motion registration in complex datasets."""
     roi_detection: ROIDetection = field(default_factory=ROIDetection)
     """Stores parameters for ROI detection and extraction."""
     signal_extraction: SignalExtraction = field(default_factory=SignalExtraction)

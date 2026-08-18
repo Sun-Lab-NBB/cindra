@@ -37,9 +37,6 @@ _LOG_EPSILON: float = 1e-6
 class Classifier:
     """Provides logistic regression-based classification for identifying cell ROIs.
 
-    Loads classifier training data from the specified .npz file, fits a logistic regression model, and uses
-    it to predict whether detected ROIs represent real cells or artifacts based on their morphological features.
-
     Notes:
         The classifier file format uses pickle-free npz serialization containing training_labels and feature arrays
         (normalized_pixel_count, compactness, skewness). The model is fitted on load, which takes approximately 10 ms
@@ -49,29 +46,29 @@ class Classifier:
         classifier_path: The path to a classifier .npz file containing training_labels and feature arrays. The file
             must hold at least _GRID_NODE_COUNT training samples, which is the number of nodes the fitted probability
             grid spans.
-        feature_names: The tuple of feature names to use for classification. Only these features will be loaded from
-            the classifier file and used for model fitting. If None, the default classification feature set
-            (_CLASSIFICATION_FEATURES: normalized_pixel_count, compactness, skewness) is used, restricted to the
-            features actually present in the classifier file.
+        feature_names: The feature names to use for classification. Only these features are read from the classifier
+            file, and only those among them that are present in it, match the training label count, and carry at
+            least one non-NaN value are used for model fitting. If None, the default classification feature set
+            (_CLASSIFICATION_FEATURES: normalized_pixel_count, compactness, skewness) is used.
 
     Attributes:
         _classifier_path: The path to the loaded classifier file.
-        _available_features: The list of feature names used by the classifier.
-        _training_features: A dictionary mapping feature names to their training value arrays.
-        _training_labels: The boolean training labels array with shape (n_samples,).
-        _probability_grid: The grid boundaries computed from sorted training statistics with shape
-            (n_nodes, n_features). Used to map input feature values to grid intervals for probability lookup
-            during classification.
-        _grid_cell_probabilities: The Gaussian-smoothed probability that an ROI is a cell for each grid interval
-            with shape (n_nodes - 1, n_features). Used to compute log probability ratios that serve as input
-            features for the logistic regression model.
+        _available_features: The names of the features the classifier uses.
+        _training_features: The training values of every used feature.
+        _training_labels: The training labels with shape (n_samples,).
+        _probability_grid: The grid boundaries from the sorted training statistics with shape (n_nodes, n_features).
+            Used to map input feature values to grid intervals for probability lookup during classification.
+        _grid_cell_probabilities: The Gaussian-smoothed probability that an ROI is a cell for each grid interval with
+            shape (n_nodes - 1, n_features). Used to compute log probability ratios that serve as input features for
+            the logistic regression model.
         _model: The fitted LogisticRegression model.
 
     Raises:
         FileNotFoundError: If the classifier file does not exist.
-        ValueError: If the classifier file is unreadable, holds a column that does not cast to its numeric type, is
-            missing the training labels, holds fewer than _GRID_NODE_COUNT training samples, or contains none of the
-            requested feature columns.
+        ValueError: If the classifier file is unreadable, holds a column that does not cast to its numeric type, or is
+            missing the training labels. It is also raised when the file holds fewer than _GRID_NODE_COUNT training
+            samples, or supplies no requested feature column that both matches the training label count and carries at
+            least one non-NaN value.
     """
 
     def __init__(self, classifier_path: Path, feature_names: tuple[str, ...] | None = None) -> None:
@@ -82,8 +79,6 @@ class Classifier:
             )
             console.error(message=message, error=FileNotFoundError)
 
-        # Determines which features to load. If feature_names is specified, only those features are used. Otherwise,
-        # the default _CLASSIFICATION_FEATURES set is used.
         target_features = feature_names if feature_names is not None else _CLASSIFICATION_FEATURES
 
         # Reads and casts the archive columns under the handler that reports a malformed file. A column whose stored
@@ -120,9 +115,8 @@ class Classifier:
             )
             console.error(message=message, error=ValueError)
 
-        # Keeps the requested features that match the label count and carry at least one value. As long as the dataset
-        # contains at least one valid feature, the class can train the model. This allows flexibly working with
-        # incomplete datasets and extending the feature set in the future.
+        # As long as the dataset contains at least one valid feature, the class can train the model. This allows
+        # flexibly working with incomplete datasets and extending the feature set in the future.
         training_features: dict[str, NDArray[np.float32]] = {}
         available_features: list[str] = []
         for feature_name, feature_array in feature_arrays.items():
@@ -137,13 +131,11 @@ class Classifier:
             )
             console.error(message=message, error=ValueError)
 
-        # Sets instance attributes after all validation passes.
         self._classifier_path: Path = classifier_path
         self._available_features: list[str] = available_features
         self._training_features: dict[str, NDArray[np.float32]] = training_features
         self._training_labels: NDArray[np.bool_] = training_labels
 
-        # Fits the logistic regression model using the validated training data.
         self._fit_model()
 
     def __repr__(self) -> str:
@@ -169,17 +161,17 @@ class Classifier:
 
         Args:
             file_path: The path where the classifier file will be saved. Should have .npz extension.
-            training_labels: An array of binary labels (False for artifact, True for cell) with shape (n_samples,).
-            normalized_pixel_count: An array of normalized pixel count values with shape (n_samples,).
-            compactness: An array of compactness values with shape (n_samples,).
-            skewness: An array of skewness values with shape (n_samples,).
+            training_labels: The label of every training sample, False for an artifact and True for a cell, with
+                shape (n_samples,).
+            normalized_pixel_count: The normalized pixel count values with shape (n_samples,).
+            compactness: The compactness values with shape (n_samples,).
+            skewness: The skewness values with shape (n_samples,).
 
         Raises:
             ValueError: If feature arrays have mismatched lengths.
         """
         sample_count = len(training_labels)
 
-        # Validates feature array lengths.
         features = {
             "normalized_pixel_count": normalized_pixel_count,
             "compactness": compactness,
@@ -193,7 +185,6 @@ class Classifier:
                 )
                 console.error(message=message, error=ValueError)
 
-        # Saves the training dataset.
         np.savez(
             file_path,
             training_labels=training_labels,
@@ -210,7 +201,7 @@ class Classifier:
         """Classifies the ROIs as cells or non-cells based on their morphological features.
 
         Args:
-            roi_statistics: The list of ROIStatistics instances that store the features of the ROIs to classify.
+            roi_statistics: The ROIs to classify, holding the morphological features the model reads.
             probability_threshold: The probability threshold above which an ROI is classified as a cell.
 
         Returns:
@@ -233,10 +224,10 @@ class Classifier:
         """Extracts classification features supported by the model from ROIStatistics instances.
 
         Args:
-            roi_statistics: The list of ROIStatistics instances to extract features from.
+            roi_statistics: The ROIs to extract the features from.
 
         Returns:
-            An array of shape (n_rois, n_features) containing the extracted features.
+            The extracted features with shape (n_rois, n_features).
         """
         roi_count = len(roi_statistics)
         feature_count = len(self._available_features)
@@ -245,7 +236,6 @@ class Classifier:
         # Pre-creates attribute accessors to avoid repeated string lookups.
         getters = [attrgetter(name) for name in self._available_features]
 
-        # Extracts feature values, using NaN for missing values.
         for roi_index, roi in enumerate(roi_statistics):
             for feature_index, getter in enumerate(getters):
                 value = getter(roi)
@@ -257,7 +247,7 @@ class Classifier:
         """Assembles the training feature matrix from individual feature arrays.
 
         Returns:
-            An array of shape (n_samples, n_features) containing the training features.
+            The training features with shape (n_samples, n_features).
         """
         feature_arrays = [self._training_features[name] for name in self._available_features]
         return np.column_stack(tup=feature_arrays)
@@ -266,23 +256,21 @@ class Classifier:
         """Computes log probability ratios for the given features.
 
         Args:
-            features: An array of shape (n_samples, n_features) containing the feature values.
+            features: The feature values with shape (n_samples, n_features).
 
         Returns:
-            An array of shape (n_samples, n_features) containing the log probability ratios.
+            The log probability ratios with shape (n_samples, n_features).
         """
         log_probabilities = np.zeros(features.shape, dtype=np.float32)
 
         for feature_index in range(features.shape[1]):
             feature_values = features[:, feature_index].copy()
 
-            # Clips feature values to the grid bounds and replaces NaN with the minimum grid value.
-            grid_min = self._probability_grid[0, feature_index]
-            grid_max = self._probability_grid[-1, feature_index]
-            feature_values = np.clip(a=feature_values, a_min=grid_min, a_max=grid_max)
-            feature_values[np.isnan(feature_values)] = grid_min
+            grid_minimum = self._probability_grid[0, feature_index]
+            grid_maximum = self._probability_grid[-1, feature_index]
+            feature_values = np.clip(a=feature_values, a_min=grid_minimum, a_max=grid_maximum)
+            feature_values[np.isnan(feature_values)] = grid_minimum
 
-            # Maps each feature value to its corresponding grid bin index.
             bin_indices = np.digitize(x=feature_values, bins=self._probability_grid[:, feature_index], right=True) - 1
             bin_indices = np.clip(a=bin_indices, a_min=0, a_max=self._grid_cell_probabilities.shape[0] - 1)
 
@@ -298,10 +286,10 @@ class Classifier:
         """Predicts the probability that each ROI in the input list is a cell.
 
         Args:
-            roi_statistics: The list of ROIStatistics instances that define the ROIs to predict probabilities for.
+            roi_statistics: The ROIs to predict the probabilities for.
 
         Returns:
-            An array of shape (n_rois,) containing the probability that each ROI is a cell.
+            The probability that each ROI is a cell, with shape (n_rois,).
         """
         features = self._extract_features(roi_statistics=roi_statistics)
         log_probabilities = self._compute_log_probabilities(features=features)
@@ -327,11 +315,9 @@ class Classifier:
         bin_sizes = grid_indices[1:] - grid_indices[:-1]
 
         for feature_index in range(feature_count):
-            # Reorders labels by sorted feature values and computes cumulative sum.
             sorted_labels = self._training_labels[sort_indices[:, feature_index]].astype(np.float32)
             cumulative_sum = np.concatenate([np.array([0], dtype=np.float32), np.cumsum(a=sorted_labels)])
 
-            # Computes bin sums using cumulative sum differences, then converts to means.
             bin_sums = cumulative_sum[grid_indices[1:]] - cumulative_sum[grid_indices[:-1]]
             self._grid_cell_probabilities[:, feature_index] = bin_sums / bin_sizes
 
@@ -340,7 +326,6 @@ class Classifier:
             np.float32
         )
 
-        # Fits the logistic regression model using log-odds transformed features.
         log_probabilities = self._compute_log_probabilities(features=training_features)
         self._model: LogisticRegression = LogisticRegression(C=100.0, solver="liblinear")
         self._model.fit(X=log_probabilities, y=self._training_labels)
@@ -355,13 +340,9 @@ def classify(
 ) -> NDArray[np.float32]:
     """Classifies detected ROIs as cells or non-cells using a logistic regression model.
 
-    Loads classifier training data from the specified file (or the built-in classifier if no custom path
-    is provided), fits a logistic regression model, and uses it to classify the input ROIs based on their morphological
-    features.
-
     Args:
-        roi_statistics: The list of ROIStatistics instances containing the morphological features of the ROIs to
-            classify. Must contain at least one ROI.
+        roi_statistics: The ROIs to classify, holding the morphological features the model reads. Must contain at
+            least one ROI.
         classification_threshold: The probability threshold above which an ROI is classified as a cell. ROIs with
             probabilities above this threshold are labeled as cells (1.0), others as non-cells (0.0).
         custom_classifier_path: An optional path to a custom classifier .npz file. If None, the built-in classifier
@@ -375,7 +356,10 @@ def classify(
         ROI is classified as a cell (probability > threshold) and 0.0 otherwise.
 
     Raises:
-        ValueError: If the input roi_statistics list is empty.
+        FileNotFoundError: If custom_classifier_path is provided but does not name an existing file.
+        ValueError: If the input roi_statistics list is empty. It is also raised when the resolved classifier file is
+            unreadable, holds a column that does not cast to its numeric type, is missing the training labels, holds
+            fewer than _GRID_NODE_COUNT training samples, or supplies no usable feature column.
     """
     if not roi_statistics:
         message = (
@@ -384,11 +368,10 @@ def classify(
         )
         console.error(message=message, error=ValueError)
 
-    # Resolves the classifier dataset to use for training the model.
     classifier_path = custom_classifier_path if custom_classifier_path is not None else _BUILTIN_CLASSIFIER_PATH
 
-    # Selects the feature set based on the classification mode. Preclassification uses only morphological features
-    # available during detection, while full classification includes skewness from extracted fluorescence.
+    # Preclassification uses only the morphological features available during detection, while full classification
+    # includes skewness from extracted fluorescence.
     feature_names = _PRECLASSIFICATION_FEATURES if preclassification else _CLASSIFICATION_FEATURES
 
     # Trains the logistic regression model (~10 ms) and uses it to classify the detected ROIs.

@@ -25,65 +25,6 @@ _FRAME_COUNT: int = 36
 """The synthetic frame count for the registration-metric movies."""
 
 
-def _metric_movie(gaussian_blob_image: Callable[..., NDArray[np.float64]]) -> NDArray[np.int16]:
-    """Builds a structured movie with temporal intensity variation so PCA finds a non-degenerate component."""
-    base = gaussian_blob_image(height=128, width=128, centers=_BLOB_CENTERS, sigma=4.0, amplitude=2000.0)
-    generator = np.random.default_rng(seed=2024)
-    movie = np.empty((_FRAME_COUNT, 128, 128), dtype=np.int16)
-    scales = np.linspace(start=0.7, stop=1.3, num=_FRAME_COUNT)
-    for index in range(_FRAME_COUNT):
-        frame = base * scales[index] + generator.normal(loc=0.0, scale=5.0, size=base.shape)
-        movie[index] = frame.astype(np.int16)
-    return movie
-
-
-def _registered_context(
-    tmp_path: Path,
-    single_recording_context: Callable[..., RuntimeContext],
-    gaussian_blob_image: Callable[..., NDArray[np.float64]],
-    configure: Callable[[SingleRecordingConfiguration], None] | None = None,
-) -> RuntimeContext:
-    """Builds a context with a structured movie and valid crop ranges ready for metric computation."""
-    movie = _metric_movie(gaussian_blob_image=gaussian_blob_image)
-    context = single_recording_context(
-        tmp_path=tmp_path,
-        frame_height=128,
-        frame_width=128,
-        frame_count=_FRAME_COUNT,
-        movie=movie,
-        configure=configure,
-    )
-    context.runtime.registration.valid_y_range = (8, 120)
-    context.runtime.registration.valid_x_range = (8, 120)
-    return context
-
-
-def _assert_metric_outputs(context: RuntimeContext, *, nonrigid: bool) -> None:
-    """Asserts that the principal-component metric arrays are present, correctly shaped, finite, and separated."""
-    extreme = context.runtime.registration.principal_component_extreme_images
-    projections = context.runtime.registration.principal_component_projections
-    shift = context.runtime.registration.principal_component_shift_metrics
-    assert extreme is not None
-    assert projections is not None
-    assert shift is not None
-    assert extreme.shape == (2, 3, 112, 112)
-    assert projections.shape == (_FRAME_COUNT, 3)
-    assert shift.shape == (3, 3)
-    assert np.all(np.isfinite(extreme))
-    assert np.all(np.isfinite(shift))
-    assert np.all(shift >= 0)
-
-    # Column 1 carries the mean per-block nonrigid magnitude and column 2 carries the maximum. The per-block
-    # magnitudes of the synthetic movie spread out, so the mean of every component stays strictly below its maximum,
-    # and both columns are zero whenever nonrigid registration is disabled.
-    if nonrigid:
-        assert np.all(shift[:, 2] > 0.0)
-        assert np.all(shift[:, 1] < shift[:, 2])
-    else:
-        assert np.all(shift[:, 1] == 0.0)
-        assert np.all(shift[:, 2] == 0.0)
-
-
 class TestComputePcMetrics:
     """Tests compute_pc_metrics."""
 
@@ -222,3 +163,62 @@ class TestComputePcMetrics:
 
         with pytest.raises(FileNotFoundError):
             compute_pc_metrics(context=context, workers=1)
+
+
+def _metric_movie(gaussian_blob_image: Callable[..., NDArray[np.float64]]) -> NDArray[np.int16]:
+    """Builds a structured movie with temporal intensity variation so PCA finds a non-degenerate component."""
+    base = gaussian_blob_image(height=128, width=128, centers=_BLOB_CENTERS, sigma=4.0, amplitude=2000.0)
+    generator = np.random.default_rng(seed=2024)
+    movie = np.empty((_FRAME_COUNT, 128, 128), dtype=np.int16)
+    scales = np.linspace(start=0.7, stop=1.3, num=_FRAME_COUNT)
+    for index in range(_FRAME_COUNT):
+        frame = base * scales[index] + generator.normal(loc=0.0, scale=5.0, size=base.shape)
+        movie[index] = frame.astype(np.int16)
+    return movie
+
+
+def _registered_context(
+    tmp_path: Path,
+    single_recording_context: Callable[..., RuntimeContext],
+    gaussian_blob_image: Callable[..., NDArray[np.float64]],
+    configure: Callable[[SingleRecordingConfiguration], None] | None = None,
+) -> RuntimeContext:
+    """Builds a context with a structured movie and valid crop ranges ready for metric computation."""
+    movie = _metric_movie(gaussian_blob_image=gaussian_blob_image)
+    context = single_recording_context(
+        tmp_path=tmp_path,
+        frame_height=128,
+        frame_width=128,
+        frame_count=_FRAME_COUNT,
+        movie=movie,
+        configure=configure,
+    )
+    context.runtime.registration.valid_y_range = (8, 120)
+    context.runtime.registration.valid_x_range = (8, 120)
+    return context
+
+
+def _assert_metric_outputs(context: RuntimeContext, *, nonrigid: bool) -> None:
+    """Asserts that the principal-component metric arrays are present, correctly shaped, finite, and separated."""
+    extreme = context.runtime.registration.principal_component_extreme_images
+    projections = context.runtime.registration.principal_component_projections
+    shift = context.runtime.registration.principal_component_shift_metrics
+    assert extreme is not None
+    assert projections is not None
+    assert shift is not None
+    assert extreme.shape == (2, 3, 112, 112)
+    assert projections.shape == (_FRAME_COUNT, 3)
+    assert shift.shape == (3, 3)
+    assert np.all(np.isfinite(extreme))
+    assert np.all(np.isfinite(shift))
+    assert np.all(shift >= 0)
+
+    # Column 1 carries the mean per-block nonrigid magnitude and column 2 carries the maximum. The per-block
+    # magnitudes of the synthetic movie spread out, so the mean of every component stays strictly below its maximum,
+    # and both columns are zero whenever nonrigid registration is disabled.
+    if nonrigid:
+        assert np.all(shift[:, 2] > 0.0)
+        assert np.all(shift[:, 1] < shift[:, 2])
+    else:
+        assert np.all(shift[:, 1] == 0.0)
+        assert np.all(shift[:, 2] == 0.0)

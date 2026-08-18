@@ -22,23 +22,6 @@ _FRAME_WIDTH: int = 8
 """The width of each frame used in test binary files."""
 
 
-def _create_test_binary(file_path: Path, frame_count: int, height: int, width: int) -> NDArray[np.int16]:
-    """Creates a test binary file with sequential int16 data and returns the written data array.
-
-    Args:
-        file_path: The absolute path where the binary file will be created.
-        frame_count: The number of frames to write into the binary file.
-        height: The frame height in pixels.
-        width: The frame width in pixels.
-
-    Returns:
-        The int16 data array that was written to the file.
-    """
-    data = np.arange(frame_count * height * width, dtype=np.int16).reshape(frame_count, height, width)
-    data.tofile(file_path)
-    return data
-
-
 class TestConvertNumpyFileToBinary:
     """Tests BinaryFile.convert_numpy_file_to_binary."""
 
@@ -52,7 +35,7 @@ class TestConvertNumpyFileToBinary:
         BinaryFile.convert_numpy_file_to_binary(source_file_name=source_path, destination_file_name=destination_path)
 
         assert destination_path.exists()
-        # The binary contents should match what np.load would produce written with tofile.
+        # The binary contents match the array np.load returns, because the conversion writes that array with tofile.
         loaded = np.fromfile(destination_path, dtype=np.float64)
         np.testing.assert_array_equal(loaded, data)
 
@@ -226,9 +209,7 @@ class TestBinaryFileCombined:
         combined.close()
 
         assert result.shape == (frame_count, combined_height, combined_width)
-        # The top half holds plane 0 data (10s).
         np.testing.assert_array_equal(result[:, :plane_height, :], 10)
-        # The bottom half holds plane 1 data (20s).
         np.testing.assert_array_equal(result[:, plane_height:, :], 20)
 
     def test_reads_combined_frames_from_horizontally_tiled_planes(self, tmp_path: Path) -> None:
@@ -259,9 +240,7 @@ class TestBinaryFileCombined:
         combined.close()
 
         assert result.shape == (frame_count, plane_height, plane_width * 2)
-        # The left tile holds plane 0 data (10s).
         np.testing.assert_array_equal(result[:, :, :plane_width], 10)
-        # The right tile holds plane 1 data (20s).
         np.testing.assert_array_equal(result[:, :, plane_width:], 20)
 
     def test_context_manager_opens_and_closes(self, tmp_path: Path) -> None:
@@ -388,3 +367,20 @@ class TestBinaryFileCombined:
         assert byte_numbers.shape == (2,)
         assert byte_numbers[0] == expected_bytes
         assert byte_numbers[1] == expected_bytes
+
+
+def _create_test_binary(file_path: Path, frame_count: int, height: int, width: int) -> NDArray[np.int16]:
+    """Creates a test binary file with sequential int16 data and returns the written data array.
+
+    Args:
+        file_path: The absolute path where the binary file will be created.
+        frame_count: The number of frames to write into the binary file.
+        height: The frame height in pixels.
+        width: The frame width in pixels.
+
+    Returns:
+        The int16 data array that was written to the file.
+    """
+    data = np.arange(frame_count * height * width, dtype=np.int16).reshape(frame_count, height, width)
+    data.tofile(file_path)
+    return data

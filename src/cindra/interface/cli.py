@@ -56,7 +56,10 @@ def cindra_mcp(transport: Literal["stdio", "sse", "streamable-http"]) -> None:
     type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
     required=False,
     default=None,
-    help="The path to the OpenMP runtime to link. Omit to search the Homebrew library directories for it.",
+    help=(
+        "The path to the OpenMP runtime to link. Omit to search the macOS package manager directories, the active "
+        "conda environment, and the installed Python distributions for one."
+    ),
 )
 @click.option(
     "-t",
@@ -76,8 +79,10 @@ def cindra_mcp(transport: Literal["stdio", "sse", "streamable-http"]) -> None:
     "-y",
     "--yes",
     is_flag=True,
-    help="Actually creates the resolved link. Without this flag the command reports what it would do and changes "
-    "nothing.",
+    help=(
+        "Determines whether to create the resolved link. Without this flag the command reports what it would do and "
+        "changes nothing."
+    ),
 )
 def cindra_omp(source: Path | None, target: Path | None, *, force: bool, yes: bool) -> None:
     """Links the OpenMP runtime that the Numba threading layer loads on macOS into a directory the loader searches.
@@ -90,13 +95,14 @@ def cindra_omp(source: Path | None, target: Path | None, *, force: bool, yes: bo
     try:
         summary = resolve_openmp_runtime(runtime_path=source, link_path=target, execute=yes, force=force)
     except RuntimeError as error:
-        raise click.ClickException(message=str(error)) from error
+        message = f"Unable to resolve the macOS OpenMP runtime. {error}"
+        console.error(message=message, error=RuntimeError)
 
     if summary.searched_paths:
-        console.echo(message=f"searched: {', '.join(str(path) for path in summary.searched_paths)}")
+        console.echo(message=f"searched: {', '.join(str(path) for path in summary.searched_paths)}", raw=True)
     if summary.runtime_path is not None:
-        console.echo(message=f"runtime:  {summary.runtime_path}")
-        console.echo(message=f"link:     {summary.link_path}")
+        console.echo(message=f"runtime:  {summary.runtime_path}", raw=True)
+        console.echo(message=f"link:     {summary.link_path}", raw=True)
     console.echo(message=summary.describe())
     if summary.status == OpenMpStatus.UNRESOLVED:
         raise SystemExit(1)
@@ -132,7 +138,6 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     pipeline. Provide the path to the modified file to the 'run' CLI command to execute the desired pipeline
     with the parameters specified inside the file.
     """
-    # Normalizes shorthand aliases and resolves pipeline-specific parameters.
     single_recording = pipeline in ("single-recording", "sd")
     resolved_name = name if name is not None else ("cindra_sd_conf" if single_recording else "cindra_md_conf")
     if not resolved_name.strip():
@@ -150,7 +155,6 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
         resolved_name = f"{resolved_name}.yaml"
     file_path = output_path / resolved_name
 
-    # Generates the precursor configuration file in the specified output directory.
     configuration = SingleRecordingConfiguration() if single_recording else MultiRecordingConfiguration()
     configuration.save(file_path=file_path)
 
@@ -184,9 +188,9 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     default=None,
     help=(
         "[Single-recording] The number of parallel workers to allocate to the binarization step. When this option is "
-        "omitted, the step receives its measured default allocation of 3 workers, which is the point where the "
-        "allocated cores become the TIFF image decode threads. Setting this to -1 uses every available core, minus "
-        "the cores reserved for system use."
+        "omitted, the step receives its measured default allocation of 3 workers. The allocated cores become the "
+        "TIFF image decode threads, capped at the TIFF_DECODE_CEILING of 4. Setting this to -1 uses every available "
+        "core, minus the cores reserved for system use."
     ),
 )
 @click.option(
@@ -223,9 +227,9 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     default=None,
     help=(
         "[Multi-recording] The number of parallel workers to allocate to the discovery step. When this option is "
-        "omitted, the step receives its measured default allocation of 30 workers, which is the saturating allocation "
-        "the step is admitted at. Setting this to -1 uses every available core, minus the cores reserved for system "
-        "use."
+        "omitted, the step receives its measured default allocation of 2 workers, which covers the deformation pool "
+        "alone, because the stage has no parallel critical path. Setting this to -1 uses every available core, minus "
+        "the cores reserved for system use."
     ),
 )
 @click.option(
@@ -236,9 +240,9 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     default=None,
     help=(
         "[Multi-recording] The number of parallel workers to allocate to each per-recording extraction step. When this "
-        "option is omitted, the step receives its measured default allocation of 16 workers, which is the point where "
-        "the step stops shortening. Setting this to -1 uses every available core, minus the cores reserved for system "
-        "use."
+        "option is omitted, the step receives its measured default allocation of 16 workers, which leaves room for "
+        "the six to eight datasets a compute node extracts at once while still reaching a sevenfold single-job "
+        "speedup. Setting this to -1 uses every available core, minus the cores reserved for system use."
     ),
 )
 @click.option(
@@ -383,11 +387,10 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     multiple=True,
     required=False,
     help=(
-        "[Multi-recording] The path to the recording processed with the single-recording cindra pipeline "
-        "to include in the processed multi-recording dataset. Specify this option multiple times to include "
-        "multiple recordings "
-        "(at least two required). When provided, these paths override the matching fields in the pipeline's "
-        "configuration file."
+        "[Multi-recording] The path to the recording processed with the single-recording cindra pipeline to include in "
+        "the processed multi-recording dataset. Specify this option multiple times to include multiple recordings (at "
+        "least two required). When provided, these paths override the matching fields in the pipeline's configuration "
+        "file."
     ),
 )
 def cindra_run(
@@ -414,15 +417,14 @@ def cindra_run(
 ) -> None:
     """Runs the cindra processing pipeline using the specified configuration file.
 
-    The pipeline type (single-recording or multi-recording) is automatically detected from the
-    configuration file. When no step flag is set, every step of the detected pipeline runs in phase order.
-    When --job-id is provided, only the matching job is executed and all step flags are ignored. The
-    combination step merges the per-plane result files with serial input and output.
+    The pipeline type (single-recording or multi-recording) is automatically detected from the configuration file. When
+    no step flag is set, every step of the detected pipeline runs in phase order. When --job-id is provided, only the
+    matching job is executed and all step flags are ignored. The combination step merges the per-plane result files with
+    serial input and output.
     """
     pipeline_type = detect_pipeline_type(file_path=input_path)
 
     if pipeline_type == PipelineType.SINGLE_RECORDING:
-        # Writes CLI overrides into the configuration file before running the pipeline.
         configuration = SingleRecordingConfiguration.from_yaml(file_path=input_path)
         configuration.runtime.display_progress_bars = not no_progress
         if data_path is not None:
@@ -450,7 +452,6 @@ def cindra_run(
             processing_workers=process_workers,
         )
     else:
-        # Writes CLI overrides into the configuration file before running the pipeline.
         multi_recording_configuration = MultiRecordingConfiguration.from_yaml(file_path=input_path)
         if recording_paths:
             multi_recording_configuration.recording_io.recording_directories = tuple(natsorted(recording_paths))

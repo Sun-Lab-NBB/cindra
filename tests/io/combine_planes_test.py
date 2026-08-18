@@ -30,115 +30,6 @@ type _ROISpecifications = tuple[tuple[tuple[int, ...], tuple[int, ...]], ...]
 x-pixel coordinates of one synthetic ROI."""
 
 
-def _make_roi_statistics(*, frame_width: int, y_pixels: tuple[int, ...], x_pixels: tuple[int, ...]) -> ROIStatistics:
-    """Builds a deterministic ROIStatistics instance from explicit pixel coordinates."""
-    y_array = np.array(y_pixels, dtype=np.int32)
-    x_array = np.array(x_pixels, dtype=np.int32)
-    mask = ROIMask(
-        y_pixels=y_array,
-        x_pixels=x_array,
-        pixel_weights=np.ones(shape=len(y_pixels), dtype=np.float32),
-        centroid=(int(np.median(y_array)), int(np.median(x_array))),
-        frame_width=frame_width,
-        radius=2.0,
-    )
-    return ROIStatistics(mask=mask, footprint=2, pixel_count=len(y_pixels))
-
-
-def _make_channel_2_movie(*, frame_count: int, seed: int) -> NDArray[np.int16]:
-    """Builds a synthetic int16 channel 2 movie for two-channel contexts."""
-    generator = np.random.default_rng(seed=seed)
-    return generator.integers(low=100, high=1000, size=(frame_count, _FRAME_HEIGHT, _FRAME_WIDTH)).astype(np.int16)
-
-
-def _configure_two_channels(*, second_functional: bool) -> Callable[[SingleRecordingConfiguration], None]:
-    """Returns a configuration callback that enables two channels with the given second-channel mode."""
-
-    def _configure(configuration: SingleRecordingConfiguration) -> None:
-        configuration.main.two_channels = True
-        configuration.main.first_channel_functional = True
-        configuration.main.second_channel_functional = second_functional
-
-    return _configure
-
-
-def _populate_channel_1(
-    context: RuntimeContext,
-    *,
-    roi_specifications: _ROISpecifications,
-    frame_count: int,
-    fill: float,
-    seed: int,
-    with_images: bool = True,
-    with_max_projection: bool = False,
-    with_corrected_structural: bool = False,
-    with_colocalization: bool = False,
-) -> None:
-    """Populates channel 1 detection images and extraction traces on the given context."""
-    generator = np.random.default_rng(seed=seed)
-    detection = context.runtime.detection
-    if with_images:
-        detection.mean_image = generator.random(size=(_FRAME_HEIGHT, _FRAME_WIDTH)).astype(np.float32)
-        detection.enhanced_mean_image = generator.random(size=(_FRAME_HEIGHT, _FRAME_WIDTH)).astype(np.float32)
-        detection.correlation_map = generator.random(size=(_FRAME_HEIGHT, _FRAME_WIDTH)).astype(np.float32)
-    if with_max_projection:
-        detection.maximum_projection = generator.random(size=(_FRAME_HEIGHT, _FRAME_WIDTH)).astype(np.float32)
-
-    width = context.runtime.io.frame_width
-    rois = [_make_roi_statistics(frame_width=width, y_pixels=ys, x_pixels=xs) for ys, xs in roi_specifications]
-    roi_count = len(rois)
-    extraction = context.runtime.extraction
-    extraction.roi_statistics = rois
-    extraction.cell_fluorescence = np.full(shape=(roi_count, frame_count), fill_value=fill, dtype=np.float32)
-    extraction.neuropil_fluorescence = np.full(shape=(roi_count, frame_count), fill_value=fill, dtype=np.float32)
-    extraction.subtracted_fluorescence = np.full(shape=(roi_count, frame_count), fill_value=fill, dtype=np.float32)
-    extraction.spikes = np.full(shape=(roi_count, frame_count), fill_value=fill, dtype=np.float32)
-    extraction.cell_classification = generator.random(size=(roi_count, 2)).astype(np.float32)
-    if with_colocalization:
-        extraction.cell_colocalization = generator.random(size=(roi_count, 2)).astype(np.float32)
-    if with_corrected_structural:
-        extraction.corrected_structural_mean_image = generator.random(size=(_FRAME_HEIGHT, _FRAME_WIDTH)).astype(
-            np.float32
-        )
-
-
-def _populate_channel_2(
-    context: RuntimeContext,
-    *,
-    roi_specifications: _ROISpecifications,
-    frame_count: int,
-    seed: int,
-    with_traces: bool = True,
-    with_max_projection: bool = False,
-) -> None:
-    """Populates channel 2 detection images and extraction data on the given context."""
-    generator = np.random.default_rng(seed=seed)
-    detection = context.runtime.detection
-    detection.mean_image_channel_2 = generator.random(size=(_FRAME_HEIGHT, _FRAME_WIDTH)).astype(np.float32)
-    detection.enhanced_mean_image_channel_2 = generator.random(size=(_FRAME_HEIGHT, _FRAME_WIDTH)).astype(np.float32)
-    detection.correlation_map_channel_2 = generator.random(size=(_FRAME_HEIGHT, _FRAME_WIDTH)).astype(np.float32)
-    if with_max_projection:
-        detection.maximum_projection_channel_2 = generator.random(size=(_FRAME_HEIGHT, _FRAME_WIDTH)).astype(np.float32)
-
-    width = context.runtime.io.frame_width
-    rois = [_make_roi_statistics(frame_width=width, y_pixels=ys, x_pixels=xs) for ys, xs in roi_specifications]
-    roi_count = len(rois)
-    extraction = context.runtime.extraction
-    extraction.roi_statistics_channel_2 = rois
-    extraction.cell_classification_channel_2 = generator.random(size=(roi_count, 2)).astype(np.float32)
-    if with_traces:
-        extraction.cell_fluorescence_channel_2 = np.full(
-            shape=(roi_count, frame_count), fill_value=5.0, dtype=np.float32
-        )
-        extraction.neuropil_fluorescence_channel_2 = np.full(
-            shape=(roi_count, frame_count), fill_value=5.0, dtype=np.float32
-        )
-        extraction.subtracted_fluorescence_channel_2 = np.full(
-            shape=(roi_count, frame_count), fill_value=5.0, dtype=np.float32
-        )
-        extraction.spikes_channel_2 = np.full(shape=(roi_count, frame_count), fill_value=5.0, dtype=np.float32)
-
-
 class TestCombinePlanes:
     """Tests the combine_planes multi-plane combination entry point."""
 
@@ -504,3 +395,118 @@ class TestCombinePlanes:
         assert rois is not None
         assert len(rois) == 1
         assert rois[0].plane_index == 0
+
+
+def _make_roi_statistics(*, frame_width: int, y_pixels: tuple[int, ...], x_pixels: tuple[int, ...]) -> ROIStatistics:
+    """Builds a deterministic ROIStatistics instance from explicit pixel coordinates."""
+    y_array = np.array(y_pixels, dtype=np.int32)
+    x_array = np.array(x_pixels, dtype=np.int32)
+    mask = ROIMask(
+        y_pixels=y_array,
+        x_pixels=x_array,
+        pixel_weights=np.ones(shape=len(y_pixels), dtype=np.float32),
+        centroid=(int(np.median(y_array)), int(np.median(x_array))),
+        frame_width=frame_width,
+        radius=2.0,
+    )
+    return ROIStatistics(mask=mask, footprint=2, pixel_count=len(y_pixels))
+
+
+def _make_channel_2_movie(*, frame_count: int, seed: int) -> NDArray[np.int16]:
+    """Builds a synthetic int16 channel 2 movie for two-channel contexts."""
+    generator = np.random.default_rng(seed=seed)
+    return generator.integers(low=100, high=1000, size=(frame_count, _FRAME_HEIGHT, _FRAME_WIDTH)).astype(np.int16)
+
+
+def _configure_two_channels(*, second_functional: bool) -> Callable[[SingleRecordingConfiguration], None]:
+    """Returns a configuration callback that enables two channels with the given second-channel mode."""
+
+    def _configure(configuration: SingleRecordingConfiguration) -> None:
+        configuration.main.two_channels = True
+        configuration.main.first_channel_functional = True
+        configuration.main.second_channel_functional = second_functional
+
+    return _configure
+
+
+def _populate_channel_1(
+    context: RuntimeContext,
+    *,
+    roi_specifications: _ROISpecifications,
+    frame_count: int,
+    fill: float,
+    seed: int,
+    with_images: bool = True,
+    with_max_projection: bool = False,
+    with_corrected_structural: bool = False,
+    with_colocalization: bool = False,
+) -> None:
+    """Populates channel 1 detection images and extraction traces on the given context."""
+    generator = np.random.default_rng(seed=seed)
+    detection = context.runtime.detection
+    if with_images:
+        detection.mean_image = generator.random(size=(_FRAME_HEIGHT, _FRAME_WIDTH)).astype(np.float32)
+        detection.enhanced_mean_image = generator.random(size=(_FRAME_HEIGHT, _FRAME_WIDTH)).astype(np.float32)
+        detection.correlation_map = generator.random(size=(_FRAME_HEIGHT, _FRAME_WIDTH)).astype(np.float32)
+    if with_max_projection:
+        detection.maximum_projection = generator.random(size=(_FRAME_HEIGHT, _FRAME_WIDTH)).astype(np.float32)
+
+    width = context.runtime.io.frame_width
+    rois = [
+        _make_roi_statistics(frame_width=width, y_pixels=y_coordinates, x_pixels=x_coordinates)
+        for y_coordinates, x_coordinates in roi_specifications
+    ]
+    roi_count = len(rois)
+    extraction = context.runtime.extraction
+    extraction.roi_statistics = rois
+    extraction.cell_fluorescence = np.full(shape=(roi_count, frame_count), fill_value=fill, dtype=np.float32)
+    extraction.neuropil_fluorescence = np.full(shape=(roi_count, frame_count), fill_value=fill, dtype=np.float32)
+    extraction.subtracted_fluorescence = np.full(shape=(roi_count, frame_count), fill_value=fill, dtype=np.float32)
+    extraction.spikes = np.full(shape=(roi_count, frame_count), fill_value=fill, dtype=np.float32)
+    extraction.cell_classification = generator.random(size=(roi_count, 2)).astype(np.float32)
+    if with_colocalization:
+        extraction.cell_colocalization = generator.random(size=(roi_count, 2)).astype(np.float32)
+    if with_corrected_structural:
+        extraction.corrected_structural_mean_image = generator.random(size=(_FRAME_HEIGHT, _FRAME_WIDTH)).astype(
+            np.float32
+        )
+
+
+def _populate_channel_2(
+    context: RuntimeContext,
+    *,
+    roi_specifications: _ROISpecifications,
+    frame_count: int,
+    seed: int,
+    with_traces: bool = True,
+    with_max_projection: bool = False,
+) -> None:
+    """Populates channel 2 detection images and extraction data on the given context."""
+    generator = np.random.default_rng(seed=seed)
+    detection = context.runtime.detection
+    detection.mean_image_channel_2 = generator.random(size=(_FRAME_HEIGHT, _FRAME_WIDTH)).astype(np.float32)
+    detection.enhanced_mean_image_channel_2 = generator.random(size=(_FRAME_HEIGHT, _FRAME_WIDTH)).astype(np.float32)
+    detection.correlation_map_channel_2 = generator.random(size=(_FRAME_HEIGHT, _FRAME_WIDTH)).astype(np.float32)
+    if with_max_projection:
+        detection.maximum_projection_channel_2 = generator.random(size=(_FRAME_HEIGHT, _FRAME_WIDTH)).astype(np.float32)
+
+    width = context.runtime.io.frame_width
+    rois = [
+        _make_roi_statistics(frame_width=width, y_pixels=y_coordinates, x_pixels=x_coordinates)
+        for y_coordinates, x_coordinates in roi_specifications
+    ]
+    roi_count = len(rois)
+    extraction = context.runtime.extraction
+    extraction.roi_statistics_channel_2 = rois
+    extraction.cell_classification_channel_2 = generator.random(size=(roi_count, 2)).astype(np.float32)
+    if with_traces:
+        extraction.cell_fluorescence_channel_2 = np.full(
+            shape=(roi_count, frame_count), fill_value=5.0, dtype=np.float32
+        )
+        extraction.neuropil_fluorescence_channel_2 = np.full(
+            shape=(roi_count, frame_count), fill_value=5.0, dtype=np.float32
+        )
+        extraction.subtracted_fluorescence_channel_2 = np.full(
+            shape=(roi_count, frame_count), fill_value=5.0, dtype=np.float32
+        )
+        extraction.spikes_channel_2 = np.full(shape=(roi_count, frame_count), fill_value=5.0, dtype=np.float32)

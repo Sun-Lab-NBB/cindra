@@ -1,4 +1,4 @@
-"""Provides rigid (translation-only) registration algorithm for motion correction."""
+"""Provides the rigid (translation-only) registration algorithm for motion correction."""
 
 from __future__ import annotations
 
@@ -29,10 +29,9 @@ def compute_edge_taper(
 ) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
     """Computes edge taper mask and mean offset for phase correlation preprocessing.
 
-    Creates a spatial taper that suppresses edge artifacts during phase correlation. The taper mask
-    transitions from 1.0 in the center to ~0 at edges. The mean offset fills tapered regions with uniform
-    intensity (the image mean) rather than fading to black, preventing artificial gradients at frame
-    borders that could create spurious correlation peaks.
+    Creates a spatial taper that suppresses edge artifacts during phase correlation. The taper mask transitions from 1.0
+    in the center to ~0 at edges. The mean offset fills tapered regions with uniform intensity (the image mean) rather
+    than fading to black, preventing artificial gradients at frame borders that could create spurious correlation peaks.
 
     Args:
         reference_image: The reference image with shape (height, width) used to compute the mean offset.
@@ -66,7 +65,7 @@ def apply_edge_taper(
     Returns:
         The tapered frames with the same shape as input.
     """
-    return apply_mask(frames, taper_mask, mean_offset)
+    return apply_mask(frames=frames, mask=taper_mask, offset=mean_offset)
 
 
 def compute_phase_correlation_kernel(
@@ -75,14 +74,14 @@ def compute_phase_correlation_kernel(
 ) -> NDArray[np.complex64]:
     """Computes the phase correlation kernel from a reference image.
 
-    Transforms the reference image to frequency domain, normalizes by magnitude to extract phase-only
-    information, and optionally applies Gaussian smoothing. The resulting kernel is used for
-    cross-correlation with data frames during motion estimation.
+    Transforms the reference image to frequency domain, normalizes by magnitude to extract phase-only information, and
+    optionally applies Gaussian smoothing. The resulting kernel is used for cross-correlation with data frames during
+    motion estimation.
 
     Args:
         reference_image: The reference image with shape (height, width).
-        smoothing_sigma: The standard deviation of Gaussian smoothing in pixels. Values <= 0 disable
-            smoothing.
+        smoothing_sigma: The standard deviation of Gaussian smoothing in pixels. Defaults to 0.0. Values <= 0
+            disable smoothing.
 
     Returns:
         The phase correlation kernel with shape (height, width // 2 + 1) from real FFT.
@@ -110,16 +109,17 @@ def compute_rigid_offsets(
 ) -> tuple[NDArray[np.int32], NDArray[np.int32], NDArray[np.float32]]:
     """Computes rigid translation offsets using phase correlation.
 
-    Estimates per-frame (y, x) pixel offsets by finding the peak of the phase correlation between
-    each frame and the reference kernel. Optionally applies temporal smoothing to the correlation
-    maps before peak detection.
+    Estimates per-frame (y, x) pixel offsets by finding the peak of the phase correlation between each frame and the
+    reference kernel. Optionally applies temporal smoothing to the correlation maps before peak detection.
 
     Args:
         frames: The frame data with shape (num_frames, height, width) after edge tapering.
         reference_kernel: The phase correlation kernel from compute_phase_correlation_kernel.
         maximum_offset_fraction: The maximum allowed offset as a fraction of the minimum spatial dimension. The
-            search window is limited to min(height, width) * maximum_offset_fraction pixels, clamped to at least one
-            pixel, because a fraction that rounds to a zero-pixel radius describes a search window no offset fits in.
+            correlation search radius is min(height, width) * maximum_offset_fraction, rounded to the nearest pixel and
+            then clamped to the [1, min(height, width) // 2] range. A fraction that rounds to a zero-pixel radius
+            describes a search window no offset fits in. A radius above half the minimum dimension exceeds the wrapped
+            correlation surface the quadrant rearrangement reads.
         temporal_smoothing_sigma: The standard deviation for temporal Gaussian smoothing of correlation
             maps. If 0, no smoothing is applied.
         workers: The number of parallel workers for FFT computation. Use -1 for all available cores.
@@ -161,10 +161,9 @@ def compute_rigid_offsets(
     if temporal_smoothing_sigma > 0:
         correlation_window = apply_temporal_smoothing(frames=correlation_window, sigma=temporal_smoothing_sigma)
 
-    # Finds peak location for each frame using vectorized argmax.
     frame_count = frames.shape[0]
     window_size = 2 * correlation_radius + 1
-    flat_indices = np.argmax(correlation_window.reshape(frame_count, -1), axis=1)
+    flat_indices = np.argmax(a=correlation_window.reshape(frame_count, -1), axis=1)
     y_offsets = (flat_indices // window_size - correlation_radius).astype(np.int32)
     x_offsets = (flat_indices % window_size - correlation_radius).astype(np.int32)
 

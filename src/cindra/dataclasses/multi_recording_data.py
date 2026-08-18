@@ -34,23 +34,22 @@ class MultiRecordingIOData:
 
     data_path: Path | None = None
     """The path to this recording's cindra single-recording pipeline output directory. This is the resolved cindra root
-    that contains combined_metadata.npz and other single-recording outputs. Used to reload CombinedData on demand by
-    downstream pipeline stages."""
+    that contains combined_metadata.npz and other single-recording outputs."""
 
     dataset_name: str = ""
     """The name of the multi-recording dataset, used to create the output subdirectory structure."""
 
     mroi_region_borders: tuple[int, ...] = ()
     """The x-coordinates of MROI region borders, computed from acquisition parameters during initialization. For MROI
-    recordings, these borders mark the boundaries between adjacent imaging regions in the combined field of view.
-    ROIs near these borders are filtered out during ROI selection to avoid tracking ambiguities. This field is empty
-    for non-MROI recordings."""
+    recordings, these borders mark the boundaries between adjacent imaging regions in the combined field of view. ROIs
+    near these borders are filtered out during ROI selection to avoid tracking ambiguities. This field is empty for
+    non-MROI recordings."""
 
     dataset_output_paths: tuple[Path, ...] = ()
-    """The multi_recording output paths for every recording in the dataset, stored in natural-sorted order. Each
-    entry points to a recording's multi_recording output directory
-    (e.g., {cindra_directory}/multi_recording/{dataset_name}/). Storing this tuple in every recording enables full
-    dataset hierarchy reconstruction from any single recording's serialized YAML file."""
+    """The multi_recording output paths for every recording in the dataset, stored in natural-sorted order. Each entry
+    points to a recording's multi_recording output directory (e.g., {cindra_directory}/multi_recording/{dataset_name}/).
+    Storing this tuple in every recording enables full dataset hierarchy reconstruction from any single recording's
+    serialized YAML file."""
 
     selected_roi_indices: tuple[int, ...] = ()
     """The indices of channel 1 ROIs selected from CombinedData.extraction.roi_statistics for multi-recording tracking.
@@ -65,7 +64,6 @@ class MultiRecordingIOData:
 class MultiRecordingRegistrationData:
     """Stores runtime data from the registration stage."""
 
-    # Deformation fields.
     deform_field_y: NDArray[np.float32] | None = None
     """The Y-dimension displacement field computed by DiffeomorphicDemonsRegistration. Combined with deform_field_x,
     these fields can be used to construct a Deformation instance for warping images."""
@@ -74,7 +72,6 @@ class MultiRecordingRegistrationData:
     """The X-dimension displacement field computed by DiffeomorphicDemonsRegistration. Combined with deform_field_y,
     these fields can be used to construct a Deformation instance for warping images."""
 
-    # Channel 1 transformed images.
     transformed_mean_image: NDArray[np.float32] | None = None
     """The mean image transformed to the shared (deformed) visual space."""
 
@@ -84,7 +81,6 @@ class MultiRecordingRegistrationData:
     transformed_maximum_projection: NDArray[np.float32] | None = None
     """The maximum projection transformed to the shared (deformed) visual space."""
 
-    # Channel 2 transformed images.
     transformed_mean_image_channel_2: NDArray[np.float32] | None = None
     """The channel 2 mean image transformed to the shared (deformed) visual space."""
 
@@ -94,22 +90,22 @@ class MultiRecordingRegistrationData:
     transformed_maximum_projection_channel_2: NDArray[np.float32] | None = None
     """The channel 2 maximum projection transformed to the shared (deformed) visual space."""
 
-    # Deformed ROI masks (intermediate data for ROI tracking).
+    # Defines the deformed masks that serve as the intermediate data for ROI tracking.
     deformed_roi_masks: list[ROIMask] | None = None
-    """The channel 1 ROI spatial data after multi-recording registration deform offsets have been applied to the
-    spatial coordinates of each ROI."""
+    """The channel 1 ROI spatial data after multi-recording registration deform offsets have been applied to the spatial
+    coordinates of each ROI."""
 
     deformed_roi_masks_channel_2: list[ROIMask] | None = None
-    """The channel 2 ROI spatial data after multi-recording registration deform offsets have been applied to the
-    spatial coordinates of each ROI."""
+    """The channel 2 ROI spatial data after multi-recording registration deform offsets have been applied to the spatial
+    coordinates of each ROI."""
 
     def is_registered(self, output_path: Path | None = None) -> bool:
         """Checks whether registration data exists in memory or on disk.
 
         Notes:
             The on-disk check requires the deformed mask archive alongside the deformation field, which mirrors the
-            in-memory check. ``save_arrays`` writes the archive last and writes nothing for an empty mask list, so
-            both checks answer True only once at least one deformed mask has landed beside the field.
+            in-memory check. ``save_arrays`` writes the archive last and writes nothing for an empty mask list, so both
+            checks answer True only once at least one deformed mask has landed beside the field.
 
         Args:
             output_path: The directory containing the ``registration_arrays/`` subdirectory. When provided and arrays
@@ -157,8 +153,8 @@ class MultiRecordingRegistrationData:
         """Saves registration arrays as individual .npy files inside a ``registration_arrays/`` subdirectory.
 
         Notes:
-            Deformed ROI masks are serialized by ``ROIMask.save_list`` using its variable-length pixel layout and
-            remain as .npz files saved directly into ``output_path``.
+            Deformed ROI masks are serialized by ``ROIMask.save_list`` using its variable-length pixel layout and remain
+            as .npz files saved directly into ``output_path``.
 
         Args:
             output_path: The directory in which to create the ``registration_arrays/`` subdirectory.
@@ -307,10 +303,9 @@ class MultiRecordingRegistrationData:
             self.deformed_roi_masks_channel_2 = ROIMask.load_list(file_path=masks_path_channel_2)
 
     def memory_map_arrays(self, output_path: Path) -> None:
-        """Memory-maps registration arrays from individual .npy files in ``r+`` mode.
+        """Memory-maps registration arrays from individual .npy files in read-only ``r`` mode.
 
-        This method mirrors load_arrays() but uses memory mapping for .npy files instead of eager loading.
-        ROIMask .npz files are still eagerly loaded because NumPy does not support memory mapping for .npz archives.
+        ROIMask .npz files are eagerly loaded, because NumPy does not support memory mapping for .npz archives.
 
         Args:
             output_path: The directory containing the ``registration_arrays/`` subdirectory.
@@ -380,20 +375,20 @@ class MultiRecordingTrackingData:
     """
 
     template_masks: list[ROIMask] | None = None
-    """The template ROI masks in shared visual space coordinates. Each ROIMask represents an ROI that can be
-    tracked across recordings, with pixel coordinates and weights derived from the clustering consensus."""
+    """The template ROI masks in shared visual space coordinates. Each ROIMask represents an ROI that can be tracked
+    across recordings, with pixel coordinates and weights derived from the clustering consensus."""
 
     template_masks_channel_2: list[ROIMask] | None = None
-    """The channel 2 template ROI masks in shared visual space coordinates. Only present when tracking channel 2
-    ROIs independently in dual-channel recordings."""
+    """The channel 2 template ROI masks in shared visual space coordinates. Only present when tracking channel 2 ROIs
+    independently in dual-channel recordings."""
 
     template_diameter: int = 0
-    """The estimated ROI diameter in pixels for channel 1 template masks, derived from the median pixel count of
-    the generated templates. A value of 0 indicates that no templates have been computed yet."""
+    """The estimated ROI diameter in pixels for channel 1 template masks, derived from the median pixel count of the
+    generated templates. A value of 0 indicates that no templates have been computed yet."""
 
     template_diameter_channel_2: int = 0
-    """The estimated ROI diameter in pixels for channel 2 template masks, derived from the median pixel count of
-    the generated templates. A value of 0 indicates that no templates have been computed yet."""
+    """The estimated ROI diameter in pixels for channel 2 template masks, derived from the median pixel count of the
+    generated templates. A value of 0 indicates that no templates have been computed yet."""
 
     def prepare_for_saving(self) -> None:
         """Sets all list fields to None for YAML serialization."""
@@ -458,7 +453,7 @@ class MultiRecordingTimingData:
         recording-specific.
     """
 
-    # Discovery phase timing (stored redundantly per recording).
+    # Defines the discovery phase timing, which is duplicated in every recording of the dataset.
     registration_time: int = 0
     """The across-recording diffeomorphic demons registration time in seconds."""
 
@@ -471,7 +466,7 @@ class MultiRecordingTimingData:
     total_discovery_time: int = 0
     """The total discovery phase time in seconds."""
 
-    # Extraction phase timing (recording-specific).
+    # Defines the extraction phase timing, which is specific to this recording.
     extraction_time: int = 0
     """The fluorescence extraction time for this recording in seconds."""
 
@@ -481,10 +476,9 @@ class MultiRecordingTimingData:
     total_extraction_time: int = 0
     """The total extraction phase time for this recording in seconds."""
 
-    # Version and timestamp tracking.
     date_processed: str = ""
-    """The timestamp captured when this recording's multi-recording discovery phase completed. The extraction phase
-    does not update this value."""
+    """The timestamp captured when this recording's multi-recording discovery phase completed. The extraction phase does
+    not update this value."""
 
     python_version: str = PYTHON_VERSION
     """The Python interpreter version used for processing this recording."""
@@ -517,15 +511,14 @@ class MultiRecordingRuntimeData(YamlConfig):
     """The timing information for both discovery and extraction phases."""
 
     combined_data: CombinedData | None = None
-    """The combined single-recording processing data for this recording, loaded from the recording directory.
-    This field is not serialized to YAML and is loaded on-demand from the single-recording pipeline
-    outputs."""
+    """The combined single-recording processing data for this recording, loaded from the recording directory. This field
+    is not serialized to YAML and is loaded on-demand from the single-recording pipeline outputs."""
 
     def release_arrays(self) -> None:
         """Releases all array fields across registration, tracking, extraction, and combined_data to free memory.
 
-        Delegates to the ``release_arrays()`` method on each child dataclass. Also releases combined_data detection
-        and extraction arrays if combined_data is loaded.
+        Delegates to the ``release_arrays()`` method on each child dataclass. Also releases combined_data detection and
+        extraction arrays if combined_data is loaded.
         """
         self.registration.release_arrays()
         self.tracking.release_arrays()
@@ -537,10 +530,7 @@ class MultiRecordingRuntimeData(YamlConfig):
     def load_arrays(self) -> None:
         """Eagerly loads all multi-recording NumPy arrays from disk into memory.
 
-        This is a convenience method that eagerly loads registration, tracking, and extraction arrays.
-        CombinedData (single-recording data) is NOT loaded by this method and must be loaded separately by
-        the caller. Use the individual ``load_arrays()`` / ``memory_map_arrays()`` methods on each child
-        dataclass for fine-grained control over which arrays are loaded and how.
+        CombinedData (single-recording data) is not loaded by this method and must be loaded separately by the caller.
         """
         if self.output_path is not None:
             self.registration.load_arrays(output_path=self.output_path)
@@ -548,12 +538,9 @@ class MultiRecordingRuntimeData(YamlConfig):
             self.extraction.load_arrays(output_path=self.output_path)
 
     def memory_map_arrays(self) -> None:
-        """Memory-maps all multi-recording NumPy arrays from disk in ``r+`` mode.
+        """Memory-maps all multi-recording NumPy arrays from disk in read-only ``r`` mode.
 
-        This is a convenience method that memory-maps registration, tracking, and extraction arrays.
-        CombinedData (single-recording data) is NOT loaded by this method and must be loaded separately by
-        the caller. Use the individual ``load_arrays()`` / ``memory_map_arrays()`` methods on each child
-        dataclass for fine-grained control over which arrays are loaded and how.
+        CombinedData (single-recording data) is not loaded by this method and must be loaded separately by the caller.
         """
         if self.output_path is not None:
             self.registration.memory_map_arrays(output_path=self.output_path)
@@ -564,8 +551,8 @@ class MultiRecordingRuntimeData(YamlConfig):
         """Saves the runtime data to a YAML file and arrays to .npz/.npy files.
 
         Notes:
-            The combined_data field is NOT saved since it references immutable single-recording outputs. It
-            must be loaded separately by the caller after deserialization.
+            The combined_data field is NOT saved since it references immutable single-recording outputs. It must be
+            loaded separately by the caller after deserialization.
 
         Args:
             output_path: The directory in which to save the multi_recording_runtime_data.yaml file and array files.
@@ -601,16 +588,14 @@ class MultiRecordingRuntimeData(YamlConfig):
     def load(cls, output_path: Path) -> MultiRecordingRuntimeData:
         """Deserializes runtime data from a YAML file without loading any NumPy arrays or CombinedData.
 
-        After calling this method, multi-recording arrays can be loaded using the ``load_arrays()`` or
-        ``memory_map_arrays()`` convenience methods, or individually per-child dataclass. The caller is responsible for
-        assigning the ``combined_data`` field from ``CombinedData.load()``.
+        The caller is responsible for assigning the ``combined_data`` field from ``CombinedData.load()``.
 
         Args:
             output_path: The directory containing the multi_recording_runtime_data.yaml file.
 
         Returns:
-            A MultiRecordingRuntimeData instance with all scalar fields deserialized. NumPy array fields
-            and combined_data remain None until explicitly loaded.
+            A MultiRecordingRuntimeData instance with all scalar fields deserialized. NumPy array fields and
+            combined_data remain None until explicitly loaded.
         """
         file_path = output_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME
         return cls.from_yaml(file_path=file_path)
