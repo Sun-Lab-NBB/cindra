@@ -28,11 +28,11 @@ from cindra.dataclasses import SingleRecordingConfiguration
 from cindra.orchestration import (
     RESOURCE_CLASS_BY_JOB_NAME,
     PendingJob,
-    JobExecutionState,
     SingleRecordingJobNames,
     get_execution_state,
     set_execution_state,
 )
+from cindra.orchestration.execution import JobExecutionState
 from cindra.interface.processing_tools import (
     execute_full_pipeline_tool,
     clean_processing_output_tool,
@@ -50,27 +50,6 @@ _SETTLE_SECONDS: float = 0.05
 
 _MINIMUM_THROUGHPUT: float = 1000.0
 """The rate a session measured in tens of milliseconds must exceed, expressed in jobs per hour."""
-
-
-def _initialize_binarization_job(tracker_path: Path) -> tuple[ProcessingTracker, str]:
-    """Registers one binarization job on a fresh tracker and returns the tracker with the job's identifier."""
-    tracker = ProcessingTracker(file_path=tracker_path)
-    job_id = tracker.initialize_jobs(jobs=[(str(SingleRecordingJobNames.BINARIZE), "")])[0]
-    return tracker, job_id
-
-
-def _build_unpreparable_batch(tmp_path: Path) -> tuple[str, list[str], list[str]]:
-    """Creates a template configuration and two recording directories that hold no acquisition parameters file."""
-    configuration_path = tmp_path / "template.yaml"
-    SingleRecordingConfiguration().save(file_path=configuration_path)
-    recording_paths: list[str] = []
-    output_paths: list[str] = []
-    for name in ("recA", "recB"):
-        recording = tmp_path / name
-        recording.mkdir()
-        recording_paths.append(str(recording))
-        output_paths.append(str(tmp_path / f"out_{name}"))
-    return str(configuration_path), recording_paths, output_paths
 
 
 @pytest.fixture(autouse=True)
@@ -245,3 +224,24 @@ class TestCleanProcessingOutput:
         assert result["success"] is True
         assert marker_index < removal_order.index(str(MULTI_RECORDING_ARRAYS_DIRECTORY_NAME))
         assert marker_index < removal_order.index(str(DEFORMED_MASKS_FILENAME))
+
+
+def _initialize_binarization_job(tracker_path: Path) -> tuple[ProcessingTracker, str]:
+    """Registers one binarization job on a fresh tracker and returns the tracker with the job's identifier."""
+    tracker = ProcessingTracker(file_path=tracker_path)
+    job_id = tracker.initialize_jobs(jobs=[(str(SingleRecordingJobNames.BINARIZE), "")])[0]
+    return tracker, job_id
+
+
+def _build_unpreparable_batch(tmp_path: Path) -> tuple[str, list[str], list[str]]:
+    """Creates a template configuration and two recording directories that hold no acquisition parameters file."""
+    configuration_path = tmp_path / "template.yaml"
+    SingleRecordingConfiguration().save(file_path=configuration_path)
+    recording_paths: list[str] = []
+    output_paths: list[str] = []
+    for name in ("recA", "recB"):
+        recording = tmp_path / name
+        recording.mkdir()
+        recording_paths.append(str(recording))
+        output_paths.append(str(tmp_path / f"out_{name}"))
+    return str(configuration_path), recording_paths, output_paths

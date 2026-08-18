@@ -28,120 +28,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-def _make_roi_statistics(frame_width: int) -> ROIStatistics:
-    """Creates a minimal ROIStatistics instance for round-trip verification."""
-    mask = ROIMask(
-        y_pixels=np.array([1, 2, 3], dtype=np.int32),
-        x_pixels=np.array([4, 5, 6], dtype=np.int32),
-        pixel_weights=np.array([0.1, 0.2, 0.3], dtype=np.float32),
-        centroid=(2, 5),
-        frame_width=frame_width,
-        radius=2.0,
-    )
-    return ROIStatistics(
-        mask=mask,
-        footprint=4,
-        compactness=0.8,
-        solidity=0.9,
-        pixel_count=3,
-        aspect_ratio=1.0,
-        normalized_pixel_count=0.5,
-        skewness=1.2,
-    )
-
-
-def _populate_single_runtime_arrays(
-    runtime: SingleRecordingRuntimeData, *, height: int, width: int, frame_count: int
-) -> None:
-    """Populates registration, detection, and extraction arrays so that a save/load round-trip carries data."""
-    generator = np.random.default_rng(seed=7)
-    runtime.registration.reference_image = generator.random(size=(height, width)).astype(np.float32)
-    runtime.registration.rigid_y_offsets = np.arange(frame_count, dtype=np.int32)
-    runtime.registration.rigid_x_offsets = (np.arange(frame_count, dtype=np.int32) * 2).astype(np.int32)
-    runtime.detection.mean_image = generator.random(size=(height, width)).astype(np.float32)
-    runtime.extraction.roi_statistics = [_make_roi_statistics(frame_width=width)]
-
-
-def _build_multi_plane_recording(
-    context_factory: Callable[..., RuntimeContext], tmp_path: Path, *, plane_count: int
-) -> Path:
-    """Saves a recording carrying plane_count plane directories and returns the recording's output root.
-
-    Every plane carries a geometry derived from its index (height 8 + index, width 16 + index, frame count 10 + index),
-    so a context loaded out of order is detectable from its scalars alone. Plane 0 comes from the shared fixture, and
-    the remaining planes are written directly as runtime data files.
-    """
-    context = context_factory(tmp_path=tmp_path, frame_height=8, frame_width=16, frame_count=10)
-    context.save_shared()
-    context.save_runtime()
-
-    cindra_root = context.configuration.file_io.output_path / "cindra"
-    for index in range(1, plane_count):
-        runtime = SingleRecordingRuntimeData()
-        runtime.io.plane_index = index
-        runtime.io.frame_height = 8 + index
-        runtime.io.frame_width = 16 + index
-        runtime.io.frame_count = 10 + index
-        runtime.io.sampling_rate = 30.0
-        runtime.io.output_path = cindra_root / f"plane_{index}"
-        runtime.save(output_path=cindra_root / f"plane_{index}")
-
-    return context.configuration.file_io.output_path
-
-
-def _build_multi_dataset(
-    base: Path, *, recording_count: int = 2, write_config: bool = True, set_data_path: bool = True
-) -> tuple[Path, ...]:
-    """Builds and saves a multi-recording dataset under base and returns the natural-sorted output paths.
-
-    Each recording owns a multi_recording output directory holding multi_recording_runtime_data.yaml. When
-    set_data_path is True, each recording also owns a single-recording cindra root containing combined_metadata.npz, a
-    valid plane_0 directory, and an empty decoy plane directory that exercises the plane discovery skip branch during
-    relocation. The first recording's output directory holds the shared multi_recording_configuration.yaml.
-    """
-    data_paths: list[Path] = []
-    multi_directories: list[Path] = []
-    for index in range(recording_count):
-        data_path = base / f"rec{index}" / "cindra"
-        multi_directory = data_path / "multi_recording" / "dataset"
-        ensure_directory_exists(multi_directory)
-        data_paths.append(data_path)
-        multi_directories.append(multi_directory)
-
-    multi_directories_tuple = tuple(multi_directories)
-    for index in range(recording_count):
-        if set_data_path:
-            CombinedData(
-                detection=DetectionData(),
-                extraction=ExtractionData(),
-                plane_count=1,
-                combined_height=16,
-                combined_width=16,
-                tau=1.0,
-                sampling_rate=15.0,
-            ).save(root_path=data_paths[index])
-
-            # Writes a minimal single-recording runtime under a plane_0 directory so the multi-recording relocation
-            # logic discovers and relocates underlying single-recording data during a move. The empty decoy plane
-            # directory exercises the discovery skip branch (a plane_* entry without a runtime_data.yaml file).
-            SingleRecordingRuntimeData().save(output_path=data_paths[index] / "plane_0")
-            ensure_directory_exists(data_paths[index] / "plane_decoy")
-
-        runtime = MultiRecordingRuntimeData()
-        runtime.io.recording_id = f"rec{index}"
-        runtime.io.dataset_name = "dataset"
-        runtime.io.data_path = data_paths[index] if set_data_path else None
-        runtime.io.dataset_output_paths = multi_directories_tuple
-        runtime.save(output_path=multi_directories[index])
-
-    if write_config:
-        configuration = MultiRecordingConfiguration()
-        configuration.runtime.display_progress_bars = True
-        configuration.save(file_path=multi_directories[0] / "multi_recording_configuration.yaml")
-
-    return multi_directories_tuple
-
-
 class TestRuntimeContextSaveShared:
     """Tests RuntimeContext.save_shared."""
 
@@ -543,7 +429,7 @@ class TestMultiRecordingRuntimeContextLoad:
 
     def test_load_raises_when_configuration_missing(self, tmp_path: Path) -> None:
         """Verifies that load raises FileNotFoundError when the configuration file is absent."""
-        _build_multi_dataset(base=tmp_path, recording_count=1, write_config=False)
+        _build_multi_dataset(base=tmp_path, recording_count=1, write_configuration=False)
 
         configuration_path = (
             tmp_path / "rec0" / "cindra" / "multi_recording" / "dataset" / "multi_recording_configuration.yaml"
@@ -697,3 +583,90 @@ class TestLoadMultiRecordingData:
         _load_multi_recording_data(runtime=runtime)
 
         assert runtime.combined_data is None
+
+
+def _make_roi_statistics(frame_width: int) -> ROIStatistics:
+    """Creates a minimal ROIStatistics instance for round-trip verification."""
+    mask = ROIMask(
+        y_pixels=np.array([1, 2, 3], dtype=np.int32),
+        x_pixels=np.array([4, 5, 6], dtype=np.int32),
+        pixel_weights=np.array([0.1, 0.2, 0.3], dtype=np.float32),
+        centroid=(2, 5),
+        frame_width=frame_width,
+        radius=2.0,
+    )
+    return ROIStatistics(
+        mask=mask,
+        footprint=4,
+        compactness=0.8,
+        solidity=0.9,
+        pixel_count=3,
+        aspect_ratio=1.0,
+        normalized_pixel_count=0.5,
+        skewness=1.2,
+    )
+
+
+def _populate_single_runtime_arrays(
+    runtime: SingleRecordingRuntimeData, *, height: int, width: int, frame_count: int
+) -> None:
+    """Populates registration, detection, and extraction arrays so that a save/load round-trip carries data."""
+    generator = np.random.default_rng(seed=7)
+    runtime.registration.reference_image = generator.random(size=(height, width)).astype(np.float32)
+    runtime.registration.rigid_y_offsets = np.arange(frame_count, dtype=np.int32)
+    runtime.registration.rigid_x_offsets = (np.arange(frame_count, dtype=np.int32) * 2).astype(np.int32)
+    runtime.detection.mean_image = generator.random(size=(height, width)).astype(np.float32)
+    runtime.extraction.roi_statistics = [_make_roi_statistics(frame_width=width)]
+
+
+def _build_multi_dataset(
+    base: Path, *, recording_count: int = 2, write_configuration: bool = True, set_data_path: bool = True
+) -> tuple[Path, ...]:
+    """Builds and saves a multi-recording dataset under base and returns the natural-sorted output paths.
+
+    Each recording owns a multi_recording output directory holding multi_recording_runtime_data.yaml. When
+    set_data_path is True, each recording also owns a single-recording cindra root containing combined_metadata.npz, a
+    valid plane_0 directory, and an empty decoy plane directory that exercises the plane discovery skip branch during
+    relocation. The first recording's output directory holds the shared multi_recording_configuration.yaml.
+    """
+    data_paths: list[Path] = []
+    multi_directories: list[Path] = []
+    for index in range(recording_count):
+        data_path = base / f"rec{index}" / "cindra"
+        multi_directory = data_path / "multi_recording" / "dataset"
+        ensure_directory_exists(multi_directory)
+        data_paths.append(data_path)
+        multi_directories.append(multi_directory)
+
+    multi_directories_tuple = tuple(multi_directories)
+    for index in range(recording_count):
+        if set_data_path:
+            CombinedData(
+                detection=DetectionData(),
+                extraction=ExtractionData(),
+                plane_count=1,
+                combined_height=16,
+                combined_width=16,
+                tau=1.0,
+                sampling_rate=15.0,
+            ).save(root_path=data_paths[index])
+
+            # Writes a minimal single-recording runtime under a plane_0 directory so the multi-recording relocation
+            # logic discovers and relocates underlying single-recording data during a move. The empty decoy plane
+            # directory exercises the discovery skip branch (a plane_* entry without a runtime_data.yaml file).
+            SingleRecordingRuntimeData().save(output_path=data_paths[index] / "plane_0")
+            ensure_directory_exists(data_paths[index] / "plane_decoy")
+
+        runtime = MultiRecordingRuntimeData()
+        runtime.io.recording_id = f"rec{index}"
+        runtime.io.dataset_name = "dataset"
+        runtime.io.data_path = data_paths[index] if set_data_path else None
+        runtime.io.dataset_output_paths = multi_directories_tuple
+        runtime.save(output_path=multi_directories[index])
+
+    if write_configuration:
+        configuration = MultiRecordingConfiguration()
+        configuration.runtime.display_progress_bars = True
+        configuration.save(file_path=multi_directories[0] / "multi_recording_configuration.yaml")
+
+    return multi_directories_tuple

@@ -29,29 +29,6 @@ _READER_THREADS: int = 4
 """The number of threads listing viewers concurrently with the same number of closing threads."""
 
 
-class _StubProcess:
-    """Stands in for a viewer subprocess, reporting a liveness state the test controls."""
-
-    def __init__(self, *, alive: bool) -> None:
-        self._alive = alive
-
-    def poll(self) -> int | None:
-        """Returns None while the stub is alive and a zero exit code once it is not."""
-        return None if self._alive else 0
-
-    def terminate(self) -> None:
-        """Marks the stub as exited."""
-        self._alive = False
-
-    def wait(self, timeout: float | None = None) -> int:
-        """Returns the exit code without blocking."""
-        return 0
-
-    def kill(self) -> None:
-        """Marks the stub as exited."""
-        self._alive = False
-
-
 @pytest.fixture(autouse=True)
 def _empty_registry() -> Iterator[None]:
     """Clears the module-global viewer registry around every test, so no viewer leaks between them."""
@@ -127,3 +104,26 @@ class TestViewerRegistryConcurrency:
 
         assert failures == []
         assert _viewer_registry == {}
+
+
+class _StubProcess:
+    """Stands in for a viewer subprocess, reporting a liveness state the test controls."""
+
+    def __init__(self, *, alive: bool) -> None:
+        self._alive = alive
+
+    def poll(self) -> int | None:
+        """Returns None while the stub is alive and a zero exit code once it is not."""
+        return None if self._alive else 0
+
+    def terminate(self) -> None:
+        """Marks the stub as exited."""
+        self._alive = False
+
+    def wait(self, timeout: float | None = None) -> int:
+        """Returns the exit code without blocking."""
+        return 0
+
+    def kill(self) -> None:
+        """Marks the stub as exited."""
+        self._alive = False

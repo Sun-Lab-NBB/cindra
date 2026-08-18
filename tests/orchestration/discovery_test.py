@@ -29,56 +29,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _write_parameters(output_root: Path, plane_count: int) -> None:
-    """Writes the acquisition parameters that declare a recording's plane count."""
-    output_path = resolve_output_path(output_root=output_root)
-    output_path.mkdir(parents=True, exist_ok=True)
-    (output_path / ACQUISITION_PARAMETERS_FILENAME).write_text(
-        f"frame_rate: 30.0\nplane_number: {plane_count}\nchannel_number: 1\nroi_number: 1\n"
-        f"roi_lines: []\nroi_x_coordinates: []\nroi_y_coordinates: []\n"
-    )
-
-
-def _convert_plane(output_root: Path, plane_index: int) -> None:
-    """Writes the channel binary the conversion stage produces for one plane."""
-    plane_path = resolve_plane_path(output_root=output_root, plane_index=plane_index)
-    plane_path.mkdir(parents=True, exist_ok=True)
-    (plane_path / CHANNEL_1_BINARY_FILENAME).write_bytes(b"")
-
-
-def _process_plane(output_root: Path, plane_index: int) -> None:
-    """Writes the extracted trace that marks one plane as processed."""
-    plane_path = resolve_plane_path(output_root=output_root, plane_index=plane_index)
-    plane_path.mkdir(parents=True, exist_ok=True)
-    (plane_path / RecordingArrays.CELL_FLUORESCENCE).write_bytes(b"")
-
-
-def _project_masks(output_root: Path, dataset_name: str) -> None:
-    """Writes the projected ROI statistics one recording's extraction job reads."""
-    dataset_path = resolve_dataset_path(output_root=output_root, dataset_name=dataset_name)
-    dataset_path.mkdir(parents=True, exist_ok=True)
-    (dataset_path / RecordingArrays.ROI_STATISTICS).write_bytes(b"")
-
-
-def _register_plane(output_root: Path, plane_index: int) -> None:
-    """Writes the reference image that marks one plane as registered."""
-    directory = resolve_plane_path(output_root=output_root, plane_index=plane_index) / REGISTRATION_DATA_DIRECTORY_NAME
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / RegistrationArrays.REFERENCE_IMAGE).write_bytes(b"")
-
-
-def _mark_processed(output_root: Path) -> None:
-    """Writes the combined metadata archive that marks a recording's pipeline complete."""
-    output_path = resolve_output_path(output_root=output_root)
-    output_path.mkdir(parents=True, exist_ok=True)
-    np.savez(output_path / COMBINED_METADATA_FILENAME, combined_height=np.array([1], dtype=np.uint16))
-
-
-def _names(jobs: tuple[tuple[str, str], ...]) -> set[str]:
-    """Returns the distinct job names the given job pairs carry."""
-    return {job_name for job_name, _ in jobs}
-
-
 class TestSingleRecordingJobUniverse:
     """Tests the single-recording job universe."""
 
@@ -86,7 +36,7 @@ class TestSingleRecordingJobUniverse:
         """Verifies that a recording carrying no parameters resolves rather than raising."""
         universe = resolve_single_recording_job_universe(output_root=tmp_path)
 
-        assert universe.resolved is False
+        assert not universe.resolved
         assert universe.universe == ()
         assert universe.possible == ()
 
@@ -96,10 +46,10 @@ class TestSingleRecordingJobUniverse:
 
         universe = resolve_single_recording_job_universe(output_root=tmp_path)
 
-        assert universe.resolved is True
+        assert universe.resolved
         assert universe.plane_count == 2
         assert len(universe.universe) == 6
-        assert _names(universe.universe) == {
+        assert _names(jobs=universe.universe) == {
             SingleRecordingJobNames.BINARIZE,
             SingleRecordingJobNames.REGISTER,
             SingleRecordingJobNames.PROCESS,
@@ -203,7 +153,7 @@ class TestMultiRecordingJobUniverse:
         """Verifies that a dataset spanning no recordings resolves rather than raising."""
         universe = resolve_multi_recording_job_universe(recording_roots=[], dataset_name="Set")
 
-        assert universe.resolved is False
+        assert not universe.resolved
         assert universe.dataset_name == "set"
         assert universe.universe == ()
 
@@ -216,7 +166,7 @@ class TestMultiRecordingJobUniverse:
         universe = resolve_multi_recording_job_universe(recording_roots=roots, dataset_name="set")
 
         assert universe.recording_ids == ("day1", "day2")
-        assert _names(universe.universe) == {MultiRecordingJobNames.DISCOVER, MultiRecordingJobNames.EXTRACT}
+        assert _names(jobs=universe.universe) == {MultiRecordingJobNames.DISCOVER, MultiRecordingJobNames.EXTRACT}
         assert len(universe.universe) == 3
 
     def test_discovery_waits_for_every_recording_to_be_processed(self, tmp_path: Path) -> None:
@@ -253,3 +203,53 @@ class TestMultiRecordingJobUniverse:
 
         assert (MultiRecordingJobNames.EXTRACT, "day2") in universe.possible
         assert (MultiRecordingJobNames.EXTRACT, "day1") not in universe.possible
+
+
+def _write_parameters(output_root: Path, plane_count: int) -> None:
+    """Writes the acquisition parameters that declare a recording's plane count."""
+    output_path = resolve_output_path(output_root=output_root)
+    output_path.mkdir(parents=True, exist_ok=True)
+    (output_path / ACQUISITION_PARAMETERS_FILENAME).write_text(
+        f"frame_rate: 30.0\nplane_number: {plane_count}\nchannel_number: 1\nroi_number: 1\n"
+        f"roi_lines: []\nroi_x_coordinates: []\nroi_y_coordinates: []\n"
+    )
+
+
+def _convert_plane(output_root: Path, plane_index: int) -> None:
+    """Writes the channel binary the conversion stage produces for one plane."""
+    plane_path = resolve_plane_path(output_root=output_root, plane_index=plane_index)
+    plane_path.mkdir(parents=True, exist_ok=True)
+    (plane_path / CHANNEL_1_BINARY_FILENAME).write_bytes(b"")
+
+
+def _process_plane(output_root: Path, plane_index: int) -> None:
+    """Writes the extracted trace that marks one plane as processed."""
+    plane_path = resolve_plane_path(output_root=output_root, plane_index=plane_index)
+    plane_path.mkdir(parents=True, exist_ok=True)
+    (plane_path / RecordingArrays.CELL_FLUORESCENCE).write_bytes(b"")
+
+
+def _project_masks(output_root: Path, dataset_name: str) -> None:
+    """Writes the projected ROI statistics one recording's extraction job reads."""
+    dataset_path = resolve_dataset_path(output_root=output_root, dataset_name=dataset_name)
+    dataset_path.mkdir(parents=True, exist_ok=True)
+    (dataset_path / RecordingArrays.ROI_STATISTICS).write_bytes(b"")
+
+
+def _register_plane(output_root: Path, plane_index: int) -> None:
+    """Writes the reference image that marks one plane as registered."""
+    directory = resolve_plane_path(output_root=output_root, plane_index=plane_index) / REGISTRATION_DATA_DIRECTORY_NAME
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / RegistrationArrays.REFERENCE_IMAGE).write_bytes(b"")
+
+
+def _mark_processed(output_root: Path) -> None:
+    """Writes the combined metadata archive that marks a recording's pipeline complete."""
+    output_path = resolve_output_path(output_root=output_root)
+    output_path.mkdir(parents=True, exist_ok=True)
+    np.savez(output_path / COMBINED_METADATA_FILENAME, combined_height=np.array([1], dtype=np.uint16))
+
+
+def _names(jobs: tuple[tuple[str, str], ...]) -> set[str]:
+    """Returns the distinct job names the given job pairs carry."""
+    return {job_name for job_name, _ in jobs}

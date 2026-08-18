@@ -53,67 +53,6 @@ _CHANNEL_2_BLOB_CENTERS: tuple[tuple[int, int], ...] = ((12, 12), (36, 36))
 binary for both channels reports centroids the channel 2 movie plants nowhere."""
 
 
-def _build_flickering_movie(
-    blob_builder: Callable[..., NDArray[np.float64]],
-    *,
-    centers: tuple[tuple[int, int], ...],
-    frame_count: int,
-    seed: int,
-) -> NDArray[np.int16]:
-    """Builds a synthetic movie whose spatially fixed Gaussian blobs flicker independently across frames.
-
-    Notes:
-        Detection keys on temporal variance, normalizing each pixel by its temporal standard deviation before searching
-        for spatially coherent activity. A movie of identical frames therefore yields no detectable ROIs, so each blob
-        is switched on in a random subset of frames to plant localized, temporally coherent signal.
-    """
-    generator = np.random.default_rng(seed=seed)
-    movie = np.full((frame_count, _FRAME_HEIGHT, _FRAME_WIDTH), fill_value=_BACKGROUND_LEVEL, dtype=np.float64)
-    for center in centers:
-        blob = blob_builder(
-            height=_FRAME_HEIGHT,
-            width=_FRAME_WIDTH,
-            centers=(center,),
-            sigma=_BLOB_SIGMA,
-            amplitude=1.0,
-            background=0.0,
-        )
-        activity = (generator.random(frame_count) < _ACTIVE_FRAME_FRACTION).astype(np.float64)
-        movie += _BLOB_AMPLITUDE * activity[:, np.newaxis, np.newaxis] * blob[np.newaxis, :, :]
-    return movie.astype(np.int16)
-
-
-def _minimum_centroid_distance(centroid: tuple[int, int], centers: tuple[tuple[int, int], ...]) -> float:
-    """Returns the distance from the centroid to the nearest planted blob center."""
-    return min(float(np.hypot(centroid[0] - center[0], centroid[1] - center[1])) for center in centers)
-
-
-def _assert_centroids_match_planted_centers(
-    roi_statistics: list[ROIStatistics],
-    centers: tuple[tuple[int, int], ...],
-) -> None:
-    """Asserts that the detected centroids and the planted blob centers cover each other in both directions."""
-    assert 1 <= len(roi_statistics) <= 2 * len(centers)
-
-    # Every detected ROI lands on a planted blob, so the pass produced no spurious centroids.
-    centroids = tuple(roi.mask.centroid for roi in roi_statistics)
-    for centroid in centroids:
-        assert _minimum_centroid_distance(centroid=centroid, centers=centers) <= _CENTROID_TOLERANCE
-
-    # Every planted blob is recovered by at least one detected ROI, so the pass dropped none of them.
-    for center in centers:
-        assert _minimum_centroid_distance(centroid=center, centers=centroids) <= _CENTROID_TOLERANCE
-
-
-def _permissive_detection(configuration: SingleRecordingConfiguration) -> None:
-    """Configures a permissive, deterministic detection pass that keeps every blob it finds."""
-    configuration.roi_detection.denoise = False
-    configuration.roi_detection.preclassification_threshold = 0.0
-    configuration.roi_detection.crop_to_soma = False
-    configuration.roi_detection.threshold_scaling = 0.5
-    configuration.main.tau = 0.01
-
-
 class TestDetectPlaneRois:
     """Tests detect_plane_rois."""
 
@@ -202,7 +141,7 @@ class TestDetectPlaneRois:
         )
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
-            _permissive_detection(configuration)
+            _permissive_detection(configuration=configuration)
             configuration.main.first_channel_functional = True
             configuration.main.second_channel_functional = True
 
@@ -220,8 +159,8 @@ class TestDetectPlaneRois:
         detect_plane_rois(context=context, workers=1)
 
         # Each channel recovers the blobs planted in its own binary. Channel 2 carries only two of channel 1's four
-        # blobs, so a pass that read the channel 1 binary for both channels reports ROIs at the two centers channel
-        # 2 does not carry, which are farther from both channel 2 centers than the tolerance allows.
+        # blobs. A pass that read the channel 1 binary for both channels therefore reports ROIs at the two centers
+        # channel 2 does not carry, which are farther from both channel 2 centers than the tolerance allows.
         roi_statistics = context.runtime.extraction.roi_statistics
         assert roi_statistics is not None
         _assert_centroids_match_planted_centers(roi_statistics=roi_statistics, centers=_BLOB_CENTERS)
@@ -247,7 +186,7 @@ class TestDetectPlaneRois:
         )
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
-            _permissive_detection(configuration)
+            _permissive_detection(configuration=configuration)
             configuration.roi_detection.denoise = True
 
         context = single_recording_context(
@@ -277,7 +216,7 @@ class TestDetectPlaneRois:
         )
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
-            _permissive_detection(configuration)
+            _permissive_detection(configuration=configuration)
             configuration.roi_detection.preclassification_threshold = 0.5
 
         context = single_recording_context(
@@ -308,7 +247,7 @@ class TestDetectPlaneRois:
         )
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
-            _permissive_detection(configuration)
+            _permissive_detection(configuration=configuration)
             # No classifier probability exceeds 1.0, so every detected ROI is rejected by the filter.
             configuration.roi_detection.preclassification_threshold = 1.0
 
@@ -369,3 +308,64 @@ class TestDetectPlaneRois:
         expected_message = "Unable to run ROI detection. The registered binary file path is not set for channel 1."
         with pytest.raises(RuntimeError, match=error_format(expected_message)):
             detect_plane_rois(context=context, workers=1)
+
+
+def _build_flickering_movie(
+    blob_builder: Callable[..., NDArray[np.float64]],
+    *,
+    centers: tuple[tuple[int, int], ...],
+    frame_count: int,
+    seed: int,
+) -> NDArray[np.int16]:
+    """Builds a synthetic movie whose spatially fixed Gaussian blobs flicker independently across frames.
+
+    Notes:
+        Detection keys on temporal variance, normalizing each pixel by its temporal standard deviation before searching
+        for spatially coherent activity. A movie of identical frames therefore yields no detectable ROIs, so each blob
+        is switched on in a random subset of frames to plant localized, temporally coherent signal.
+    """
+    generator = np.random.default_rng(seed=seed)
+    movie = np.full((frame_count, _FRAME_HEIGHT, _FRAME_WIDTH), fill_value=_BACKGROUND_LEVEL, dtype=np.float64)
+    for center in centers:
+        blob = blob_builder(
+            height=_FRAME_HEIGHT,
+            width=_FRAME_WIDTH,
+            centers=(center,),
+            sigma=_BLOB_SIGMA,
+            amplitude=1.0,
+            background=0.0,
+        )
+        activity = (generator.random(frame_count) < _ACTIVE_FRAME_FRACTION).astype(np.float64)
+        movie += _BLOB_AMPLITUDE * activity[:, np.newaxis, np.newaxis] * blob[np.newaxis, :, :]
+    return movie.astype(np.int16)
+
+
+def _minimum_centroid_distance(centroid: tuple[int, int], centers: tuple[tuple[int, int], ...]) -> float:
+    """Returns the distance from the centroid to the nearest planted blob center."""
+    return min(float(np.hypot(centroid[0] - center[0], centroid[1] - center[1])) for center in centers)
+
+
+def _assert_centroids_match_planted_centers(
+    roi_statistics: list[ROIStatistics],
+    centers: tuple[tuple[int, int], ...],
+) -> None:
+    """Asserts that the detected centroids and the planted blob centers cover each other in both directions."""
+    assert 1 <= len(roi_statistics) <= 2 * len(centers)
+
+    # Every detected ROI lands on a planted blob, so the pass produced no spurious centroids.
+    centroids = tuple(roi.mask.centroid for roi in roi_statistics)
+    for centroid in centroids:
+        assert _minimum_centroid_distance(centroid=centroid, centers=centers) <= _CENTROID_TOLERANCE
+
+    # Every planted blob is recovered by at least one detected ROI, so the pass dropped none of them.
+    for center in centers:
+        assert _minimum_centroid_distance(centroid=center, centers=centroids) <= _CENTROID_TOLERANCE
+
+
+def _permissive_detection(configuration: SingleRecordingConfiguration) -> None:
+    """Configures a permissive, deterministic detection pass that keeps every blob it finds."""
+    configuration.roi_detection.denoise = False
+    configuration.roi_detection.preclassification_threshold = 0.0
+    configuration.roi_detection.crop_to_soma = False
+    configuration.roi_detection.threshold_scaling = 0.5
+    configuration.main.tau = 0.01

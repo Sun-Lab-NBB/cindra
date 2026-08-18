@@ -1,7 +1,5 @@
-"""Provides the MCP server entry point for agentic neural imaging data processing.
-
-Imports all tool modules at module level to trigger ``@mcp.tool()`` registration on the shared instance from
-``mcp_instance``. The ``run_server`` function starts the server with all registered tools available.
+"""Provides the MCP server entry point for agentic neural imaging data processing. Imports all tool modules at module
+level to trigger ``@mcp.tool()`` registration on the shared instance from ``mcp_instance``.
 """
 
 from __future__ import annotations

@@ -141,7 +141,7 @@ class TestComputeTemporalStandardDeviation:
 
     def test_shape(self) -> None:
         """Verifies the output shape matches spatial dimensions."""
-        rng = np.random.default_rng(42)
+        rng = np.random.default_rng(seed=42)
         frames = rng.standard_normal((20, 32, 32)).astype(np.float32)
         result = compute_temporal_standard_deviation(frames=frames)
         assert result.shape == (32, 32)
@@ -155,7 +155,7 @@ class TestComputeTemporalStandardDeviation:
 
     def test_all_values_positive(self) -> None:
         """Verifies all output values are strictly positive."""
-        rng = np.random.default_rng(42)
+        rng = np.random.default_rng(seed=42)
         frames = rng.standard_normal((20, 16, 16)).astype(np.float32)
         result = compute_temporal_standard_deviation(frames=frames)
         assert np.all(result > 0)
@@ -164,7 +164,7 @@ class TestComputeTemporalStandardDeviation:
         """Verifies pixels with more temporal variation produce larger standard deviation."""
         frames = np.zeros((20, 4, 4), dtype=np.float32)
         # Left half: high variation.
-        rng = np.random.default_rng(42)
+        rng = np.random.default_rng(seed=42)
         frames[:, :, :2] = rng.standard_normal((20, 4, 2)).astype(np.float32) * 10.0
         # Right half: low variation.
         frames[:, :, 2:] = rng.standard_normal((20, 4, 2)).astype(np.float32) * 0.1
@@ -213,7 +213,7 @@ class TestApplyTemporalHighPassFilter:
 
     def test_gaussian_dispatch_modifies_frames(self) -> None:
         """Verifies Gaussian dispatch for small kernel sizes modifies frames."""
-        rng = np.random.default_rng(42)
+        rng = np.random.default_rng(seed=42)
         frames = rng.standard_normal((20, 8, 8)).astype(np.float32) + 10.0
         frames_copy = frames.copy()
         apply_temporal_high_pass_filter(frames=frames, kernel_size=5)
@@ -221,7 +221,7 @@ class TestApplyTemporalHighPassFilter:
 
     def test_rolling_dispatch_modifies_frames(self) -> None:
         """Verifies rolling mean dispatch for large kernel sizes modifies frames."""
-        rng = np.random.default_rng(42)
+        rng = np.random.default_rng(seed=42)
         frames = rng.standard_normal((50, 8, 8)).astype(np.float32) + 10.0
         frames_copy = frames.copy()
         apply_temporal_high_pass_filter(frames=frames, kernel_size=15)
@@ -229,7 +229,7 @@ class TestApplyTemporalHighPassFilter:
 
     def test_in_place_modification(self) -> None:
         """Verifies the filter modifies frames in-place."""
-        rng = np.random.default_rng(42)
+        rng = np.random.default_rng(seed=42)
         frames = rng.standard_normal((20, 8, 8)).astype(np.float32) + 100.0
         original_id = id(frames)
         apply_temporal_high_pass_filter(frames=frames, kernel_size=5)
@@ -237,7 +237,7 @@ class TestApplyTemporalHighPassFilter:
 
     def test_removes_constant_offset(self) -> None:
         """Verifies the high-pass filter removes constant temporal offset."""
-        rng = np.random.default_rng(42)
+        rng = np.random.default_rng(seed=42)
         frames = rng.standard_normal((30, 4, 4)).astype(np.float32) + 1000.0
         apply_temporal_high_pass_filter(frames=frames, kernel_size=5)
         # After high-pass, temporal mean should be significantly reduced.
@@ -249,7 +249,7 @@ class TestApplyGaussianHighPass:
 
     def test_in_place_subtraction(self) -> None:
         """Verifies Gaussian high-pass subtracts low-frequency content in-place."""
-        rng = np.random.default_rng(42)
+        rng = np.random.default_rng(seed=42)
         frames = rng.standard_normal((20, 8, 8)).astype(np.float32) + 50.0
         original = frames.copy()
         _apply_gaussian_high_pass(frames=frames, kernel_size=3)
@@ -270,7 +270,7 @@ class TestApplyRollingMeanHighPass:
 
     def test_with_remainder(self) -> None:
         """Verifies rolling mean folds the leftover frames into the last complete window."""
-        rng = np.random.default_rng(42)
+        rng = np.random.default_rng(seed=42)
         frames = rng.standard_normal((35, 4, 4)).astype(np.float32) + 100.0
         _apply_rolling_mean_high_pass(frames=frames, kernel_size=10)
         # Batched windows (the first 20 frames): within-window mean should be ~0.
@@ -282,7 +282,7 @@ class TestApplyRollingMeanHighPass:
 
     def test_single_leftover_frame_is_high_passed(self) -> None:
         """Verifies that a lone leftover frame is folded into the preceding window instead of being zeroed."""
-        rng = np.random.default_rng(0)
+        rng = np.random.default_rng(seed=0)
         frames = (100.0 + 10.0 * rng.standard_normal((101, 4, 4))).astype(np.float32)
         original = frames.copy()
         _apply_rolling_mean_high_pass(frames=frames, kernel_size=100)

@@ -159,9 +159,8 @@ def resolve_tiff_conversion_plan(contexts: list[RuntimeContext], *, workers: int
         converted.
 
     Args:
-        contexts: A list of RuntimeContext instances created by resolve_single_recording_contexts(). Each
-            context must have valid configuration, acquisition parameters, and IOData with binary file paths
-            configured.
+        contexts: The runtime context of every plane the conversion writes, in plane order. Each context must have
+            valid configuration, acquisition parameters, and IOData with binary file paths configured.
         workers: The number of parallel workers allocated to this binarization job. Must be a positive integer, which
             the caller resolves before invoking this function.
 
@@ -186,7 +185,6 @@ def resolve_tiff_conversion_plan(contexts: list[RuntimeContext], *, workers: int
     configuration = contexts[0].configuration
     acquisition = contexts[0].acquisition
 
-    # Finds the data directory from the configuration's data_path.
     data_path = configuration.file_io.data_path
     if data_path is None:
         message = (
@@ -202,7 +200,6 @@ def resolve_tiff_conversion_plan(contexts: list[RuntimeContext], *, workers: int
         ignored_file_names=configuration.file_io.ignored_file_names,
     )
 
-    # Extracts processing parameters.
     plane_number = acquisition.plane_number
     channel_number = acquisition.channel_number
 
@@ -296,7 +293,6 @@ def convert_tiffs_to_binary(plan: TiffConversionPlan) -> None:
     contexts = plan.contexts
     acquisition = contexts[0].acquisition
 
-    # Extracts processing parameters.
     plane_number = acquisition.plane_number
     channel_number = acquisition.channel_number
     is_mroi = acquisition.is_mroi
@@ -313,7 +309,6 @@ def convert_tiffs_to_binary(plan: TiffConversionPlan) -> None:
 
     description = "Converting MROI frames to binary" if is_mroi else "Converting frames to binary"
 
-    # Initializes mean image accumulators and write indices for each context.
     mean_images: list[NDArray[np.float32] | None] = [None] * len(contexts)
     mean_images_channel_2: list[NDArray[np.float32] | None] = [None] * len(contexts)
     write_indices: list[int] = [0] * len(contexts)
@@ -327,7 +322,6 @@ def convert_tiffs_to_binary(plan: TiffConversionPlan) -> None:
     # of an incomplete final interleave cycle out of the binaries, whatever file boundary they fall behind.
     remaining_frames = converted_frames
 
-    # Processes each TIFF file.
     with console.progress(total=converted_frames, description=description, unit="frames") as progress_bar:
         for tiff_file in tiff_files:
             if remaining_frames <= 0:
@@ -353,7 +347,6 @@ def convert_tiffs_to_binary(plan: TiffConversionPlan) -> None:
                     progress_bar.update(frame_count)
                     remaining_frames -= frame_count
 
-                    # Processes each context (plane or virtual plane).
                     for context_index, context in enumerate(contexts):
                         io_data = context.runtime.io
 
@@ -385,7 +378,6 @@ def convert_tiffs_to_binary(plan: TiffConversionPlan) -> None:
                         write_indices[context_index] = write_index
                         mean_images[context_index] = mean_image
 
-                        # Processes channel 2 if applicable.
                         if channel_number > 1:
                             target_position_channel_2 = physical_plane_index * channel_number + second_channel_index
                             write_index, mean_image = _write_interleave_selection(
@@ -402,7 +394,6 @@ def convert_tiffs_to_binary(plan: TiffConversionPlan) -> None:
 
                     start_index += frame_count
 
-            # Updates the interleave offset for the next file based on the total frames read from this file.
             interleave_offset = (interleave_offset + start_index) % interleave_stride
 
     # Verifies that every plane received exactly the number of frames its binary was sized for. The conversion reads
@@ -425,7 +416,6 @@ def convert_tiffs_to_binary(plan: TiffConversionPlan) -> None:
                 )
                 console.error(message=message, error=RuntimeError)
 
-    # Closes binary files and updates runtime data in each context.
     for context_index, context in enumerate(contexts):
         channel_1_binaries[context_index].close()
         if channel_number > 1:
@@ -450,7 +440,6 @@ def convert_tiffs_to_binary(plan: TiffConversionPlan) -> None:
             io_data.frame_width = mean_image.shape[1]
         io_data.frame_count = write_indices[context_index]
 
-        # Updates DetectionData with mean images.
         context.runtime.detection.mean_image = mean_image
         if channel_number > 1:
             context.runtime.detection.mean_image_channel_2 = mean_image_channel_2
@@ -488,11 +477,11 @@ def _discover_tiff_files(
     Args:
         data_directory: The directory to scan for TIFF files. This should be the same directory that contains the
             acquisition parameters JSON file.
-        ignored_file_names: A tuple of file names (without extension) to ignore. Files whose stem matches any of
-            these names are excluded from the results.
+        ignored_file_names: The file names, without extension, to ignore. Files whose stem matches any of these
+            names are excluded from the results.
 
     Returns:
-        A list of absolute paths to TIFF files, sorted naturally by filename.
+        The absolute paths to the discovered TIFF files, sorted naturally by filename.
 
     Raises:
         ValueError: If the data_directory is not a valid directory.
@@ -547,8 +536,8 @@ def _read_tiff(tiff: TiffFile, start_index: int, batch_size: int, decode_workers
         decode_workers: The number of threads tifffile uses to decode the requested frames.
 
     Returns:
-        A 3D NumPy array with shape (frames, height, width) containing the requested frame data, or None if the
-        start_index is beyond the end of the file.
+        The requested frame data, shaped as (frames, height, width), or None if the start_index is beyond the end
+        of the file.
     """
     tiff_length = len(tiff.pages)
 
@@ -606,13 +595,12 @@ def _write_interleave_selection(
         mean_image: The mean image accumulator of the written channel, or None before the first frame lands.
 
     Returns:
-        A tuple of the index past the written frames and the mean image accumulator the written frames were added to.
+        The index past the written frames and the mean image accumulator the written frames were added to.
     """
     selection = frames[first_frame_index::interleave_stride]
     if selection.shape[0] == 0:
         return write_index, mean_image
 
-    # For MROI data, slices frames to extract only the ROI lines.
     if roi_lines:
         selection = selection[:, roi_lines[0] : roi_lines[-1] + 1, :]
 
@@ -647,7 +635,7 @@ def _scan_source_frames(tiff_files: list[Path]) -> tuple[int, int, int]:
         tiff_files: The discovered TIFF files, in conversion order.
 
     Returns:
-        A tuple of the number of frames the files hold, the height of the first file's first frame, and its width.
+        The number of frames the files hold, the height of the first file's first frame, and its width.
 
     Raises:
         ValueError: If the first TIFF file is empty, or if any file holds frames of a different shape than the first
@@ -700,13 +688,13 @@ def _resolve_plane_dimensions(
     """Returns the frame dimensions the binary of each plane is sized for.
 
     Args:
-        contexts: The list of RuntimeContext instances, one per plane.
+        contexts: The runtime context of every plane, in plane order.
         acquisition: The acquisition parameters describing the recording setup.
         base_height: The frame height the recording's source files hold.
         base_width: The frame width the recording's source files hold.
 
     Returns:
-        A tuple of two lists: (heights, widths) where each list has one entry per plane/context.
+        The frame height and the frame width of every plane, in plane order.
     """
     heights: list[int] = []
     widths: list[int] = []
@@ -799,12 +787,12 @@ def _resolve_binary_paths(contexts: list[RuntimeContext]) -> tuple[tuple[Path, .
     """Returns the binaries the conversion writes each plane's channels into.
 
     Args:
-        contexts: The list of RuntimeContext instances, one per plane. Each context must have IOData with binary file
+        contexts: The runtime context of every plane, in plane order. Each context must have IOData with binary file
             paths configured.
 
     Returns:
-        A tuple of two tuples. The first holds the functional channel binary of every plane, and the second holds the
-        second channel binary of every plane, which is empty for a single-channel recording.
+        The functional channel binary of every plane and the second channel binary of every plane, the latter being
+        empty for a single-channel recording.
 
     Raises:
         ValueError: If a plane carries no path for a binary the conversion writes.
@@ -849,13 +837,12 @@ def _create_binary_files(plan: TiffConversionPlan) -> tuple[list[BinaryFile], li
         plan: The resolved conversion plan, which names every destination binary and the frames it receives.
 
     Returns:
-        A tuple of two lists. The first list contains BinaryFile instances for channel 1 (one per plane). The second
-        list contains BinaryFile instances for channel 2 (empty if single channel).
+        The channel 1 binary of every plane and the channel 2 binary of every plane, the latter being empty for a
+        single-channel recording.
     """
     channel_1_binary_files: list[BinaryFile] = []
     channel_2_binary_files: list[BinaryFile] = []
 
-    # Creates BinaryFile instances for each plane based on the paths resolved into the plan.
     for context_index, channel_1_path in enumerate(plan.channel_1_paths):
         height = plan.frame_heights[context_index]
         width = plan.frame_widths[context_index]
@@ -884,7 +871,6 @@ def _create_binary_files(plan: TiffConversionPlan) -> tuple[list[BinaryFile], li
             )
         )
 
-        # Creates channel 2 binary file if applicable.
         if plan.channel_2_paths:
             channel_2_path = plan.channel_2_paths[context_index]
             channel_2_path.unlink(missing_ok=True)

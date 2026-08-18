@@ -9,10 +9,10 @@ from importlib.metadata import metadata as _metadata
 if TYPE_CHECKING:
     from importlib.metadata import PackageMetadata
 
-_package_metadata: PackageMetadata = _metadata("cindra")
+_PACKAGE_METADATA: PackageMetadata = _metadata("cindra")
 """The distribution metadata cindra was installed with, read once at import time."""
 
-VERSION: str = _package_metadata["version"]
+VERSION: str = _PACKAGE_METADATA["version"]
 """The cindra library version string, resolved from package metadata at import time."""
 
 PYTHON_VERSION: str = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"

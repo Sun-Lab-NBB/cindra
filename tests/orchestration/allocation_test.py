@@ -36,13 +36,6 @@ from cindra.orchestration.allocation import (
 )
 
 
-class _VirtualMemory:
-    """Stands in for the psutil memory record, carrying only the available-byte counter the resolver reads."""
-
-    def __init__(self, available: int) -> None:
-        self.available = available
-
-
 class TestStageDefaults:
     """Tests the measured worker default each pipeline stage resolves to."""
 
@@ -379,3 +372,10 @@ class TestSummarizeClassAllocation:
     def test_session_without_jobs_reports_no_classes(self) -> None:
         """Verifies that a session carrying no jobs publishes an empty report."""
         assert summarize_class_allocation(class_workers={}, class_capacities={}, class_job_counts={}) == {}
+
+
+class _VirtualMemory:
+    """Stands in for the psutil memory record, carrying only the available-byte counter the resolver reads."""
+
+    def __init__(self, available: int) -> None:
+        self.available = available

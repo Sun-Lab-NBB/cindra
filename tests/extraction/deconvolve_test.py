@@ -10,32 +10,6 @@ from ataraxis_base_utilities import error_format
 from cindra.extraction.deconvolve import apply_oasis_deconvolution, compute_delta_fluorescence
 
 
-def _isotonic_oasis_oracle(
-    trace: np.ndarray,
-    time_constant: float,
-    sampling_rate: float,
-) -> np.ndarray:
-    """Solves the unconstrained non-negative AR(1) deconvolution problem with a weighted isotonic regression."""
-    # The OASIS problem is min ||trace - calcium||^2 subject to calcium[t] >= gamma * calcium[t - 1]. Substituting
-    # calcium[t] = gamma**t * z[t] turns the constraint into z[t] >= z[t - 1], which makes the problem a weighted
-    # isotonic regression of trace[t] / gamma**t with weights gamma**(2 * t). This is a completely different solver
-    # (pool adjacent violators, from scikit-learn) reaching the same optimum as the pool-merge kernel under test.
-    decay = np.exp(-1.0 / (time_constant * sampling_rate))
-    frame_indices = np.arange(trace.shape[0], dtype=np.float64)
-    decay_powers = decay**frame_indices
-    monotone = IsotonicRegression(increasing=True).fit_transform(
-        frame_indices,
-        trace.astype(np.float64) / decay_powers,
-        sample_weight=decay_powers**2,
-    )
-    calcium = decay_powers * monotone
-
-    # Recovers the spikes as the discontinuities the AR(1) model leaves between consecutive calcium samples.
-    spikes = np.zeros_like(calcium)
-    spikes[1:] = calcium[1:] - decay * calcium[:-1]
-    return spikes
-
-
 class TestComputeDeltaFluorescence:
     """Tests compute_delta_fluorescence."""
 
@@ -61,8 +35,8 @@ class TestComputeDeltaFluorescence:
         """Verifies that neuropil signal is subtracted with the given coefficient."""
         cell = np.ones((1, 100), dtype=np.float32) * 100.0
         neuropil = np.ones((1, 100), dtype=np.float32) * 50.0
-        # With constant baseline, baseline = min(smoothed) which should be close to 100 - 0.7*50 = 65.
-        # After baseline subtraction, result should be near zero.
+        # With a constant baseline, the baseline is min(smoothed), which should be close to 100 - 0.7 * 50 = 65.
+        # After baseline subtraction, the result should be near zero.
         result = compute_delta_fluorescence(
             cell_fluorescence=cell,
             neuropil_fluorescence=neuropil,
@@ -128,7 +102,6 @@ class TestComputeDeltaFluorescence:
             baseline_percentile=8.0,
             sampling_rate=30.0,
         )
-        # The bump region should have positive delta F.
         assert np.mean(result[0, 105:115]) > np.mean(result[0, :20])
 
     def test_constant_baseline_is_the_single_global_minimum(self) -> None:
@@ -171,7 +144,7 @@ class TestComputeDeltaFluorescence:
             sampling_rate=30.0,
         )
         assert result.shape == (2, 200)
-        # Baseline is 8th percentile, so most values should be positive.
+        # The baseline is the 8th percentile, so most values should be positive.
         assert np.mean(result > 0) > 0.5
 
     def test_invalid_baseline_method_raises(self) -> None:
@@ -324,7 +297,6 @@ class TestApplyOasisDeconvolution:
 
     def test_detects_spike_in_exponential_decay(self) -> None:
         """Verifies that OASIS detects a spike at the onset of an exponential decay."""
-        # An isolated onset followed by exponential decay should localize the deconvolved spike at frame 50.
         time_constant = 1.0
         sampling_rate = 30.0
         frame_count = 200
@@ -433,3 +405,29 @@ class TestApplyOasisDeconvolution:
             sampling_rate=30.0,
         )
         np.testing.assert_allclose(result_small_batch, result_large_batch, atol=1e-6)
+
+
+def _isotonic_oasis_oracle(
+    trace: np.ndarray,
+    time_constant: float,
+    sampling_rate: float,
+) -> np.ndarray:
+    """Solves the unconstrained non-negative AR(1) deconvolution problem with a weighted isotonic regression."""
+    # The OASIS problem is min ||trace - calcium||^2 subject to calcium[t] >= gamma * calcium[t - 1]. Substituting
+    # calcium[t] = gamma**t * z[t] turns the constraint into z[t] >= z[t - 1], which makes the problem a weighted
+    # isotonic regression of trace[t] / gamma**t with weights gamma**(2 * t). This is a completely different solver
+    # (pool adjacent violators, from scikit-learn) reaching the same optimum as the pool-merge kernel under test.
+    decay = np.exp(-1.0 / (time_constant * sampling_rate))
+    frame_indices = np.arange(trace.shape[0], dtype=np.float64)
+    decay_powers = decay**frame_indices
+    monotone = IsotonicRegression(increasing=True).fit_transform(
+        frame_indices,
+        trace.astype(np.float64) / decay_powers,
+        sample_weight=decay_powers**2,
+    )
+    calcium = decay_powers * monotone
+
+    # Recovers the spikes as the discontinuities the AR(1) model leaves between consecutive calcium samples.
+    spikes = np.zeros_like(calcium)
+    spikes[1:] = calcium[1:] - decay * calcium[:-1]
+    return spikes

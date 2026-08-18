@@ -1,12 +1,8 @@
-"""Provides assets for importing, converting, and combining multi-plane imaging data, for resolving the pipeline
-runtime contexts and the read-only recording inventory, and for selecting the ROIs the multi-recording pipeline
-tracks.
-"""
+"""Provides assets for converting imaging data, resolving runtime contexts, inventorying outputs, and selecting ROIs."""
 
 from .tiff import (
     TIFF_EXTENSIONS,
     TIFF_DECODE_CEILING,
-    TiffConversionPlan,
     SourceFrameGeometry,
     convert_tiffs_to_binary,
     resolve_tiff_conversion_plan,
@@ -24,7 +20,6 @@ from .combine import combine_planes
 from .context import (
     PARAMETERS_FILENAME,
     MAXIMUM_CHANNEL_COUNT,
-    OUTPUT_DIRECTORY_NAME,
     find_cindra_directory,
     resolve_recording_roots,
     extract_unique_components,
@@ -47,7 +42,6 @@ from .inventory import (
 
 __all__ = [
     "MAXIMUM_CHANNEL_COUNT",
-    "OUTPUT_DIRECTORY_NAME",
     "PARAMETERS_FILENAME",
     "TIFF_DECODE_CEILING",
     "TIFF_EXTENSIONS",
@@ -56,7 +50,6 @@ __all__ = [
     "DatasetRecordings",
     "RecordingPlanes",
     "SourceFrameGeometry",
-    "TiffConversionPlan",
     "clear_registration_marker",
     "combine_planes",
     "convert_tiffs_to_binary",

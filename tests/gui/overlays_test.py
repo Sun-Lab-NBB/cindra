@@ -13,26 +13,6 @@ _FRAME_SIZE: int = 6
 """The synthetic frame height and width used by the overlay fixtures."""
 
 
-def _make_color_arrays(roi_count: int) -> ColorArrays:
-    """Builds the zero-initialized color arrays the overlay helpers mutate in place."""
-    color_count = len(ROIColorMode)
-    return ColorArrays(
-        colors=np.zeros((color_count, roi_count, 3), dtype=np.uint8),
-        normalized_statistics=np.zeros((color_count, roi_count), dtype=np.float32),
-        colorbar=[[0.0, 0.5, 1.0] for _ in range(color_count)],
-        rgb=np.zeros((color_count, _FRAME_SIZE, _FRAME_SIZE, 4), dtype=np.uint8),
-        random_hues=np.zeros(roi_count, dtype=np.float32),
-    )
-
-
-def _make_roi_maps() -> ROIIndexMaps:
-    """Builds ROI index maps that attribute every pixel to the first ROI."""
-    return ROIIndexMaps(
-        roi_presence=np.zeros((_FRAME_SIZE, _FRAME_SIZE), dtype=bool),
-        roi_indices=np.zeros((ROI_CONFIG.overlap_layers, _FRAME_SIZE, _FRAME_SIZE), dtype=np.int32),
-    )
-
-
 class TestUpdateCorrelationMasks:
     """Tests the activity correlation coloring helper."""
 
@@ -78,3 +58,23 @@ class TestUpdateCorrelationMasks:
         assert normalized[1] == pytest.approx(1.0)
         assert normalized[2] == pytest.approx(0.0)
         assert color_arrays.colorbar[ROIColorMode.CORRELATIONS] == pytest.approx([-1.0, 0.0, 1.0])
+
+
+def _make_color_arrays(roi_count: int) -> ColorArrays:
+    """Builds the zero-initialized color arrays the overlay helpers mutate in place."""
+    color_count = len(ROIColorMode)
+    return ColorArrays(
+        colors=np.zeros((color_count, roi_count, 3), dtype=np.uint8),
+        normalized_statistics=np.zeros((color_count, roi_count), dtype=np.float32),
+        colorbar=[[0.0, 0.5, 1.0] for _ in range(color_count)],
+        rgb=np.zeros((color_count, _FRAME_SIZE, _FRAME_SIZE, 4), dtype=np.uint8),
+        random_hues=np.zeros(roi_count, dtype=np.float32),
+    )
+
+
+def _make_roi_maps() -> ROIIndexMaps:
+    """Builds ROI index maps that attribute every pixel to the first ROI."""
+    return ROIIndexMaps(
+        roi_presence=np.zeros((_FRAME_SIZE, _FRAME_SIZE), dtype=bool),
+        roi_indices=np.zeros((ROI_CONFIG.overlap_layers, _FRAME_SIZE, _FRAME_SIZE), dtype=np.int32),
+    )

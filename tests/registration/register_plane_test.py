@@ -44,178 +44,6 @@ _MOTION_SHIFTS_X: tuple[int, ...] = (0, 2, 2, -3, 1, -1, 3, 0, -2, 3, -3, 1, 2, 
 """The planted per-frame horizontal translation, in pixels, of the motion-carrying synthetic movies."""
 
 
-def _build_checkerboard(amplitude: float) -> NDArray[np.float64]:
-    """Builds a 128x128 single-pixel checkerboard of the given amplitude, the finest pattern the frame grid holds."""
-    rows, columns = np.mgrid[0:128, 0:128]
-    return amplitude * ((-1.0) ** (rows + columns))
-
-
-def _measure_checkerboard_amplitude(image: NDArray[np.float64]) -> float:
-    """Measures how much single-pixel checkerboard the image carries, as the magnitude of its projection onto one."""
-    return float(np.absolute((image.astype(np.float64) * _build_checkerboard(amplitude=1.0)).mean()))
-
-
-def _measure_content_shift(image: NDArray[np.float64], template: NDArray[np.float64]) -> tuple[int, int]:
-    """Measures the integer circular shift, in pixels, that carries the template's content onto the image's content.
-
-    The measurement is a plain mean-subtracted FFT cross-correlation computed here rather than through any pipeline
-    helper, so the position it reports is independent of the offsets the pipeline itself recorded.
-
-    Args:
-        image: The image whose content position is measured, with shape (height, width).
-        template: The unshifted content the image is compared against, with shape (height, width).
-
-    Returns:
-        A tuple of the (vertical, horizontal) shift in pixels, wrapped into the signed range each axis spans.
-    """
-    height, width = image.shape
-    image_spectrum = np.fft.rfft2(image.astype(np.float64) - image.mean())
-    template_spectrum = np.fft.rfft2(template.astype(np.float64) - template.mean())
-    correlation = np.fft.irfft2(image_spectrum * np.conjugate(template_spectrum), s=(height, width))
-    peak_row, peak_column = np.unravel_index(np.argmax(correlation), correlation.shape)
-    shift_y = int(peak_row) - height if int(peak_row) > height // 2 else int(peak_row)
-    shift_x = int(peak_column) - width if int(peak_column) > width // 2 else int(peak_column)
-    return shift_y, shift_x
-
-
-def _build_shifted_blob_movie(
-    gaussian_blob_image: Callable[..., NDArray[np.float64]],
-    centers: tuple[tuple[int, int], ...] = _BLOB_CENTERS,
-    illumination_amplitude: float = 0.0,
-    checkerboard_amplitude: float = 0.0,
-) -> NDArray[np.int16]:
-    """Builds a movie whose blobs translate by the planted per-frame shifts on a static illumination background."""
-    base = gaussian_blob_image(height=128, width=128, centers=centers, sigma=4.0, amplitude=2000.0)
-
-    # A single-pixel checkerboard riding along with the tissue, standing in for the pixel-scale detector structure the
-    # one-photon pre-smoothing exists to average away before the high-pass filter keeps it.
-    base = base + _build_checkerboard(amplitude=checkerboard_amplitude)
-
-    # A broad, static, off-center illumination gradient of the kind one-photon preprocessing exists to remove. It does
-    # not move with the tissue, so a registration that fails to high-pass it away is pulled toward a zero offset.
-    rows, columns = np.mgrid[0:128, 0:128]
-    illumination = illumination_amplitude * np.exp(-(((rows - 8) ** 2 + (columns - 8) ** 2) / (2.0 * 80.0**2)))
-
-    movie = np.empty((len(_MOTION_SHIFTS_Y), 128, 128), dtype=np.int16)
-    for index, (shift_y, shift_x) in enumerate(zip(_MOTION_SHIFTS_Y, _MOTION_SHIFTS_X, strict=True)):
-        movie[index] = (np.roll(base, shift=(shift_y, shift_x), axis=(0, 1)) + illumination).astype(np.int16)
-    return movie
-
-
-def _measure_alignment_spread(movie: NDArray[np.int16]) -> float:
-    """Measures how much the intensity centroid of the movie's interior wanders across frames, in pixels.
-
-    The synthetic movies carry four bright blobs on a flat background that translate together, so the background-
-    subtracted intensity centroid tracks the frame's translation. Its spread across frames is therefore the residual
-    misalignment left after registration, measured without reference to any offset the pipeline itself reported.
-
-    Args:
-        movie: The movie with shape (frames, height, width) whose alignment is measured.
-
-    Returns:
-        The Euclidean magnitude of the per-axis standard deviation of the centroid across frames, in pixels.
-    """
-    # Restricts the measurement to the interior, so the wrap-around edges the translation introduces stay out of it.
-    interior = movie[:, 16:112, 16:112].astype(np.float64)
-    weights = np.clip(interior - np.median(interior), 0.0, None)
-    rows = np.arange(interior.shape[1], dtype=np.float64)[np.newaxis, :, np.newaxis]
-    columns = np.arange(interior.shape[2], dtype=np.float64)[np.newaxis, np.newaxis, :]
-    totals = weights.sum(axis=(1, 2))
-    centroid_y = (weights * rows).sum(axis=(1, 2)) / totals
-    centroid_x = (weights * columns).sum(axis=(1, 2)) / totals
-    return float(np.hypot(centroid_y.std(), centroid_x.std()))
-
-
-def _build_static_blob_movie(
-    gaussian_blob_image: Callable[..., NDArray[np.float64]],
-    frame_count: int = 30,
-    centers: tuple[tuple[int, int], ...] = _BLOB_CENTERS,
-) -> NDArray[np.int16]:
-    """Builds a motion-free structured movie that registers trivially, exercising the registration code paths."""
-    base = gaussian_blob_image(height=128, width=128, centers=centers, sigma=4.0, amplitude=2000.0).astype(np.int16)
-    return np.broadcast_to(base, (frame_count, 128, 128)).copy()
-
-
-def _make_interrupted_registration_context(
-    tmp_path: Path,
-    single_recording_context: Callable[..., RuntimeContext],
-    gaussian_blob_image: Callable[..., NDArray[np.float64]],
-    monkeypatch: pytest.MonkeyPatch,
-) -> RuntimeContext:
-    """Builds a context whose registration fails after its first batch, leaving a partially rewritten binary.
-
-    Args:
-        tmp_path: The temporary directory the context writes its binary into.
-        single_recording_context: The context factory fixture.
-        gaussian_blob_image: The synthetic image builder fixture.
-        monkeypatch: The patcher used to inject the batch failure.
-
-    Returns:
-        The prepared context. Calling register_plane on it raises RuntimeError partway through the batch loop.
-    """
-    movie = _build_static_blob_movie(gaussian_blob_image)
-
-    def configure(configuration: SingleRecordingConfiguration) -> None:
-        # Splits the movie across several batches, so the injected failure lands after at least one batch has already
-        # been written into the binary.
-        configuration.registration.batch_size = 10
-
-    context = single_recording_context(
-        tmp_path=tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
-    )
-
-    completed_batches = 0
-
-    def fail_after_first_batch(**kwargs: object) -> object:
-        """Runs the first batch normally and raises on every batch after it."""
-        nonlocal completed_batches
-        completed_batches += 1
-        if completed_batches > 1:
-            message = "Unable to register the frame batch. Simulated mid-loop failure."
-            raise RuntimeError(message)
-        return _register_frames_batch(**kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr("cindra.registration.register._register_frames_batch", fail_after_first_batch)
-    return context
-
-
-def _make_interrupted_second_channel_context(
-    tmp_path: Path,
-    single_recording_context: Callable[..., RuntimeContext],
-    gaussian_blob_image: Callable[..., NDArray[np.float64]],
-    monkeypatch: pytest.MonkeyPatch,
-) -> RuntimeContext:
-    """Builds a two-channel context whose registration fails once the alignment channel has been fully rewritten.
-
-    Args:
-        tmp_path: The temporary directory the context writes its binaries into.
-        single_recording_context: The context factory fixture.
-        gaussian_blob_image: The synthetic image builder fixture.
-        monkeypatch: The patcher used to inject the secondary-channel failure.
-
-    Returns:
-        The prepared context. Calling register_plane on it raises RuntimeError between the two channel rewrites.
-    """
-    movie = _build_static_blob_movie(gaussian_blob_image)
-    movie_channel_2 = _build_static_blob_movie(gaussian_blob_image=gaussian_blob_image, centers=_SECONDARY_BLOB_CENTERS)
-    context = single_recording_context(
-        tmp_path=tmp_path,
-        frame_height=128,
-        frame_width=128,
-        frame_count=30,
-        movie=movie,
-        movie_channel_2=movie_channel_2,
-    )
-
-    def fail_before_secondary_rewrite(**kwargs: object) -> None:
-        """Raises in place of the secondary-channel rewrite, leaving channel 1 registered and channel 2 raw."""
-        message = "Unable to register the secondary channel. Simulated inter-channel failure."
-        raise RuntimeError(message)
-
-    monkeypatch.setattr("cindra.registration.register._register_secondary_channel", fail_before_secondary_rewrite)
-    return context
-
-
 class TestRegisterPlane:
     """Tests register_plane."""
 
@@ -238,7 +66,7 @@ class TestRegisterPlane:
             movie[index] = np.roll(base, shift=(int(shifts_y[index]), int(shifts_x[index])), axis=(0, 1))
 
         interior = (slice(16, 112), slice(16, 112))
-        unregistered_std = movie[:, interior[0], interior[1]].astype(np.float64).std(axis=0).mean()
+        unregistered_standard_deviation = movie[:, interior[0], interior[1]].astype(np.float64).std(axis=0).mean()
 
         context = single_recording_context(
             tmp_path=tmp_path, frame_height=128, frame_width=128, frame_count=frame_count, movie=movie
@@ -248,9 +76,9 @@ class TestRegisterPlane:
 
         binary_path = tmp_path / "output" / "cindra" / "plane_0" / "channel_1_data.bin"
         registered = read_binary_movie(file_path=binary_path, frame_height=128, frame_width=128)
-        registered_std = registered[:, interior[0], interior[1]].astype(np.float64).std(axis=0).mean()
+        registered_standard_deviation = registered[:, interior[0], interior[1]].astype(np.float64).std(axis=0).mean()
         # Correcting the planted motion collapses the per-pixel temporal spread across frames in the interior region.
-        assert registered_std < 0.5 * unregistered_std
+        assert registered_standard_deviation < 0.5 * unregistered_standard_deviation
 
     def test_records_offsets_and_writes_outputs(
         self,
@@ -312,7 +140,7 @@ class TestRegisterPlane:
         single_recording_context: Callable[..., RuntimeContext],
     ) -> None:
         """Verifies that register_plane returns early when the plane is registered and re-registration is disabled."""
-        context = single_recording_context(tmp_path)
+        context = single_recording_context(tmp_path=tmp_path)
 
         # Plants the full registration output set on disk so that the plane reports as already registered. A subset of
         # it reads as an interrupted save, which the plane re-registers rather than skips.
@@ -334,7 +162,7 @@ class TestRegisterPlane:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies that register_plane clears existing data and re-runs when re-registration is forced."""
-        movie = _build_static_blob_movie(gaussian_blob_image)
+        movie = _build_static_blob_movie(gaussian_blob_image=gaussian_blob_image)
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
             configuration.registration.repeat_registration = True
@@ -467,7 +295,7 @@ class TestRegisterPlane:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies that aligning by the second channel without one present raises a ValueError."""
-        movie = _build_static_blob_movie(gaussian_blob_image)
+        movie = _build_static_blob_movie(gaussian_blob_image=gaussian_blob_image)
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
             configuration.registration.align_by_first_channel = False
@@ -551,7 +379,7 @@ class TestRegisterPlane:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies that register_plane marks frames listed in a bad_frames file as bad."""
-        movie = _build_static_blob_movie(gaussian_blob_image)
+        movie = _build_static_blob_movie(gaussian_blob_image=gaussian_blob_image)
         data_directory = tmp_path / "raw"
         data_directory.mkdir(parents=True, exist_ok=True)
         np.save(data_directory / "bad_frames.npy", np.array([2, 5], dtype=np.int64))
@@ -578,7 +406,7 @@ class TestRegisterPlane:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies that register_plane proceeds normally when a data path is set but no bad_frames file exists."""
-        movie = _build_static_blob_movie(gaussian_blob_image)
+        movie = _build_static_blob_movie(gaussian_blob_image=gaussian_blob_image)
         data_directory = tmp_path / "raw"
         data_directory.mkdir(parents=True, exist_ok=True)
 
@@ -603,7 +431,7 @@ class TestRegisterPlane:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies that register_plane runs nonrigid registration across both channels and stores block offsets."""
-        movie = _build_static_blob_movie(gaussian_blob_image)
+        movie = _build_static_blob_movie(gaussian_blob_image=gaussian_blob_image)
         movie_channel_2 = _build_static_blob_movie(
             gaussian_blob_image=gaussian_blob_image, centers=_SECONDARY_BLOB_CENTERS
         )
@@ -636,7 +464,7 @@ class TestRegisterPlane:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies that registration metrics are skipped when the recording has too few frames."""
-        movie = _build_static_blob_movie(gaussian_blob_image)
+        movie = _build_static_blob_movie(gaussian_blob_image=gaussian_blob_image)
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
             configuration.registration.registration_metric_principal_components = 3
@@ -664,7 +492,7 @@ class TestRegisterPlane:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies that register_plane completes with frame normalization disabled and stores sentinel bounds."""
-        movie = _build_static_blob_movie(gaussian_blob_image)
+        movie = _build_static_blob_movie(gaussian_blob_image=gaussian_blob_image)
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
             configuration.registration.normalize_frames = False
@@ -686,7 +514,7 @@ class TestRegisterPlane:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies that register_plane estimates and applies a non-zero bidirectional phase offset from the data."""
-        movie = _build_static_blob_movie(gaussian_blob_image)
+        movie = _build_static_blob_movie(gaussian_blob_image=gaussian_blob_image)
         # Plants a bidirectional scanning artifact by shifting odd lines horizontally.
         movie[:, 1::2, :] = np.roll(movie[:, 1::2, :], shift=4, axis=2)
 
@@ -709,7 +537,7 @@ class TestRegisterPlane:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies that register_plane estimates a zero bidirectional phase offset for artifact-free data."""
-        movie = _build_static_blob_movie(gaussian_blob_image)
+        movie = _build_static_blob_movie(gaussian_blob_image=gaussian_blob_image)
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
             configuration.registration.compute_bidirectional_phase_offset = True
@@ -731,7 +559,7 @@ class TestRegisterPlane:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies that the refinement pass keeps the bidirectional offset the first pass applied to the binary."""
-        movie = _build_static_blob_movie(gaussian_blob_image)
+        movie = _build_static_blob_movie(gaussian_blob_image=gaussian_blob_image)
         # Plants a bidirectional scanning artifact by shifting odd lines horizontally.
         movie[:, 1::2, :] = np.roll(movie[:, 1::2, :], shift=4, axis=2)
 
@@ -757,7 +585,7 @@ class TestRegisterPlane:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies that a completed registration clears the marker that guards its in-place rewrite."""
-        movie = _build_static_blob_movie(gaussian_blob_image)
+        movie = _build_static_blob_movie(gaussian_blob_image=gaussian_blob_image)
         context = single_recording_context(
             tmp_path=tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie
         )
@@ -832,7 +660,7 @@ class TestRegisterPlane:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies that a binary an interrupted conversion left marked refuses to register."""
-        movie = _build_static_blob_movie(gaussian_blob_image)
+        movie = _build_static_blob_movie(gaussian_blob_image=gaussian_blob_image)
         context = single_recording_context(
             tmp_path=tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie
         )
@@ -916,7 +744,7 @@ class TestRegisterPlane:
         read_binary_movie: Callable[..., NDArray[np.int16]],
     ) -> None:
         """Verifies that the secondary channel receives the bidirectional phase correction, not the offsets alone."""
-        movie = _build_static_blob_movie(gaussian_blob_image)
+        movie = _build_static_blob_movie(gaussian_blob_image=gaussian_blob_image)
         movie_channel_2 = _build_static_blob_movie(
             gaussian_blob_image=gaussian_blob_image, centers=_SECONDARY_BLOB_CENTERS
         )
@@ -1053,12 +881,13 @@ class TestRegisterPlane:
         # high-pass filter that follows the smoothing nor the whole-pixel translations the refinement applies can
         # reintroduce a frequency the smoothing removed. A reference averaged from pre-smoothed frames therefore
         # carries none of the pattern. A reference averaged from raw frames keeps it, because the checkerboard rides
-        # along with the tissue and so lands in a common phase across the frames the averaging selects, and because
-        # the high-pass filter preserves rather than removes the frame's finest structure. The bound is expressed
-        # against the amplitude the movie itself carries, and is placed between the two regimes on a logarithmic
-        # scale: a tenth of a percent of the planted amplitude sits several hundred times above the float32 rounding
-        # residue a correctly smoothed reference leaves behind and several hundred times below the fraction an
-        # unsmoothed reference retains, so it also rejects a reference that keeps only a small part of the pattern.
+        # along with the tissue and so lands in a common phase across the frames the averaging selects. It keeps it
+        # as well because the high-pass filter preserves rather than removes the frame's finest structure. The bound
+        # is expressed against the amplitude the movie itself carries, and is placed between the two regimes on a
+        # logarithmic scale. A tenth of a percent of the planted amplitude sits several hundred times above the
+        # float32 rounding residue a correctly smoothed reference leaves behind, and several hundred times below the
+        # fraction an unsmoothed reference retains. That placement also rejects a reference that keeps only a small
+        # part of the pattern.
         planted_amplitude = _measure_checkerboard_amplitude(image=movie[0])
         assert planted_amplitude > 500.0
         assert _measure_checkerboard_amplitude(image=reference_image) < 0.001 * planted_amplitude
@@ -1141,7 +970,7 @@ class TestRegisterPlane:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies that applying channel-2 offsets without a channel-1 binary path raises the exact ValueError."""
-        movie = _build_static_blob_movie(gaussian_blob_image)
+        movie = _build_static_blob_movie(gaussian_blob_image=gaussian_blob_image)
         movie_channel_2 = _build_static_blob_movie(
             gaussian_blob_image=gaussian_blob_image, centers=_SECONDARY_BLOB_CENTERS
         )
@@ -1266,3 +1095,175 @@ class TestRegisterPlane:
         registration_directory = tmp_path / "output" / "cindra" / "plane_0" / "registration_data"
         assert not (registration_directory / "principal_component_shift_metrics.npy").exists()
         assert (registration_directory / "rigid_y_offsets.npy").exists()
+
+
+def _build_checkerboard(amplitude: float) -> NDArray[np.float64]:
+    """Builds a 128x128 single-pixel checkerboard of the given amplitude, the finest pattern the frame grid holds."""
+    rows, columns = np.mgrid[0:128, 0:128]
+    return amplitude * ((-1.0) ** (rows + columns))
+
+
+def _measure_checkerboard_amplitude(image: NDArray[np.float64]) -> float:
+    """Measures how much single-pixel checkerboard the image carries, as the magnitude of its projection onto one."""
+    return float(np.absolute((image.astype(np.float64) * _build_checkerboard(amplitude=1.0)).mean()))
+
+
+def _measure_content_shift(image: NDArray[np.float64], template: NDArray[np.float64]) -> tuple[int, int]:
+    """Measures the integer circular shift, in pixels, that carries the template's content onto the image's content.
+
+    The measurement is a plain mean-subtracted FFT cross-correlation computed here rather than through any pipeline
+    helper, so the position it reports is independent of the offsets the pipeline itself recorded.
+
+    Args:
+        image: The image whose content position is measured, with shape (height, width).
+        template: The unshifted content the image is compared against, with shape (height, width).
+
+    Returns:
+        A tuple of the (vertical, horizontal) shift in pixels, wrapped into the signed range each axis spans.
+    """
+    height, width = image.shape
+    image_spectrum = np.fft.rfft2(image.astype(np.float64) - image.mean())
+    template_spectrum = np.fft.rfft2(template.astype(np.float64) - template.mean())
+    correlation = np.fft.irfft2(image_spectrum * np.conjugate(template_spectrum), s=(height, width))
+    peak_row, peak_column = np.unravel_index(np.argmax(correlation), correlation.shape)
+    shift_y = int(peak_row) - height if int(peak_row) > height // 2 else int(peak_row)
+    shift_x = int(peak_column) - width if int(peak_column) > width // 2 else int(peak_column)
+    return shift_y, shift_x
+
+
+def _build_shifted_blob_movie(
+    gaussian_blob_image: Callable[..., NDArray[np.float64]],
+    centers: tuple[tuple[int, int], ...] = _BLOB_CENTERS,
+    illumination_amplitude: float = 0.0,
+    checkerboard_amplitude: float = 0.0,
+) -> NDArray[np.int16]:
+    """Builds a movie whose blobs translate by the planted per-frame shifts on a static illumination background."""
+    base = gaussian_blob_image(height=128, width=128, centers=centers, sigma=4.0, amplitude=2000.0)
+
+    # A single-pixel checkerboard riding along with the tissue, standing in for the pixel-scale detector structure the
+    # one-photon pre-smoothing exists to average away before the high-pass filter keeps it.
+    base = base + _build_checkerboard(amplitude=checkerboard_amplitude)
+
+    # A broad, static, off-center illumination gradient of the kind one-photon preprocessing exists to remove. It does
+    # not move with the tissue, so a registration that fails to high-pass it away is pulled toward a zero offset.
+    rows, columns = np.mgrid[0:128, 0:128]
+    illumination = illumination_amplitude * np.exp(-(((rows - 8) ** 2 + (columns - 8) ** 2) / (2.0 * 80.0**2)))
+
+    movie = np.empty((len(_MOTION_SHIFTS_Y), 128, 128), dtype=np.int16)
+    for index, (shift_y, shift_x) in enumerate(zip(_MOTION_SHIFTS_Y, _MOTION_SHIFTS_X, strict=True)):
+        movie[index] = (np.roll(base, shift=(shift_y, shift_x), axis=(0, 1)) + illumination).astype(np.int16)
+    return movie
+
+
+def _measure_alignment_spread(movie: NDArray[np.int16]) -> float:
+    """Measures how much the intensity centroid of the movie's interior wanders across frames, in pixels.
+
+    The synthetic movies carry four bright blobs on a flat background that translate together, so the background-
+    subtracted intensity centroid tracks the frame's translation. Its spread across frames is therefore the residual
+    misalignment left after registration, measured without reference to any offset the pipeline itself reported.
+
+    Args:
+        movie: The movie with shape (frames, height, width) whose alignment is measured.
+
+    Returns:
+        The Euclidean magnitude of the per-axis standard deviation of the centroid across frames, in pixels.
+    """
+    # Restricts the measurement to the interior, so the wrap-around edges the translation introduces stay out of it.
+    interior = movie[:, 16:112, 16:112].astype(np.float64)
+    weights = np.clip(interior - np.median(interior), 0.0, None)
+    rows = np.arange(interior.shape[1], dtype=np.float64)[np.newaxis, :, np.newaxis]
+    columns = np.arange(interior.shape[2], dtype=np.float64)[np.newaxis, np.newaxis, :]
+    totals = weights.sum(axis=(1, 2))
+    centroid_y = (weights * rows).sum(axis=(1, 2)) / totals
+    centroid_x = (weights * columns).sum(axis=(1, 2)) / totals
+    return float(np.hypot(centroid_y.std(), centroid_x.std()))
+
+
+def _build_static_blob_movie(
+    gaussian_blob_image: Callable[..., NDArray[np.float64]],
+    frame_count: int = 30,
+    centers: tuple[tuple[int, int], ...] = _BLOB_CENTERS,
+) -> NDArray[np.int16]:
+    """Builds a motion-free structured movie that registers trivially, exercising the registration code paths."""
+    base = gaussian_blob_image(height=128, width=128, centers=centers, sigma=4.0, amplitude=2000.0).astype(np.int16)
+    return np.broadcast_to(base, (frame_count, 128, 128)).copy()
+
+
+def _make_interrupted_registration_context(
+    tmp_path: Path,
+    single_recording_context: Callable[..., RuntimeContext],
+    gaussian_blob_image: Callable[..., NDArray[np.float64]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> RuntimeContext:
+    """Builds a context whose registration fails after its first batch, leaving a partially rewritten binary.
+
+    Args:
+        tmp_path: The temporary directory the context writes its binary into.
+        single_recording_context: The context factory fixture.
+        gaussian_blob_image: The synthetic image builder fixture.
+        monkeypatch: The patcher used to inject the batch failure.
+
+    Returns:
+        The prepared context. Calling register_plane on it raises RuntimeError partway through the batch loop.
+    """
+    movie = _build_static_blob_movie(gaussian_blob_image=gaussian_blob_image)
+
+    def configure(configuration: SingleRecordingConfiguration) -> None:
+        # Splits the movie across several batches, so the injected failure lands after at least one batch has already
+        # been written into the binary.
+        configuration.registration.batch_size = 10
+
+    context = single_recording_context(
+        tmp_path=tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
+    )
+
+    completed_batches = 0
+
+    def fail_after_first_batch(**keyword_arguments: object) -> object:
+        """Runs the first batch normally and raises on every batch after it."""
+        nonlocal completed_batches
+        completed_batches += 1
+        if completed_batches > 1:
+            message = "Unable to register the frame batch. Simulated mid-loop failure."
+            raise RuntimeError(message)
+        return _register_frames_batch(**keyword_arguments)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("cindra.registration.register._register_frames_batch", fail_after_first_batch)
+    return context
+
+
+def _make_interrupted_second_channel_context(
+    tmp_path: Path,
+    single_recording_context: Callable[..., RuntimeContext],
+    gaussian_blob_image: Callable[..., NDArray[np.float64]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> RuntimeContext:
+    """Builds a two-channel context whose registration fails once the alignment channel has been fully rewritten.
+
+    Args:
+        tmp_path: The temporary directory the context writes its binaries into.
+        single_recording_context: The context factory fixture.
+        gaussian_blob_image: The synthetic image builder fixture.
+        monkeypatch: The patcher used to inject the secondary-channel failure.
+
+    Returns:
+        The prepared context. Calling register_plane on it raises RuntimeError between the two channel rewrites.
+    """
+    movie = _build_static_blob_movie(gaussian_blob_image=gaussian_blob_image)
+    movie_channel_2 = _build_static_blob_movie(gaussian_blob_image=gaussian_blob_image, centers=_SECONDARY_BLOB_CENTERS)
+    context = single_recording_context(
+        tmp_path=tmp_path,
+        frame_height=128,
+        frame_width=128,
+        frame_count=30,
+        movie=movie,
+        movie_channel_2=movie_channel_2,
+    )
+
+    def fail_before_secondary_rewrite(**keyword_arguments: object) -> None:
+        """Raises in place of the secondary-channel rewrite, leaving channel 1 registered and channel 2 raw."""
+        message = "Unable to register the secondary channel. Simulated inter-channel failure."
+        raise RuntimeError(message)
+
+    monkeypatch.setattr("cindra.registration.register._register_secondary_channel", fail_before_secondary_rewrite)
+    return context

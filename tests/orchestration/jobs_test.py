@@ -41,29 +41,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 
-def _job_id(job_name: str, specifier: str = "") -> str:
-    """Returns the tracker identifier that the job with the given name and specifier is registered under."""
-    return ProcessingTracker.generate_job_id(job_name=str(job_name), specifier=specifier)
-
-
-def _build_registry(jobs: Sequence[tuple[str, str, ProcessingStatus]]) -> dict[str, JobState]:
-    """Builds a tracker job registry that maps the identifier of each given job to its state."""
-    return {
-        _job_id(job_name=job_name, specifier=specifier): JobState(
-            job_name=str(job_name), specifier=specifier, status=status
-        )
-        for job_name, specifier, status in jobs
-    }
-
-
-def _build_single_recording_registry(
-    plane_count: int, status: ProcessingStatus = ProcessingStatus.SCHEDULED
-) -> dict[str, JobState]:
-    """Builds the registry of a single-recording tracker whose every job carries the given status."""
-    jobs = resolve_single_recording_jobs(plane_count=plane_count)
-    return _build_registry(jobs=[(job_name, specifier, status) for job_name, specifier in jobs])
-
-
 class TestJobModelConstants:
     """Tests the module-level constants the trackers and the execution engine consume."""
 
@@ -765,3 +742,26 @@ class TestValidateJobPrerequisites:
 
         assert message is not None
         assert "Unable to resolve the prerequisites for job 0123456789abcdef." in message
+
+
+def _job_id(job_name: str, specifier: str = "") -> str:
+    """Returns the tracker identifier that the job with the given name and specifier is registered under."""
+    return ProcessingTracker.generate_job_id(job_name=str(job_name), specifier=specifier)
+
+
+def _build_registry(jobs: Sequence[tuple[str, str, ProcessingStatus]]) -> dict[str, JobState]:
+    """Builds a tracker job registry that maps the identifier of each given job to its state."""
+    return {
+        _job_id(job_name=job_name, specifier=specifier): JobState(
+            job_name=str(job_name), specifier=specifier, status=status
+        )
+        for job_name, specifier, status in jobs
+    }
+
+
+def _build_single_recording_registry(
+    plane_count: int, status: ProcessingStatus = ProcessingStatus.SCHEDULED
+) -> dict[str, JobState]:
+    """Builds the registry of a single-recording tracker whose every job carries the given status."""
+    jobs = resolve_single_recording_jobs(plane_count=plane_count)
+    return _build_registry(jobs=[(job_name, specifier, status) for job_name, specifier in jobs])

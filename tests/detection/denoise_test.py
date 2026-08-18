@@ -15,14 +15,14 @@ class TestFitAndReconstructBlock:
         """Verifies that the reconstructed block has the same shape as the input."""
         generator = np.random.default_rng(seed=42)
         block = generator.standard_normal((50, 100)).astype(np.float32)
-        result = _fit_and_reconstruct_block(block=block, num_components=5)
+        result = _fit_and_reconstruct_block(block=block, component_count=5)
         assert result.shape == block.shape
 
     def test_output_dtype(self) -> None:
         """Verifies that the output dtype is float32."""
         generator = np.random.default_rng(seed=42)
         block = generator.standard_normal((50, 100)).astype(np.float32)
-        result = _fit_and_reconstruct_block(block=block, num_components=5)
+        result = _fit_and_reconstruct_block(block=block, component_count=5)
         assert result.dtype == np.float32
 
     def test_low_rank_reconstruction(self) -> None:
@@ -32,7 +32,7 @@ class TestFitAndReconstructBlock:
         left_factor = generator.standard_normal((50, 3)).astype(np.float32)
         right_factor = generator.standard_normal((3, 100)).astype(np.float32)
         block = (left_factor @ right_factor).astype(np.float32)
-        result = _fit_and_reconstruct_block(block=block, num_components=3)
+        result = _fit_and_reconstruct_block(block=block, component_count=3)
         np.testing.assert_allclose(result, block, atol=1e-3)
 
     def test_reduces_noise(self) -> None:
@@ -43,8 +43,7 @@ class TestFitAndReconstructBlock:
         )
         noise = generator.standard_normal((50, 100)).astype(np.float32) * 0.1
         block = (signal + noise).astype(np.float32)
-        result = _fit_and_reconstruct_block(block=block, num_components=3)
-        # The reconstruction should be closer to the signal than the noisy input.
+        result = _fit_and_reconstruct_block(block=block, component_count=3)
         error_before = np.mean((block - signal) ** 2)
         error_after = np.mean((result - signal) ** 2)
         assert error_after < error_before
@@ -53,10 +52,9 @@ class TestFitAndReconstructBlock:
         """Verifies that a single component produces a rank-1 reconstruction."""
         generator = np.random.default_rng(seed=42)
         block = generator.standard_normal((30, 50)).astype(np.float32)
-        result = _fit_and_reconstruct_block(block=block, num_components=1)
+        result = _fit_and_reconstruct_block(block=block, component_count=1)
         # A rank-1 matrix has at most 1 non-zero singular value.
         singular_values = np.linalg.svd(result, compute_uv=False)
-        # All singular values beyond the first should be near zero.
         np.testing.assert_allclose(singular_values[1:], 0, atol=1e-4)
 
 

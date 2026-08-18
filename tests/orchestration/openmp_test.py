@@ -24,27 +24,6 @@ from cindra.orchestration.openmp import (
 )
 
 
-def _make_runtime(directory: Path) -> Path:
-    """Creates a stand-in OpenMP runtime file inside the given directory and returns its path."""
-    runtime_path = directory / "libomp.dylib"
-    runtime_path.write_bytes(b"")
-    return runtime_path
-
-
-def _summary(status: OpenMpStatus, **overrides: object) -> OpenMpSummary:
-    """Builds a summary carrying the given status and field overrides."""
-    fields: dict[str, object] = {
-        "status": status,
-        "unresolved_reason": "",
-        "runtime_path": None,
-        "link_path": None,
-        "searched_paths": (),
-        "loadable": False,
-    }
-    fields.update(overrides)
-    return OpenMpSummary(**fields)  # type: ignore[arg-type]
-
-
 class TestRuntimeProbe:
     """Tests the interpreter-level and subprocess-level OpenMP runtime probes."""
 
@@ -79,7 +58,7 @@ class TestRuntimeDiscovery:
         """Verifies that the search returns the earliest candidate that resolves to a file."""
         second = tmp_path / "second"
         second.mkdir()
-        runtime_path = _make_runtime(second)
+        runtime_path = _make_runtime(directory=second)
         candidates = (tmp_path / "missing" / "libomp.dylib", runtime_path)
         assert _discover_openmp_runtime(candidates=candidates) == runtime_path
 
@@ -111,7 +90,7 @@ class TestCandidateResolution:
         monkeypatch.delenv("CONDA_PREFIX", raising=False)
         vendored_directory = tmp_path / "scikit_learn" / ".dylibs"
         vendored_directory.mkdir(parents=True)
-        vendored_runtime = _make_runtime(vendored_directory)
+        vendored_runtime = _make_runtime(directory=vendored_directory)
         monkeypatch.setattr("cindra.orchestration.openmp.sysconfig.get_path", lambda name: str(tmp_path))
         assert _resolve_candidate_paths()[-1] == vendored_runtime
 
@@ -121,7 +100,7 @@ class TestRuntimeLinking:
 
     def test_linking_creates_the_link_and_its_parent_directory(self, tmp_path):
         """Verifies that linking creates the missing parent directory and points the link at the runtime."""
-        runtime_path = _make_runtime(tmp_path)
+        runtime_path = _make_runtime(directory=tmp_path)
         link_path = tmp_path / "lib" / "libomp.dylib"
         _link_openmp_runtime(runtime_path=runtime_path, link_path=link_path)
         assert link_path.is_symlink()
@@ -129,7 +108,7 @@ class TestRuntimeLinking:
 
     def test_linking_replaces_an_existing_link(self, tmp_path):
         """Verifies that linking overwrites a link left behind by an earlier run."""
-        runtime_path = _make_runtime(tmp_path)
+        runtime_path = _make_runtime(directory=tmp_path)
         link_path = tmp_path / "lib" / "libomp.dylib"
         link_path.parent.mkdir()
         link_path.symlink_to(target=tmp_path / "stale.dylib")
@@ -138,7 +117,7 @@ class TestRuntimeLinking:
 
     def test_linking_errors_when_the_link_cannot_be_written(self, tmp_path, monkeypatch):
         """Verifies that a filesystem refusal is reported as an actionable runtime error."""
-        runtime_path = _make_runtime(tmp_path)
+        runtime_path = _make_runtime(directory=tmp_path)
 
         def _raise(*args, **kwargs):
             raise OSError("read-only file system")
@@ -149,7 +128,7 @@ class TestRuntimeLinking:
             f"modify that directory, which usually means running the command through sudo. The loader reported: "
             f"read-only file system."
         )
-        with pytest.raises(RuntimeError, match=error_format(expected_message)):
+        with pytest.raises(RuntimeError, match=error_format(message=expected_message)):
             _link_openmp_runtime(runtime_path=runtime_path, link_path=tmp_path / "lib" / "libomp.dylib")
 
 
@@ -166,7 +145,7 @@ class TestSummaryDescription:
     )
     def test_description_reports_each_unchanged_outcome(self, status, expected):
         """Verifies that every outcome leaving the host unchanged describes itself distinctly."""
-        assert expected in _summary(status).describe()
+        assert expected in _summary(status=status).describe()
 
     def test_description_reports_a_link_that_resolved_the_runtime(self):
         """Verifies that a successful link reports the runtime as loadable."""
@@ -191,7 +170,7 @@ class TestRuntimeResolution:
             f"threading layer. Every other platform runs TBB, which carries lower overhead on the flat prange loops "
             f"this library compiles, so an OpenMP runtime linked here would go unused."
         )
-        with pytest.raises(RuntimeError, match=error_format(expected_message)):
+        with pytest.raises(RuntimeError, match=error_format(message=expected_message)):
             resolve_openmp_runtime()
 
     def test_resolution_leaves_a_host_whose_runtime_loads_alone(self, monkeypatch):
@@ -218,7 +197,7 @@ class TestRuntimeResolution:
         """Verifies that a dry run resolves the link and leaves the filesystem untouched."""
         monkeypatch.setattr("cindra.orchestration.openmp.sys.platform", "darwin")
         monkeypatch.setattr("cindra.orchestration.openmp._openmp_runtime_loadable", lambda: False)
-        runtime_path = _make_runtime(tmp_path)
+        runtime_path = _make_runtime(directory=tmp_path)
         link_path = tmp_path / "lib" / "libomp.dylib"
         summary = resolve_openmp_runtime(runtime_path=runtime_path, link_path=link_path)
         assert summary.status == OpenMpStatus.PREVIEWED
@@ -230,7 +209,7 @@ class TestRuntimeResolution:
         monkeypatch.setattr("cindra.orchestration.openmp.sys.platform", "darwin")
         monkeypatch.setattr("cindra.orchestration.openmp._openmp_runtime_loadable", lambda: False)
         monkeypatch.setattr("cindra.orchestration.openmp._verify_runtime_loadable", lambda: True)
-        runtime_path = _make_runtime(tmp_path)
+        runtime_path = _make_runtime(directory=tmp_path)
         link_path = tmp_path / "lib" / "libomp.dylib"
         summary = resolve_openmp_runtime(runtime_path=runtime_path, link_path=link_path, execute=True)
         assert summary.status == OpenMpStatus.LINKED
@@ -241,7 +220,7 @@ class TestRuntimeResolution:
         """Verifies that forcing the request bypasses the check that leaves a loadable host alone."""
         monkeypatch.setattr("cindra.orchestration.openmp.sys.platform", "darwin")
         monkeypatch.setattr("cindra.orchestration.openmp._openmp_runtime_loadable", lambda: True)
-        runtime_path = _make_runtime(tmp_path)
+        runtime_path = _make_runtime(directory=tmp_path)
         summary = resolve_openmp_runtime(runtime_path=runtime_path, link_path=tmp_path / "link.dylib", force=True)
         assert summary.status == OpenMpStatus.PREVIEWED
 
@@ -250,7 +229,7 @@ class TestRuntimeResolution:
         monkeypatch.setattr("cindra.orchestration.openmp.sys.platform", "darwin")
         monkeypatch.setattr("cindra.orchestration.openmp._openmp_runtime_loadable", lambda: False)
         monkeypatch.setattr("cindra.orchestration.openmp._LINK_DIRECTORY", tmp_path)
-        summary = resolve_openmp_runtime(runtime_path=_make_runtime(tmp_path))
+        summary = resolve_openmp_runtime(runtime_path=_make_runtime(directory=tmp_path))
         assert summary.link_path == tmp_path / "libomp.dylib"
 
 
@@ -280,5 +259,26 @@ class TestMissingRuntimeVerification:
             f"one into {openmp_module._LINK_DIRECTORY}. Install one with 'brew install libomp' when the report finds "
             f"none."
         )
-        with pytest.raises(RuntimeError, match=error_format(expected_message)):
+        with pytest.raises(RuntimeError, match=error_format(message=expected_message)):
             verify_openmp_runtime()
+
+
+def _make_runtime(directory: Path) -> Path:
+    """Creates a stand-in OpenMP runtime file inside the given directory and returns its path."""
+    runtime_path = directory / "libomp.dylib"
+    runtime_path.write_bytes(b"")
+    return runtime_path
+
+
+def _summary(status: OpenMpStatus, **overrides: object) -> OpenMpSummary:
+    """Builds a summary carrying the given status and field overrides."""
+    fields: dict[str, object] = {
+        "status": status,
+        "unresolved_reason": "",
+        "runtime_path": None,
+        "link_path": None,
+        "searched_paths": (),
+        "loadable": False,
+    }
+    fields.update(overrides)
+    return OpenMpSummary(**fields)  # type: ignore[arg-type]

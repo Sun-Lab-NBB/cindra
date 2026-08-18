@@ -38,136 +38,6 @@ _FAKE_ELAPSED_SECONDS: int = 10
 """The interval every timed section reports once the stub timer replaces PrecisionTimer."""
 
 
-class _ConstantTimer:
-    """Replaces PrecisionTimer with a stub reporting a fixed interval, so timing oracles do not depend on wall time."""
-
-    def __init__(self, precision=None) -> None:
-        self.precision = precision
-
-    def reset(self) -> None:
-        """Accepts the reset every timed section issues without changing the reported interval."""
-
-    @property
-    def elapsed(self) -> int:
-        """Returns the fixed interval every timed section reports."""
-        return _FAKE_ELAPSED_SECONDS
-
-
-def _make_roi(
-    center: tuple[int, int],
-    *,
-    frame_height: int,
-    frame_width: int,
-    half: int = 2,
-    radius: float = 3.0,
-) -> ROIStatistics:
-    """Creates an ROIStatistics instance backed by a small square block of unit-weight pixels."""
-    center_y, center_x = center
-    y_coordinates: list[int] = []
-    x_coordinates: list[int] = []
-    for delta_y in range(-half, half + 1):
-        for delta_x in range(-half, half + 1):
-            pixel_y = center_y + delta_y
-            pixel_x = center_x + delta_x
-            if 0 <= pixel_y < frame_height and 0 <= pixel_x < frame_width:
-                y_coordinates.append(pixel_y)
-                x_coordinates.append(pixel_x)
-
-    y_pixels = np.array(y_coordinates, dtype=np.int32)
-    x_pixels = np.array(x_coordinates, dtype=np.int32)
-    pixel_weights = np.ones(len(y_coordinates), dtype=np.float32)
-    mask = ROIMask(
-        y_pixels=y_pixels,
-        x_pixels=x_pixels,
-        pixel_weights=pixel_weights,
-        centroid=center,
-        frame_width=frame_width,
-        radius=radius,
-    )
-    roi = ROIStatistics(mask=mask)
-    roi.pixel_count = len(y_coordinates)
-    return roi
-
-
-def _make_roi_statistics(
-    centers: tuple[tuple[int, int], ...],
-    *,
-    frame_height: int,
-    frame_width: int,
-) -> list[ROIStatistics]:
-    """Creates a list of ROIStatistics instances at the requested centroids."""
-    return [_make_roi(center=center, frame_height=frame_height, frame_width=frame_width) for center in centers]
-
-
-def _constant_movie(value: int, *, frame_count: int, frame_height: int, frame_width: int) -> NDArray[np.int16]:
-    """Creates a constant-valued synthetic movie so that weighted extraction has an exact analytic oracle."""
-    return np.full((frame_count, frame_height, frame_width), fill_value=value, dtype=np.int16)
-
-
-def _load_result(output_directory: Path, name: str) -> NDArray[np.float32]:
-    """Loads a saved extraction result array from disk after the entry point releases its in-memory copy."""
-    return np.load(output_directory / f"{name}.npy")
-
-
-def _build_multi_context(
-    tmp_path: Path,
-    *,
-    frame_height: int,
-    frame_width: int,
-    movie: NDArray[np.int16],
-    movie_channel_2: NDArray[np.int16] | None = None,
-    tau: float = 1.0,
-    sampling_rate: float = 30.0,
-    configure: Callable[[MultiRecordingConfiguration], None] | None = None,
-) -> MultiRecordingRuntimeContext:
-    """Builds a minimal single-plane MultiRecordingRuntimeContext backed by synthetic constant binary movies.
-
-    Writes the channel 1 movie, and the optional channel 2 movie, as raw int16 binaries. Wires a single-plane
-    CombinedData with the combined geometry and cached binary paths, then returns a context whose extraction
-    data the caller populates with backward-transformed tracked ROI statistics.
-    """
-    output_directory = tmp_path / "rec0" / "cindra" / "multi_recording" / "dataset"
-    binary_directory = tmp_path / "rec0" / "cindra" / "binaries"
-    ensure_directory_exists(output_directory)
-    ensure_directory_exists(binary_directory)
-
-    channel_1_path = binary_directory / "channel_1_data.bin"
-    movie.astype(np.int16).tofile(channel_1_path)
-
-    channel_2_paths: tuple[Path, ...] | None = None
-    if movie_channel_2 is not None:
-        channel_2_path = binary_directory / "channel_2_data.bin"
-        movie_channel_2.astype(np.int16).tofile(channel_2_path)
-        channel_2_paths = (channel_2_path,)
-
-    combined_data = CombinedData(
-        detection=DetectionData(),
-        extraction=ExtractionData(),
-        plane_count=1,
-        combined_height=frame_height,
-        combined_width=frame_width,
-        tau=tau,
-        sampling_rate=sampling_rate,
-        plane_heights=np.array([frame_height], dtype=np.uint16),
-        plane_widths=np.array([frame_width], dtype=np.uint16),
-        plane_y_offsets=np.array([0], dtype=np.int32),
-        plane_x_offsets=np.array([0], dtype=np.int32),
-        registered_binary_paths=(channel_1_path,),
-        registered_binary_paths_channel_2=channel_2_paths,
-    )
-
-    configuration = MultiRecordingConfiguration()
-    if configure is not None:
-        configure(configuration)
-
-    runtime = MultiRecordingRuntimeData()
-    runtime.output_path = output_directory
-    runtime.io.recording_id = "rec0"
-    runtime.combined_data = combined_data
-
-    return MultiRecordingRuntimeContext(configuration=configuration, runtime=runtime)
-
-
 class TestExtractMultiRecording:
     """Tests the multi-recording dispatch path of the extract_traces stage entry point."""
 
@@ -419,3 +289,129 @@ class TestExtractMultiRecording:
         assert timing["deconvolution_time"] == _FAKE_ELAPSED_SECONDS
         assert timing["extraction_time"] == 0
         assert timing["total_extraction_time"] == _FAKE_ELAPSED_SECONDS
+
+
+class _ConstantTimer:
+    """Replaces PrecisionTimer with a stub reporting a fixed interval, so timing oracles do not depend on wall time."""
+
+    def __init__(self, precision=None) -> None:
+        self.precision = precision
+
+    def reset(self) -> None:
+        """Accepts the reset every timed section issues without changing the reported interval."""
+
+    @property
+    def elapsed(self) -> int:
+        """Returns the fixed interval every timed section reports."""
+        return _FAKE_ELAPSED_SECONDS
+
+
+def _make_roi(
+    center: tuple[int, int],
+    *,
+    frame_height: int,
+    frame_width: int,
+    half: int = 2,
+    radius: float = 3.0,
+) -> ROIStatistics:
+    """Creates an ROIStatistics instance backed by a small square block of unit-weight pixels."""
+    center_y, center_x = center
+    y_coordinates, x_coordinates = np.mgrid[
+        center_y - half : center_y + half + 1, center_x - half : center_x + half + 1
+    ]
+    inside = (
+        (y_coordinates >= 0) & (y_coordinates < frame_height) & (x_coordinates >= 0) & (x_coordinates < frame_width)
+    )
+    y_pixels = y_coordinates[inside].astype(np.int32)
+    x_pixels = x_coordinates[inside].astype(np.int32)
+    pixel_weights = np.ones(y_pixels.size, dtype=np.float32)
+    mask = ROIMask(
+        y_pixels=y_pixels,
+        x_pixels=x_pixels,
+        pixel_weights=pixel_weights,
+        centroid=center,
+        frame_width=frame_width,
+        radius=radius,
+    )
+    roi = ROIStatistics(mask=mask)
+    roi.pixel_count = y_pixels.size
+    return roi
+
+
+def _make_roi_statistics(
+    centers: tuple[tuple[int, int], ...],
+    *,
+    frame_height: int,
+    frame_width: int,
+) -> list[ROIStatistics]:
+    """Creates a list of ROIStatistics instances at the requested centroids."""
+    return [_make_roi(center=center, frame_height=frame_height, frame_width=frame_width) for center in centers]
+
+
+def _constant_movie(value: int, *, frame_count: int, frame_height: int, frame_width: int) -> NDArray[np.int16]:
+    """Creates a constant-valued synthetic movie so that weighted extraction has an exact analytic oracle."""
+    return np.full((frame_count, frame_height, frame_width), fill_value=value, dtype=np.int16)
+
+
+def _load_result(output_directory: Path, name: str) -> NDArray[np.float32]:
+    """Loads a saved extraction result array from disk after the entry point releases its in-memory copy."""
+    return np.load(output_directory / f"{name}.npy")
+
+
+def _build_multi_context(
+    tmp_path: Path,
+    *,
+    frame_height: int,
+    frame_width: int,
+    movie: NDArray[np.int16],
+    movie_channel_2: NDArray[np.int16] | None = None,
+    tau: float = 1.0,
+    sampling_rate: float = 30.0,
+    configure: Callable[[MultiRecordingConfiguration], None] | None = None,
+) -> MultiRecordingRuntimeContext:
+    """Builds a minimal single-plane MultiRecordingRuntimeContext backed by synthetic constant binary movies.
+
+    Writes the channel 1 movie, and the optional channel 2 movie, as raw int16 binaries. Wires a single-plane
+    CombinedData with the combined geometry and cached binary paths, then returns a context whose extraction
+    data the caller populates with backward-transformed tracked ROI statistics.
+    """
+    output_directory = tmp_path / "rec0" / "cindra" / "multi_recording" / "dataset"
+    binary_directory = tmp_path / "rec0" / "cindra" / "binaries"
+    ensure_directory_exists(output_directory)
+    ensure_directory_exists(binary_directory)
+
+    channel_1_path = binary_directory / "channel_1_data.bin"
+    movie.astype(np.int16).tofile(channel_1_path)
+
+    channel_2_paths: tuple[Path, ...] | None = None
+    if movie_channel_2 is not None:
+        channel_2_path = binary_directory / "channel_2_data.bin"
+        movie_channel_2.astype(np.int16).tofile(channel_2_path)
+        channel_2_paths = (channel_2_path,)
+
+    combined_data = CombinedData(
+        detection=DetectionData(),
+        extraction=ExtractionData(),
+        plane_count=1,
+        combined_height=frame_height,
+        combined_width=frame_width,
+        tau=tau,
+        sampling_rate=sampling_rate,
+        plane_heights=np.array([frame_height], dtype=np.uint16),
+        plane_widths=np.array([frame_width], dtype=np.uint16),
+        plane_y_offsets=np.array([0], dtype=np.int32),
+        plane_x_offsets=np.array([0], dtype=np.int32),
+        registered_binary_paths=(channel_1_path,),
+        registered_binary_paths_channel_2=channel_2_paths,
+    )
+
+    configuration = MultiRecordingConfiguration()
+    if configure is not None:
+        configure(configuration)
+
+    runtime = MultiRecordingRuntimeData()
+    runtime.output_path = output_directory
+    runtime.io.recording_id = "rec0"
+    runtime.combined_data = combined_data
+
+    return MultiRecordingRuntimeContext(configuration=configuration, runtime=runtime)

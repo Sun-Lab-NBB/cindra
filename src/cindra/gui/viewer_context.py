@@ -69,7 +69,6 @@ class SingleRecordingData:
 
     def __post_init__(self) -> None:
         """Opens binary file handles and memory-maps all trace arrays for every view."""
-        # Opens per-plane binary files for both channels.
         self._channel_1_binaries = {}
         self._channel_2_binaries = {}
         channel_2_paths = self._combined.registered_binary_paths_channel_2
@@ -89,7 +88,6 @@ class SingleRecordingData:
                     file_path=channel_2_paths[index],
                 )
 
-        # Constructs stitched multi-plane binaries for combined frame display.
         self._combined_binary = BinaryFileCombined(
             height=self._combined.combined_height,
             width=self._combined.combined_width,
@@ -135,7 +133,6 @@ class SingleRecordingData:
                 console.error(message=message, error=FileNotFoundError)
             runtime.extraction.memory_map_results(output_path=plane_output)
 
-        # Caches display labels for all views.
         self._view_labels = ("Combined", *(f"Plane {context.runtime.io.plane_index}" for context in self._contexts))
 
     @property
@@ -447,12 +444,11 @@ class SingleRecordingData:
             return ""
 
         parts = data_path.parts
-        max_characters = 45
-        # Tries 3, then 2, then 1 trailing component(s) until the label fits.
+        maximum_characters = 45
         for count in (3, 2, 1):
             if len(parts) >= count:
                 label = str(Path(*parts[-count:]))
-                if len(label) <= max_characters:
+                if len(label) <= maximum_characters:
                     return label
         return ""
 
@@ -980,9 +976,7 @@ class MultiRecordingData:
 class ViewerData:
     """Provides the top-level data entry point for all consumer GUIs.
 
-    Binds single-recording data with an optionally loaded multi-recording dataset. Consumer GUIs access the underlying
-    ``single_recording`` and per-recording ``MultiRecordingData`` objects directly via ``current_recording`` or
-    ``recording(index)``.
+    Binds single-recording data with an optionally loaded multi-recording dataset.
     """
 
     single_recording: SingleRecordingData
@@ -997,8 +991,8 @@ class ViewerData:
     that include the visualized recording."""
 
     _active_dataset_name: str = ""
-    """The name of the active multi-recording dataset. Empty when the visualized recording only has
-    single-recording data."""
+    """The name of the active multi-recording dataset. Empty when the visualized recording only has single-recording
+    data."""
 
     _current_recording_index: int = 0
     """The index into ``_recordings`` for the currently active recording."""
@@ -1086,7 +1080,6 @@ class ViewerData:
             self._resolve_anchor_recording_index()
             return
 
-        # Loads a different dataset from disk, replacing the previous one.
         search_root = self.single_recording.output_path.parent
         self._load_dataset_from_root(dataset_name=dataset_name, search_root=search_root)
 
@@ -1167,7 +1160,6 @@ class ViewerData:
             dataset_name: The dataset name to load.
             search_root: The root path to search for multi_recording_runtime_data.yaml files.
         """
-        # Finds the target dataset directory by matching multi_recording_runtime_data.yaml parent names.
         matches = discover_marker_files(directory=search_root, marker_name=MULTI_RECORDING_RUNTIME_DATA_FILENAME)
         target_dir: Path | None = None
         for match in matches:
@@ -1193,7 +1185,6 @@ class ViewerData:
             )
             return
 
-        # Constructs MultiRecordingData per recording, skipping failures.
         console.echo(message=f"Loading multi-recording dataset '{dataset_name}' ({len(contexts)} recording(s))...")
         recordings: list[MultiRecordingData] = []
         for index, context in enumerate(contexts):
@@ -1215,7 +1206,6 @@ class ViewerData:
         self._loaded_dataset_name = dataset_name
         self._active_dataset_name = dataset_name
 
-        # Resolves the dataset display name from runtime data or falls back to the directory name.
         if recordings:
             runtime_name = recordings[0].runtime_dataset_name
             self.dataset_name = runtime_name or dataset_name

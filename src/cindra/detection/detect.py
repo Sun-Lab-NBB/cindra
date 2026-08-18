@@ -79,13 +79,11 @@ def detect_plane_rois(context: RuntimeContext, *, workers: int) -> None:
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
 
-    # Extracts configuration.
     detection_config = context.configuration.roi_detection
     main_config = context.configuration.main
     nonrigid_block_size = context.configuration.nonrigid_registration.block_size
     custom_classifier_path = main_config.custom_classifier_path
 
-    # Extracts runtime data.
     io_data = context.runtime.io
     registration_data = context.runtime.registration
     detection_data = context.runtime.detection
@@ -99,8 +97,7 @@ def detect_plane_rois(context: RuntimeContext, *, workers: int) -> None:
     frame_height = io_data.frame_height
     frame_width = io_data.frame_width
 
-    # Computes the bin size for temporal averaging. The bin size is the maximum of 1, the ratio of total frames to the
-    # maximum number of binned frames, and the number of frames per sensor time constant.
+    # Computes the bin size for temporal averaging.
     bin_size = int(
         max(
             1,
@@ -119,7 +116,6 @@ def detect_plane_rois(context: RuntimeContext, *, workers: int) -> None:
         message = "Unable to run ROI detection. The registered binary file path is not set for channel 1."
         console.error(message=message, error=RuntimeError)
 
-    # Runs channel 1 detection.
     mean_image, enhanced_mean_image, maximum_projection, correlation_map, roi_diameter, roi_statistics = (
         _detect_channel(
             binary_path=channel_1_path,
@@ -139,11 +135,9 @@ def detect_plane_rois(context: RuntimeContext, *, workers: int) -> None:
         )
     )
 
-    # Computes the aggregate aspect ratio as the median across all detected ROIs.
     aspect_ratios = np.array([roi.aspect_ratio for roi in roi_statistics], dtype=np.float32)
     detection_data.aspect_ratio = float(np.median(a=aspect_ratios)) if aspect_ratios.size else 0.0
 
-    # Stores channel 1 detection results.
     detection_data.mean_image = mean_image
     detection_data.enhanced_mean_image = enhanced_mean_image
     detection_data.maximum_projection = maximum_projection
@@ -153,7 +147,6 @@ def detect_plane_rois(context: RuntimeContext, *, workers: int) -> None:
         roi.mask.frame_width = frame_width
     context.runtime.extraction.roi_statistics = roi_statistics
 
-    # Records channel 1 detection time.
     elapsed_seconds = int(timer.elapsed)
     context.runtime.timing.detection_time = elapsed_seconds
     console.echo(
@@ -192,7 +185,6 @@ def detect_plane_rois(context: RuntimeContext, *, workers: int) -> None:
             channel_label="channel 2",
         )
 
-        # Stores channel 2 detection results.
         detection_data.mean_image_channel_2 = mean_image_channel_2
         detection_data.enhanced_mean_image_channel_2 = enhanced_mean_image_channel_2
         detection_data.maximum_projection_channel_2 = maximum_projection_channel_2
@@ -202,7 +194,6 @@ def detect_plane_rois(context: RuntimeContext, *, workers: int) -> None:
             roi.mask.frame_width = frame_width
         context.runtime.extraction.roi_statistics_channel_2 = roi_statistics_channel_2
 
-        # Records channel 2 detection time.
         elapsed_seconds = int(timer.elapsed)
         context.runtime.timing.detection_time_channel_2 = elapsed_seconds
         console.echo(
@@ -247,10 +238,7 @@ def _create_enhanced_mean_image(
         The enhanced mean image with shape (frame_height, frame_width), background-subtracted and contrast-normalized
         with values in [0, 1] inside the valid region.
     """
-    # Uses ROI diameter for spatial scaling, with a default fallback.
     spatial_scale_pixels = roi_diameter if roi_diameter > 0 else _DEFAULT_CELL_DIAMETER
-
-    # Computes median filter kernel size proportional to the ROI diameter.
     kernel_dimension = int(_BACKGROUND_SCALE * np.ceil(spatial_scale_pixels) + 1)
     filter_kernel_size = (kernel_dimension, kernel_dimension)
 
@@ -260,14 +248,14 @@ def _create_enhanced_mean_image(
     np.subtract(mean_image, background_removed, out=background_removed)
 
     # Normalizes ROI contrast by dividing by local absolute median.
-    abs_background_removed = np.abs(background_removed)
-    local_variance = medfilt2d(input=abs_background_removed, kernel_size=filter_kernel_size).astype(np.float32)
+    absolute_background_removed = np.abs(background_removed)
+    local_variance = medfilt2d(input=absolute_background_removed, kernel_size=filter_kernel_size).astype(np.float32)
     np.add(local_variance, _VARIANCE_EPSILON, out=local_variance)
     np.divide(background_removed, local_variance, out=background_removed)
 
     # Clips intensities and scales to [0, 1] range. The mean_image is already cropped to the valid region, so no
     # additional slicing is needed.
-    clipped_roi = np.clip(background_removed, _ENHANCED_MINIMUM_INTENSITY, _ENHANCED_MAXIMUM_INTENSITY)
+    clipped_roi = np.clip(a=background_removed, a_min=_ENHANCED_MINIMUM_INTENSITY, a_max=_ENHANCED_MAXIMUM_INTENSITY)
     scaled_roi = (clipped_roi - _ENHANCED_MINIMUM_INTENSITY) / (
         _ENHANCED_MAXIMUM_INTENSITY - _ENHANCED_MINIMUM_INTENSITY
     )
@@ -275,7 +263,7 @@ def _create_enhanced_mean_image(
     # Places the enhanced image into a full-size array with border set to the minimum value.
     y_start, y_end = valid_y_range
     x_start, x_end = valid_x_range
-    enhanced_image = np.full((frame_height, frame_width), scaled_roi.min(), dtype=np.float32)
+    enhanced_image = np.full(shape=(frame_height, frame_width), fill_value=scaled_roi.min(), dtype=np.float32)
     enhanced_image[y_start:y_end, x_start:x_end] = scaled_roi
 
     return enhanced_image
@@ -365,9 +353,8 @@ def _detect_channel(
     """Runs the full detection pipeline for a single imaging channel.
 
     Notes:
-        Handles binning, optional denoising, sparse ROI detection, coordinate offset correction,
-        optional preclassification, and final overlap filtering for one channel. It is called by detect_plane_rois
-        once per functional channel.
+        Handles binning, optional denoising, sparse ROI detection, coordinate offset correction, optional
+        preclassification, and final overlap filtering for one channel.
 
     Args:
         binary_path: The absolute path to the registered binary file for this channel.
@@ -405,7 +392,6 @@ def _detect_channel(
     )
     timer.reset()
 
-    # Opens the registered binary file and bins frames for detection.
     with BinaryFile(
         file_path=binary_path,
         height=frame_height,
@@ -437,7 +423,6 @@ def _detect_channel(
             parallel_workers=workers,
         )
 
-    # Runs the sparse iterative ROI detection algorithm.
     console.echo(
         message=f"Discovering ROIs for plane {plane_index} {channel_label}...",
         level=LogLevel.INFO,
@@ -461,7 +446,6 @@ def _detect_channel(
     # The spatial scale in pixels doubles as the ROI diameter for ROI statistics and classification.
     roi_diameter = spatial_scale_pixels
 
-    # Computes the enhanced mean image using the ROI diameter for spatial filtering scale.
     enhanced_mean_image = _create_enhanced_mean_image(
         mean_image=mean_image,
         roi_diameter=roi_diameter,
@@ -529,7 +513,6 @@ def _detect_channel(
             )
             console.error(message=message, error=ValueError)
 
-    # Computes final ROI shape statistics with overlap-based filtering.
     console.echo(
         message=f"Computing ROI statistics and removing overlapping ROIs for plane {plane_index} {channel_label}...",
         level=LogLevel.INFO,

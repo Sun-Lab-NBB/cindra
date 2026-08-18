@@ -1,14 +1,6 @@
-"""Provides the per-stage memory models of the single and multi-recording pipeline jobs, which project each stage's
-peak anonymous working set from the shape of the data it processes.
-
-Most models here are read from the stage's own allocations, so a change to what a kernel holds is a change to the
-model beside it. Each model reads the data that exists when the sizing happens, which lets a caller size a whole job
-graph before dispatching any of it. The single-recording estimates resolve from the raw acquisition alone, while the
-multi-recording estimates resolve from the completed single-recording output they run on. The estimates cover
-anonymous memory alone, which is the term that forces a host to swap and a scheduler to kill a job, so the
-reclaimable pages a memory-mapping stage leaves resident are excluded. A recording carrying no readable raw data, and
-a dataset reporting no regions, can run no stage at all, so sizing either is rejected rather than answered with a
-guess.
+"""Provides the per-stage memory models of the single and multi-recording pipeline jobs, which project each stage's peak
+anonymous working set from the shape of the data it processes. The models exclude the reclaimable pages a memory-mapping
+stage leaves resident, because anonymous memory is the term that forces a host to swap and a scheduler to kill a job.
 """
 
 from __future__ import annotations
@@ -173,7 +165,7 @@ _TRACKING_PAIRWISE_BYTES_PER_SQUARED_REGION: float = 0.55
 """The memory the cross-recording clustering stage holds per squared region it clusters.
 
 Notes:
-    The stage clusters the regions of one spatial bin at a time, and each bin holds a condensed distance array, its
+    The stage clusters the regions of one spatial bin at a time. Each bin holds a condensed distance array, its
     thresholded copy, that copy's square and upper triangle, a condensed Jaccard array, and the copy the linkage
     makes of it. Every one of those scales with the square of the regions the bin holds, and bin occupancy scales
     with the regions the dataset spans, so the term is quadratic in that count and independent of the combined frame.
@@ -273,8 +265,8 @@ def resolve_maximum_roi_count(plane_count: int, configuration: SingleRecordingCo
 
     Notes:
         The sparse detection loop runs a bounded number of iterations and appends at most one region per iteration,
-        and every step after the append can only remove regions, so the product of the iteration multiplier, the
-        configured iteration limit, and the plane count is a ceiling rather than an observed maximum. A second
+        and every step after the append can only remove regions. The product of the iteration multiplier, the
+        configured iteration limit, and the plane count is therefore a ceiling rather than an observed maximum. A second
         functional channel is detected into its own arrays, which the trace models account for through their own
         channel factor.
 

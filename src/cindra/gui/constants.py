@@ -103,8 +103,8 @@ class BackgroundView(IntEnum):
     """Displays the maximum intensity projection (channel 1 or channel 2 depending on channel toggle)."""
 
     CORRECTED_STRUCTURAL = 5
-    """Displays the bleed-through-corrected structural channel mean image computed during
-    functional-to-structural channel colocalization. Only enabled when colocalization data exists."""
+    """Displays the bleed-through-corrected structural channel mean image computed during functional-to-structural
+    channel colocalization. Only enabled when colocalization data exists."""
 
 
 class BackgroundViewLabel(StrEnum):
@@ -168,8 +168,8 @@ class MaskLayer(IntEnum):
     """Displays the original ROI masks from single-recording extraction in native recording coordinates."""
 
     DEFORMED = 1
-    """Displays the original ROI masks warped to the shared cross-recording coordinate space via
-    multi-recording registration deformation fields."""
+    """Displays the original ROI masks warped to the shared cross-recording coordinate space via multi-recording
+    registration deformation fields."""
 
     TEMPLATE = 2
     """Displays the consensus template ROI masks derived from cross-recording clustering, defined in the shared

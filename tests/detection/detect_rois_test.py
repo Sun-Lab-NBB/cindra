@@ -240,5 +240,5 @@ class TestComputeMultiscaleMasks:
             scale_widths=scale_widths,
         )
         # Mask extension can grow a coarse scale past its raw downsampled footprint, so only non-emptiness is checked.
-        for i in range(3):
-            assert len(y_coordinates[i]) > 0
+        for coordinates in y_coordinates:
+            assert len(coordinates) > 0

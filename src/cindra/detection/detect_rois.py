@@ -65,7 +65,6 @@ def extend_roi(
         expanded_y = np.concatenate((y_pixels, y_pixels, y_pixels, y_pixels - 1, y_pixels + 1))
         expanded_x = np.concatenate((x_pixels, x_pixels + 1, x_pixels - 1, x_pixels, x_pixels))
 
-        # Filters out any coordinates that fall outside the recording frame boundaries.
         valid_mask = (expanded_y >= 0) & (expanded_y < height) & (expanded_x >= 0) & (expanded_x < width)
         expanded_y = expanded_y[valid_mask]
         expanded_x = expanded_x[valid_mask]
@@ -92,11 +91,10 @@ def detect_rois_in_frames(
     Notes:
         The algorithm first preprocesses the frames by applying a temporal high-pass filter, dividing each pixel by its
         temporal standard deviation, and subtracting neuropil contamination. It then builds a multiscale representation
-        by repeatedly convolving and downsampling the frames.
-        Peaks are iteratively detected in the variance maps across scales, and each detected peak is grown into an
-        ROI by correlating neighboring pixel activity. ROIs may be split if a two-component model explains
-        significantly more variance. Detected ROIs are subtracted from the residual frames before continuing to the
-        next peak.
+        by repeatedly convolving and downsampling the frames. Peaks are iteratively detected in the variance maps
+        across scales, and each detected peak is grown into an ROI by correlating neighboring pixel activity. ROIs may
+        be split if a two-component model explains significantly more variance. Detected ROIs are subtracted from the
+        residual frames before continuing to the next peak.
 
     Args:
         frames: The binned frames with shape (num_frames, height, width). Modified in-place during detection.
@@ -176,7 +174,6 @@ def detect_rois_in_frames(
     # Computes the cross-scale maximum as the correlation map for visualization and downstream quality assessment.
     correlation_map = scale_images.max(axis=0)
 
-    # Selects the best spatial scale and computes the detection threshold.
     scale = _find_best_scale(scale_images=scale_images)
 
     spatial_scale_pixels = base_filter_size * 2**scale
@@ -474,7 +471,7 @@ def _check_split_components(
         the best component's spatial mask, temporal projections on active frames, and active frame boolean mask.
     """
     # Captures the total energy before any in-place modifications, since pixel_frames is used as a working buffer.
-    total_energy = np.dot(pixel_frames.ravel(), pixel_frames.ravel())
+    total_energy = np.dot(a=pixel_frames.ravel(), b=pixel_frames.ravel())
 
     # Establishes a single-component baseline to compare against. Computes the actual explained variance as the
     # difference in total energy before and after subtracting the single-component model.
@@ -482,7 +479,7 @@ def _check_split_components(
     active_frames = projection > intensity_threshold
     active_projection = projection[active_frames]
     pixel_frames[active_frames, :] -= np.outer(a=active_projection, b=weights)
-    single_component_variance = total_energy - np.dot(pixel_frames.ravel(), pixel_frames.ravel())
+    single_component_variance = total_energy - np.dot(a=pixel_frames.ravel(), b=pixel_frames.ravel())
 
     # Seeds the two-component split from the residual's most energetic frame: pixels with negative vs positive
     # residual are assigned to separate components, capturing the spatial pattern that the single component missed.
@@ -520,7 +517,7 @@ def _check_split_components(
             )
             temporal_projection = pixel_frames @ component_masks[component_index]
             component_frames[component_index] = temporal_projection > intensity_threshold
-            component_variances[component_index] = np.dot(temporal_projection, temporal_projection)
+            component_variances[component_index] = np.dot(a=temporal_projection, b=temporal_projection)
             # Takes the count as a Python int, which stays weak under NEP 50 so the division below keeps its
             # float32 operand width instead of promoting to float64 and being narrowed straight back.
             active_count = int(np.count_nonzero(component_frames[component_index]))
@@ -543,7 +540,7 @@ def _check_split_components(
     # Computes the variance ratio, where values above the caller's split threshold indicate that the two-component
     # model explains meaningfully more activity than the single component.
     best_component = np.argmax(component_variances)
-    residual_energy = np.dot(pixel_frames.ravel(), pixel_frames.ravel())
+    residual_energy = np.dot(a=pixel_frames.ravel(), b=pixel_frames.ravel())
     variance_ratio = (total_energy - residual_energy) / single_component_variance
     return float(variance_ratio), (
         component_masks[best_component],
@@ -577,18 +574,18 @@ def _extend_mask(
         mask.
     """
     # Computes a tight bounding box that encloses the original pixels plus 1-pixel expansion in each direction.
-    min_y = max(0, int(y_pixels.min()) - 1)
-    max_y = min(height - 1, int(y_pixels.max()) + 1)
-    min_x = max(0, int(x_pixels.min()) - 1)
-    max_x = min(width - 1, int(x_pixels.max()) + 1)
-    box_height = max_y - min_y + 1
-    box_width = max_x - min_x + 1
+    minimum_y = max(0, int(y_pixels.min()) - 1)
+    maximum_y = min(height - 1, int(y_pixels.max()) + 1)
+    minimum_x = max(0, int(x_pixels.min()) - 1)
+    maximum_x = min(width - 1, int(x_pixels.max()) + 1)
+    box_height = maximum_y - minimum_y + 1
+    box_width = maximum_x - minimum_x + 1
 
     # Shifts coordinates into the local bounding-box frame and divides weights by 3. Each pixel is scattered into all
     # 9 offsets below (center plus 8 neighbors), so the extended mask carries three times the original total weight,
     # apart from offsets clipped at the frame border. Uses a copy to avoid mutating the caller's array.
-    local_y = y_pixels - min_y
-    local_x = x_pixels - min_x
+    local_y = y_pixels - minimum_y
+    local_x = x_pixels - minimum_x
     weights = weights / np.float32(3.0)
 
     # Accumulates weights from each of the 9 directional offsets into the dense local grid. Boundary checks per
@@ -602,8 +599,8 @@ def _extend_mask(
 
     # Extracts the non-zero pixels from the accumulator and maps back to full-frame coordinates.
     nonzero_y, nonzero_x = np.nonzero(accumulator)
-    extended_y = (nonzero_y + min_y).astype(np.int32)
-    extended_x = (nonzero_x + min_x).astype(np.int32)
+    extended_y = (nonzero_y + minimum_y).astype(np.int32)
+    extended_x = (nonzero_x + minimum_x).astype(np.int32)
     return extended_y, extended_x, accumulator[nonzero_y, nonzero_x]
 
 
@@ -625,12 +622,12 @@ def _estimate_spatial_scale(scale_images: NDArray[np.float32]) -> int:
     peak_tolerance = 1e-4
     peak_count = 50
 
-    max_projection = scale_images.max(axis=0)
+    maximum_projection = scale_images.max(axis=0)
     scale_map = np.argmax(scale_images, axis=0).ravel()
 
     # Restricts scale voting to local maxima so that broad bright regions do not dominate the vote count.
-    flat_projection = max_projection.ravel()
-    neighborhood_max = maximum_filter(input=max_projection, size=peak_detection_window).ravel()
+    flat_projection = maximum_projection.ravel()
+    neighborhood_max = maximum_filter(input=maximum_projection, size=peak_detection_window).ravel()
     is_peak = np.abs(flat_projection - neighborhood_max) < peak_tolerance
     peak_values = flat_projection[is_peak]
     peak_scales = scale_map[is_peak]
@@ -638,7 +635,7 @@ def _estimate_spatial_scale(scale_images: NDArray[np.float32]) -> int:
     # Focuses on the brightest peaks because they correspond to the most reliable feature detections. Uses partial
     # sort to select the top-k in O(n) instead of a full O(n log n) sort.
     if len(peak_values) > peak_count:
-        top_indices = np.argpartition(peak_values, -peak_count)[-peak_count:]
+        top_indices = np.argpartition(a=peak_values, kth=-peak_count)[-peak_count:]
     else:
         top_indices = np.arange(len(peak_values))
 
@@ -719,9 +716,8 @@ def _extend_iteratively(
     Args:
         y_pixels: The y-coordinates of the current ROI pixels.
         x_pixels: The x-coordinates of the current ROI pixels.
-        frames: The recording data flattened to a shape (num_frames, height * width), where each row is a
-            single frame and each column is one spatial pixel. This array is progressively updated as detected ROIs
-            are subtracted from it by the caller.
+        frames: The recording data flattened to a shape (num_frames, height * width), where each row is a single frame
+            and each column is one spatial pixel.
         height: The recording frame height in pixels.
         width: The recording frame width in pixels.
         active_frame_indices: The indices of frames with above-threshold activity.
@@ -731,16 +727,15 @@ def _extend_iteratively(
         the grown ROI. An ROI whose residual is uniformly zero returns its zero weight vector unnormalized, which the
         caller rejects on its own activity threshold.
     """
-    max_pixel_count = 10000
+    maximum_pixel_count = 10000
     previous_count = 0
 
     # Initializes weights as a placeholder for static analysis. The loop runs at least once, so it is overwritten.
     weights = np.empty(y_pixels.size, dtype=np.float32)
 
-    while previous_count < max_pixel_count:
+    while previous_count < maximum_pixel_count:
         previous_count = y_pixels.size
 
-        # Extends the processed ROI by 1 pixel in each direction.
         y_pixels, x_pixels = extend_roi(
             y_pixels=y_pixels,
             x_pixels=x_pixels,

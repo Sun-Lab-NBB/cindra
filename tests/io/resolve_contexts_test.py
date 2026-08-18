@@ -27,68 +27,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _make_single_configuration(output_path: Path, data_path: Path | None = None) -> SingleRecordingConfiguration:
-    """Builds a single-recording configuration with the given output and data paths and progress bars disabled."""
-    configuration = SingleRecordingConfiguration()
-    configuration.file_io.output_path = output_path
-    configuration.file_io.data_path = data_path
-    configuration.runtime.display_progress_bars = False
-    return configuration
-
-
-def _write_saved_acquisition(output_path: Path, acquisition: AcquisitionParameters) -> None:
-    """Saves acquisition parameters to the processed cindra output directory used by context resolution."""
-    cindra_directory = output_path / "cindra"
-    cindra_directory.mkdir(parents=True, exist_ok=True)
-    acquisition.to_yaml(file_path=cindra_directory / "acquisition_parameters.yaml")
-
-
-def _write_raw_parameters(data_path: Path, data: dict[str, object]) -> None:
-    """Writes a raw cindra_parameters.json acquisition file into the data directory."""
-    data_path.mkdir(parents=True, exist_ok=True)
-    (data_path / PARAMETERS_FILENAME).write_text(json.dumps(data))
-
-
-def _make_recording(parent: Path, name: str, acquisition: AcquisitionParameters) -> Path:
-    """Creates a fake processed recording with a combined_metadata.npz and acquisition file, returning its root."""
-    recording_root = parent / name
-    cindra_root = recording_root / "cindra"
-    cindra_root.mkdir(parents=True, exist_ok=True)
-
-    combined = CombinedData(detection=DetectionData(), extraction=ExtractionData())
-    combined.save(root_path=cindra_root)
-
-    acquisition.to_yaml(file_path=cindra_root / "acquisition_parameters.yaml")
-    return recording_root
-
-
-def _rewrite_plane_output_path(plane_directory: Path, recorded_path: str | None) -> None:
-    """Rewrites the output directory a persisted plane record names, leaving the file where the resolution finds it."""
-    runtime_path = plane_directory / "runtime_data.yaml"
-    payload = yaml.safe_load(runtime_path.read_text())
-    payload["io"]["output_path"] = recorded_path
-    runtime_path.write_text(yaml.safe_dump(payload))
-
-
-def _rewrite_recording_output_path(dataset_directory: Path, recorded_path: str | None) -> None:
-    """Rewrites the output directory a persisted recording record names, leaving the file where it is found."""
-    runtime_path = dataset_directory / "multi_recording_runtime_data.yaml"
-    payload = yaml.safe_load(runtime_path.read_text())
-    payload["output_path"] = recorded_path
-    runtime_path.write_text(yaml.safe_dump(payload))
-
-
-def _make_multi_configuration(
-    recording_directories: tuple[Path, ...], dataset_name: str
-) -> MultiRecordingConfiguration:
-    """Builds a multi-recording configuration referencing the given recording directories and dataset name."""
-    configuration = MultiRecordingConfiguration()
-    configuration.recording_io.recording_directories = recording_directories
-    configuration.recording_io.dataset_name = dataset_name
-    configuration.runtime.display_progress_bars = False
-    return configuration
-
-
 class TestResolveSingleRecordingContexts:
     """Tests resolve_single_recording_contexts."""
 
@@ -458,3 +396,65 @@ class TestResolveMultiRecordingContexts:
         )
         with pytest.raises(FileNotFoundError, match=error_format(expected_message)):
             resolve_multi_recording_contexts(configuration=configuration, persist=False)
+
+
+def _make_single_configuration(output_path: Path, data_path: Path | None = None) -> SingleRecordingConfiguration:
+    """Builds a single-recording configuration with the given output and data paths and progress bars disabled."""
+    configuration = SingleRecordingConfiguration()
+    configuration.file_io.output_path = output_path
+    configuration.file_io.data_path = data_path
+    configuration.runtime.display_progress_bars = False
+    return configuration
+
+
+def _write_saved_acquisition(output_path: Path, acquisition: AcquisitionParameters) -> None:
+    """Saves acquisition parameters to the processed cindra output directory used by context resolution."""
+    cindra_directory = output_path / "cindra"
+    cindra_directory.mkdir(parents=True, exist_ok=True)
+    acquisition.to_yaml(file_path=cindra_directory / "acquisition_parameters.yaml")
+
+
+def _write_raw_parameters(data_path: Path, data: dict[str, object]) -> None:
+    """Writes a raw cindra_parameters.json acquisition file into the data directory."""
+    data_path.mkdir(parents=True, exist_ok=True)
+    (data_path / PARAMETERS_FILENAME).write_text(json.dumps(data))
+
+
+def _make_recording(parent: Path, name: str, acquisition: AcquisitionParameters) -> Path:
+    """Creates a fake processed recording with a combined_metadata.npz and acquisition file, returning its root."""
+    recording_root = parent / name
+    cindra_root = recording_root / "cindra"
+    cindra_root.mkdir(parents=True, exist_ok=True)
+
+    combined = CombinedData(detection=DetectionData(), extraction=ExtractionData())
+    combined.save(root_path=cindra_root)
+
+    acquisition.to_yaml(file_path=cindra_root / "acquisition_parameters.yaml")
+    return recording_root
+
+
+def _rewrite_plane_output_path(plane_directory: Path, recorded_path: str | None) -> None:
+    """Rewrites the output directory a persisted plane record names, leaving the file where the resolution finds it."""
+    runtime_path = plane_directory / "runtime_data.yaml"
+    payload = yaml.safe_load(runtime_path.read_text())
+    payload["io"]["output_path"] = recorded_path
+    runtime_path.write_text(yaml.safe_dump(payload))
+
+
+def _rewrite_recording_output_path(dataset_directory: Path, recorded_path: str | None) -> None:
+    """Rewrites the output directory a persisted recording record names, leaving the file where it is found."""
+    runtime_path = dataset_directory / "multi_recording_runtime_data.yaml"
+    payload = yaml.safe_load(runtime_path.read_text())
+    payload["output_path"] = recorded_path
+    runtime_path.write_text(yaml.safe_dump(payload))
+
+
+def _make_multi_configuration(
+    recording_directories: tuple[Path, ...], dataset_name: str
+) -> MultiRecordingConfiguration:
+    """Builds a multi-recording configuration referencing the given recording directories and dataset name."""
+    configuration = MultiRecordingConfiguration()
+    configuration.recording_io.recording_directories = recording_directories
+    configuration.recording_io.dataset_name = dataset_name
+    configuration.runtime.display_progress_bars = False
+    return configuration

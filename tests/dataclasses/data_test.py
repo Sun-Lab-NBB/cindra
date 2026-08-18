@@ -18,17 +18,6 @@ from cindra.dataclasses.multi_recording_configuration import RecordingIO
 from cindra.dataclasses.single_recording_configuration import AcquisitionParameters
 
 
-def _make_roi_mask() -> ROIMask:
-    """Creates a minimal ROIMask instance."""
-    return ROIMask(
-        y_pixels=np.array([0, 1, 2], dtype=np.int32),
-        x_pixels=np.array([3, 4, 5], dtype=np.int32),
-        pixel_weights=np.ones(3, dtype=np.float32),
-        centroid=(1, 4),
-        frame_width=10,
-    )
-
-
 class TestIsMemoryMapped:
     """Tests the is_memory_mapped() function."""
 
@@ -440,7 +429,6 @@ class TestROIMaskCirclePixels:
             radius=10.0,
         )
         y_circle, x_circle = mask.circle_pixels
-        # Confirms the mean of sampled circle points lies near the center.
         assert abs(float(np.mean(y_circle)) - centroid_y) < 2
         assert abs(float(np.mean(x_circle)) - centroid_x) < 2
 
@@ -485,41 +473,35 @@ class TestExtractionDataPrepareForSaving:
     def test_sets_all_fields_to_none(self) -> None:
         """Verifies that prepare_for_saving() nullifies all array and list fields across both channels."""
         data = ExtractionData()
-        # Channel 1.
         data.roi_statistics = []
         data.cell_fluorescence = np.zeros((5, 100), dtype=np.float32)
         data.neuropil_fluorescence = np.zeros((5, 100), dtype=np.float32)
         data.subtracted_fluorescence = np.zeros((5, 100), dtype=np.float32)
         data.spikes = np.zeros((5, 100), dtype=np.float32)
         data.cell_classification = np.zeros((5, 2), dtype=np.float32)
-        # Channel 2.
         data.roi_statistics_channel_2 = []
         data.cell_fluorescence_channel_2 = np.zeros((5, 100), dtype=np.float32)
         data.neuropil_fluorescence_channel_2 = np.zeros((5, 100), dtype=np.float32)
         data.subtracted_fluorescence_channel_2 = np.zeros((5, 100), dtype=np.float32)
         data.spikes_channel_2 = np.zeros((5, 100), dtype=np.float32)
         data.cell_classification_channel_2 = np.zeros((5, 2), dtype=np.float32)
-        # Colocalization.
         data.cell_colocalization = np.zeros((5, 2), dtype=np.float32)
         data.corrected_structural_mean_image = np.zeros((64, 64), dtype=np.float32)
 
         data.prepare_for_saving()
 
-        # Channel 1.
         assert data.roi_statistics is None
         assert data.cell_fluorescence is None
         assert data.neuropil_fluorescence is None
         assert data.subtracted_fluorescence is None
         assert data.spikes is None
         assert data.cell_classification is None
-        # Channel 2.
         assert data.roi_statistics_channel_2 is None
         assert data.cell_fluorescence_channel_2 is None
         assert data.neuropil_fluorescence_channel_2 is None
         assert data.subtracted_fluorescence_channel_2 is None
         assert data.spikes_channel_2 is None
         assert data.cell_classification_channel_2 is None
-        # Colocalization.
         assert data.cell_colocalization is None
         assert data.corrected_structural_mean_image is None
 
@@ -530,41 +512,35 @@ class TestExtractionDataReleaseArrays:
     def test_sets_all_fields_to_none(self) -> None:
         """Verifies that release_arrays() nullifies all array and list fields across both channels."""
         data = ExtractionData()
-        # Channel 1.
         data.roi_statistics = []
         data.cell_fluorescence = np.zeros((5, 100), dtype=np.float32)
         data.neuropil_fluorescence = np.zeros((5, 100), dtype=np.float32)
         data.subtracted_fluorescence = np.zeros((5, 100), dtype=np.float32)
         data.spikes = np.zeros((5, 100), dtype=np.float32)
         data.cell_classification = np.zeros((5, 2), dtype=np.float32)
-        # Channel 2.
         data.roi_statistics_channel_2 = []
         data.cell_fluorescence_channel_2 = np.zeros((5, 100), dtype=np.float32)
         data.neuropil_fluorescence_channel_2 = np.zeros((5, 100), dtype=np.float32)
         data.subtracted_fluorescence_channel_2 = np.zeros((5, 100), dtype=np.float32)
         data.spikes_channel_2 = np.zeros((5, 100), dtype=np.float32)
         data.cell_classification_channel_2 = np.zeros((5, 2), dtype=np.float32)
-        # Colocalization.
         data.cell_colocalization = np.zeros((5, 2), dtype=np.float32)
         data.corrected_structural_mean_image = np.zeros((64, 64), dtype=np.float32)
 
         data.release_arrays()
 
-        # Channel 1.
         assert data.roi_statistics is None
         assert data.cell_fluorescence is None
         assert data.neuropil_fluorescence is None
         assert data.subtracted_fluorescence is None
         assert data.spikes is None
         assert data.cell_classification is None
-        # Channel 2.
         assert data.roi_statistics_channel_2 is None
         assert data.cell_fluorescence_channel_2 is None
         assert data.neuropil_fluorescence_channel_2 is None
         assert data.subtracted_fluorescence_channel_2 is None
         assert data.spikes_channel_2 is None
         assert data.cell_classification_channel_2 is None
-        # Colocalization.
         assert data.cell_colocalization is None
         assert data.corrected_structural_mean_image is None
 
@@ -803,3 +779,14 @@ class TestAcquisitionParametersProperties:
         """Verifies that virtual_plane_count is roi_number * plane_number."""
         parameters = AcquisitionParameters(frame_rate=30.0, plane_number=2, channel_number=1, roi_number=3)
         assert parameters.virtual_plane_count == 6
+
+
+def _make_roi_mask() -> ROIMask:
+    """Creates a minimal ROIMask instance."""
+    return ROIMask(
+        y_pixels=np.array([0, 1, 2], dtype=np.int32),
+        x_pixels=np.array([3, 4, 5], dtype=np.int32),
+        pixel_weights=np.ones(3, dtype=np.float32),
+        centroid=(1, 4),
+        frame_width=10,
+    )

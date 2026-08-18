@@ -69,7 +69,6 @@ class PCViewer(QMainWindow):
     """
 
     def __init__(self, data: SingleRecordingData) -> None:
-        # Initializes the main viewer window.
         super().__init__()
         pg.setConfigOptions(imageAxisOrder="row-major")
         self.setGeometry(*PC_STYLE.window_geometry)
@@ -94,7 +93,7 @@ class PCViewer(QMainWindow):
         self._metrics_y_range: tuple[float, float] = (0.0, 1.0)
         self._projection_y_range: tuple[float, float] = (0.0, 1.0)
 
-        # Row 0: Toolbar with plane selector.
+        # Builds row 0, the toolbar holding the plane selector.
         toolbar = QHBoxLayout()
         plane_label = QLabel("Plane:")
         plane_label.setStyleSheet(STYLE.white_label)
@@ -114,7 +113,7 @@ class PCViewer(QMainWindow):
         toolbar.addStretch()
         self._layout.addLayout(toolbar, 0, 0, 1, 1)
 
-        # Row 1: Graphics widget spans the full width. Row stretch gives it all available vertical space.
+        # Adds the full-width graphics widget as row 1, whose row stretch gives it all available vertical space.
         self._graphics_widget: pg.GraphicsLayoutWidget = pg.GraphicsLayoutWidget()
         self._layout.addWidget(self._graphics_widget, 1, 0, 1, 1)
         self._layout.setRowStretch(1, 1)
@@ -157,8 +156,8 @@ class PCViewer(QMainWindow):
         self._merged_view_box.addItem(self._merged_image)
         self._animated_view_box.addItem(self._animated_image)
 
-        # Title labels anchored inside each image ViewBox. Their position is set in _zoom_plot() and
-        # they serve as content anchors that stabilize the ViewBox bounds during animation.
+        # Anchors a title label inside each image ViewBox. Their position is set in _zoom_plot() and they serve as
+        # content anchors that stabilize the ViewBox bounds during animation.
         self._title_labels: list[pg.TextItem] = []
         for view_box in (self._difference_view_box, self._merged_view_box, self._animated_view_box):
             label = pg.TextItem("", color=COLORS.white, anchor=(0.5, 0))
@@ -178,7 +177,7 @@ class PCViewer(QMainWindow):
             bottom_label="Sampled Frame",
         )
 
-        # Bottom control panel: PC selector, metric labels, title labels, playback controls.
+        # Builds the bottom control panel with the PC selector, metric labels, title labels, and playback controls.
         self._create_bottom_panel()
         self._pc_edit.setValidator(QtGui.QIntValidator(1, self._pc_count))
         self._update_timer: QtCore.QTimer = QtCore.QTimer()
@@ -215,7 +214,7 @@ class PCViewer(QMainWindow):
         """Returns the current display state of the PC viewer for cross-process state exchange.
 
         Returns:
-            A dictionary containing the current plane, principal component, and animation status.
+            The current plane, principal component, and animation status.
         """
         return {
             "current_plane": self._plane_selector.currentIndex(),
@@ -299,7 +298,6 @@ class PCViewer(QMainWindow):
 
     def _reload_pc_data(self) -> None:
         """Loads and renders PC registration data for the currently selected plane."""
-        # Updates the window title to reflect the loaded recording path.
         self.setWindowTitle(f"Registration Quality Metrics — {self.data.recording_label}")
         pc_images = self.data.principal_component_extreme_images
         pc_metrics = self.data.principal_component_shift_metrics
@@ -312,9 +310,9 @@ class PCViewer(QMainWindow):
 
         # Clips extreme pixel values to the 1st-99th percentile range for stable image display.
         self._pc_images = np.clip(
-            pc_images,
-            np.percentile(pc_images, COMMON_CONFIG.lower_percentile),
-            np.percentile(pc_images, COMMON_CONFIG.upper_percentile),
+            a=pc_images,
+            a_min=np.percentile(a=pc_images, q=COMMON_CONFIG.lower_percentile),
+            a_max=np.percentile(a=pc_images, q=COMMON_CONFIG.upper_percentile),
         )
         self._image_height, self._image_width = self._pc_images.shape[2:]
         self._pc_metrics = pc_metrics
@@ -350,7 +348,7 @@ class PCViewer(QMainWindow):
         panel = QHBoxLayout()
         group_spacing = PC_STYLE.group_spacing
 
-        # PC selector: label and input field for the current principal component number.
+        # Adds the PC selector, a label and input field for the current principal component number.
         pc_label = QLabel("PC:")
         pc_label.setFont(bold_font)
         pc_label.setStyleSheet(STYLE.white_label)
@@ -368,7 +366,7 @@ class PCViewer(QMainWindow):
         panel.addWidget(self._pc_edit)
         panel.addSpacing(group_spacing)
 
-        # Metric value labels showing per-PC registration offset magnitudes.
+        # Creates the metric value labels showing per-PC registration offset magnitudes.
         self._metric_labels: list[QLabel] = []
         for _ in range(3):
             metric_label = QLabel("")
@@ -377,7 +375,7 @@ class PCViewer(QMainWindow):
             self._metric_labels.append(metric_label)
         panel.addSpacing(group_spacing)
 
-        # Playback controls.
+        # Adds the playback controls.
         playback = create_play_pause_group(
             parent=self,
             play_tooltip="Start automatic PC cycling.",
@@ -423,10 +421,10 @@ class PCViewer(QMainWindow):
 
         # Alternates the animated view between the top (low-projection) and bottom (high-projection) extremes.
         if self._current_frame == 0:
-            self._animated_image.setImage(np.tile(pc_low[:, :, np.newaxis], (1, 1, 3)))
+            self._animated_image.setImage(np.tile(A=pc_low[:, :, np.newaxis], reps=(1, 1, 3)))
             self._title_labels[2].setText("top")
         else:
-            self._animated_image.setImage(np.tile(pc_high[:, :, np.newaxis], (1, 1, 3)))
+            self._animated_image.setImage(np.tile(A=pc_high[:, :, np.newaxis], reps=(1, 1, 3)))
             self._title_labels[2].setText("bottom")
         # Uses the low-projection range for both frames so brightness stays consistent across toggles.
         self._animated_image.setLevels([pc_low.min(), pc_low.max()])
@@ -446,11 +444,11 @@ class PCViewer(QMainWindow):
         pc_high = np.asarray(self._pc_images[1, pc_index, :, :])
         pc_low = np.asarray(self._pc_images[0, pc_index, :, :])
 
-        # Difference image: high minus low, normalized to 0-1 centered at 0.5, then scaled to 0-255.
+        # Computes the difference image as high minus low, normalized to 0-1 centered at 0.5, then scaled to 0-255.
         difference = np.asarray(pc_high[:, :, np.newaxis] - pc_low[:, :, np.newaxis])
         difference /= np.abs(difference).max() * 2
         difference += 0.5
-        self._difference_image.setImage(np.tile(difference * 255, (1, 1, 3)))
+        self._difference_image.setImage(np.tile(A=difference * 255, reps=(1, 1, 3)))
         self._difference_image.setLevels([0, 255])
 
         # Merged image: red/blue channels show the high-projection image, green shows the low-projection image.
@@ -464,17 +462,17 @@ class PCViewer(QMainWindow):
         # Animated image: shows whichever extreme the animation toggle is currently on and labels it the way the
         # animation labels it, because a redraw that follows a pause on an odd tick shows the high-projection extreme.
         if self._current_frame == 0:
-            self._animated_image.setImage(np.tile(pc_low[:, :, np.newaxis], (1, 1, 3)))
+            self._animated_image.setImage(np.tile(A=pc_low[:, :, np.newaxis], reps=(1, 1, 3)))
             self._title_labels[2].setText("top")
         else:
-            self._animated_image.setImage(np.tile(pc_high[:, :, np.newaxis], (1, 1, 3)))
+            self._animated_image.setImage(np.tile(A=pc_high[:, :, np.newaxis], reps=(1, 1, 3)))
             self._title_labels[2].setText("bottom")
         # Uses the low-projection range for both extremes so brightness stays consistent across toggles.
         self._animated_image.setLevels([pc_low.min(), pc_low.max()])
         self._zoom_plot()
 
-        # Metrics plot: shows rigid, nonrigid, and nonrigid-max offset magnitudes across all PCs.
-        # The legend is recreated on every update because clear() removes it from the plot.
+        # Metrics plot: shows rigid, nonrigid, and nonrigid-max offset magnitudes across all PCs. The legend is
+        # recreated on every update because clear() removes it from the plot.
         self._metrics_plot.clear()
         self._metrics_plot.disableAutoRange()
         colors = (COLORS.cyan, COLORS.red, COLORS.magenta)

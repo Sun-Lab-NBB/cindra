@@ -26,115 +26,6 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 
-def _make_roi(centroid: tuple[int, int] = (10, 10), pixel_count: int = 50) -> ROIStatistics:
-    """Creates a minimal ROIStatistics instance with the given centroid and pixel count."""
-    y_pixels = np.arange(pixel_count, dtype=np.int32) % 10
-    x_pixels = np.arange(pixel_count, dtype=np.int32) // 10
-    mask = ROIMask(
-        y_pixels=y_pixels,
-        x_pixels=x_pixels,
-        pixel_weights=np.ones(pixel_count, dtype=np.float32),
-        centroid=centroid,
-        frame_width=200,
-    )
-    roi = ROIStatistics(mask=mask)
-    roi.pixel_count = pixel_count
-    return roi
-
-
-def _make_classification(probabilities: list[float]) -> NDArray[np.float32]:
-    """Builds a (cells, 2) classification array placing each probability in the second column."""
-    return np.array([[1.0, probability] for probability in probabilities], dtype=np.float32)
-
-
-def _make_context(
-    tmp_path: Path,
-    recording_id: str,
-    *,
-    rois: list[ROIStatistics],
-    classification: NDArray[np.float32],
-    rois_channel_2: list[ROIStatistics] | None = None,
-    classification_channel_2: NDArray[np.float32] | None = None,
-    persist: bool = True,
-    data_path_none: bool = False,
-    combined_data_none: bool = False,
-    repeat_selection: bool = False,
-    probability_threshold: float = 0.5,
-    maximum_size: int = 10000,
-    mroi_region_margin: int = 0,
-    mroi_region_borders: tuple[int, ...] = (),
-    selected_roi_indices: tuple[int, ...] = (),
-    selected_roi_indices_channel_2: tuple[int, ...] = (),
-) -> MultiRecordingRuntimeContext:
-    """Builds a MultiRecordingRuntimeContext with combined data either saved to disk or held in memory.
-
-    Args:
-        tmp_path: The pytest temporary directory used to host the recording tree.
-        recording_id: The identifier used for the recording and its output directory.
-        rois: The channel 1 ROIStatistics list stored in the combined data.
-        classification: The channel 1 classification array stored in the combined data.
-        rois_channel_2: The optional channel 2 ROIStatistics list to enable two-channel selection.
-        classification_channel_2: The optional channel 2 classification array.
-        persist: Determines whether to save the combined data to disk and attach a metadata-only copy that
-            forces on-demand memory mapping during selection.
-        data_path_none: Determines whether to leave the runtime data path unset when persist is False, which
-            skips the memory-mapping branch and runs selection on the in-memory combined data.
-        combined_data_none: Determines whether to omit the combined data, exercising the missing-data guard.
-        repeat_selection: Determines whether to re-run selection for a recording that already stores a selection.
-        probability_threshold: The minimum classifier probability required for selection.
-        maximum_size: The maximum allowed ROI pixel count.
-        mroi_region_margin: The minimum distance between an ROI centroid and an MROI border.
-        mroi_region_borders: The x-coordinates of MROI region borders.
-        selected_roi_indices: The pre-existing channel 1 selection used by the skip guard.
-        selected_roi_indices_channel_2: The pre-existing channel 2 selection used by the skip guard.
-
-    Returns:
-        The assembled MultiRecordingRuntimeContext ready to pass to select_recording_rois.
-    """
-    base = tmp_path / recording_id / "cindra"
-    output_directory = base / "multi_recording" / "dataset"
-    ensure_directory_exists(output_directory)
-
-    runtime_combined: CombinedData | None = None
-    data_path: Path | None = None
-    if not combined_data_none:
-        extraction = ExtractionData()
-        extraction.roi_statistics = rois
-        extraction.cell_classification = classification
-        if rois_channel_2 is not None:
-            extraction.roi_statistics_channel_2 = rois_channel_2
-            extraction.cell_classification_channel_2 = classification_channel_2
-        combined = CombinedData(detection=DetectionData(), extraction=extraction)
-
-        if persist:
-            ensure_directory_exists(base)
-            combined.save(root_path=base)
-            data_path = base
-            # Loads a metadata-only copy so select_recording_rois memory-maps arrays from disk.
-            runtime_combined = CombinedData.load(root_path=base)
-        else:
-            runtime_combined = combined
-            data_path = None if data_path_none else base
-
-    runtime = MultiRecordingRuntimeData()
-    runtime.output_path = output_directory
-    runtime.io.recording_id = recording_id
-    runtime.io.dataset_name = "dataset"
-    runtime.io.data_path = data_path
-    runtime.io.mroi_region_borders = mroi_region_borders
-    runtime.io.selected_roi_indices = selected_roi_indices
-    runtime.io.selected_roi_indices_channel_2 = selected_roi_indices_channel_2
-    runtime.combined_data = runtime_combined
-
-    configuration = MultiRecordingConfiguration()
-    configuration.recording_io.repeat_selection = repeat_selection
-    configuration.roi_selection.probability_threshold = probability_threshold
-    configuration.roi_selection.maximum_size = maximum_size
-    configuration.roi_selection.mroi_region_margin = mroi_region_margin
-
-    return MultiRecordingRuntimeContext(configuration=configuration, runtime=runtime)
-
-
 class TestSelectRecordingRois:
     """Tests select_recording_rois."""
 
@@ -333,3 +224,112 @@ class TestSelectRecordingRois:
 
         assert context_one.runtime.io.selected_roi_indices == (0, 2)
         assert context_two.runtime.io.selected_roi_indices == (1, 2)
+
+
+def _make_roi(centroid: tuple[int, int] = (10, 10), pixel_count: int = 50) -> ROIStatistics:
+    """Creates a minimal ROIStatistics instance with the given centroid and pixel count."""
+    y_pixels = np.arange(pixel_count, dtype=np.int32) % 10
+    x_pixels = np.arange(pixel_count, dtype=np.int32) // 10
+    mask = ROIMask(
+        y_pixels=y_pixels,
+        x_pixels=x_pixels,
+        pixel_weights=np.ones(pixel_count, dtype=np.float32),
+        centroid=centroid,
+        frame_width=200,
+    )
+    roi = ROIStatistics(mask=mask)
+    roi.pixel_count = pixel_count
+    return roi
+
+
+def _make_classification(probabilities: list[float]) -> NDArray[np.float32]:
+    """Builds a (cells, 2) classification array placing each probability in the second column."""
+    return np.array([[1.0, probability] for probability in probabilities], dtype=np.float32)
+
+
+def _make_context(
+    tmp_path: Path,
+    recording_id: str,
+    *,
+    rois: list[ROIStatistics],
+    classification: NDArray[np.float32],
+    rois_channel_2: list[ROIStatistics] | None = None,
+    classification_channel_2: NDArray[np.float32] | None = None,
+    persist: bool = True,
+    data_path_none: bool = False,
+    combined_data_none: bool = False,
+    repeat_selection: bool = False,
+    probability_threshold: float = 0.5,
+    maximum_size: int = 10000,
+    mroi_region_margin: int = 0,
+    mroi_region_borders: tuple[int, ...] = (),
+    selected_roi_indices: tuple[int, ...] = (),
+    selected_roi_indices_channel_2: tuple[int, ...] = (),
+) -> MultiRecordingRuntimeContext:
+    """Builds a MultiRecordingRuntimeContext with combined data either saved to disk or held in memory.
+
+    Args:
+        tmp_path: The pytest temporary directory used to host the recording tree.
+        recording_id: The identifier used for the recording and its output directory.
+        rois: The channel 1 ROIStatistics list stored in the combined data.
+        classification: The channel 1 classification array stored in the combined data.
+        rois_channel_2: The optional channel 2 ROIStatistics list to enable two-channel selection.
+        classification_channel_2: The optional channel 2 classification array.
+        persist: Determines whether to save the combined data to disk and attach a metadata-only copy that
+            forces on-demand memory mapping during selection.
+        data_path_none: Determines whether to leave the runtime data path unset when persist is False, which
+            skips the memory-mapping branch and runs selection on the in-memory combined data.
+        combined_data_none: Determines whether to omit the combined data, exercising the missing-data guard.
+        repeat_selection: Determines whether to re-run selection for a recording that already stores a selection.
+        probability_threshold: The minimum classifier probability required for selection.
+        maximum_size: The maximum allowed ROI pixel count.
+        mroi_region_margin: The minimum distance between an ROI centroid and an MROI border.
+        mroi_region_borders: The x-coordinates of MROI region borders.
+        selected_roi_indices: The pre-existing channel 1 selection used by the skip guard.
+        selected_roi_indices_channel_2: The pre-existing channel 2 selection used by the skip guard.
+
+    Returns:
+        The assembled MultiRecordingRuntimeContext ready to pass to select_recording_rois.
+    """
+    base = tmp_path / recording_id / "cindra"
+    output_directory = base / "multi_recording" / "dataset"
+    ensure_directory_exists(output_directory)
+
+    runtime_combined: CombinedData | None = None
+    data_path: Path | None = None
+    if not combined_data_none:
+        extraction = ExtractionData()
+        extraction.roi_statistics = rois
+        extraction.cell_classification = classification
+        if rois_channel_2 is not None:
+            extraction.roi_statistics_channel_2 = rois_channel_2
+            extraction.cell_classification_channel_2 = classification_channel_2
+        combined = CombinedData(detection=DetectionData(), extraction=extraction)
+
+        if persist:
+            ensure_directory_exists(base)
+            combined.save(root_path=base)
+            data_path = base
+            # Loads a metadata-only copy so select_recording_rois memory-maps arrays from disk.
+            runtime_combined = CombinedData.load(root_path=base)
+        else:
+            runtime_combined = combined
+            data_path = None if data_path_none else base
+
+    runtime = MultiRecordingRuntimeData()
+    runtime.output_path = output_directory
+    runtime.io.recording_id = recording_id
+    runtime.io.dataset_name = "dataset"
+    runtime.io.data_path = data_path
+    runtime.io.mroi_region_borders = mroi_region_borders
+    runtime.io.selected_roi_indices = selected_roi_indices
+    runtime.io.selected_roi_indices_channel_2 = selected_roi_indices_channel_2
+    runtime.combined_data = runtime_combined
+
+    configuration = MultiRecordingConfiguration()
+    configuration.recording_io.repeat_selection = repeat_selection
+    configuration.roi_selection.probability_threshold = probability_threshold
+    configuration.roi_selection.maximum_size = maximum_size
+    configuration.roi_selection.mroi_region_margin = mroi_region_margin
+
+    return MultiRecordingRuntimeContext(configuration=configuration, runtime=runtime)

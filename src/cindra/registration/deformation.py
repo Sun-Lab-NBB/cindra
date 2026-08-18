@@ -14,8 +14,6 @@ from ataraxis_base_utilities import console
 from .spline_grid import MINIMUM_KNOTS_FOR_FROZEN_EDGES, SplineGrid, compute_cardinal_coefficients
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
-
     from numpy.typing import NDArray
 
 _MINIMUM_DIFFUSION_SIGMA: float = 0.1
@@ -46,7 +44,6 @@ def diffuse(data: NDArray[np.float32], sigma: float | list[float]) -> NDArray[np
     Returns:
         The diffused data array with the same shape as the input.
     """
-    # Converts sigma to a list with one value per dimension.
     sigma_list = [sigma] * data.ndim if isinstance(sigma, float) else list(sigma)
 
     # Applies 1D diffusion filtering along each dimension.
@@ -67,8 +64,8 @@ def zoom(
 
     Args:
         data: The 2D array to resize.
-        factor: The factor by which to resize the data. Can be a scalar for uniform scaling, or a
-            (height_factor, width_factor) tuple.
+        factor: The factor by which to resize the data. Can be a scalar for uniform scaling, or a (height_factor,
+            width_factor) tuple.
         order: The interpolation order (0=nearest, 1=linear, 3=cubic).
 
     Returns:
@@ -82,7 +79,6 @@ def zoom(
     else:
         factor_y, factor_x = factor[0], factor[1]
 
-    # Calculates the new shape.
     new_height = round(factor_y * height)
     new_width = round(factor_x * width)
 
@@ -112,6 +108,12 @@ class Deformation:
         self._field_shape: tuple[int, int] = (field_y.shape[0], field_y.shape[1])
         self._fields: list[NDArray[np.float32]] = [field_y, field_x]
 
+    def __repr__(self) -> str:
+        """Returns a string representation of the Deformation instance."""
+        if self.is_identity:
+            return f"Deformation(field_shape={self.field_shape}, identity=True)"
+        return f"Deformation(field_shape={self.field_shape})"
+
     @classmethod
     def identity(cls, height: int, width: int) -> Deformation:
         """Creates an identity (no-op) deformation with the specified dimensions.
@@ -130,49 +132,15 @@ class Deformation:
         instance._fields = []
         return instance
 
-    def __repr__(self) -> str:
-        """Returns a string representation of the Deformation instance."""
-        if self.is_identity:
-            return f"Deformation(field_shape={self.field_shape}, identity=True)"
-        return f"Deformation(field_shape={self.field_shape})"
-
     @property
     def is_identity(self) -> bool:
         """Returns whether this deformation represents an identity (no-op) transformation."""
         return not self._fields
 
     @property
-    def dimension_count(self) -> int:
-        """Returns the number of dimensions of the deformation."""
-        return len(self._field_shape)
-
-    @property
     def field_shape(self) -> tuple[int, ...]:
         """Returns the shape of the deformation field as (height, width)."""
         return tuple(self._field_shape)
-
-    def __len__(self) -> int:
-        """Returns the number of field arrays (one per dimension)."""
-        return len(self._fields)
-
-    def __getitem__(self, index: int) -> NDArray[np.float32]:
-        """Returns the field array at the specified dimension index.
-
-        Args:
-            index: The dimension index (0 for Y, 1 for X).
-
-        Returns:
-            The displacement field array for that dimension.
-        """
-        return self._fields[index]
-
-    def __iter__(self) -> Iterator[NDArray[np.float32]]:
-        """Returns an iterator over the field arrays."""
-        return iter(self._fields)
-
-    def __add__(self, other: Deformation) -> Deformation:
-        """Combines two deformations by element-wise addition of their fields."""
-        return self.add(other=other)
 
     def copy(self) -> Deformation:
         """Creates a deep copy of this deformation.
@@ -204,24 +172,6 @@ class Deformation:
             field_x = self._fields[1] * factor
         return Deformation(field_y=field_y, field_x=field_x)
 
-    def add(self, other: Deformation) -> Deformation:
-        """Combines two deformations by element-wise addition of their displacement fields.
-
-        Args:
-            other: The deformation to add to this one.
-
-        Returns:
-            A new Deformation with summed displacement fields.
-        """
-        if self.is_identity:
-            return other.copy()
-        if other.is_identity:
-            return self.copy()
-
-        field_y = self._fields[0] + other.get_field(dimension=0)
-        field_x = self._fields[1] + other.get_field(dimension=1)
-        return Deformation(field_y=field_y, field_x=field_x)
-
     def compose(self, other: Deformation) -> Deformation:
         """Combines two deformations by composition (function composition).
 
@@ -242,7 +192,6 @@ class Deformation:
         # Backward composition: samples self's field at locations defined by the other.
         samples_x, samples_y = other.get_deformation_locations()
 
-        # Warps Y field.
         warped_y = np.empty(samples_x.shape, dtype=np.float32)
         _warp(
             data=self._fields[0],
@@ -253,7 +202,6 @@ class Deformation:
         )
         field_y = other.get_field(dimension=0) + warped_y
 
-        # Warps X field.
         warped_x = np.empty(samples_x.shape, dtype=np.float32)
         _warp(
             data=self._fields[1],
@@ -334,15 +282,12 @@ class Deformation:
         if self.is_identity:
             return data
 
-        # Resizes field to match data shape if needed.
         resized_deformation = self.resize_field(new_height=data.shape[0], new_width=data.shape[1])
 
-        # Converts relative deformation to absolute sample positions.
         samples_x, samples_y = _make_samples_absolute(
             delta_x=resized_deformation._fields[1], delta_y=resized_deformation._fields[0]
         )
 
-        # Applies backward warp to sample data at deformed positions.
         result = np.empty(samples_x.shape, dtype=data.dtype)
         _warp(
             data=data,
@@ -366,7 +311,6 @@ class Deformation:
         if self.is_identity:
             return self
 
-        # Converts relative deformation to absolute sample positions.
         samples_x, samples_y = _make_samples_absolute(delta_x=self._fields[1], delta_y=self._fields[0])
 
         # Computes inverse fields using forward projection (splatting).
@@ -435,10 +379,9 @@ class Deformation:
     ) -> tuple[Deformation, tuple[int, int]]:
         """Creates a cropped view of the deformation field starting at the specified top-left origin.
 
-        This method extracts a local region of the deformation field to reduce memory overhead when applying
-        deformations to small regions such as individual ROI masks. The origin is automatically clamped to ensure
-        the crop stays within valid field bounds. The returned Deformation contains views into the original arrays,
-        not copies.
+        Extracts a local region of the deformation field to reduce memory overhead when applying deformations to small
+        regions such as individual ROI masks. The origin is automatically clamped to ensure the crop stays within valid
+        field bounds. The returned Deformation contains views into the original arrays, not copies.
 
         Args:
             origin: The top-left corner of the crop region as (y, x) coordinates.
@@ -577,8 +520,8 @@ def _warp(  # pragma: no cover
                         )
                 result[sample_index] = interpolated_value
 
-            # Edge case: sample is within bounds but near the border.
-            # Uses partial neighborhood and renormalizes coefficients.
+            # Edge case: sample is within bounds but near the border. Uses partial neighborhood and renormalizes
+            # coefficients.
             elif (
                 _BOUNDARY_TOLERANCE <= sample_x <= width + _BOUNDARY_TOLERANCE
                 and _BOUNDARY_TOLERANCE <= sample_y <= height + _BOUNDARY_TOLERANCE
@@ -724,9 +667,8 @@ def _project(  # pragma: no cover
             target_x = samples_x[source_y, source_x]
             target_y = samples_y[source_y, source_x]
 
-            # Determines the bounding box of the destination region by examining
-            # where neighboring source pixels map to. This adaptive approach handles
-            # non-uniform deformations where the splat size varies spatially.
+            # Determines the bounding box of the destination region by examining where neighboring source pixels map to.
+            # This adaptive approach handles non-uniform deformations where the splat size varies spatially.
             bounds_min_x = target_x
             bounds_max_x = target_x
             bounds_min_y = target_y
@@ -761,7 +703,6 @@ def _project(  # pragma: no cover
                     bounds_min_y = min(bounds_min_y, neighbor_target_y)
                     bounds_max_y = max(bounds_max_y, neighbor_target_y)
 
-            # Clamps bounds to valid image region.
             bounds_min_x = max(0, min(width - 1, bounds_min_x))
             bounds_max_x = max(0, min(width - 1, bounds_max_x))
             bounds_min_y = max(0, min(height - 1, bounds_min_y))
@@ -773,8 +714,8 @@ def _project(  # pragma: no cover
             destination_start_y = max(0, math.floor(bounds_min_y))
             destination_end_y = min(height - 1, math.ceil(bounds_max_y))
 
-            # Computes inverse kernel radius from the maximum extent.
-            # The kernel uses a tent function that falls off linearly from the target center.
+            # Computes inverse kernel radius from the maximum extent. The kernel uses a tent function that falls off
+            # linearly from the target center.
             inverse_kernel_radius = max(
                 0.1,
                 abs(bounds_min_y - target_y),
@@ -827,11 +768,10 @@ def _resize(
     height, width = data.shape
 
     # Creates coordinate grids mapping new pixels to source positions.
-    range_y = np.linspace(0, height - 1, new_height, dtype=np.float32)
-    range_x = np.linspace(0, width - 1, new_width, dtype=np.float32)
+    range_y = np.linspace(start=0, stop=height - 1, num=new_height, dtype=np.float32)
+    range_x = np.linspace(start=0, stop=width - 1, num=new_width, dtype=np.float32)
     samples_x, samples_y = np.meshgrid(range_x, range_y)
 
-    # Applies warp to resample at the new coordinates.
     result = np.empty((new_height, new_width), dtype=data.dtype)
     _warp(
         data=data,

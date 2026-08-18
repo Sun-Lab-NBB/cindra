@@ -21,12 +21,6 @@ _CLASSIFIED_LABELS: list[float] = [1.0, 0.0, 0.0, 0.0]
 """The classification labels used by every test that is not about the initial selection itself."""
 
 
-def _make_viewer(single_recording_stub: Callable[..., object], cell_labels: list[float]) -> ROIViewer:
-    """Builds an ROI viewer over a synthetic single recording carrying the requested classification labels."""
-    data = ViewerData(single_recording=single_recording_stub(cell_labels=cell_labels, roi_count=_ROI_COUNT))
-    return ROIViewer(data=data)
-
-
 @pytest.mark.xdist_group("gui_viewers")
 class TestInitialSelection:
     """Tests the ROI selection the viewer opens with."""
@@ -153,3 +147,9 @@ class TestRankedSelection:
         assert len(viewer._selected_roi_indices) == 2
 
         viewer.close()
+
+
+def _make_viewer(single_recording_stub: Callable[..., object], cell_labels: list[float]) -> ROIViewer:
+    """Builds an ROI viewer over a synthetic single recording carrying the requested classification labels."""
+    data = ViewerData(single_recording=single_recording_stub(cell_labels=cell_labels, roi_count=_ROI_COUNT))
+    return ROIViewer(data=data)

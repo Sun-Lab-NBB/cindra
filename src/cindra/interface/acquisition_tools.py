@@ -73,7 +73,6 @@ def generate_acquisition_parameters_file_tool(
             "error": f"Unable to generate acquisition parameters file. The path is not a directory: {output_directory}",
         }
 
-    # Assembles the parameter dictionary.
     parameters: dict[str, object] = {
         "frame_rate": frame_rate,
         "plane_number": plane_number,
@@ -89,7 +88,6 @@ def generate_acquisition_parameters_file_tool(
         if roi_y_coordinates is not None:
             parameters["roi_y_coordinates"] = roi_y_coordinates
 
-    # Validates before writing.
     errors, warnings = _validate_acquisition_parameters(data=parameters)
     if errors:
         return {"success": False, "errors": errors}
@@ -171,12 +169,11 @@ def validate_acquisition_parameters_file_tool(file_path: str) -> dict[str, bool 
 def validate_recording_readiness_tool(recording_directory: str) -> dict[str, object]:
     """Validates that a recording directory is fully ready for cindra single-recording processing.
 
-    Verifies that the cindra_parameters.json acquisition parameters file is present and valid, that raw TIFF files
-    exist and are readable, and that the TIFF data is compatible with the acquisition parameters. Files whose frame
-    shape differs from the shape holding the most frames are reported as warnings rather than errors. A raw directory
-    commonly holds an unrelated file such as an anatomical z-stack, which must be excluded through the
-    'file_io.ignored_file_names' configuration parameter. Serves as the final readiness gate before committing
-    compute resources to pipeline execution.
+    Verifies that the cindra_parameters.json acquisition parameters file is present and valid, that raw TIFF files exist
+    and are readable, and that the TIFF data is compatible with the acquisition parameters. Files whose frame shape
+    differs from the shape holding the most frames are reported as warnings rather than errors. A raw directory commonly
+    holds an unrelated file such as an anatomical z-stack, which must be excluded through the
+    'file_io.ignored_file_names' configuration parameter.
 
     Args:
         recording_directory: The absolute path to the recording directory containing raw TIFF files and a
@@ -208,7 +205,6 @@ def validate_recording_readiness_tool(recording_directory: str) -> dict[str, obj
     errors: list[str] = []
     warnings: list[str] = []
 
-    # Requires cindra_parameters.json to be present and valid.
     parameters_path = directory / PARAMETERS_FILENAME
     if not parameters_path.exists():
         return {
@@ -237,7 +233,6 @@ def validate_recording_readiness_tool(recording_directory: str) -> dict[str, obj
             ),
         }
 
-    # Validates acquisition parameters using the shared validator.
     parameter_errors, parameter_warnings = _validate_acquisition_parameters(data=parameters)
     errors.extend(parameter_errors)
     warnings.extend(parameter_warnings)
@@ -272,7 +267,6 @@ def validate_recording_readiness_tool(recording_directory: str) -> dict[str, obj
             "files": [],
         }
 
-    # Inspects each TIFF file for page count, dimensions, and dtype.
     file_details: list[dict[str, str | int]] = []
     total_frames: int = 0
     reference_height: int | None = None
@@ -335,7 +329,6 @@ def validate_recording_readiness_tool(recording_directory: str) -> dict[str, obj
                 f"cover the {reference_height}x{reference_width} files alone."
             )
 
-    # Cross-validates TIFF data against acquisition parameters.
     frames_per_plane: int = 0
     if total_frames > 0 and interleave_stride > 0:
         frames_per_plane = total_frames // interleave_stride
@@ -367,7 +360,6 @@ def validate_recording_readiness_tool(recording_directory: str) -> dict[str, obj
                         f"ROI {roi_index} roi_lines maximum ({maximum_line}) exceeds frame height ({reference_height})."
                     )
 
-    # Checks dtype compatibility with the pipeline.
     if reference_dtype is not None and reference_dtype not in ("uint16", "int16", "int32"):
         warnings.append(
             f"TIFF dtype '{reference_dtype}' is not one of the natively supported types (uint16, int16, int32). "
@@ -412,13 +404,12 @@ def _validate_acquisition_parameters(
         data: The acquisition parameter dictionary to validate.
 
     Returns:
-        A tuple of two lists where the first contains error messages for invalid parameters and the second contains
-        warning messages for potentially problematic values.
+        The error messages for invalid parameters, paired with the warning messages for values that pass validation but
+        are likely unintended.
     """
     errors: list[str] = []
     warnings: list[str] = []
 
-    # Validates frame_rate.
     frame_rate = data.get("frame_rate")
     if frame_rate is None:
         errors.append("Missing required field 'frame_rate'.")
@@ -427,7 +418,6 @@ def _validate_acquisition_parameters(
     elif frame_rate <= 0:
         errors.append(f"'frame_rate' must be positive (found: {frame_rate}).")
 
-    # Validates plane_number.
     plane_number = data.get("plane_number")
     if plane_number is None:
         errors.append("Missing required field 'plane_number'.")
@@ -436,7 +426,6 @@ def _validate_acquisition_parameters(
     elif plane_number < 1:
         errors.append(f"'plane_number' must be at least 1 (found: {plane_number}).")
 
-    # Validates channel_number.
     channel_number = data.get("channel_number")
     if channel_number is None:
         errors.append("Missing required field 'channel_number'.")
@@ -445,14 +434,12 @@ def _validate_acquisition_parameters(
     elif channel_number < 1 or channel_number > MAXIMUM_CHANNEL_COUNT:
         errors.append(f"'channel_number' must be 1 or 2 (found: {channel_number}).")
 
-    # Validates roi_number and MROI fields.
     roi_number = data.get("roi_number", 1)
     if not isinstance(roi_number, int):
         errors.append(f"'roi_number' must be an integer (found: {type(roi_number).__name__}).")
     elif roi_number < 1:
         errors.append(f"'roi_number' must be at least 1 (found: {roi_number}).")
     elif roi_number > 1:
-        # Validates all MROI fields in MROI mode.
         roi_lines = data.get("roi_lines")
         roi_x_coordinates = data.get("roi_x_coordinates")
         roi_y_coordinates = data.get("roi_y_coordinates")
@@ -482,7 +469,6 @@ def _validate_acquisition_parameters(
                 f"'roi_y_coordinates' length ({len(roi_y_coordinates)}) must equal 'roi_number' ({roi_number})."
             )
     else:
-        # Warns when MROI fields are present in single-ROI mode.
         if data.get("roi_lines"):
             warnings.append("'roi_lines' is set but 'roi_number' is 1 (single-ROI mode). Field will be ignored.")
         if data.get("roi_x_coordinates"):
@@ -494,7 +480,6 @@ def _validate_acquisition_parameters(
                 "'roi_y_coordinates' is set but 'roi_number' is 1 (single-ROI mode). Field will be ignored."
             )
 
-    # Checks for unrecognized fields.
     known_fields = {
         "frame_rate",
         "plane_number",
@@ -517,9 +502,6 @@ def _is_integer_list(value: object) -> TypeIs[list[int]]:
     Notes:
         Booleans are rejected, because JSON deserializes 'true' into a subclass of int that the pipeline cannot use
         as a line or pixel index.
-
-        The return narrows the checked value to a list of integers, so a caller that measures or indexes the value
-        after this check works against the narrowed type rather than the deserialized object.
 
     Args:
         value: The deserialized JSON value to check.

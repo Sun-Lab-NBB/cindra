@@ -66,7 +66,6 @@ def create_masks(
         include_overlap=include_overlap,
     )
 
-    # Combines ROI masks with None neuropil placeholders if neuropil processing is disabled.
     if not neuropil:
         return tuple((indices, weights, None) for indices, weights in roi_masks)
 
@@ -102,31 +101,42 @@ def _create_roi_masks(
         A tuple of two masks for each ROI. The first is the flattened ROI pixel mask. The second is the flattened
         lambda weight mask for the pixels that make up the ROI mask.
     """
-    roi_masks: list[tuple[NDArray[np.int32], NDArray[np.float32]]] = []
+    return tuple(_build_roi_mask(roi=roi, width=width, include_overlap=include_overlap) for roi in roi_statistics)
 
-    for roi in roi_statistics:
-        # Selects all pixels or excludes overlapping pixels depending on the include_overlap flag. Treats a missing
-        # overlap mask as having no overlapping pixels.
-        if include_overlap or roi.mask.overlap_mask is None:
-            pixel_mask: slice | NDArray[np.bool_] = slice(None)
-        else:
-            pixel_mask = ~roi.mask.overlap_mask
 
-        # Computes flat pixel indices directly via arithmetic instead of np.ravel_multi_index to avoid function-call
-        # overhead and bounds checking. Applies the pixel selection mask in the same step.
-        flat_indices = (roi.mask.y_pixels * width + roi.mask.x_pixels).astype(np.int32)[pixel_mask]
-        weights = roi.mask.pixel_weights[pixel_mask]
+def _build_roi_mask(
+    roi: ROIStatistics,
+    width: int,
+    *,
+    include_overlap: bool,
+) -> tuple[NDArray[np.int32], NDArray[np.float32]]:
+    """Creates the ROI pixel mask and the normalized lambda weight mask for a single ROI.
 
-        # Normalizes the weights to sum to 1.0, creating a probability distribution of each pixel belonging to a
-        # cell ROI.
-        if weights.size > 0:
-            normalized_weights = (weights / weights.sum()).astype(np.float32)
-        else:
-            normalized_weights = np.empty(0, dtype=np.float32)
+    Args:
+        roi: The statistics of the ROI to be processed.
+        width: The width of the imaged area in pixels. Used to compute flat pixel indices.
+        include_overlap: Determines whether to include overlapping ROI pixels in the created ROI mask.
 
-        roi_masks.append((flat_indices, normalized_weights))
+    Returns:
+        The flattened ROI pixel mask and the flattened lambda weight mask for the pixels that make up the ROI mask.
+    """
+    # Selects all pixels or excludes overlapping pixels depending on the include_overlap flag. Treats a missing overlap
+    # mask as having no overlapping pixels.
+    if include_overlap or roi.mask.overlap_mask is None:
+        pixel_mask: slice | NDArray[np.bool_] = slice(None)
+    else:
+        pixel_mask = ~roi.mask.overlap_mask
 
-    return tuple(roi_masks)
+    # Computes flat pixel indices directly via arithmetic instead of np.ravel_multi_index to avoid function-call
+    # overhead and bounds checking. Applies the pixel selection mask in the same step.
+    flat_indices = (roi.mask.y_pixels * width + roi.mask.x_pixels).astype(np.int32)[pixel_mask]
+    weights = roi.mask.pixel_weights[pixel_mask]
+
+    # Normalizes the weights to sum to 1.0, creating a probability distribution of each pixel belonging to a cell ROI.
+    if weights.size > 0:
+        return flat_indices, (weights / weights.sum()).astype(np.float32)
+
+    return flat_indices, np.empty(0, dtype=np.float32)
 
 
 def _create_neuropil_masks(
@@ -136,15 +146,13 @@ def _create_neuropil_masks(
     inner_neuropil_border_radius: int,
     minimum_neuropil_pixels: int,
     cell_probability_percentile: int,
-    *,
-    recompute: bool = False,
 ) -> tuple[NDArray[np.int32], ...]:
     """Creates the neuropil masks for the input ROIs, caching results on each ROIStatistics instance.
 
     Notes:
         Computed neuropil masks are stored as flattened (raveled) int32 pixel-index arrays on each ROI's
-        ``neuropil_mask`` field. When all ROIs already have cached masks and ``recompute`` is False, the cached masks
-        are returned directly, skipping the expensive cell pixel map and iterative expansion computation.
+        ``neuropil_mask`` field. When all ROIs already have cached masks, those masks are returned directly, skipping
+        the expensive cell pixel map and iterative expansion computation.
 
     Args:
         roi_statistics: The ROI statistics for each ROI to be processed. Each ROI's ``neuropil_mask`` field is
@@ -156,22 +164,13 @@ def _create_neuropil_masks(
         minimum_neuropil_pixels: The minimum number of pixels to use for each created neuropil mask.
         cell_probability_percentile: The percentile threshold for labeling a pixel as belonging to the cell ROI region.
             This is used to determine the size of each ROI's cell region around which to form the neuropil mask.
-        recompute: Determines whether to force recomputation of neuropil masks even when cached masks are available.
 
     Returns:
         The flattened neuropil masks for each ROI.
     """
-    # Returns cached masks if all ROIs already have neuropil masks and recomputation is not requested.
-    if not recompute and all(roi.neuropil_mask is not None for roi in roi_statistics):
-        cached_masks: list[NDArray[np.int32]] = []
-        for roi in roi_statistics:
-            # Unreachable due to the all() guard, retained only for type narrowing.
-            if roi.neuropil_mask is None:  # pragma: no cover
-                continue
-            cached_masks.append(roi.neuropil_mask)
-        return tuple(cached_masks)
+    if all(roi.neuropil_mask is not None for roi in roi_statistics):
+        return tuple(roi.neuropil_mask for roi in roi_statistics if roi.neuropil_mask is not None)
 
-    # Creates a binary mask of all cell pixels across all ROIs.
     roi_pixels = _create_roi_pixels(
         roi_statistics=roi_statistics,
         height=height,
@@ -203,7 +202,6 @@ def _create_neuropil_masks(
             valid_pixels = int(np.sum(a=roi_pixels[current_y_pixels, current_x_pixels] == 0))
             neuropil_count = valid_pixels - exclude_count
 
-            # Aborts expansion if the accumulated number of neuropil pixels exceeds the minimum required count.
             if neuropil_count > minimum_neuropil_pixels:
                 break
 
@@ -228,7 +226,7 @@ def _create_neuropil_masks(
 
         # setdiff1d returns ascending unique values, matching the order and the deduplication a dense frame-sized
         # mask followed by flatnonzero produces.
-        flat_indices = np.setdiff1d(included, excluded).astype(np.int32)
+        flat_indices = np.setdiff1d(ar1=included, ar2=excluded).astype(np.int32)
         roi.neuropil_mask = flat_indices
         neuropil_masks.append(flat_indices)
 
@@ -266,7 +264,6 @@ def _create_roi_pixels(
 
     # Selects ROI pixels based on the specified percentile threshold if additional likelihood filtering is enabled.
     if cell_probability_percentile > 0:
-        # Selects pixels as 'ROI' if their likelihood is greater than or equal to the specified percentile filter.
         neighborhood_size = int(median_radius * _RADIUS_TO_NEIGHBORHOOD_SCALE)
         roi_threshold_filter = percentile_filter(
             input=roi_likelihood_map,
@@ -275,7 +272,6 @@ def _create_roi_pixels(
         ).astype(np.float32)
         pixel_mask = (roi_likelihood_map > 0.0) & (roi_likelihood_map >= roi_threshold_filter)
     else:
-        # Selects all pixels with a weight greater than zero.
         pixel_mask = roi_likelihood_map > 0.0
 
     return pixel_mask
