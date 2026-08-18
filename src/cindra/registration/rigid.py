@@ -81,8 +81,8 @@ def compute_phase_correlation_kernel(
 
     Args:
         reference_image: The reference image with shape (height, width).
-        smoothing_sigma: The standard deviation of Gaussian smoothing in pixels. Values <= 0 disable
-            smoothing.
+        smoothing_sigma: The standard deviation of Gaussian smoothing in pixels. Defaults to 0.0. Values <= 0
+            disable smoothing.
 
     Returns:
         The phase correlation kernel with shape (height, width // 2 + 1) from real FFT.
@@ -118,8 +118,10 @@ def compute_rigid_offsets(
         frames: The frame data with shape (num_frames, height, width) after edge tapering.
         reference_kernel: The phase correlation kernel from compute_phase_correlation_kernel.
         maximum_offset_fraction: The maximum allowed offset as a fraction of the minimum spatial dimension. The
-            search window is limited to min(height, width) * maximum_offset_fraction pixels, clamped to at least one
-            pixel, because a fraction that rounds to a zero-pixel radius describes a search window no offset fits in.
+            correlation search radius is min(height, width) * maximum_offset_fraction, rounded to the nearest pixel
+            and then clamped to the [1, min(height, width) // 2] range, because a fraction that rounds to a zero-pixel
+            radius describes a search window no offset fits in and a radius above half the minimum dimension exceeds
+            the wrapped correlation surface the quadrant rearrangement reads.
         temporal_smoothing_sigma: The standard deviation for temporal Gaussian smoothing of correlation
             maps. If 0, no smoothing is applied.
         workers: The number of parallel workers for FFT computation. Use -1 for all available cores.

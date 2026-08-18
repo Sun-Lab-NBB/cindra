@@ -62,7 +62,7 @@ class TestWarpMaskPixels:
         assert new_weights.dtype == np.float32
 
     def test_translation_deformation_shifts_pixels(self) -> None:
-        """Verifies that a uniform translation deformation shifts pixel positions."""
+        """Verifies that a uniform translation deformation returns non-empty warped pixels with float32 weights."""
         height = 128
         width = 128
         mask = _make_roi_mask(centroid=(60, 60), radius=4, frame_width=width)
@@ -83,7 +83,7 @@ class TestForwardDeformMasks:
     """Tests _forward_deform_masks."""
 
     def test_identity_deformation_preserves_mask_count(self) -> None:
-        """Verifies that identity deformation preserves the number of masks and approximate positions."""
+        """Verifies that identity deformation preserves the number of masks and leaves each one with pixels."""
         height = 128
         width = 128
         masks = [

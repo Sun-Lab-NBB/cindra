@@ -307,7 +307,7 @@ class MultiRecordingRegistrationData:
             self.deformed_roi_masks_channel_2 = ROIMask.load_list(file_path=masks_path_channel_2)
 
     def memory_map_arrays(self, output_path: Path) -> None:
-        """Memory-maps registration arrays from individual .npy files in ``r+`` mode.
+        """Memory-maps registration arrays from individual .npy files in read-only ``r`` mode.
 
         This method mirrors load_arrays() but uses memory mapping for .npy files instead of eager loading.
         ROIMask .npz files are still eagerly loaded because NumPy does not support memory mapping for .npz archives.
@@ -548,7 +548,7 @@ class MultiRecordingRuntimeData(YamlConfig):
             self.extraction.load_arrays(output_path=self.output_path)
 
     def memory_map_arrays(self) -> None:
-        """Memory-maps all multi-recording NumPy arrays from disk in ``r+`` mode.
+        """Memory-maps all multi-recording NumPy arrays from disk in read-only ``r`` mode.
 
         This is a convenience method that memory-maps registration, tracking, and extraction arrays.
         CombinedData (single-recording data) is NOT loaded by this method and must be loaded separately by

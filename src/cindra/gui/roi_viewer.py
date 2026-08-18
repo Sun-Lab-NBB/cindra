@@ -507,8 +507,8 @@ class ROIViewer(QMainWindow):
         self._channel_2_button = QPushButton("Channel 2")
         self._channel_2_button.setCheckable(True)
         self._channel_2_button.setToolTip(
-            "Toggle display between channel 1 and channel 2 data. When active, background images, ROI masks, and "
-            "fluorescence traces switch to the channel 2 variants."
+            "Toggle display between channel 1 and channel 2 background images. ROI masks and fluorescence traces "
+            "continue to show the channel 1 data."
         )
         self._channel_2_button.toggled.connect(self._on_channel_2_toggled)
         channel_layout.addWidget(self._channel_2_button)

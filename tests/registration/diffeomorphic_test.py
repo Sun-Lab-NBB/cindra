@@ -66,7 +66,8 @@ class TestComputeDemonsForce:
         generator = np.random.default_rng(seed=77)
         fields = [generator.standard_normal((height, width)).astype(np.float32) for _ in range(6)]
 
-        # Flattens one corner of both gradients so the zero-denominator branch is exercised.
+        # Flattens one corner of both gradients so the zero gradient-magnitude path is covered. The intensity
+        # difference keeps both denominators non-zero there, so the zero-denominator branch stays untaken.
         for index in (1, 2, 4, 5):
             fields[index][:5, :5] = 0.0
 

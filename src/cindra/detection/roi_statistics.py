@@ -29,7 +29,7 @@ def estimate_diameter_from_rois(rois: list[ROIMask], default_diameter: int = 10)
 
     Returns:
         The estimated ROI diameter in pixels, computed as the diameter of a circle with area equal to the median
-        ROI pixel count.
+        ROI pixel count, truncated toward zero and floored at 1 pixel.
     """
     if not rois:
         return default_diameter
@@ -370,7 +370,9 @@ class _ROI:
 
     @property
     def solidity(self) -> float:
-        """Returns the ROI solidity as the ratio of soma pixel count to convex hull area."""
+        """Returns the ROI solidity as the ratio of soma pixel count to convex hull area, substituting a fixed area
+        of 10.0 for ROIs of 10 or fewer pixels and for degenerate hulls.
+        """
         minimum_pixels_for_hull = 10
         default_area = 10.0
 

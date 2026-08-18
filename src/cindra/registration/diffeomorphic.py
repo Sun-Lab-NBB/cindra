@@ -28,8 +28,9 @@ class DiffeomorphicDemonsRegistration:
     to a common mean space.
 
     Args:
-        images: Two or more 2D images to register. Images that do not already use the float32 dtype are converted to
-            float32.
+        images: Two or more 2D images to register. All images must share one (height, width) shape, since the group
+            works at the resolution the first image's pyramid reports. Images that do not already use the float32
+            dtype are converted to float32.
         speed_factor: The relative force of the deformation transform. This is the most important parameter to tune.
             For most cases, a value between 1 and 5 is reasonable.
         scale_sampling: The number of iterations per scale level. Values between 20 and 30 are reasonable, but higher

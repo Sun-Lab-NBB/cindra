@@ -49,10 +49,10 @@ class Classifier:
         classifier_path: The path to a classifier .npz file containing training_labels and feature arrays. The file
             must hold at least _GRID_NODE_COUNT training samples, which is the number of nodes the fitted probability
             grid spans.
-        feature_names: The tuple of feature names to use for classification. Only these features will be loaded from
-            the classifier file and used for model fitting. If None, the default classification feature set
-            (_CLASSIFICATION_FEATURES: normalized_pixel_count, compactness, skewness) is used, restricted to the
-            features actually present in the classifier file.
+        feature_names: The tuple of feature names to use for classification. Only these features are read from the
+            classifier file, and only those among them that are present in it, match the training label count, and
+            carry at least one non-NaN value are used for model fitting. If None, the default classification feature
+            set (_CLASSIFICATION_FEATURES: normalized_pixel_count, compactness, skewness) is used.
 
     Attributes:
         _classifier_path: The path to the loaded classifier file.
@@ -70,8 +70,8 @@ class Classifier:
     Raises:
         FileNotFoundError: If the classifier file does not exist.
         ValueError: If the classifier file is unreadable, holds a column that does not cast to its numeric type, is
-            missing the training labels, holds fewer than _GRID_NODE_COUNT training samples, or contains none of the
-            requested feature columns.
+            missing the training labels, holds fewer than _GRID_NODE_COUNT training samples, or supplies no requested
+            feature column that both matches the training label count and carries at least one non-NaN value.
     """
 
     def __init__(self, classifier_path: Path, feature_names: tuple[str, ...] | None = None) -> None:
@@ -375,7 +375,10 @@ def classify(
         ROI is classified as a cell (probability > threshold) and 0.0 otherwise.
 
     Raises:
-        ValueError: If the input roi_statistics list is empty.
+        FileNotFoundError: If custom_classifier_path is provided but does not name an existing file.
+        ValueError: If the input roi_statistics list is empty, or if the resolved classifier file is unreadable, holds
+            a column that does not cast to its numeric type, is missing the training labels, holds fewer than
+            _GRID_NODE_COUNT training samples, or supplies no usable feature column.
     """
     if not roi_statistics:
         message = (

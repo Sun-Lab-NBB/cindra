@@ -58,7 +58,7 @@ class TestComputePcExtremes:
         assert projections.shape == (frame_count, component_count)
 
     def test_output_dtypes(self) -> None:
-        """Verifies that pc_low and pc_high arrays have float32 dtype."""
+        """Verifies that the pc_low, pc_high, and projections arrays all have float32 dtype."""
         frame_count = 50
         height = 16
         width = 16

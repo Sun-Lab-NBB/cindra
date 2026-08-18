@@ -73,7 +73,8 @@ def detect_plane_rois(context: RuntimeContext, *, workers: int) -> None:
 
     Raises:
         RuntimeError: If the registered binary file path for channel 1 is not set.
-        ValueError: If no ROIs are detected on either channel.
+        ValueError: If no ROIs are detected on either channel, if preclassification rejects every detected ROI on
+            either channel, or if 'workers' is not a positive integer while PCA denoising is enabled.
     """
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()

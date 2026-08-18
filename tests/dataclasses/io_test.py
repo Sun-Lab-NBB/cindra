@@ -207,7 +207,7 @@ def _populate_extraction_data(
     roi_count: int = 3,
     frame_count: int = 50,
 ) -> ExtractionData:
-    """Creates an ExtractionData instance with all arrays populated."""
+    """Creates an ExtractionData instance with every channel 1 array and both colocalization arrays populated."""
     generator = np.random.default_rng(seed=99)
     roi_statistics = [_make_roi_statistics(pixel_count=5 + index) for index in range(roi_count)]
     return ExtractionData(

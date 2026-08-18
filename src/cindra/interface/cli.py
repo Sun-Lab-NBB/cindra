@@ -56,7 +56,10 @@ def cindra_mcp(transport: Literal["stdio", "sse", "streamable-http"]) -> None:
     type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
     required=False,
     default=None,
-    help="The path to the OpenMP runtime to link. Omit to search the Homebrew library directories for it.",
+    help=(
+        "The path to the OpenMP runtime to link. Omit to search the macOS package manager directories, the active "
+        "conda environment, and the installed Python distributions for one."
+    ),
 )
 @click.option(
     "-t",
@@ -184,9 +187,9 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     default=None,
     help=(
         "[Single-recording] The number of parallel workers to allocate to the binarization step. When this option is "
-        "omitted, the step receives its measured default allocation of 3 workers, which is the point where the "
-        "allocated cores become the TIFF image decode threads. Setting this to -1 uses every available core, minus "
-        "the cores reserved for system use."
+        "omitted, the step receives its measured default allocation of 3 workers. The allocated cores become the "
+        "TIFF image decode threads, capped at the TIFF_DECODE_CEILING of 4. Setting this to -1 uses every available "
+        "core, minus the cores reserved for system use."
     ),
 )
 @click.option(
@@ -223,9 +226,9 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     default=None,
     help=(
         "[Multi-recording] The number of parallel workers to allocate to the discovery step. When this option is "
-        "omitted, the step receives its measured default allocation of 30 workers, which is the saturating allocation "
-        "the step is admitted at. Setting this to -1 uses every available core, minus the cores reserved for system "
-        "use."
+        "omitted, the step receives its measured default allocation of 2 workers, which covers the deformation pool "
+        "alone, because the stage has no parallel critical path. Setting this to -1 uses every available core, minus "
+        "the cores reserved for system use."
     ),
 )
 @click.option(
@@ -236,9 +239,9 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     default=None,
     help=(
         "[Multi-recording] The number of parallel workers to allocate to each per-recording extraction step. When this "
-        "option is omitted, the step receives its measured default allocation of 16 workers, which is the point where "
-        "the step stops shortening. Setting this to -1 uses every available core, minus the cores reserved for system "
-        "use."
+        "option is omitted, the step receives its measured default allocation of 16 workers, which leaves room for "
+        "the six to eight datasets a compute node extracts at once while still reaching a sevenfold single-job "
+        "speedup. Setting this to -1 uses every available core, minus the cores reserved for system use."
     ),
 )
 @click.option(

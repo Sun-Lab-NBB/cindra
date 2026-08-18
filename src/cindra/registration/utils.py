@@ -277,7 +277,7 @@ def compute_upsampling_kernel(padding: int, subpixel: int = 10) -> tuple[NDArray
 
     Args:
         padding: The half-width of the correlation peak region to upsample, in pixels.
-        subpixel: The subpixel resolution factor (e.g., 10 means 0.1 pixel precision).
+        subpixel: The subpixel resolution factor (e.g., 10 means 0.1 pixel precision). Defaults to 10.
 
     Returns:
         A tuple of (kernel_matrix, upsampled_point_count) where kernel_matrix is the upsampling transformation
@@ -326,8 +326,8 @@ def _compute_gaussian_rbf_weights(
             the array length.
         target_coordinates: The 1D array of target coordinates. The 2D target grid has m² points where m is
             the array length.
-        sigma: The Gaussian kernel bandwidth controlling interpolation smoothness. Smaller values produce
-            sharper interpolation, larger values produce smoother results.
+        sigma: The Gaussian kernel bandwidth controlling interpolation smoothness. Defaults to 0.85. Smaller values
+            produce sharper interpolation, larger values produce smoother results.
 
     Returns:
         The Gaussian RBF weight matrix with shape (n², m²). Float64 precision is used because this matrix

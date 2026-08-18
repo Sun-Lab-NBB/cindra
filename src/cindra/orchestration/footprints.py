@@ -314,7 +314,8 @@ def estimate_single_recording_job_memory_mb(
         specifier: The job's tracker specifier, which names a plane for the per-plane stages and is empty otherwise.
         output_root: The output root the recording was configured with.
         configuration: The recording's processing configuration.
-        data_path: The raw imaging directory, consulted when the recording carries no output yet.
+        data_path: The raw imaging directory holding the recording's source files, whose header every estimate
+            reads.
         planned_roi_count: The regions to plan for, counting every plane of the recording together. Use None to
             accept the ceiling the detection iteration bound provides. Must be a positive integer when supplied.
 
@@ -322,8 +323,8 @@ def estimate_single_recording_job_memory_mb(
         The memory the job occupies in megabytes.
 
     Raises:
-        FileNotFoundError: If the recording carries neither pipeline output nor readable raw imaging data, in which
-            case no stage of it can run.
+        FileNotFoundError: If the recording's raw imaging directory holds no readable source file, in which case no
+            stage of it can run.
         ValueError: If planned_roi_count is supplied and is not a positive integer, or if a per-plane job's specifier
             names an imaging plane the recording does not hold.
     """
@@ -452,7 +453,8 @@ def size_single_recording_job(
         specifier: The job's tracker specifier, which names a plane for the per-plane stages and is empty otherwise.
         output_root: The output root the recording was configured with.
         configuration: The recording's processing configuration.
-        data_path: The raw imaging directory, consulted when the recording carries no output yet.
+        data_path: The raw imaging directory holding the recording's source files, whose header every estimate
+            reads.
         planned_roi_count: The regions to plan for, counting every plane of the recording together. Use None to
             accept the ceiling the detection iteration bound provides. Must be a positive integer when supplied.
 
@@ -460,8 +462,8 @@ def size_single_recording_job(
         The cores the job occupies and the memory it holds.
 
     Raises:
-        FileNotFoundError: If the recording carries neither pipeline output nor readable raw imaging data, in which
-            case no stage of it can run.
+        FileNotFoundError: If the recording's raw imaging directory holds no readable source file, in which case no
+            stage of it can run.
         ValueError: If planned_roi_count is supplied and is not a positive integer, or if a per-plane job's specifier
             names an imaging plane the recording does not hold.
     """

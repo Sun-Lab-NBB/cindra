@@ -179,7 +179,8 @@ class ViewBox(pg.ViewBox):
         border: The panel border frame pen specification forwarded to ``mkPen``.
         invert_y: Determines whether to invert the Y axis.
         enable_menu: Determines whether the context menu is enabled.
-        name: The unique name for the managed panel used by pyqtgraph's view-linking system.
+        name: The name stored on the managed panel. It is set directly rather than through pyqtgraph's register(),
+            so the panel does not join the named-view list used for axis linking.
 
     Attributes:
         _click_handler: Callback installed by the orchestrator for click events.

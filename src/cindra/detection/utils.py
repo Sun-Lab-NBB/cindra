@@ -219,7 +219,8 @@ def compute_registration_blocks(
         A tuple of (y_blocks, x_blocks, block_counts, actual_block_size, smoothing_kernel). The
         y_blocks and x_blocks are lists of 2-element arrays specifying the start and end indices for
         each block. The block_counts tuple gives (y_count, x_count). The actual_block_size tuple gives
-        the final block dimensions. The smoothing_kernel is used for interpolating block offsets.
+        the final block dimensions. The smoothing_kernel is used for SNR-based adaptive smoothing of correlation
+        peaks across neighboring blocks.
     """
     # Computes block dimensions and counts for each axis. If the requested block size exceeds the image
     # dimension, uses the full dimension as a single block. Otherwise, the 1.5x multiplier produces

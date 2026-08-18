@@ -110,8 +110,8 @@ class TestExtractNeuropilFluorescence:
         pixel_count = 50
         data = generator.standard_normal((frame_count, pixel_count)).astype(np.float32)
 
-        # Three neuropil masks of 4, 9, and 6 pixels. The sizes are deliberately not powers of two and differ per
-        # ROI, so dropping the per-ROI offset or reusing one pixel count for every ROI changes the averages.
+        # Three neuropil masks of 4, 9, and 6 pixels. The sizes deliberately differ per ROI, so dropping the per-ROI
+        # offset or reusing one pixel count for every ROI changes the averages.
         masks = (
             np.array([1, 4, 8, 11], dtype=np.int32),
             np.array([13, 15, 16, 19, 22, 27, 31, 36, 41], dtype=np.int32),
@@ -136,7 +136,7 @@ class TestExtractNeuropilFluorescence:
                 expected[cell_index, frame_index] = np.mean(data[frame_index, masks[cell_index]])
 
         # The kernel accumulates sequentially and multiplies by a reciprocal, while np.mean sums pairwise and
-        # divides, so the two agree to about 1.5e-05 relative at these mask sizes.
+        # divides, so the two agree to about 1.3e-07 relative at these mask sizes.
         np.testing.assert_allclose(result, expected, rtol=1e-4)
         assert result is output_prototype
 

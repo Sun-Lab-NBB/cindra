@@ -100,6 +100,8 @@ def extract_multi_recording_fluorescence(
         ValueError: If the target recording_id does not match any resolved recording context.
         RuntimeError: If backward-transformed ROI statistics are not available, indicating the discovery phase has
             not completed.
+        FileNotFoundError: If the recording's multi_recording_runtime_data.yaml was not written by an earlier
+            bootstrap step, or if no combined_metadata.npz file is found in a recording directory.
     """
     # Reloads only the target recording's context from disk. The target_recording_id parameter avoids loading
     # CombinedData and runtime arrays for every other recording in the dataset. The outer pipeline entry

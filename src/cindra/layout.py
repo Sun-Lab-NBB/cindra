@@ -146,9 +146,11 @@ class DetectionImages(StrEnum):
     """Defines the names of the summary images the detection stage writes into its own subdirectory."""
 
     MEAN_IMAGE = "mean_image.npy"
-    """The mean of the temporally binned movie, which excludes the frames registration marked bad."""
+    """The mean of the temporally binned movie, which excludes the frames registration marked bad, zero outside the
+    valid registration crop."""
     ENHANCED_MEAN_IMAGE = "enhanced_mean_image.npy"
-    """The mean image filtered at the detected ROI scale."""
+    """The mean image filtered at the detected ROI scale, filled with the enhanced interior's minimum value outside the
+    valid registration crop."""
     MAXIMUM_PROJECTION = "maximum_projection.npy"
     """The maximum of every pixel across the temporally binned and high-pass filtered movie, zero outside the valid
     registration crop."""

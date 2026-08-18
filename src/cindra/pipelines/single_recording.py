@@ -451,8 +451,9 @@ def _validate_binary_sizes(contexts: list[RuntimeContext]) -> None:
         frame_bytes = io_data.frame_height * io_data.frame_width * _BINARY_ITEM_SIZE
 
         # A bootstrapped plane records a zero frame geometry until its conversion saves the measured values, and the
-        # conversion clears the binarization marker before that save. A run interrupted between the two therefore
-        # leaves a plane holding no geometry to size its binary against, which this skips rather than misreports.
+        # conversion persists that save before it clears the binarization marker. A run interrupted before the save
+        # therefore leaves a plane holding no geometry to size its binary against, which this skips rather than
+        # misreports.
         if frame_bytes <= 0:
             continue
 

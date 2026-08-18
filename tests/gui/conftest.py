@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 
 # Selects the headless Qt platform plugin. Qt resolves the plugin when the GUI library initializes, so this
-# assignment has to run before the PySide6 imports below, which is why they carry the E402 suppression.
+# assignment has to run before the PySide6 imports below.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from typing import TYPE_CHECKING
@@ -38,7 +38,8 @@ _DATASET_RECORDING_IDS: tuple[str, ...] = ("a", "b", "c")
 
 
 class _StubSingleRecording:
-    """Stands in for SingleRecordingData, exposing the attributes the ROI and tracking viewers read."""
+    """Stands in for SingleRecordingData, exposing the attributes the ROI and tracking viewers read while they
+    load and render a recording."""
 
     def __init__(
         self,

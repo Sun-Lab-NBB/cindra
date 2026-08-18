@@ -228,7 +228,7 @@ class PCViewer(QMainWindow):
         }
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802
-        """Handles keyboard navigation for PC stepping and animation control.
+        """Handles keyboard navigation for PC stepping, imaging plane cycling, and animation control.
 
         Notes:
             Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
