@@ -545,7 +545,7 @@ def _check_split_components(
     best_component = np.argmax(component_variances)
     residual_energy = np.dot(pixel_frames.ravel(), pixel_frames.ravel())
     variance_ratio = (total_energy - residual_energy) / single_component_variance
-    return variance_ratio, (
+    return float(variance_ratio), (
         component_masks[best_component],
         projections[best_component],
         component_frames[best_component],
@@ -751,7 +751,7 @@ def _extend_iteratively(
         # a fraction of the peak to discard weakly correlated boundary pixels.
         flat_indices = y_pixels * width + x_pixels
         weights = frames[np.ix_(active_frame_indices, flat_indices)].mean(axis=0)
-        active_mask = weights > max(0, weights.max() * _MINIMUM_WEIGHT_FRACTION)
+        active_mask = weights > max(np.float32(0), weights.max() * _MINIMUM_WEIGHT_FRACTION)
         active_count = active_mask.sum()
         if active_count == 0:
             break

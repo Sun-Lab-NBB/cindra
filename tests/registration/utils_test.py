@@ -12,7 +12,6 @@ from cindra.registration.utils import (
     apply_mask,
     combine_rigid_offsets,
     compute_reference_fft,
-    mean_centered_meshgrid,
     apply_phase_correlation,
     apply_spatial_high_pass,
     apply_spatial_smoothing,
@@ -210,6 +209,11 @@ class TestComputeGaussianFrequencyFilter:
         """Verifies the DC component is approximately 1.0 (normalized Gaussian)."""
         result = compute_gaussian_frequency_filter(sigma=2.0, height=32, width=32)
         np.testing.assert_allclose(np.abs(result[0, 0]), 1.0, atol=1e-4)
+
+    def test_carries_no_phase_on_even_dimensions(self) -> None:
+        """Verifies the filter is zero-phase, so smoothing leaves the correlation peaks it acts on where they are."""
+        result = compute_gaussian_frequency_filter(sigma=1.15, height=48, width=38)
+        np.testing.assert_allclose(np.imag(result), 0.0, atol=1e-6)
 
     def test_cache_returns_same_object(self) -> None:
         """Verifies the lru_cache returns the same object for identical parameters."""
@@ -438,28 +442,6 @@ class TestComputeUpsamplingKernel:
         first_result = compute_upsampling_kernel(padding=4, subpixel=10)
         second_result = compute_upsampling_kernel(padding=4, subpixel=10)
         assert first_result[0] is second_result[0]
-
-
-class TestMeanCenteredMeshgridRegistration:
-    """Tests mean_centered_meshgrid in registration/utils."""
-
-    def test_shape(self) -> None:
-        """Verifies meshgrid output shapes match input dimensions."""
-        column_distance, row_distance = mean_centered_meshgrid(height=10, width=20)
-        assert column_distance.shape == (10, 20)
-        assert row_distance.shape == (10, 20)
-
-    def test_center_zero_for_odd_dimensions(self) -> None:
-        """Verifies center values are zero for odd dimensions."""
-        column_distance, row_distance = mean_centered_meshgrid(height=11, width=11)
-        np.testing.assert_allclose(row_distance[5, 5], 0.0)
-        np.testing.assert_allclose(column_distance[5, 5], 0.0)
-
-    def test_dtype(self) -> None:
-        """Verifies the meshgrid dtype is float32."""
-        column_distance, row_distance = mean_centered_meshgrid(height=8, width=8)
-        assert column_distance.dtype == np.float32
-        assert row_distance.dtype == np.float32
 
 
 class TestComputeGaussianRbfWeights:

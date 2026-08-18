@@ -147,7 +147,7 @@ def compute_spatial_taper_mask(sigma: float, height: int, width: int) -> NDArray
         The multiplicative taper mask with shape (height, width), values in range [0, 1].
     """
     # Creates grids of absolute distances from center for each axis.
-    column_distances, row_distances = mean_centered_meshgrid(height=height, width=width)
+    column_distances, row_distances = _mean_centered_meshgrid(height=height, width=width)
 
     # Computes where taper begins: 2*sigma pixels inward from the edge. This ensures the sigmoid reaches
     # ~0.12 at the edge (when distance equals half-width).
@@ -261,12 +261,12 @@ def compute_registration_blocks(
     return y_blocks, x_blocks, (y_block_count, x_block_count), actual_block_size, smoothing_kernel
 
 
-def mean_centered_meshgrid(height: int, width: int) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
+def _mean_centered_meshgrid(height: int, width: int) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
     """Creates a mean-centered distance meshgrid of the specified dimensions.
 
     Notes:
         Each coordinate value represents the absolute distance from the center of that axis. Used for creating spatial
-        taper masks and Gaussian frequency filters.
+        taper masks.
 
     Args:
         height: The height of the frames or images to generate the meshgrid for, in pixels.
