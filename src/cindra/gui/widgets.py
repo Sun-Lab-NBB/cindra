@@ -21,13 +21,13 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
     from pyqtgraph.GraphicsScene.mouseEvents import MouseClickEvent  # type: ignore[import-untyped]
 
-type _ClickHandler = Callable[[int, int, bool, bool], bool]
+type ClickHandler = Callable[[int, int, bool, bool], bool]
 """The callback type for click events dispatched by a ViewBox to the orchestrator.
 
 Signature: (click_x, click_y, is_right_button, is_multi_select) -> handled.
 """
 
-type _ZoomHandler = Callable[[], None]
+type ZoomHandler = Callable[[], None]
 """The callback type for double-click zoom-to-fit events dispatched by a ViewBox to the orchestrator."""
 
 
@@ -206,10 +206,10 @@ class ViewBox(pg.ViewBox):
         self.state["yInverted"] = invert_y
 
         # Callbacks installed by the orchestrator after construction.
-        self._click_handler: _ClickHandler | None = None
-        self._zoom_handler: _ZoomHandler | None = None
+        self._click_handler: ClickHandler | None = None
+        self._zoom_handler: ZoomHandler | None = None
 
-    def set_click_handler(self, handler: _ClickHandler) -> None:
+    def set_click_handler(self, handler: ClickHandler) -> None:
         """Configures the instance to use the provided click handler when the user clicks.
 
         Args:
@@ -217,7 +217,7 @@ class ViewBox(pg.ViewBox):
         """
         self._click_handler = handler
 
-    def set_zoom_handler(self, handler: _ZoomHandler) -> None:
+    def set_zoom_handler(self, handler: ZoomHandler) -> None:
         """Configures the instance to use the provided zoom handler on double-click zoom-to-fit.
 
         Args:

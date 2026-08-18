@@ -8,10 +8,10 @@ import numpy as np
 import pytest
 from ataraxis_base_utilities import error_format
 
-from cindra.io import (
+from cindra.io.binary import (
     create_binarization_marker,
-    resolve_binarization_marker_path,
-    resolve_registration_marker_path,
+    _resolve_binarization_marker_path,
+    _resolve_registration_marker_path,
 )
 from cindra.registration import register_plane
 from cindra.registration.rigid import translate_frame
@@ -766,7 +766,7 @@ class TestRegisterPlane:
         register_plane(context=context, workers=1)
 
         assert binary_path.exists()
-        assert not resolve_registration_marker_path(binary_path=binary_path).exists()
+        assert not _resolve_registration_marker_path(binary_path=binary_path).exists()
 
     def test_interrupted_registration_leaves_a_marker(
         self,
@@ -790,7 +790,7 @@ class TestRegisterPlane:
 
         # The binary now holds corrected frames up to the failure point and raw frames after it, which only the
         # marker records.
-        assert resolve_registration_marker_path(binary_path=binary_path).exists()
+        assert _resolve_registration_marker_path(binary_path=binary_path).exists()
 
     def test_marker_blocks_a_later_registration(
         self,
@@ -815,7 +815,7 @@ class TestRegisterPlane:
         monkeypatch.setattr("cindra.registration.register._register_frames_batch", _register_frames_batch)
 
         binary_path = context.runtime.io.registered_binary_path
-        marker_path = resolve_registration_marker_path(binary_path=binary_path)
+        marker_path = _resolve_registration_marker_path(binary_path=binary_path)
         expected_message = (
             f"Unable to register plane {context.runtime.io.plane_index}. A previous write of the binary file "
             f"'{binary_path}' was interrupted, so the file holds finished frames up to an unknown point and "
@@ -839,7 +839,7 @@ class TestRegisterPlane:
         create_binarization_marker(binary_path=context.runtime.io.registered_binary_path)
 
         binary_path = context.runtime.io.registered_binary_path
-        marker_path = resolve_binarization_marker_path(binary_path=binary_path)
+        marker_path = _resolve_binarization_marker_path(binary_path=binary_path)
         expected_message = (
             f"Unable to register plane {context.runtime.io.plane_index}. A previous write of the binary file "
             f"'{binary_path}' was interrupted, so the file holds finished frames up to an unknown point and "
@@ -872,8 +872,8 @@ class TestRegisterPlane:
 
         # Channel 1 now holds motion-corrected frames while channel 2 is still raw, and only the markers record that
         # the two binaries disagree about whether motion has been removed.
-        assert resolve_registration_marker_path(binary_path=binary_path).exists()
-        assert resolve_registration_marker_path(binary_path=binary_path_channel_2).exists()
+        assert _resolve_registration_marker_path(binary_path=binary_path).exists()
+        assert _resolve_registration_marker_path(binary_path=binary_path_channel_2).exists()
 
     def test_interrupted_second_channel_blocks_a_later_registration(
         self,
@@ -898,7 +898,7 @@ class TestRegisterPlane:
         monkeypatch.setattr("cindra.registration.register._register_secondary_channel", _register_secondary_channel)
 
         binary_path = context.runtime.io.registered_binary_path
-        marker_path = resolve_registration_marker_path(binary_path=binary_path)
+        marker_path = _resolve_registration_marker_path(binary_path=binary_path)
         expected_message = (
             f"Unable to register plane {context.runtime.io.plane_index}. A previous write of the binary file "
             f"'{binary_path}' was interrupted, so the file holds finished frames up to an unknown point and "

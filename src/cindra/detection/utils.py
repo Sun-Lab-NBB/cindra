@@ -164,39 +164,6 @@ def compute_spatial_taper_mask(sigma: float, height: int, width: int) -> NDArray
     return taper_mask
 
 
-@lru_cache(maxsize=5)
-def compute_block_smoothing_kernel(x_block_count: int, y_block_count: int) -> NDArray[np.float32]:
-    """Computes a normalized Gaussian kernel matrix for smoothing nonrigid block offsets.
-
-    Notes:
-        Creates a kernel that weights neighboring blocks based on their spatial distance, used to enforce smoothness
-        constraints in nonrigid registration. Results are cached since block counts don't change during a recording.
-
-    Args:
-        x_block_count: Number of blocks along the x-axis.
-        y_block_count: Number of blocks along the y-axis.
-
-    Returns:
-        The column-normalized Gaussian kernel matrix with shape (num_blocks, num_blocks).
-    """
-    # Creates 2D coordinate grids from block indices.
-    grid_y, grid_x = np.meshgrid(
-        np.arange(x_block_count, dtype=np.float32),
-        np.arange(y_block_count, dtype=np.float32),
-    )
-
-    # Reshapes to row vectors for pairwise distance computation via broadcasting.
-    grid_y = grid_y.reshape(1, -1)
-    grid_x = grid_x.reshape(1, -1)
-
-    # Computes pairwise Gaussian weights based on squared Euclidean distance.
-    kernel_matrix = np.exp(-((grid_y - grid_y.T) ** 2 + (grid_x - grid_x.T) ** 2), dtype=np.float32)
-
-    # Normalizes each column to sum to 1 for weighted averaging.
-    kernel_matrix /= kernel_matrix.sum(axis=0)
-    return kernel_matrix
-
-
 def compute_registration_blocks(
     height: int,
     width: int,
@@ -254,7 +221,7 @@ def compute_registration_blocks(
     ]
 
     # Computes the smoothing kernel used for SNR-based adaptive smoothing during offset estimation.
-    smoothing_kernel = compute_block_smoothing_kernel(
+    smoothing_kernel = _compute_block_smoothing_kernel(
         x_block_count=x_block_count,
         y_block_count=y_block_count,
     ).T
@@ -332,3 +299,36 @@ def _apply_rolling_mean_high_pass(frames: NDArray[np.float32], kernel_size: int)
     trailing_frames = num_frames - batched_windows * kernel_size
     if trailing_frames > 0:
         frames[-trailing_frames:] -= frames[-trailing_frames:].mean(axis=0)
+
+
+@lru_cache(maxsize=5)
+def _compute_block_smoothing_kernel(x_block_count: int, y_block_count: int) -> NDArray[np.float32]:
+    """Computes a normalized Gaussian kernel matrix for smoothing nonrigid block offsets.
+
+    Notes:
+        Creates a kernel that weights neighboring blocks based on their spatial distance, used to enforce smoothness
+        constraints in nonrigid registration. Results are cached since block counts don't change during a recording.
+
+    Args:
+        x_block_count: Number of blocks along the x-axis.
+        y_block_count: Number of blocks along the y-axis.
+
+    Returns:
+        The column-normalized Gaussian kernel matrix with shape (num_blocks, num_blocks).
+    """
+    # Creates 2D coordinate grids from block indices.
+    grid_y, grid_x = np.meshgrid(
+        np.arange(x_block_count, dtype=np.float32),
+        np.arange(y_block_count, dtype=np.float32),
+    )
+
+    # Reshapes to row vectors for pairwise distance computation via broadcasting.
+    grid_y = grid_y.reshape(1, -1)
+    grid_x = grid_x.reshape(1, -1)
+
+    # Computes pairwise Gaussian weights based on squared Euclidean distance.
+    kernel_matrix = np.exp(-((grid_y - grid_y.T) ** 2 + (grid_x - grid_x.T) ** 2), dtype=np.float32)
+
+    # Normalizes each column to sum to 1 for weighted averaging.
+    kernel_matrix /= kernel_matrix.sum(axis=0)
+    return kernel_matrix

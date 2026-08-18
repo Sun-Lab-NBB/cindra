@@ -83,7 +83,7 @@ CHANNEL_1_BINARY_FILENAME: str = "channel_1_data.bin"
 CHANNEL_2_BINARY_FILENAME: str = "channel_2_data.bin"
 """The name of the binary holding the second channel frames of one imaging plane."""
 
-BINARIZATION_MARKER_SUFFIX: str = ".binarizing"
+_BINARIZATION_MARKER_SUFFIX: str = ".binarizing"
 """The suffix appended to a plane binary's name while the binarization stage fills that binary with converted frames.
 
 Notes:
@@ -94,7 +94,7 @@ Notes:
     status spells it.
 """
 
-REGISTRATION_MARKER_SUFFIX: str = ".registering"
+_REGISTRATION_MARKER_SUFFIX: str = ".registering"
 """The suffix appended to a plane binary's name while the registration stage rewrites that binary in place.
 
 Notes:
@@ -105,7 +105,7 @@ Notes:
     way the reported job status spells it.
 """
 
-CHANNEL_2_ARRAY_SUFFIX: str = "_channel_2"
+_CHANNEL_2_ARRAY_SUFFIX: str = "_channel_2"
 """The suffix distinguishing the second channel's copy of a result array from the functional channel's copy."""
 
 
@@ -263,7 +263,7 @@ def resolve_channel_2_name(name: str) -> str:
         The name of the second channel's copy, carrying the channel suffix before the extension.
     """
     stem, _, extension = name.rpartition(".")
-    return f"{stem}{CHANNEL_2_ARRAY_SUFFIX}.{extension}"
+    return f"{stem}{_CHANNEL_2_ARRAY_SUFFIX}.{extension}"
 
 
 def resolve_array_name(array: PipelineArray, *, second_channel: bool = False) -> str:
@@ -308,7 +308,7 @@ def resolve_binarization_marker_name(binary_name: str) -> str:
     Returns:
         The name of the marker file guarding the conversion.
     """
-    return f"{binary_name}{BINARIZATION_MARKER_SUFFIX}"
+    return f"{binary_name}{_BINARIZATION_MARKER_SUFFIX}"
 
 
 def resolve_registration_marker_name(binary_name: str) -> str:
@@ -320,7 +320,7 @@ def resolve_registration_marker_name(binary_name: str) -> str:
     Returns:
         The name of the marker file guarding the rewrite.
     """
-    return f"{binary_name}{REGISTRATION_MARKER_SUFFIX}"
+    return f"{binary_name}{_REGISTRATION_MARKER_SUFFIX}"
 
 
 def resolve_plane_specifier(plane_index: int) -> str:

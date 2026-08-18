@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from cindra.io.combine import compute_plane_offsets
+from cindra.io.combine import _compute_plane_offsets
 from cindra.dataclasses import (
     RuntimeContext,
     AcquisitionParameters,
@@ -43,13 +43,13 @@ def _make_context(
 
 
 class TestComputePlaneOffsets:
-    """Tests compute_plane_offsets."""
+    """Tests _compute_plane_offsets."""
 
     def test_single_plane_returns_zero_offsets(self) -> None:
         """Verifies that a single-plane recording produces zero displacements."""
         contexts = [_make_context(frame_height=64, frame_width=64)]
 
-        y_displacement, x_displacement = compute_plane_offsets(plane_contexts=contexts)
+        y_displacement, x_displacement = _compute_plane_offsets(plane_contexts=contexts)
 
         assert y_displacement.shape == (1,)
         assert x_displacement.shape == (1,)
@@ -62,7 +62,7 @@ class TestComputePlaneOffsets:
         width = 64
         contexts = [_make_context(frame_height=height, frame_width=width) for _ in range(4)]
 
-        y_displacement, x_displacement = compute_plane_offsets(plane_contexts=contexts)
+        y_displacement, x_displacement = _compute_plane_offsets(plane_contexts=contexts)
 
         assert y_displacement.shape == (4,)
         assert x_displacement.shape == (4,)
@@ -81,7 +81,7 @@ class TestComputePlaneOffsets:
         width = 32
         contexts = [_make_context(frame_height=height, frame_width=width) for _ in range(2)]
 
-        y_displacement, x_displacement = compute_plane_offsets(plane_contexts=contexts)
+        y_displacement, x_displacement = _compute_plane_offsets(plane_contexts=contexts)
 
         assert y_displacement.shape == (2,)
         assert x_displacement.shape == (2,)
@@ -99,7 +99,7 @@ class TestComputePlaneOffsets:
             _make_context(frame_height=32, frame_width=32, mroi_y_offset=0, mroi_x_offset=200),
         ]
 
-        y_displacement, x_displacement = compute_plane_offsets(plane_contexts=contexts)
+        y_displacement, x_displacement = _compute_plane_offsets(plane_contexts=contexts)
 
         assert y_displacement.shape == (3,)
         assert x_displacement.shape == (3,)
@@ -117,7 +117,7 @@ class TestComputePlaneOffsets:
             _make_context(frame_height=32, frame_width=32, mroi_y_offset=0, mroi_x_offset=50),
         ]
 
-        y_displacement, x_displacement = compute_plane_offsets(plane_contexts=contexts)
+        y_displacement, x_displacement = _compute_plane_offsets(plane_contexts=contexts)
 
         assert y_displacement.shape == (4,)
         assert x_displacement.shape == (4,)
@@ -140,7 +140,7 @@ class TestComputePlaneOffsets:
             for x_offset in (0, 0, 50, 50, 100, 100)
         ]
 
-        y_displacement, x_displacement = compute_plane_offsets(plane_contexts=contexts)
+        y_displacement, x_displacement = _compute_plane_offsets(plane_contexts=contexts)
 
         # The tile bounding box spans 132 pixels in x, so a single tile column fits the six planes into two rows.
         np.testing.assert_array_equal(x_displacement, [0, 0, 50, 50, 100, 100])
@@ -157,7 +157,7 @@ class TestComputePlaneOffsets:
             for x_offset in (0, 0, 0, 50, 50, 50)
         ]
 
-        y_displacement, x_displacement = compute_plane_offsets(plane_contexts=contexts)
+        y_displacement, x_displacement = _compute_plane_offsets(plane_contexts=contexts)
 
         # The tile bounding box spans 82 pixels in x and the grid holds two tile columns, so the third z-plane wraps
         # onto the second tile row while the second z-plane shifts one tile width to the right.
@@ -171,7 +171,7 @@ class TestComputePlaneOffsets:
         """Verifies that a single-plane MROI recording keeps its base MROI offsets."""
         contexts = [_make_context(frame_height=32, frame_width=32, mroi_y_offset=10, mroi_x_offset=20)]
 
-        y_displacement, x_displacement = compute_plane_offsets(plane_contexts=contexts)
+        y_displacement, x_displacement = _compute_plane_offsets(plane_contexts=contexts)
 
         # A single plane holds as many unique MROI positions as it holds planes, so the two-level tiling is skipped.
         np.testing.assert_array_equal(y_displacement, [10])
@@ -181,7 +181,7 @@ class TestComputePlaneOffsets:
         """Verifies that a single-ROI recording with multiple z-planes tiles its planes into a square grid."""
         contexts = [_make_context(frame_height=32, frame_width=32, mroi_y_offset=0, mroi_x_offset=0) for _ in range(4)]
 
-        y_displacement, x_displacement = compute_plane_offsets(plane_contexts=contexts)
+        y_displacement, x_displacement = _compute_plane_offsets(plane_contexts=contexts)
 
         # With one ROI position, every virtual plane index is also its z-plane index, so the four planes fill a 2x2
         # grid of tiles.

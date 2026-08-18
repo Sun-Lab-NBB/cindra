@@ -276,21 +276,19 @@ outputs.
   `registration/register.py` limit to the job's `workers`, and `detection/denoise.py` limits to 1 because its own block
   pool already spends the budget. The BLAS width these set is a property of the process rather than of the thread that
   asked for it, which is why the engine gives each job its own process.
-- **Binary write integrity**: Binarization fills a plane binary sized to its full frame count, and registration
-  rewrites that binary in place. Each phase guards its own write with its own marker, `<binary>.binarizing` and
+- **Binary write integrity**: Binarization fills a plane binary sized to its full frame count, and registration rewrites
+  that binary in place. Each phase guards its own write with its own marker, `<binary>.binarizing` and
   `<binary>.registering`, whose suffixes match the `binarizing` and `registering` job statuses the interface reports.
-  Both markers mean the same thing to the pipeline, so the names serve the user who finds one on disk. `cindra.io`
-  exports a create, clear, and path helper per phase (`create_binarization_marker`, `clear_binarization_marker`,
-  `resolve_binarization_marker_path`, `create_registration_marker`, `clear_registration_marker`,
-  `resolve_registration_marker_path`) alongside `resolve_active_binary_marker`, the one question every reader asks,
-  which returns whichever marker sits beside a binary or None. `register_plane` refuses to run while either marker
-  exists, and `binarize_recording` refuses a marked binary, a binary whose size disagrees with its plane's recorded
-  frame geometry, and a two-channel plane holding no second channel binary, naming `repeat_binarization` as the remedy
-  in each message. The conversion drops the registration marker of the binary it unlinks, because that marker
-  describes a file that no longer exists.
-  `binarize_recording` resolves the conversion plan (`resolve_tiff_conversion_plan`) before it clears the outputs
-  derived from the previous binaries, so a conversion that fails its input validation leaves the recording's results
-  in place.
+  Both markers mean the same thing to the pipeline, so the names serve the user who finds one on disk. `io/binary.py`
+  defines a create and clear helper per phase over a private path resolver, and `cindra.io` exports the registration
+  pair alongside `resolve_active_binary_marker`, the one question every reader asks, which returns whichever marker sits
+  beside a binary or None. The binarization pair stays inside `cindra.io`, whose `tiff.py` is its only caller.
+  `register_plane` refuses to run while either marker exists, and `binarize_recording` refuses a marked binary, a binary
+  whose size disagrees with its plane's recorded frame geometry, and a two-channel plane holding no second channel
+  binary, naming `repeat_binarization` as the remedy in each message. The conversion drops the registration marker of
+  the binary it unlinks, because that marker describes a file that no longer exists. `binarize_recording` resolves the
+  conversion plan (`resolve_tiff_conversion_plan`) before it clears the outputs derived from the previous binaries, so a
+  conversion that fails its input validation leaves the recording's results in place.
 - **Memory efficiency**: Pre-allocates arrays with `np.empty` when overwritten immediately. Uses flattened mask arrays
   with offset indices to reduce per-ROI allocations. Memory maps registration arrays on demand via
   `memory_map_arrays()`. Results tools use lightweight NumPy/YAML reads for targeted queries without full data loading.

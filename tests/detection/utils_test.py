@@ -12,7 +12,7 @@ from cindra.detection.utils import (
     compute_registration_blocks,
     compute_thresholded_variance,
     _apply_rolling_mean_high_pass,
-    compute_block_smoothing_kernel,
+    _compute_block_smoothing_kernel,
     apply_temporal_high_pass_filter,
     compute_temporal_standard_deviation,
 )
@@ -293,35 +293,35 @@ class TestApplyRollingMeanHighPass:
 
 
 class TestComputeBlockSmoothingKernel:
-    """Tests compute_block_smoothing_kernel."""
+    """Tests _compute_block_smoothing_kernel."""
 
     def test_shape(self) -> None:
         """Verifies kernel matrix shape matches total block count."""
-        kernel = compute_block_smoothing_kernel(x_block_count=3, y_block_count=4)
+        kernel = _compute_block_smoothing_kernel(x_block_count=3, y_block_count=4)
         total_blocks = 3 * 4
         assert kernel.shape == (total_blocks, total_blocks)
 
     def test_column_normalization(self) -> None:
         """Verifies each column of the kernel sums to 1."""
-        kernel = compute_block_smoothing_kernel(x_block_count=3, y_block_count=4)
+        kernel = _compute_block_smoothing_kernel(x_block_count=3, y_block_count=4)
         column_sums = kernel.sum(axis=0)
         np.testing.assert_allclose(column_sums, 1.0, atol=1e-5)
 
     def test_single_block(self) -> None:
         """Verifies a single block produces a 1x1 identity kernel."""
-        kernel = compute_block_smoothing_kernel(x_block_count=1, y_block_count=1)
+        kernel = _compute_block_smoothing_kernel(x_block_count=1, y_block_count=1)
         assert kernel.shape == (1, 1)
         np.testing.assert_allclose(kernel, [[1.0]])
 
     def test_diagonal_is_max(self) -> None:
         """Verifies diagonal elements (self-weights) are the largest in each column."""
-        kernel = compute_block_smoothing_kernel(x_block_count=3, y_block_count=3)
+        kernel = _compute_block_smoothing_kernel(x_block_count=3, y_block_count=3)
         for column in range(kernel.shape[1]):
             assert kernel[column, column] == kernel[:, column].max()
 
     def test_dtype(self) -> None:
         """Verifies the kernel dtype is float32."""
-        kernel = compute_block_smoothing_kernel(x_block_count=2, y_block_count=2)
+        kernel = _compute_block_smoothing_kernel(x_block_count=2, y_block_count=2)
         assert kernel.dtype == np.float32
 
 

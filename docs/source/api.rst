@@ -34,6 +34,9 @@ Orchestration
 
 .. autodata:: cindra.orchestration.jobs.SINGLE_RECORDING_PHASES
 .. autodata:: cindra.orchestration.jobs.MULTI_RECORDING_PHASES
+.. autodata:: cindra.orchestration.jobs.PER_PLANE_JOB_NAMES
+.. autodata:: cindra.orchestration.jobs.PREREQUISITE_FAILURE_MESSAGE
+.. autodata:: cindra.orchestration.jobs.UNREACHABLE_PREREQUISITE_MESSAGE
 .. autodata:: cindra.orchestration.allocation.ALL_CORES_REQUEST
 .. autodata:: cindra.orchestration.allocation.BINARIZATION_WORKERS
 .. autodata:: cindra.orchestration.allocation.REGISTRATION_WORKERS
@@ -61,6 +64,9 @@ Registration
    :members:
    :undoc-members:
    :show-inheritance:
+
+.. autodata:: cindra.registration.spline_grid.MINIMUM_KNOTS_FOR_FROZEN_EDGES
+.. autodata:: cindra.registration.utils.NORMALIZATION_EPSILON
 
 Detection
 =========
@@ -105,6 +111,21 @@ GUI Viewers
    :members:
    :undoc-members:
    :show-inheritance:
+
+.. autodata:: cindra.gui.constants.COMMON_CONFIG
+.. autodata:: cindra.gui.constants.ROI_CONFIG
+.. autodata:: cindra.gui.constants.TRACKING_CONFIG
+.. autodata:: cindra.gui.constants.BINARY_CONFIG
+.. autodata:: cindra.gui.constants.PC_CONFIG
+.. autodata:: cindra.gui.styles.COLORS
+.. autodata:: cindra.gui.styles.STYLE
+.. autodata:: cindra.gui.styles.PLOT_STYLE
+.. autodata:: cindra.gui.styles.FONTS
+.. autodata:: cindra.gui.styles.ROI_STYLE
+.. autodata:: cindra.gui.styles.TRACKING_STYLE
+.. autodata:: cindra.gui.styles.BINARY_STYLE
+.. autodata:: cindra.gui.styles.PC_STYLE
+.. autodata:: cindra.gui.viewer_context.EMPTY
 
 Main CLI
 ========

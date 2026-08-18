@@ -802,7 +802,9 @@ themselves can read the phase model exported from `cindra.orchestration`. `SINGL
 `MULTI_RECORDING_PHASES` describe the ordered phases, `resolve_single_recording_jobs()` and
 `resolve_multi_recording_jobs()` expand them into a job universe of `(job_name, specifier)` pairs, and
 `resolve_single_recording_prerequisites()` and `resolve_multi_recording_prerequisites()` return the jobs each job
-depends on. This keeps a scheduler's view of the pipeline in step with the library rather than restating it.
+depends on. `generate_job_ids()` derives the identifier each of those jobs is tracked under, which is what the
+`job_id` parameter of both pipeline entry points names. This keeps a scheduler's view of the pipeline in step with the
+library rather than restating it.
 
 A scheduler that also wants to know which of those jobs can run right now, where their inputs and outputs live, and
 how much memory each one holds reads three further groups, all exported from `cindra`.

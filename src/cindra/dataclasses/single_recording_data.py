@@ -1682,10 +1682,10 @@ class CombinedData:
     """Per-plane frame widths in pixels."""
 
     plane_y_offsets: NDArray[np.int32] = field(default_factory=lambda: np.array([], dtype=np.int32))
-    """Per-plane y-axis displacement from ``compute_plane_offsets()``, used to arrange planes in the combined view."""
+    """Per-plane y-axis displacement used to arrange planes in the combined view."""
 
     plane_x_offsets: NDArray[np.int32] = field(default_factory=lambda: np.array([], dtype=np.int32))
-    """Per-plane x-axis displacement from ``compute_plane_offsets()``, used to arrange planes in the combined view."""
+    """Per-plane x-axis displacement used to arrange planes in the combined view."""
 
     registered_binary_paths: tuple[Path, ...] = ()
     """Channel 1 registered binary file paths, one per plane."""
