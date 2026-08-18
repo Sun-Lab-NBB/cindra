@@ -195,7 +195,8 @@ Saved in `registration_arrays/` subdirectory. All files are `.npy` format, float
 | `transformed_enhanced_mean_image.npy` | (height, width) | Enhanced mean image warped to shared visual space |
 | `transformed_maximum_projection.npy`  | (height, width) | Maximum projection warped to shared visual space  |
 
-**Channel 2 transformed images (dual-channel only, same shape and dtype):**
+**Channel 2 transformed images (same shape and dtype). The mean image appears for any dual-channel recording, while the
+enhanced mean and the maximum projection require both channels to be functional:**
 
 | File                                            | Description                                     |
 |-------------------------------------------------|-------------------------------------------------|
@@ -288,7 +289,7 @@ matches that recording's single-recording combined `frame_count`.
 | `subtracted_fluorescence.npy` | (num_rois, frames) | Neuropil-and-baseline-subtracted fluorescence |
 | `spikes.npy`                  | (num_rois, frames) | Deconvolved spike estimates                   |
 
-**Channel 2 (dual-channel only, same shapes):**
+**Channel 2 (both channels functional only, same shapes):**
 
 | File                                    | Description                       |
 |-----------------------------------------|-----------------------------------|
@@ -299,7 +300,7 @@ matches that recording's single-recording combined `frame_count`.
 
 If `spike_deconvolution.extract_spikes` is False, `subtracted_fluorescence.npy` and `spikes.npy` are filled with zeroes.
 
-**Optional colocalization file (dual-channel only):**
+**Optional colocalization file (both channels functional only):**
 
 | File                      | Shape         | Description                                                                            |
 |---------------------------|---------------|----------------------------------------------------------------------------------------|
@@ -368,9 +369,11 @@ large datasets. NPZ archives do not support memory mapping and are always eagerl
 
 ## Verification checklist
 
-Use `verify_multi_recording_output_tool` to automate this verification. The tool checks all expected files and NPZ keys
-across every recording in the dataset and returns a completeness verdict with any missing items listed. Fall back to the
-manual checklist below only if the MCP tool is unavailable.
+Use `verify_multi_recording_output_tool` to automate the file-presence and NPZ-key parts of this verification. The tool
+checks every channel 1 output file and the required NPZ keys across every recording in the dataset and returns a
+completeness verdict with any missing items listed. It validates no array shape, and it checks no channel 2 file under
+`registration_arrays/`, so run those two items by hand. Fall back to the whole manual checklist below only if the MCP
+tool is unavailable.
 
 ```text
 Multi-Recording Output Completeness:
@@ -393,7 +396,7 @@ Registration data (per recording):
 
 Tracking data (per recording, identical across recordings):
 - [ ] `tracking_template_masks.npz` exists and contains `pixel_counts`, `cluster_id`, `recording_count` keys
-- [ ] Channel 2 tracking files exist if dual-channel
+- [ ] Channel 2 tracking files exist if both channels are functional
 
 Extraction data (per recording):
 - [ ] `roi_masks.npz` exists with backward-transformed template masks
@@ -402,7 +405,7 @@ Extraction data (per recording):
 - [ ] `neuropil_fluorescence.npy` exists with shape matching cell_fluorescence
 - [ ] `subtracted_fluorescence.npy` exists with shape matching cell_fluorescence
 - [ ] `spikes.npy` exists with shape matching cell_fluorescence
-- [ ] Channel 2 trace files exist if dual-channel
+- [ ] Channel 2 trace files exist if both channels are functional
 - [ ] `cell_colocalization.npy` exists if both channels are functional, with shape (num_rois, 2)
 - [ ] Fluorescence trace shapes are consistent across all per-recording files
 ```

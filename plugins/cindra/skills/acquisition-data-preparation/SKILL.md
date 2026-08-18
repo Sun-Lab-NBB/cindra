@@ -349,7 +349,9 @@ Binarization only skips TIFF conversion when the cindra output bootstrap already
 Configure the pipeline and run `prepare_single_recording_batch_tool` first: it writes
 `recording/cindra/configuration.yaml`, `recording/cindra/acquisition_parameters.yaml`, and each plane's
 `recording/cindra/plane_N/runtime_data.yaml` (whose `registered_binary_path` points at `plane_N/channel_1_data.bin`),
-and creates the `plane_N/` directories. Without this bootstrap, binarization falls through to TIFF conversion, which
+and creates the `plane_N/` directories. Without this bootstrap, binarization aborts before it reaches TIFF conversion,
+naming the missing `runtime_data.yaml` and asking for `prepare_single_recording_batch_tool` to be run first. With the
+bootstrap in place but no binaries at the plane paths, binarization instead falls through to TIFF conversion, which
 fails when no raw TIFFs exist at `data_path`.
 
 **Step 4: Place binary files in the cindra output structure.**

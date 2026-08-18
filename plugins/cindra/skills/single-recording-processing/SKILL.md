@@ -429,8 +429,9 @@ carried, so report it alongside the rejections.
 
 These lists do not share one element shape, and every job is sized from the recording's raw acquisition geometry rather
 than from a per-stage allowance, so a recording with unreadable raw data loses every one of its jobs rather than the
-conversion job alone. See [tool-responses.md](references/tool-responses.md) for the element shapes, the full return-key
-reference of every processing tool, and the terminal messages the engine writes to a tracker.
+conversion job alone. See [tool-responses.md](references/tool-responses.md) for the element shapes, the return-key
+reference of the planning, execution, management, and status tools, and the terminal messages the engine writes to a
+tracker.
 
 ### Execution errors
 
