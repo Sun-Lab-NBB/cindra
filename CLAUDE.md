@@ -182,23 +182,24 @@ outputs.
   expand it into a recording's job universe (`resolve_single_recording_jobs`, `resolve_multi_recording_jobs`,
   `resolve_pipeline_jobs`), the prerequisite graph (`resolve_single_recording_prerequisites`,
   `resolve_multi_recording_prerequisites`, `resolve_prerequisite_job_ids`, `validate_job_prerequisites`), the phase
-  expansion (`resolve_downstream_phases`, `order_phases_by_execution`), and the prerequisite messages. The plane
-  specifier, the tracker filenames, and every other on-disk name live one layer below in `cindra.layout`, which
-  `jobs.py` reads them from. `allocation.py` adds the measured stage worker defaults, the resource-class model, and the
-  host core and memory budgets. `footprints.py` adds the per-stage memory models, the two estimators that report what
-  one job holds, and the two sizers that pair each estimate with its stage's declared cores as a `JobSizing`, which is
-  the one thing it reads `allocation.py` for. A job is sized from the data that exists when the sizing happens, so a
-  single-recording model reads the acquisition alone while a multi-recording model reads the completed single-recording
-  output it runs on. `discovery.py` pairs the job model with the on-disk inventory to report both the jobs a recording
-  declares and the subset whose inputs exist. `worker.py` holds the per-job entry points every scheduler dispatches,
-  along with the two priming entry points that write the shared bootstrap. `execution.py` holds the batch engine:
-  `PendingJob`, `JobExecutionState`, the admission scan, the two-pass dispatcher, and the manager thread. `pipeline.py`
-  holds the two sequential entry points. `openmp.py` carries no module-level side effect and its check runs only inside
-  those two entry points, so importing the package writes nothing and a console message never precedes the stdio MCP
-  server's JSON-RPC stream. Nothing below `orchestration` imports it, and no module inside it imports `interface`, so
-  the MCP layer is a thin argument-validation and JSON-shaping wrapper over calls into the package. This mirrors the
-  orchestration package of `ataraxis-video-system` and `ataraxis-communication-interface`, and its concurrency model
-  follows `sollertia-forgery`.
+  expansion (`resolve_downstream_phases`, `order_phases_by_execution`), and the prerequisite messages.
+  `generate_job_ids` derives the identifier each of those jobs is tracked under, which is what the `job_id` parameter of
+  both pipeline entry points names. The plane specifier, the tracker filenames, and every other on-disk name live one
+  layer below in `cindra.layout`, which `jobs.py` reads them from. `allocation.py` adds the measured stage worker
+  defaults, the resource-class model, and the host core and memory budgets. `footprints.py` adds the per-stage memory
+  models, the two estimators that report what one job holds, and the two sizers that pair each estimate with its stage's
+  declared cores as a `JobSizing`, which is the one thing it reads `allocation.py` for. A job is sized from the data
+  that exists when the sizing happens, so a single-recording model reads the acquisition alone while a multi-recording
+  model reads the completed single-recording output it runs on. `discovery.py` pairs the job model with the on-disk
+  inventory to report both the jobs a recording declares and the subset whose inputs exist. `worker.py` holds the
+  per-job entry points every scheduler dispatches, along with the two priming entry points that write the shared
+  bootstrap. `execution.py` holds the batch engine: `PendingJob`, `JobExecutionState`, the admission scan, the two-pass
+  dispatcher, and the manager thread. `pipeline.py` holds the two sequential entry points. `openmp.py` carries no
+  module-level side effect and its check runs only inside those two entry points, so importing the package writes
+  nothing and a console message never precedes the stdio MCP server's JSON-RPC stream. Nothing below `orchestration`
+  imports it, and no module inside it imports `interface`, so the MCP layer is a thin argument-validation and
+  JSON-shaping wrapper over calls into the package. This mirrors the orchestration package of `ataraxis-video-system`
+  and `ataraxis-communication-interface`, and its concurrency model follows `sollertia-forgery`.
 - **Tracker-driven job state**: The transitions of a job the pipeline runs belong to the tracker's `run_job()` context
   manager rather than to a hand-rolled `start_job`/`complete_job`/`fail_job` sequence. The engine's
   `_fail_dispatched_job`, `_fail_pending_jobs`, and the `_pipeline_worker` fallback are the exceptions, because each
@@ -212,8 +213,8 @@ outputs.
   configuration and runtime data.
 - **Configuration-driven execution**: Pipelines read all processing parameters from YAML files (YamlConfig subclasses).
   The CLI writes overrides to the config file before execution rather than passing arguments. Worker counts are the
-  exception: they are explicit API parameters resolved through `cindra.orchestration`, which keeps the configuration file
-  immutable and safe to share between concurrently dispatched jobs.
+  exception: they are explicit API parameters resolved through `cindra.orchestration`, which keeps the configuration
+  file immutable and safe to share between concurrently dispatched jobs.
 - **Worker sentinel contract**: One convention governs every argument that resolves a worker or concurrency
   allocation. `None` accepts the measured default for that stage or resource class, `-1` (`ALL_CORES_REQUEST`)
   requests every available core, and a positive integer is used exactly. Any other non-positive value is rejected.

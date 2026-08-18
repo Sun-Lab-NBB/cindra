@@ -159,6 +159,14 @@
 3. Follow existing patterns for Click option decorators and error handling
 4. CLI writes configuration overrides to the config file before pipeline execution
 
+**Modifying API documentation:**
+
+1. `docs/source/api.rst` documents the export surface. A package section carries an `autodata` directive for every
+   constant that package's `__all__` names and its own modules define, and for nothing else
+2. A constant a package holds for its own use keeps its public name and reaches no directive, and one whose defining
+   module the page documents in its own section renders there instead of a second time
+3. See `/api-docs` for the shared Sphinx conventions this rule tightens
+
 **Important considerations:**
 
 - The `console` is enabled in `src/cindra/__init__.py`. Do not re-enable it elsewhere
