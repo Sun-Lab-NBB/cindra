@@ -21,6 +21,7 @@ Diagnoses and resolves cindra and cindra-gui MCP server connectivity and environ
 - Diagnosing why the `cindra` or `cindra-gui` commands are unavailable
 - Checking Python version compatibility
 - Validating cindra package installation and dependencies
+- Verifying the numeric threading runtime each platform needs (OpenMP on macOS, TBB elsewhere)
 - Environment-specific guidance for conda, pip, and uv workflows
 
 **Does not cover:**
@@ -100,10 +101,10 @@ or the pip package is installed in a different Python environment than the one a
 
 cindra is distributed as a pre-release build, so every install, upgrade, and reinstall command MUST carry pip's `--pre`
 flag. The MCP tool surface these skills document (the four single-recording phases, the `workers_per_job` and
-`max_parallel_jobs` arguments of the execute tools, and the measured worker defaults in `cindra.orchestration`, including
-the multi-recording discovery and extraction defaults) ships in cindra 2.0.0+. Without `--pre`, pip resolves an older
-build whose MCP tools do not match the documented surface, which presents as tools that reject a documented phase name
-or argument while the server itself reports as connected.
+`max_parallel_jobs` arguments of the execute tools, and the measured worker defaults in `cindra.orchestration`,
+including the multi-recording discovery and extraction defaults) ships in cindra 2.0.0+. Without `--pre`, pip resolves
+an older build whose MCP tools do not match the documented surface, which presents as tools that reject a documented
+phase name or argument while the server itself reports as connected.
 
 ---
 
@@ -226,19 +227,31 @@ because the servers start and connect while their tools reject the arguments the
 On macOS, cindra selects Numba's OpenMP threading layer because the Numba macOS wheel ships no tbbpool extension, which
 leaves the TBB layer unavailable there whatever runtime is installed. That layer loads `libomp.dylib` from the dynamic
 loader's default search path, and the file ships with neither Numba nor macOS. When it is missing, `import cindra` emits
-a warning naming the remedy, `cindra --help` and `cindra mcp` still succeed, and processing fails once it reaches a
-parallelized stage with:
+nothing, because the library runs no import-time check, and `cindra --help` and `cindra mcp` still succeed. Both
+pipeline entry points call the check before dispatching any stage, so a run aborts having done no work with:
 
 ```text
-ValueError: No threading layer could be loaded.
-HINT:
-Intel OpenMP is required, try:
-$ conda/pip install intel-openmp
+RuntimeError: Unable to locate the OpenMP runtime (libomp.dylib) that the Numba threading layer loads on macOS.
+Processing fails once it reaches a parallelized stage until the runtime is loadable. Run 'cindra omp' to report the
+runtimes found on this host, and 'cindra omp --yes' to link one into /usr/local/lib. Install one with
+'brew install libomp' when the report finds none.
 ```
 
-Numba emits this hint whenever the requested `omp` layer fails to load on macOS. The supported resolution is the LLVM
-OpenMP runtime (`libomp.dylib`) linked below, rather than the `intel-openmp` package the hint names. Report what the
-host carries with:
+The check replaces the threading-layer error Numba would otherwise raise at the first parallelized call, which names no
+remedy. The supported resolution is the LLVM OpenMP runtime (`libomp.dylib`) linked below.
+
+**Check this before dispatching, on every platform.** `check_threading_runtime_tool` reports the host's readiness
+directly. Call it and gate on its `ready` flag, then follow its `remedy` command when the host is not ready. It reports
+`required_layer` as `omp` on macOS and `tbb` elsewhere, so it diagnoses a missing TBB runtime on Linux and Windows the
+same way it diagnoses a missing `libomp.dylib` here.
+
+Skipping that check leaves a signature worth recognizing. Neither the OpenMP nor the TBB failure reaches an MCP tool
+response, so `execute_processing_jobs_tool` returns `started: true` and then every job fails with the runtime error
+recorded as its tracker error message. A batch where every job fails immediately, with no partial progress, is a
+missing threading runtime rather than a data problem. Resolve it here rather than routing to a processing or
+acquisition skill.
+
+Report what the host carries with:
 
 ```bash
 cindra omp
@@ -247,6 +260,14 @@ cindra omp
 The command searches the Homebrew and MacPorts library directories, the active conda environment, and the runtimes
 vendored inside the installed Python distributions, then reports the runtime it would link and the link it would create.
 It changes nothing without `--yes`.
+
+**The report says the runtime already loads:**
+
+```text
+the OpenMP runtime already loads. Pass --force to link a runtime anyway.
+```
+
+This is the passing outcome. Nothing was changed and nothing needs to be. Continue to Step 7.
 
 **The report found a runtime:**
 
@@ -270,9 +291,11 @@ A conda environment can take the runtime from conda-forge instead, which `cindra
 mamba install -c conda-forge llvm-openmp
 ```
 
-You MUST skip this step on Linux and Windows, where cindra selects Numba's TBB threading layer instead (`tbb4py` and
-`intel-cmplr-lib-rt` are declared as `sys_platform != 'darwin'` dependencies), so Numba never loads `omppool` and
-`cindra omp` errors when run there.
+The `cindra omp` half of this step is macOS-only. Linux and Windows select Numba's TBB threading layer instead
+(`tbb4py` and `intel-cmplr-lib-rt` are declared as `sys_platform != 'darwin'` dependencies), so Numba never loads
+`omppool` and `cindra omp` errors when run there. Run `check_threading_runtime_tool` on every platform regardless,
+because a Linux or Windows host missing the TBB runtime fails every parallelized stage exactly as a macOS host missing
+`libomp.dylib` does, and the tool reports that case with `required_layer: "tbb"` and a `pip install tbb4py` remedy.
 
 ### Step 7: Restart the MCP server
 
@@ -303,7 +326,7 @@ the MCP tools on the next session, since the current session's MCP subprocesses 
 | MCP server connected but tools fail                       | Not an environment issue                                    | Check tool-specific error messages                                                                                   |
 | cindra-gui tools unavailable                              | Plugin not installed or outdated                            | Reinstall the cindra Claude Code plugin                                                                              |
 | Skills available but MCP tools missing                    | Plugin installed without pip package                        | `pip install --pre cindra` in the active environment                                                                 |
-| `ValueError: No threading layer could be loaded` on macOS | `libomp.dylib` is not on the loader's search path           | `sudo cindra omp --yes`, after `brew install libomp` when `cindra omp` reports no runtime                            |
+| `RuntimeError: Unable to locate the OpenMP runtime` on macOS | `libomp.dylib` is not on the loader's search path        | `sudo cindra omp --yes`, after `brew install libomp` when `cindra omp` reports no runtime                            |
 
 ---
 

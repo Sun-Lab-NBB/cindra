@@ -187,7 +187,7 @@ depends on the viewer type.
 | `classify_mode`            | bool      | Whether classify mode is on (clicks flip labels)    |
 | `trace_visibility`         | dict      | Visibility flags for each trace type (see below)    |
 | `temporal_bin_size`        | int       | Temporal binning window for correlation computation |
-| `colocalization_threshold` | float     | Probability threshold for channel 2 classification  |
+| `colocalization_threshold` | float     | Colocalization threshold. Always the 0.6 default    |
 | `roi_count`                | int       | Total number of ROIs in the recording               |
 | `frame_count`              | int       | Frames in the visualized traces                     |
 | `two_channels`             | bool      | Whether the recording has two functional channels   |
@@ -209,24 +209,24 @@ depends on the viewer type.
 
 ### Tracking viewer state
 
-| Field                     | Type            | Description                                             |
-|---------------------------|-----------------|---------------------------------------------------------|
-| `viewer_type`             | str             | Always `"tracking"`                                     |
-| `loaded`                  | bool            | Whether multi-recording data has finished loading       |
-| `active_dataset`          | str             | Active multi-recording dataset name                     |
-| `available_datasets`      | list[str]       | List of available dataset names                         |
-| `current_recording_index` | int             | Index of the currently displayed recording              |
-| `current_recording_id`    | str             | Identifier of the currently displayed recording         |
-| `recording_count`         | int             | Total number of recordings in the dataset               |
-| `background_view`         | str             | Active background image (see Background views)          |
-| `coordinate_space`        | str             | Active coordinate space (`"native"` or `"transformed"`) |
-| `mask_layer`              | str             | Active mask layer (see Mask layers)                     |
-| `channel_2_active`        | bool            | Whether channel 2 overlay is toggled on                 |
-| `opacity`                 | int             | ROI overlay opacity (slider value)                      |
-| `selected_roi_indices`    | list[int]\|null | Indices of selected ROIs, or null if none               |
-| `last_clicked_roi_index`  | int\|null       | Index of the most recently clicked ROI, or null         |
-| `mask_count`              | int             | Number of masks in the active layer                     |
-| `auto_cycling`            | bool            | Whether auto-recording cycling is active                |
+| Field                       | Type              | Description                                               |                                                    |
+| --------------------------- | ----------------- | --------------------------------------------------------- |                                                    |
+| `viewer_type`               | str               | Always `"tracking"`                                       |                                                    |
+| `loaded`                    | bool              | Whether multi-recording data has finished loading         |                                                    |
+| `active_dataset`            | str               | Active multi-recording dataset name                       |                                                    |
+| `available_datasets`        | list[str]         | List of available dataset names                           |                                                    |
+| `current_recording_index`   | int               | Index of the currently displayed recording                |                                                    |
+| `current_recording_id`      | str               | Identifier of the currently displayed recording           |                                                    |
+| `recording_count`           | int               | Total number of recordings in the dataset                 |                                                    |
+| `background_view`           | str               | Active background image (see Background views)            |                                                    |
+| `coordinate_space`          | str               | Active coordinate space (`"native"` or `"transformed"`)   |                                                    |
+| `mask_layer`                | str               | Active mask layer (see Mask layers)                       |                                                    |
+| `channel_2_active`          | bool              | Whether channel 2 overlay is toggled on                   |                                                    |
+| `opacity`                   | int               | ROI overlay opacity (slider value)                        |                                                    |
+| `selected_roi_indices`      | list[int]\        | null                                                      | Selected ROI indices, or null when all are visible |
+| `last_clicked_roi_index`    | int\              | null                                                      | Index of the most recently clicked ROI, or null    |
+| `mask_count`                | int               | Number of masks in the active layer                       |                                                    |
+| `auto_cycling`              | bool              | Whether auto-recording cycling is active                  |                                                    |
 
 ### Registration viewer state
 

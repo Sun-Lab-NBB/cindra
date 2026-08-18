@@ -17,7 +17,7 @@ from .jobs import (
     resolve_multi_recording_prerequisites,
     resolve_single_recording_prerequisites,
 )
-from .openmp import OpenMpStatus, resolve_openmp_runtime
+from .openmp import OpenMPStatus, resolve_openmp_runtime
 from .worker import (
     prime_dataset,
     prime_recording,
@@ -93,7 +93,7 @@ __all__ = [
     "JobSizing",
     "MultiRecordingJobNames",
     "MultiRecordingJobs",
-    "OpenMpStatus",
+    "OpenMPStatus",
     "PendingJob",
     "PipelinePhase",
     "PlaneGeometry",

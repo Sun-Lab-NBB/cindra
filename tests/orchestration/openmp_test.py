@@ -9,12 +9,12 @@ import pytest
 from ataraxis_base_utilities import error_format
 
 from cindra.orchestration import (
-    OpenMpStatus,
+    OpenMPStatus,
     openmp as openmp_module,
     resolve_openmp_runtime,
 )
 from cindra.orchestration.openmp import (
-    OpenMpSummary,
+    OpenMPSummary,
     _link_openmp_runtime,
     verify_openmp_runtime,
     _discover_openmp_runtime,
@@ -138,9 +138,9 @@ class TestSummaryDescription:
     @pytest.mark.parametrize(
         ("status", "expected"),
         [
-            (OpenMpStatus.AVAILABLE, "already loads"),
-            (OpenMpStatus.UNRESOLVED, "no OpenMP runtime to link"),
-            (OpenMpStatus.PREVIEWED, "dry run"),
+            (OpenMPStatus.AVAILABLE, "already loads"),
+            (OpenMPStatus.UNRESOLVED, "no OpenMP runtime to link"),
+            (OpenMPStatus.PREVIEWED, "dry run"),
         ],
     )
     def test_description_reports_each_unchanged_outcome(self, status, expected):
@@ -149,12 +149,12 @@ class TestSummaryDescription:
 
     def test_description_reports_a_link_that_resolved_the_runtime(self):
         """Verifies that a successful link reports the runtime as loadable."""
-        summary = _summary(OpenMpStatus.LINKED, loadable=True)
+        summary = _summary(OpenMPStatus.LINKED, loadable=True)
         assert "the runtime now loads" in summary.describe()
 
     def test_description_reports_a_link_that_left_the_runtime_unloadable(self):
         """Verifies that a link leaving the runtime unloadable names the fallback remedy."""
-        summary = _summary(OpenMpStatus.LINKED, loadable=False)
+        summary = _summary(OpenMPStatus.LINKED, loadable=False)
         assert "DYLD_LIBRARY_PATH" in summary.describe()
 
 
@@ -178,7 +178,7 @@ class TestRuntimeResolution:
         monkeypatch.setattr("cindra.orchestration.openmp.sys.platform", "darwin")
         monkeypatch.setattr("cindra.orchestration.openmp._openmp_runtime_loadable", lambda: True)
         summary = resolve_openmp_runtime()
-        assert summary.status == OpenMpStatus.AVAILABLE
+        assert summary.status == OpenMPStatus.AVAILABLE
         assert summary.loadable
 
     def test_resolution_reports_a_host_carrying_no_runtime(self, monkeypatch, tmp_path):
@@ -189,7 +189,7 @@ class TestRuntimeResolution:
         monkeypatch.delenv("CONDA_PREFIX", raising=False)
         monkeypatch.setattr("cindra.orchestration.openmp.sysconfig.get_path", lambda name: "")
         summary = resolve_openmp_runtime()
-        assert summary.status == OpenMpStatus.UNRESOLVED
+        assert summary.status == OpenMPStatus.UNRESOLVED
         assert summary.searched_paths == (tmp_path / "libomp.dylib",)
         assert "brew install libomp" in summary.unresolved_reason
 
@@ -200,7 +200,7 @@ class TestRuntimeResolution:
         runtime_path = _make_runtime(directory=tmp_path)
         link_path = tmp_path / "lib" / "libomp.dylib"
         summary = resolve_openmp_runtime(runtime_path=runtime_path, link_path=link_path)
-        assert summary.status == OpenMpStatus.PREVIEWED
+        assert summary.status == OpenMPStatus.PREVIEWED
         assert summary.runtime_path == runtime_path
         assert not link_path.parent.exists()
 
@@ -212,7 +212,7 @@ class TestRuntimeResolution:
         runtime_path = _make_runtime(directory=tmp_path)
         link_path = tmp_path / "lib" / "libomp.dylib"
         summary = resolve_openmp_runtime(runtime_path=runtime_path, link_path=link_path, execute=True)
-        assert summary.status == OpenMpStatus.LINKED
+        assert summary.status == OpenMPStatus.LINKED
         assert summary.loadable
         assert link_path.resolve() == runtime_path
 
@@ -222,7 +222,7 @@ class TestRuntimeResolution:
         monkeypatch.setattr("cindra.orchestration.openmp._openmp_runtime_loadable", lambda: True)
         runtime_path = _make_runtime(directory=tmp_path)
         summary = resolve_openmp_runtime(runtime_path=runtime_path, link_path=tmp_path / "link.dylib", force=True)
-        assert summary.status == OpenMpStatus.PREVIEWED
+        assert summary.status == OpenMPStatus.PREVIEWED
 
     def test_resolution_derives_the_link_path_from_the_loader_search_path(self, monkeypatch, tmp_path):
         """Verifies that an omitted link path resolves to the directory the loader searches by default."""
@@ -270,7 +270,7 @@ def _make_runtime(directory: Path) -> Path:
     return runtime_path
 
 
-def _summary(status: OpenMpStatus, **overrides: object) -> OpenMpSummary:
+def _summary(status: OpenMPStatus, **overrides: object) -> OpenMPSummary:
     """Builds a summary carrying the given status and field overrides."""
     fields: dict[str, object] = {
         "status": status,
@@ -281,4 +281,4 @@ def _summary(status: OpenMpStatus, **overrides: object) -> OpenMpSummary:
         "loadable": False,
     }
     fields.update(overrides)
-    return OpenMpSummary(**fields)  # type: ignore[arg-type]
+    return OpenMPSummary(**fields)  # type: ignore[arg-type]

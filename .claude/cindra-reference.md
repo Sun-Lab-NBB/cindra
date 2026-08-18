@@ -17,7 +17,7 @@
   performs diffeomorphic demons registration to a common space, clusters ROIs across recordings via spatial overlap, and
   projects template masks back to individual recordings. Phase 2 extracts fluorescence traces and applies OASIS
   deconvolution for tracked ROI templates (parallelizable across recordings).
-- **Self-driven orchestration**: `cindra.orchestration` owns the whole scheduling surface across seven modules that form
+- **Self-driven orchestration**: `cindra.orchestration` owns the whole scheduling surface across eight modules that form
   a one-way dependency chain. `jobs.py` is the leaf above `cindra.layout`: it holds the job name enumerations, the phase
   model (`SINGLE_RECORDING_PHASES`, `MULTI_RECORDING_PHASES`, `PipelinePhase`, `PrerequisiteScope`), the resolvers that
   expand it into a recording's job universe (`resolve_single_recording_jobs`, `resolve_multi_recording_jobs`,
@@ -74,18 +74,21 @@
   `processing_tools`, `results_tools`) imported at module level to trigger `@mcp.tool()` registration. Processing uses a
   prepare-then-execute model: preparation tools create execution manifests (trackers, per-recording configurations, job
   lists) without starting computation, and execution tools dispatch jobs with prerequisite validation, per-class
-  resource allocation, and automatic phase sequencing. The dispatch half lives in `cindra.orchestration`, so the
-  execute, monitor, and cancel tools hold only argument validation and response shaping. The prepare tools stay in
-  the interface layer, because building a manifest is a user-facing operation over paths and configuration files
-  rather than part of the scheduling model. Every job class carries a measured per-job worker count from
-  `cindra.orchestration`, and the combination class holds the single core its serial merge needs. Concurrency follows
-  three separate terms. The binarization class carries a hard ceiling, because it decodes at the storage's rate rather
-  than the host's core count and a wider batch finishes the same work more slowly while holding cores other work could
-  use, so spare capacity never lifts it. The registration and processing classes carry soft reservations, which hold
-  capacity back for the stages that wait on no other job and are released once nothing else can use the room. Every
+  resource allocation, and automatic phase sequencing. Three planning tools sit ahead of both halves.
+  `get_pipeline_job_universe_tool` reports every job a configuration declares and which of them can run right now,
+  `size_pipeline_jobs_tool` reports the cores and memory each of those jobs holds, and
+  `check_threading_runtime_tool` reports whether the host carries the numeric threading layer the platform selects, so
+  an agent gates a batch on a flag rather than on parsing a per-job tracker failure. The dispatch half lives in
+  `cindra.orchestration`, so the execute, monitor, and cancel tools hold only argument validation and response shaping.
+  The prepare tools stay in the interface layer, because building a manifest is a user-facing operation over paths and
+  configuration files rather than part of the scheduling model. Every job class carries a measured per-job worker count
+  from `cindra.orchestration`, and the combination class holds the single core its serial merge needs. Concurrency
+  follows three separate terms. The binarization class carries a hard ceiling, because it decodes at the storage's rate
+  rather than the host's core count and a wider batch finishes the same work more slowly while holding cores other work
+  could use, so spare capacity never lifts it. The registration and processing classes carry soft reservations, which
+  hold capacity back for the stages that wait on no other job and are released once nothing else can use the room. Every
   other class derives its concurrency from the session CPU budget alone. Memory bounds admission rather than
-  concurrency, because the memory one job holds follows the recording it processes rather than the class it belongs
-  to.
+  concurrency, because the memory one job holds follows the recording it processes rather than the class it belongs to.
 - **Process-isolated jobs**: The batch engine dispatches every job into a `ProcessPoolExecutor` sized to the
   concurrency the per-class caps allow, so admission remains the only thing bounding how many jobs run. Isolation buys
   two things a thread pool cannot. A job's BLAS width belongs to its process, so concurrent jobs at different widths no
@@ -186,7 +189,7 @@
 | `BinaryFile`                      | `io/binary.py`                                  | Memory-mapped binary file access for imaging data       |
 | `convert_tiffs_to_binary`         | `io/tiff.py`                                    | TIFF to internal binary format conversion               |
 | `combine_planes`                  | `io/combine.py`                                 | Multi-plane result combination                          |
-| `run_roi_viewer`                  | `gui/app.py`                                    | Single-recording ROI inspector GUI                      |
+| `run_roi_viewer`                  | `gui/app.py`                                    | ROI inspector GUI, single or multi-recording            |
 | `run_tracking_viewer`             | `gui/app.py`                                    | Multi-recording tracking quality GUI                    |
 | `run_registration_viewer`         | `gui/app.py`                                    | Registration quality viewer (binary + PC viewer)        |
 
@@ -256,8 +259,8 @@
 6. Maintain the job naming convention (`SingleRecordingJobNames`, `MultiRecordingJobNames`) for tracker consistency
 7. Keep the dependency chain one-way. `jobs.py` imports `cindra.layout` alone, `allocation.py` and `discovery.py` import
    `jobs`, `footprints.py` imports `jobs` and `allocation`, `worker.py` imports `jobs` and `allocation`, `pipeline.py`
-   imports `worker` and `jobs`, `execution.py` imports `pipeline`, `jobs`, and `allocation`, and no orchestration module
-   imports `interface`.
+   imports `worker`, `jobs`, and `openmp`, `execution.py` imports `pipeline`, `jobs`, and `allocation`, and no
+   orchestration module imports `interface`.
    `openmp.py` carries no module-level side effect and its check runs only inside the two sequential entry points,
    so importing the package writes nothing and a console message never precedes the stdio MCP server's JSON-RPC
    stream
@@ -333,13 +336,13 @@
   JSON-RPC stream before any CLI code can silence the console
 - The `# type: ignore[import-untyped]` comments on the scikit-learn, threadpoolctl, and PyQtGraph imports are
   expected (Numba is excluded via the `pyproject.toml` mypy override, and the tifffile and yaml imports carry no such
-  comment, because both ship types)
+  comment, because tifffile ships a py.typed marker and yaml checks against the `types-pyyaml` stub)
 - The `# pragma: no cover` annotations on `@njit` function bodies are intentional
 - The multiscale diffeomorphic registration crosses the boundary between original-image pixels and the working
   resolution of a pyramid level in three places, and it converts units at two of them. `ScaleSpacePyramid` scales
   every smoothing sigma by the level's entry in `_level_downsample_factors`. `_scale_grid_sampling` converts the
   knot spacing into working-resolution pixels, while `_regularize_deformation` keeps the injectivity factor on the
-  original-pixel spacing, because that factor divides by `scale`, which is an original-pixel quantity.
+  original-pixel spacing, because that factor divides `scale` by that spacing and both are original-pixel quantities.
   `Deformation.resize_field` leaves displacement magnitudes unscaled, which discounts each coarse level by its
   resolution ratio and weights it below the finer levels that follow it. That third choice is deliberate, and the
   method's `Notes` block records its reasoning. Do not report it as a unit-conversion defect, as an inconsistency

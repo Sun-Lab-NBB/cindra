@@ -10,7 +10,7 @@ from ataraxis_base_utilities import LogLevel, console
 from .mcp_server import run_server
 from ..dataclasses import PipelineType, MultiRecordingConfiguration, SingleRecordingConfiguration, detect_pipeline_type
 from ..orchestration import (
-    OpenMpStatus,
+    OpenMPStatus,
     resolve_openmp_runtime,
     run_multi_recording_pipeline,
     run_single_recording_pipeline,
@@ -104,7 +104,7 @@ def cindra_omp(source: Path | None, target: Path | None, *, force: bool, yes: bo
         console.echo(message=f"runtime:  {summary.runtime_path}", raw=True)
         console.echo(message=f"link:     {summary.link_path}", raw=True)
     console.echo(message=summary.describe())
-    if summary.status == OpenMpStatus.UNRESOLVED:
+    if summary.status == OpenMPStatus.UNRESOLVED:
         raise SystemExit(1)
 
 

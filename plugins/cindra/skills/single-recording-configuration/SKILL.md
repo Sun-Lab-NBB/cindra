@@ -91,7 +91,11 @@ Runtime behavior settings shared between single-recording and multi-recording pi
 
 | Parameter               | Type | Default | Description                                          |
 |-------------------------|------|---------|------------------------------------------------------|
-| `display_progress_bars` | bool | False   | Show progress bars. Disable for parallel processing. |
+| `display_progress_bars` | bool | False   | Show progress bars. Batch tools force this False.    |
+
+`cindra run` displays progress bars by default and writes its choice into this field before dispatching, so the flag
+that suppresses them is `-np/--no-progress`. The batch MCP tools write False into every per-recording configuration
+they create, because concurrent jobs sharing a terminal interleave their bars.
 
 Worker allocation is not a configuration parameter. Each stage receives its worker count as an invocation argument, with
 measured defaults of 3 workers for binarization, 4 for registration and 10 for processing. Those defaults are published
@@ -118,12 +122,13 @@ independent ROI detection on both channels.
 
 ### Tuning guidance
 
-- **Different calcium indicator**: Set `tau` to the sensor's decay time constant. GCaMP6f ≈ 0.4, GCaMP6s ≈ 1.5, GCaMP7f
-  ≈ 0.4, GCaMP8f ≈ 0.2. Incorrect `tau` degrades spike deconvolution and ROI detection.
+- **Different calcium indicator**: Set `tau` to the sensor's decay time constant. GCaMP6f ≈ 0.4, GCaMP6s ≈ 1.5,
+  GCaMP7f ≈ 0.4, GCaMP8f ≈ 0.2. Incorrect `tau` degrades spike deconvolution and ROI detection.
 - **Structural channel**: Set `two_channels=True`, keep only `first_channel_functional=True`. The second channel is
   stored for colocalization analysis but not used for ROI detection.
 - **Custom classifier**: Provide `custom_classifier_path` when imaging non-standard cell types or preparations where the
-  built-in classifier performs poorly. The `.npz` file must contain `training_labels`.
+  built-in classifier performs poorly. The `.npz` file must hold `training_labels`, at least 100 training samples, and
+  at least one of the `normalized_pixel_count`, `compactness`, and `skewness` feature arrays.
 
 ---
 
@@ -217,8 +222,8 @@ phase-correlation accuracy in 1P recordings.
 |---------------------------|-------|---------|------------------------------------------------------------------------|
 | `enabled`                 | bool  | False   | Enable 1P preprocessing (high-pass filtering, tapering). False for 2P. |
 | `spatial_highpass_window` | int   | 42      | Spatial high-pass filter window (pixels).                              |
-| `pre_smoothing_sigma`     | float | 0.0     | Gaussian smoothing sigma before high-pass. 0 = disabled.               |
-| `edge_taper_pixels`       | float | 40.0    | Edge pixels to taper during registration.                              |
+| `pre_smoothing_sigma`     | float | 0.0     | Box filter window (pixels), truncated to an even int. 0 = off.         |
+| `edge_taper_pixels`       | float | 40.0    | Sigmoid taper falloff scale. The taper starts ~2x this inward.         |
 
 Enable this section only for widefield or miniscope (1-photon) data. The preprocessing removes background fluorescence
 that interferes with phase-correlation registration. Never enable for 2P data.
@@ -235,7 +240,7 @@ residual local deformations that a single global offset cannot capture.
 |-----------------------------|-----------------|------------|------------------------------------------------------|
 | `enabled`                   | bool            | True       | Enable nonrigid registration for non-uniform motion. |
 | `block_size`                | tuple[int, int] | (128, 128) | Block dimensions (pixels). Power of 2/3 recommended. |
-| `signal_to_noise_threshold` | float           | 1.2        | SNR threshold for accepting block offsets.           |
+| `signal_to_noise_threshold` | float           | 1.2        | SNR below which a block gets extra smoothing.        |
 | `maximum_block_offset`      | float           | 5.0        | Max block offset (pixels) relative to rigid offset.  |
 
 The recommended approach is to always keep nonrigid registration enabled alongside rigid registration (Section 4). Rigid
@@ -264,7 +269,7 @@ extracted fluorescence traces, so it only joins the feature set during the final
 
 | Parameter                     | Type  | Default | Description                                                        |
 |-------------------------------|-------|---------|--------------------------------------------------------------------|
-| `enabled`                     | bool  | True    | Enable ROI detection and classification.                           |
+| `enabled`                     | bool  | True    | Enable the plane's processing stage. False also skips extraction.  |
 | `preclassification_threshold` | float | 0.5     | Min classifier confidence to keep ROI. 0 = keep all.               |
 | `threshold_scaling`           | float | 2.0     | Detection threshold scaling. Higher = more distinct ROIs needed.   |
 | `spatial_highpass_window`     | int   | 25      | High-pass window for neuropil subtraction during detection.        |
@@ -325,8 +330,8 @@ intensities within the cell mask across all frames. A neuropil signal is estimat
 ## Section 9: spike_deconvolution
 
 Infers neural spiking activity from fluorescence traces. Subtracts a scaled neuropil signal from the raw fluorescence,
-estimates a slowly varying baseline using a sliding window or percentile method, computes ΔF/F, and deconvolves the
-result to produce an estimated spike rate trace per ROI.
+estimates a slowly varying baseline using a sliding window or percentile method, subtracts it to produce ΔF, and
+deconvolves the result to produce an estimated spike rate trace per ROI.
 
 | Parameter              | Type  | Default   | Description                                                       |
 |------------------------|-------|-----------|-------------------------------------------------------------------|
@@ -339,8 +344,10 @@ result to produce an estimated spike rate trace per ROI.
 
 ### Tuning guidance
 
-- **Slow baseline drift** (long recordings): Use `baseline_method="constant_percentile"` with default
-  `baseline_percentile=8.0` for stable baseline estimation across hours-long recordings.
+- **Slow baseline drift** (long recordings): Keep `baseline_method="maximin"`, whose sliding minimum and maximum
+  filters track the drift across `baseline_window`, and shorten that window when the drift outpaces the 60 second
+  default. `constant_percentile` computes one percentile per ROI across the whole recording, so it holds a single
+  time-invariant baseline and follows no drift at all.
 - **Fast transients dominate**: Lower `baseline_window` (30-45 seconds) to track baseline more closely.
 - **High neuropil contamination**: Increase `neuropil_coefficient` (0.8-0.9) for more aggressive subtraction. Decrease
   (0.5-0.6) if traces appear over-corrected (negative dips after transients).

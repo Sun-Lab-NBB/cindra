@@ -56,7 +56,8 @@ introspection.
 **Notes:**
 - `generate_acquisition_parameters_file_tool` validates all parameters before writing. MROI fields (`roi_lines`,
   `roi_x_coordinates`, `roi_y_coordinates`) are required when `roi_number > 1`.
-- `validate_recording_readiness_tool` requires `cindra_parameters.json` to be present. It validates the acquisition
+- `validate_recording_readiness_tool` requires `cindra_parameters.json` to sit directly inside the directory it is
+  given, because it performs no recursive search of its own. It validates the acquisition
   parameters, discovers and inspects all TIFF files (page count, dimensions, dtype) without loading frame data, and
   cross-validates TIFF metadata against the acquisition parameters (interleave cycle remainder, frames-per-plane
   thresholds, MROI roi_lines bounds, dtype compatibility). Use this tool as the final verification step before
@@ -91,7 +92,8 @@ files must be in the same directory as the JSON file (non-recursive TIFF scan).
 
 ### Supported formats
 
-The pipeline reads standard multipage TIFF files (`.tif` or `.tiff` extension). All data is automatically converted to
+The pipeline reads standard multipage TIFF files (`.tif`, `.tiff`, `.TIF`, or `.TIFF` extension). All data is
+automatically converted to
 int16 for processing. uint16 and int32 data is halved by floor division and then clipped to the int16 range, so int32
 magnitudes that still exceed that range after halving saturate at -32768 or 32767 instead of wrapping. All other data
 types are cast directly to int16 without scaling.

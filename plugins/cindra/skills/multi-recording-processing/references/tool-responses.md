@@ -1,0 +1,128 @@
+# Multi-recording processing tool responses
+
+Documents the keys every processing MCP tool returns, the element shape of each rejection list, and the terminal
+messages the execution engine writes to a tracker. This reference is loaded on demand by `/multi-recording-processing`.
+
+---
+
+## Rejection list element shapes
+
+The rejection lists do not share one element shape, so a caller that formats them uniformly prints `[object Object]`
+for some of them.
+
+| Key                      | Returned by                  | Element shape                                   |
+|--------------------------|------------------------------|-------------------------------------------------|
+| `invalid_configurations` | prepare, full-pipeline       | string, the reason with the offending entry     |
+| `unsizable_datasets`     | full-pipeline                | object, `{"dataset": str, "error": str}`        |
+| `invalid_jobs`           | execute                      | object, `{"job_id": str, "reason": str}`        |
+
+`invalid_jobs` uses `{"job": str, "reason": str}` instead, keyed on the stringified descriptor, when the descriptor is
+missing one of the four required keys and therefore carries no usable `job_id`.
+
+Each list is included only when non-empty, so their absence is the success signal and `success: true` alone never is.
+
+---
+
+## Per-tool return keys
+
+### prepare_multi_recording_batch_tool
+
+Returns `datasets` keyed by the lowercased dataset name, `total_datasets`, and `total_jobs`. Each dataset entry holds
+`configuration_path`, `tracker_path`, `dataset_name`, `pipeline_type`, `discover_job`, and `extract_jobs`, and every
+job entry additionally carries `executor_id` when the dataset's tracker already existed.
+
+### get_pipeline_job_universe_tool
+
+Returns `jobs` holding the `name`, `specifier`, and `ready` flag of every declared job, plus `total_jobs`, `ready_jobs`,
+`dataset_name`, `recording_ids`, `pipeline_type`, and a `resolved` flag. The recording identifiers derive from the
+configured directory paths rather than from what those directories hold, so a dataset whose recordings are entirely
+unprocessed still returns `resolved: true` with the full universe and `ready: false` on every job. Only a configuration
+naming no recording directory returns `resolved: false` with an empty `jobs` list, and it does so with `success: true`
+because the resolver reports absence rather than failing.
+
+### size_pipeline_jobs_tool
+
+Returns `jobs` holding the `name`, `specifier`, `cores`, and `memory_mb` of every declared job, plus `total_jobs`,
+`peak_memory_mb` for the single largest job, `total_memory_mb` for every job at once, and `pipeline_type`. Unlike the
+universe tool, this one fails when the dataset names no recording directory, when any recording carries no combined
+metadata archive, or when any recording reports no regions in its combined trace array.
+
+### check_threading_runtime_tool
+
+Returns `ready`, `platform`, `required_layer` (`omp` on macOS, `tbb` elsewhere), and a `detail` sentence. A host that is
+not ready also carries one of three `remedy` commands: `sudo cindra omp --yes` when macOS holds a runtime it has not
+linked, `brew install libomp` when macOS holds none, and `pip install tbb4py` off macOS. The first needs elevated
+privileges, so surface it to the user rather than running it. On macOS the report adds `discovered_runtimes`, holding
+the single runtime the discovery would link, and `searched_paths`, holding the candidates examined. Both are empty when
+no runtime was found and also when the runtime already loads, because a host that already loads one runs no discovery.
+
+### execute_processing_jobs_tool and execute_full_pipeline_tool
+
+| Key                | Meaning                                                                        |
+|--------------------|--------------------------------------------------------------------------------|
+| `started`          | Whether a session was dispatched. Gate on this, not on `success`               |
+| `total_jobs`       | Jobs admitted into the session                                                 |
+| `cpu_budget`       | Session core budget, which is the host core count minus 2                      |
+| `memory_budget_mb` | Session memory budget, sampled once at session start                           |
+| `resource_classes` | Per class, its `workers_per_job`, `max_parallel_jobs`, and `job_count`         |
+
+`execute_full_pipeline_tool` additionally returns `phase_count` and a per-phase `phases` list, and returns
+`started: false` with a `message` and a `next_step` when every phase is already complete.
+
+### get_processing_jobs_status_tool
+
+Returns `active`, `jobs`, a `summary` counting pending, running, succeeded, and failed, plus `awaiting_prerequisites`
+for the jobs still held in the admission pool. Its `resource_classes` mapping carries `pending` and `active` in place
+of `job_count`. Once the session drains it returns `active: false`, empty `jobs`, a zero `summary`, and a `note`.
+
+### get_active_execution_timing_tool
+
+Returns `jobs` with per-job timing and a `session` summary holding `total_elapsed_seconds`, `completed_count`,
+`failed_count`, and `running_count`. `throughput_jobs_per_hour` appears only once elapsed time and completed count are
+both above zero, so it is absent for the whole discovery phase of any batch. Its absence is not an error.
+
+### cancel_processing_jobs_tool
+
+Returns `canceled`, a `message`, and a `final_state` holding `succeeded_jobs`, `failed_jobs`, and
+`active_jobs_at_cancel`. Cancellation empties the queues and never stops a running job, so `active_jobs_at_cancel` is
+the number of jobs still executing after the call returns. Poll `get_recording_status_tool` on the affected datasets
+until those jobs leave RUNNING before starting a new session. With no active session it returns `canceled: false` plus
+a `note`.
+
+### reset_processing_phases_tool
+
+Returns `reset`, `requested_phases`, `effective_phases` after downstream expansion in pipeline execution order, and a
+`jobs` list. That list is a post-reset snapshot of **every** job of every valid phase, not only the jobs the reset
+touched, so selecting from it dispatches jobs that were already succeeded. Select from the prepare manifest instead.
+
+### clean_processing_output_tool
+
+Returns `cleaned`, `recording_path`, `deleted_files`, `deleted_dirs`, `total_deleted`, `requested_phases`, and
+`effective_phases`, plus `errors` when a deletion failed. The `cleaned` flag reports that the tool ran rather than that
+every deletion succeeded, so gate on an empty `errors` list.
+
+### get_batch_status_overview_tool
+
+Returns `permission_errors` when a directory in the scanned tree could not be read. Datasets are found by scanning for
+multi-recording tracker files, so an unreadable directory hides a whole dataset rather than one file. Surface this list
+whenever it is present.
+
+---
+
+## Terminal messages the engine writes
+
+These come from the execution engine rather than from a pipeline stage, so they name no data or configuration problem
+and no upstream skill resolves them.
+
+| Message                                                                                                                                                                          | Cause                              |
+|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------|
+| `Unable to execute job. A preceding pipeline phase failed.`                                                                                                                      | Cascade abort of an extraction job |
+| `Unable to execute job. The worker process pool was terminated, which happens when a job's process is killed by the host, most often for exhausting memory.`                     | A worker process died              |
+| `Unable to execute job. The worker process pool canceled the job before any worker started it, which happens when the pool shuts down while the job is still waiting inside it.` | Queued when the pool shut down     |
+
+A job aborted because its prerequisite phase is absent from the tracker records a message naming that phase and asking
+for the prepare tool to be re-run, because no phase failed in that case.
+
+Extraction is the widest class in the library at 16 cores per job and holds whole-dataset trace arrays, so it is the
+class most likely to meet a pool termination. Every job runs in its own spawned process, so the kill takes down that
+job alone and the engine records a terminal outcome for every job the failure strands.

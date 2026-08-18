@@ -178,8 +178,8 @@ _EXTRACTION_RESOURCES: ResourceClass = ResourceClass(
     concurrency_limit=None,
     concurrency_reservation=None,
 )
-"""The resource class of the multi-recording extraction jobs. Extraction reads each frame batch serially before the
-kernel consumes it, so the stage plateaus at its measured worker count and the remaining budget is better spent on
+"""The resource class of the multi-recording extraction jobs. The stage keeps shortening well past its measured worker
+count, so that count follows the concurrency a compute node sustains and the remaining budget is better spent on
 running more recordings concurrently."""
 
 RESOURCE_CLASS_BY_JOB_NAME: dict[str, ResourceClass] = {
