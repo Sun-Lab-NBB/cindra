@@ -19,6 +19,7 @@ execution manifests, dispatch jobs, monitor progress, and hand off to downstream
 
 **Covers:**
 - Batch processing workflow: discovery, validation, preparation, execution, monitoring, and completion
+- MCP planning tools (`get_pipeline_job_universe_tool`, `size_pipeline_jobs_tool`, `check_threading_runtime_tool`)
 - MCP preparation tools (`prepare_single_recording_batch_tool`, `execute_full_pipeline_tool`)
 - MCP execution tools (`execute_processing_jobs_tool`, `get_processing_jobs_status_tool`,
   `get_active_execution_timing_tool`, `cancel_processing_jobs_tool`)
@@ -58,6 +59,9 @@ diagnose and resolve connectivity issues.
 
 | Tool                                  | Purpose                                                                 |
 |---------------------------------------|-------------------------------------------------------------------------|
+| `get_pipeline_job_universe_tool`      | Reports every job a recording declares and which can run right now      |
+| `size_pipeline_jobs_tool`             | Reports the cores and memory every job holds, before preparing anything |
+| `check_threading_runtime_tool`        | Reports whether the numeric threading layer this host needs is loadable |
 | `prepare_single_recording_batch_tool` | Prepares execution manifest without starting execution (idempotent)     |
 | `execute_full_pipeline_tool`          | Convenience: prepares and executes all phases with automatic sequencing |
 
@@ -95,7 +99,7 @@ Four-phase sequential pipeline per recording:
 ```text
 Phase 1: BINARIZE (phase name binarization, I/O bound, 3 cores per job, up to 4 concurrent jobs)
 ├── Converts raw TIFFs to binary format
-└── Initializes the per-plane runtime data hierarchy, one job per recording with an empty specifier
+└── Fills the per-plane binaries and records their frame geometry, one job per recording with an empty specifier
 
 Phase 2: REGISTER (phase name registration, per plane, 4 cores per job)
 ├── Motion correction plus the registration-quality metrics computation
@@ -134,7 +138,12 @@ Dispatch runs in two passes. The first honors every reservation, so the conversi
 their share of the host while planes are still registering. The second releases the reservations over whatever capacity
 the first left unused, so a deep queue runs at its full width rather than idling the host. Memory bounds dispatch
 rather than concurrency: `execute_processing_jobs_tool` sizes every job it submits from the recording it will process,
-and a job whose geometry cannot be read is charged a conservative allowance for its stage.
+and a job whose geometry cannot be read is not dispatched at all. It joins `invalid_jobs` with the reason "Unable to
+size the job from its configuration", while `execute_full_pipeline_tool` drops that recording into
+`unsizable_recordings` and runs the rest of the batch.
+
+Every job runs in its own spawned process, so a job that exhausts memory takes down its own worker rather than the
+batch, and the engine records a terminal outcome for every job the resulting pool failure strands.
 
 ---
 
@@ -161,7 +170,7 @@ For fine-grained control (e.g., running only specific phases, custom resource al
 - [ ] Raw data validated (or existing binaries confirmed via get_recording_status_tool)
 - [ ] Template configuration confirmed or created (one template can serve multiple recordings)
 - [ ] Output directory confirmed with user
-- [ ] CPU core allocation confirmed with user
+- [ ] Share of the machine to dedicate to processing confirmed with user
 - [ ] Recordings to process confirmed
 ```
 
@@ -188,8 +197,12 @@ For fine-grained control (e.g., running only specific phases, custom resource al
    mirroring the recording directory structure. `recording_output_paths` is a required parameter for both
    `prepare_single_recording_batch_tool` and `execute_full_pipeline_tool`.
 
-5. **Confirm CPU allocation**: Present the per-phase measured defaults and ask the user whether to accept them or
-   override them (see Resource management section).
+5. **Confirm the machine budget**: The engine resolves every per-class worker count and concurrency cap itself, so
+   do not ask the user to choose them. Ask only how much of the machine this run may take, because that is the one
+   allocation question the engine cannot answer: it claims every core but two and the memory available when the session
+   starts. Confirm that the host is free for the run, or take an explicit ceiling from the user and pass it as
+   `max_parallel_jobs`. Report the resolved per-class allocation after dispatch, from the `resource_classes` mapping
+   the execute tool returns, rather than predicting it beforehand.
 
 6. **Execute**: Choose one of two approaches:
 
@@ -203,10 +216,11 @@ For fine-grained control (e.g., running only specific phases, custom resource al
    b. Select the jobs to execute from the manifest. Each entry in `recordings` is keyed by the recording data path and
       carries `configuration_path`, `tracker_path`, `output_path`, `pipeline_type`, `binarize_job`, `register_jobs`,
       `process_jobs`, and `combine_job`. The two `*_jobs` keys hold one entry per plane, and each job dict holds
-      `job_id`, `name`, `specifier`, and `status`. The response also carries `total_recordings`, `total_jobs`, and
-      `migrated_recordings` when an existing tracker gained per-plane registration jobs. When selecting by phase, you
-      MUST include `register_jobs`, because every processing job depends on the registration job carrying the same
-      `plane_{index}` specifier.
+      `job_id`, `name`, `specifier`, and `status`, plus `executor_id` for a recording whose tracker already existed. The
+      response also carries `total_recordings`, `total_jobs`, `migrated_recordings` when an existing tracker gained
+      per-plane registration jobs, and the rejection lists described under Partially accepted batches. When selecting
+      by phase, you MUST include `register_jobs`, because every processing job depends on the registration job carrying
+      the same `plane_{index}` specifier.
    c. Call `execute_processing_jobs_tool` with the selected job descriptors and worker settings. Each job descriptor
       needs `configuration_path`, `tracker_path`, `job_id`, and `pipeline_type` from the manifest.
 
@@ -249,7 +263,7 @@ To re-run specific phases (e.g., after changing ROI detection parameters):
 1. Use `reset_processing_phases_tool` to reset the target phases to SCHEDULED status. Downstream phases are
    automatically reset. Resetting `binarization` also resets `registration`, `processing`, and `combination`. Resetting
    `registration` also resets `processing` and `combination`. Resetting `processing` also resets `combination`. The
-   returned `effective_phases` list is sorted alphabetically rather than in execution order.
+   returned `effective_phases` list is ordered by pipeline execution order.
 2. Optionally modify the configuration file before re-execution.
 3. Optionally use `clean_processing_output_tool` to delete output files from the reset phases.
 4. Call `execute_processing_jobs_tool` with the reset jobs from the manifest.
@@ -259,9 +273,9 @@ Both `reset_processing_phases_tool` and `clean_processing_output_tool` require `
 `combination`. `reset_processing_phases_tool` also requires `tracker_path`, and `clean_processing_output_tool` requires
 `recording_path`.
 
-Cleaning `registration` deletes the plane's `registration_data` directory, which carries the `bad_frames.npy` array that
-detection reads. Registration rewrites the plane binary in place, so clean `binarization` to rebuild that binary from
-the raw TIFFs.
+Cleaning `registration` deletes the plane's `registration_data` directory, which carries the `bad_frames.npy` array
+that detection reads. It does not undo registration, because the stage rewrote the plane binary in place and that
+binary stays registered. Clean `binarization` to rebuild the binary from the raw TIFFs.
 
 **Recovering an interrupted write.** Binarization fills the plane binary under a `<binary>.binarizing` marker and
 registration rewrites it in place under a `<binary>.registering` marker, each held for the duration of that phase's
@@ -285,9 +299,13 @@ budget a full reprocessing run rather than a conversion alone.
 ## Resource management
 
 Each single-recording phase runs under its own resource class with a measured per-job worker count. Leaving
-`workers_per_job` and `max_parallel_jobs` as None accepts those measured defaults, a positive value is used exactly, and
--1 requests every available core. The session CPU budget is `cpu_count - 2`, with 2 cores reserved for system
-operations, and the dispatcher holds the sum of the cores committed by every class inside that budget.
+`workers_per_job` as None accepts the measured stage default and leaving `max_parallel_jobs` as None accepts the derived
+concurrency cap. A positive value of either is used exactly. Setting `workers_per_job` to -1 gives every job the whole
+session core budget, while setting `max_parallel_jobs` to -1 lifts the derived cap so that only the job count bounds
+concurrency. The session CPU budget is `cpu_count - 2`, with 2 cores reserved for system operations, and the dispatcher
+holds the sum of the cores committed by every class inside that budget. The one exception is that while nothing is
+running the dispatcher admits a single job regardless, so a job whose worker count exceeds the whole budget still runs
+rather than stalling the session.
 
 | Phase    | Resource class | Cores per job | Concurrency                            |
 |----------|----------------|---------------|----------------------------------------|
@@ -296,26 +314,60 @@ operations, and the dispatcher holds the sum of the cores committed by every cla
 | PROCESS  | `processing`   | 10            | Session CPU budget, 5 jobs reserved    |
 | COMBINE  | `combination`  | 1             | Session CPU budget                     |
 
-Only the `binarization` class ignores `workers_per_job` and `max_parallel_jobs`, because its ceiling is hard. Every
-other class accepts either parameter as an override of the measured default and of the derived concurrency cap, via
-`execute_processing_jobs_tool` or `execute_full_pipeline_tool`.
+Every cap but binarization's derives from the host as `min(max(1, budget // cores_per_job), max(1, job_count))`, so a
+wider machine
+raises it without being asked, and the dispatcher then admits against the live core and memory budgets rather than
+against the cap alone. The engine saturates the host it is given, so leave both parameters as None unless the user asks
+for an override. Binarization's ceiling of 4 is the exception it never lifts, because the stage decodes at the storage's
+rate rather than the host's core count, and that class alone ignores both `workers_per_job` and `max_parallel_jobs`.
 
 A reservation binds only in the dispatcher's first pass. The second pass releases it over whatever capacity the first
 left unused, so a reserved class runs at its full derived width whenever no other queue can use the room.
 
 Memory bounds dispatch separately from every class cap. Each job is estimated from the recording it will process, and
-the dispatcher holds the sum of the running jobs' estimates inside the session memory budget.
+the dispatcher holds the sum of the running jobs' estimates inside the session memory budget, reported as
+`memory_budget_mb`. That budget is the host's available memory sampled once when the session starts, and it is never
+re-read, so memory another process frees mid-batch does not widen it and memory another process claims does not narrow
+it. A batch that dispatches fewer jobs than the caps allow, on a host with idle cores, is memory-bound rather than
+stalled.
 
 The multi-recording discovery and extraction stages run under their own `discovery` and `extraction` classes, with
-measured defaults of 30 and 16 cores per job. Both accept `workers_per_job` and `max_parallel_jobs` as overrides. See
-`/multi-recording-processing` for their concurrency caps. Discovery's 30 is the saturating allocation the stage is
-admitted at, because its cost grows with the square of the recording count.
+measured defaults of 2 and 16 cores per job. Both accept `workers_per_job` and `max_parallel_jobs` as overrides. See
+`/multi-recording-processing` for their concurrency caps. Discovery's 2 covers the deformation pool alone, because the
+stage has no parallel critical path.
 
-Present the measured per-phase defaults when confirming CPU allocation with the user. A `workers_per_job` value of 30
-overrides the processing default of 10 and lowers the processing concurrency to at most the CPU budget divided by 30, so
-it reduces rather than raises the memory the class holds. A positive `max_parallel_jobs` replaces the derived cap
-outright, but it cannot exhaust memory on its own: the dispatcher still holds the running jobs' estimated memory inside
-the session memory budget whatever cap a class carries.
+Report the resolved allocation after dispatch, from the `resource_classes` mapping the execute tool returns, rather
+than predicting it beforehand. When the user does ask for an override, a `workers_per_job` value of 30 overrides the
+processing default of 10 and lowers the processing concurrency to at most the CPU budget divided by 30, so it reduces
+rather than raises the memory the class holds. A positive `max_parallel_jobs` replaces the derived cap outright, but it
+cannot exhaust memory on its own: the dispatcher still holds the running jobs' estimated memory inside the session
+memory budget whatever cap a class carries.
+
+### Planning before dispatch
+
+`get_pipeline_job_universe_tool` answers which jobs can run right now. It reads the inventory the output directories
+already hold, so it works before a tracker exists and returns `resolved: false` with an empty universe for a recording
+carrying nothing rather than failing. Each entry carries a `ready` flag reporting that the job's own input exists: the
+conversion job is ready once the acquisition parameters resolve, a registration job once its plane carries the channel
+binary, a processing job once its plane carries the reference image, and the combination job once every plane carries
+its traces. Use it to plan a selective re-run, and `get_recording_status_tool` to read recorded outcomes once a batch
+has been prepared. The two answer different questions, because a job whose input exists may still have a prerequisite
+that has not succeeded on the tracker.
+
+`size_pipeline_jobs_tool` reports the cores and memory every job of a recording holds, reading its acquisition metadata
+and one source file header, so it plans a batch before any tracker or output directory exists. Pass the recording's
+configuration path and `pipeline_type="single-recording"`. The response lists each job's `name`, `specifier`, `cores`,
+and `memory_mb`, plus `peak_memory_mb` for the single largest job and `total_memory_mb` for every job at once. Compare
+`peak_memory_mb` against the host's free memory to learn whether the largest job fits at all, and `total_memory_mb` to
+learn whether the whole batch could ever run concurrently. These are the same figures the execute tools charge against
+the session memory budget, so a batch whose peak exceeds free memory admits its jobs serially rather than failing.
+
+`check_threading_runtime_tool` reports whether the numeric threading layer this host needs is loadable, which is OpenMP
+on macOS and TBB elsewhere. Gate a batch on its `ready` flag. A macOS host that is not ready aborts every job at the
+pipeline entry point before any stage runs, because both entry points verify the runtime first, while a non-macOS host
+missing TBB instead fails at the job's first parallelized call. Either way the outcome surfaces as a per-job tracker
+failure rather than as a tool error, so checking first replaces parsing those failures. The response carries a `remedy`
+command when the host is not ready.
 
 ---
 
@@ -337,7 +389,8 @@ Summary: 10/30 recordings complete | 2 processing | 18 queued | 0 failed
 | 2024-01-16-10-15-00-222222 | pending  | 0/0      | 0/0     | pending | QUEUED     |
 ```
 
-The `jobs` mapping that `get_recording_status_tool` returns holds exactly four keys, `binarize`, `register`, `process`,
+The `single_recording.jobs` mapping that `get_recording_status_tool` returns holds exactly four keys, `binarize`,
+`register`, `process`,
 and `combine`. The `register` and `process` keys map each `plane_{index}` specifier to a lowercased status string. You
 MUST give the table a column for each of the four keys.
 
@@ -352,6 +405,32 @@ MUST give the table a column for each of the four keys.
 | "At least one recording path is required" | Provide recording paths                  |
 | "Configuration file not found"            | Invoke `/single-recording-configuration` |
 | "No valid recording paths provided"       | Inspect `invalid_paths` in the response  |
+
+### Partially accepted batches
+
+A batch that rejects some of its input still returns `success: true`, so you MUST read the rejection lists rather than
+treat the absence of an `error` as full acceptance. Report every rejected entry to the user by name before proceeding,
+because the batch runs without it.
+
+| Key                    | Returned by                          | Meaning                                                  |
+|------------------------|--------------------------------------|----------------------------------------------------------|
+| `invalid_paths`        | both prepare and full-pipeline tools | A supplied path is not an existing directory             |
+| `invalid_recordings`   | both prepare and full-pipeline tools | Preparation failed, such as a missing acquisition file   |
+| `migrated_recordings`  | both prepare and full-pipeline tools | A tracker gained the missing per-plane registration jobs |
+| `unsizable_recordings` | `execute_full_pipeline_tool`         | Sizing cannot measure the recording, so it is omitted    |
+| `invalid_jobs`         | `execute_processing_jobs_tool`       | A job failed validation or sizing and was not dispatched |
+
+A recording the sizing pass cannot measure is excluded from the batch rather than aborting it, so a run that reports
+`started: true` may still cover fewer recordings than you submitted. `execute_full_pipeline_tool` returns no recording
+count of its own, so name every entry of `invalid_paths`, `invalid_recordings`, `migrated_recordings`, and
+`unsizable_recordings` to the user rather than looking for a total to compare. Only the prepare tools return
+`total_recordings`. A migrated recording is not rejected, but its dispatched job set differs from the one it last
+carried, so report it alongside the rejections.
+
+These lists do not share one element shape, and every job is sized from the recording's raw acquisition geometry rather
+than from a per-stage allowance, so a recording with unreadable raw data loses every one of its jobs rather than the
+conversion job alone. See [tool-responses.md](references/tool-responses.md) for the element shapes, the full return-key
+reference of every processing tool, and the terminal messages the engine writes to a tracker.
 
 ### Execution errors
 
@@ -411,7 +490,7 @@ Single-Recording Processing Workflow:
 - [ ] Raw data validated via `validate_recording_readiness_tool` (or existing binaries confirmed)
 - [ ] Configuration file confirmed or created via `/single-recording-configuration`
 - [ ] Output directory confirmed with user (required, no default)
-- [ ] CPU core allocation confirmed with user
+- [ ] Share of the machine to dedicate to processing confirmed with user
 - [ ] Batch prepared or full pipeline executed
 - [ ] Status monitored until all recordings complete or fail
 - [ ] Failed recordings routed to appropriate skill (see Error routing)

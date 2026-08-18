@@ -20,6 +20,7 @@ prepare execution manifests, dispatch jobs, monitor progress, and hand off to do
 **Covers:**
 - Batch processing workflow: prerequisite verification, dataset organization, preparation, execution, monitoring, and
   completion
+- MCP planning tools (`get_pipeline_job_universe_tool`, `size_pipeline_jobs_tool`, `check_threading_runtime_tool`)
 - MCP preparation tools (`prepare_multi_recording_batch_tool`, `execute_full_pipeline_tool`)
 - MCP execution tools (`execute_processing_jobs_tool`, `get_processing_jobs_status_tool`,
   `get_active_execution_timing_tool`, `cancel_processing_jobs_tool`)
@@ -69,6 +70,9 @@ status `completed`). If any recording is incomplete, invoke the earliest missing
 
 | Tool                                 | Purpose                                                                 |
 |--------------------------------------|-------------------------------------------------------------------------|
+| `get_pipeline_job_universe_tool`     | Reports every job a dataset declares and which can run right now        |
+| `size_pipeline_jobs_tool`            | Reports the cores and memory every job holds, before preparing anything |
+| `check_threading_runtime_tool`       | Reports whether the numeric threading layer this host needs is loadable |
 | `prepare_multi_recording_batch_tool` | Prepares execution manifest without starting execution (idempotent)     |
 | `execute_full_pipeline_tool`         | Convenience: prepares and executes all phases with automatic sequencing |
 
@@ -123,7 +127,7 @@ Phase 1: DISCOVER (phase name: discovery, CPU bound, parallel by dataset)
 ├── Clusters ROI masks across recordings
 ├── Generates template masks for tracked ROIs
 ├── Projects template masks back to each recording's coordinate system
-└── One job per dataset, workers from the discovery resource class (30 per job, see Resource management)
+└── One job per dataset, workers from the discovery resource class (2 per job, see Resource management)
 
 Phase 2: EXTRACT (phase name: extraction, CPU bound, parallel by recording)
 ├── Applies template masks to extract fluorescence
@@ -187,7 +191,7 @@ For fine-grained control (e.g., running only specific phases, custom resource al
 - [ ] Recordings grouped into datasets (by common parent, explicit grouping, or user instruction)
 - [ ] Dataset names resolved via resolve_dataset_name_tool
 - [ ] Template configuration confirmed or created (one template can serve multiple datasets)
-- [ ] CPU core allocation confirmed with user
+- [ ] Share of the machine to dedicate to processing confirmed with user
 - [ ] Recordings per dataset confirmed
 ```
 
@@ -215,21 +219,20 @@ For fine-grained control (e.g., running only specific phases, custom resource al
    automatically saves resolved copies as `multi_recording_configuration.yaml` inside each dataset's output directory,
    preserving the original template. Pass the same template path for multiple datasets that share parameters.
 
-5. **Confirm CPU allocation.** Read the per-phase defaults from the Resource management section. Discovery and
-   extraction resolve independently, so present one row per class. The example below covers 2 datasets of 15 recordings
-   each on a 128-core host, which is 2 discovery jobs plus 30 extraction jobs against a budget of 126:
+5. **Confirm the machine budget.** The engine resolves the per-class worker counts and concurrency caps itself, so do
+   not ask the user to choose them and do not build an allocation table before dispatching. Ask only how much of the
+   machine this run may take, because that is the one allocation question the engine cannot answer: it claims every
+   core but two and the memory available when the session starts. Confirm that the host is free for the run, or take an
+   explicit ceiling from the user and pass it as `max_parallel_jobs`. After dispatch, report the resolved allocation
+   from the `resource_classes` mapping the execute tool returns, which for 2 datasets of 15 recordings on a 128-core
+   host reads:
 
    ```text
    Resource class | Jobs | Workers/Job | Max Parallel | Total Cores
    ---------------|------|-------------|--------------|------------
-   discovery      |    2 |          30 |            2 |          60
+   discovery      |    2 |           2 |            2 |           4
    extraction     |   30 |          16 |            7 |         112
    ```
-
-   Ask the user to confirm or override. Both `workers_per_job` and `max_parallel_jobs` default to None, which accepts
-   the measured allocation. Only pass explicit values if the user requests an override, using a positive count for an
-   exact value or -1 for every available core. Report the values returned in the `resource_classes` mapping of the
-   execute tool response rather than recomputing them per phase.
 
 6. **Execute.** Choose one of two approaches:
 
@@ -278,7 +281,8 @@ and raw-data roots differ:
 Always reuse the recording OUTPUT directory (the parent of `cindra/`) that single-recording processing used, its
 `output_path` entry in the `prepare_single_recording_batch_tool` manifest, for status, verify, and clean. The
 multi-recording prepare manifest exposes no `output_path` field: each dataset entry holds only `configuration_path`,
-`tracker_path`, `dataset_name`, `pipeline_type`, `discover_job`, and `extract_jobs`.
+`tracker_path`, `dataset_name`, `pipeline_type`, `discover_job`, and `extract_jobs`. Every job entry additionally
+carries `executor_id` when the dataset's tracker already existed.
 
 ### Re-running specific phases
 
@@ -303,26 +307,66 @@ budget.
 
 | Phase    | Resource class | Cores per job | Concurrency cap    |
 |----------|----------------|---------------|--------------------|
-| DISCOVER | `discovery`    | 30            | Session CPU budget |
+| DISCOVER | `discovery`    | 2             | Session CPU budget |
 | EXTRACT  | `extraction`   | 16            | Session CPU budget |
 
-Discovery's 30 is the saturating allocation the phase is admitted at, because its cost grows with the square of the
-recording count. Extraction's 16 is measured: the phase reads each frame batch serially before the kernel runs, so it
-plateaus above that width.
+Discovery's 2 covers the deformation pool alone. The stage has no parallel critical path, so quadrupling the allocation
+shortens a twenty-recording dataset by two percent. Extraction's 16 follows the concurrency a compute node sustains
+rather than a measured plateau, leaving room for the six to eight datasets a node extracts at once while still reaching
+a sevenfold single-job speedup.
 
-Each class caps its own concurrency at `min(budget // cores_per_job, job_count)`. The discover phase contributes one job
+Each class caps its own concurrency at `min(max(1, budget // cores_per_job), max(1, job_count))`. The discover phase
+contributes one job
 per dataset, and the extract phase contributes one job per recording. On a 128-core host, with a budget of 126,
-discovery therefore runs at most 4 jobs concurrently and extraction at most 7.
+discovery's budget-derived bound is 63 jobs, so its dataset count binds first in any realistic batch, and
+extraction runs at most 7.
 
-Neither count shrinks on a small host: a 16-core machine still asks for 30 discovery workers against a budget of 14 and
+No cap here is a fixed number the host outgrows. Both derive from the session core budget, so a wider host raises them
+on its own, and the dispatcher then admits against the live core and memory budgets rather than against the cap alone.
+The engine saturates the host it is given, so leave both parameters as None unless the user asks for an override.
+
+Extraction does not shrink on a small host: a 16-core machine still asks for 16 workers against a budget of 14 and
 dispatches one job regardless, because the dispatcher always admits a single job even when the budget cannot cover it.
 
+Memory bounds dispatch separately from both class caps. Each job is estimated from the dataset it will process, and the
+dispatcher holds the sum of the running jobs' estimates inside the session memory budget, reported as
+`memory_budget_mb`. That budget is the host's available memory sampled once when the session starts and never re-read.
+Every job runs in its own spawned process, so a job the host kills for exhausting memory takes down its own worker
+rather than the batch, and the engine records a terminal outcome for every job the failure strands.
+
 Both `workers_per_job` and `max_parallel_jobs` default to None and can be overridden in `execute_processing_jobs_tool`
-or `execute_full_pipeline_tool`. A positive value is used exactly and -1 requests every available core. An override is a
-single scalar applied to every non-fixed class alike, so passing `workers_per_job=20` sets discovery and extraction to
-20 both. Both execute tools return a session-level `cpu_budget` and a `resource_classes` mapping keyed by class name,
-with `discovery` and `extraction` entries carrying `workers_per_job`, `max_parallel_jobs` and `job_count`.
-`get_processing_jobs_status_tool` returns the same mapping with `pending` and `active` in place of `job_count`.
+or `execute_full_pipeline_tool`. A positive value of either is used exactly. Setting `workers_per_job` to -1 gives every
+job the whole session core budget, while setting `max_parallel_jobs` to -1 lifts the derived cap so that only the job
+count bounds concurrency. An override is a single scalar applied to every non-fixed class alike, so passing
+`workers_per_job=20` sets discovery and extraction to 20 both. Both execute tools return a session-level `cpu_budget`, a
+session-level `memory_budget_mb`, and a `resource_classes` mapping keyed by class name, with `discovery` and
+`extraction` entries carrying `workers_per_job`, `max_parallel_jobs` and `job_count`.
+`get_processing_jobs_status_tool` returns the same mapping with `pending` and `active` in place of `job_count`, and adds
+a session-level `awaiting_prerequisites` count of the jobs still held in the admission pool.
+
+### Planning before dispatch
+
+`get_pipeline_job_universe_tool` answers which jobs can run right now. It reads the inventory the recording directories
+already hold, so it works before a tracker exists. The discovery job is ready once every recording carries its
+single-recording output, and an extraction job once discovery has written the template masks its recording projects. The
+recording identifiers come from the configured directory paths rather than from what those directories hold, so a wholly
+unprocessed dataset still reports `resolved: true` with the full universe and `ready: false` on every job. Only a
+configuration naming no recording directory reports `resolved: false`, so gate on `ready` rather than on `resolved` to
+decide what to dispatch. Use it to plan a selective re-run, and `get_recording_status_tool` to read recorded outcomes
+once a batch has been prepared.
+
+`size_pipeline_jobs_tool` reports the cores and memory every job of a dataset holds, reading the completed
+single-recording output the dataset runs on, so it plans a batch before any tracker exists. Pass the dataset's
+configuration path and `pipeline_type="multi-recording"`. The response lists each job's `name`, `specifier`, `cores`,
+and `memory_mb`, plus `peak_memory_mb` for the single largest job and `total_memory_mb` for every job at once. Read
+`peak_memory_mb` rather than assuming which stage dominates, because discovery's clustering term grows with the square
+of the region count while extraction's trace arrays grow with the frame count, so either stage leads depending on the
+dataset.
+
+`check_threading_runtime_tool` reports whether the numeric threading layer this host needs is loadable, which is OpenMP
+on macOS and TBB elsewhere. Gate a batch on its `ready` flag. A macOS host that is not ready aborts every job at the
+pipeline entry point before any stage runs, while a non-macOS host missing TBB fails at the job's first parallelized
+call. Neither outcome returns a tool error, so both surface only as per-job tracker failures.
 
 ---
 
@@ -338,8 +382,8 @@ Summary: 1/2 datasets complete | 2/4 recordings extracted | 0 failed
 
 | Dataset                | Discover | Extract Progress | Status     |
 |------------------------|----------|------------------|------------|
-| animal_A_learning_task | done     | 2/2              | SUCCEEDED  |
-| animal_B_learning_task | done     | 0/2              | EXTRACTING |
+| animal_a_learning_task | done     | 2/2              | COMPLETED  |
+| animal_b_learning_task | done     | 0/2              | EXTRACTING |
 ```
 
 ---
@@ -354,6 +398,27 @@ Summary: 1/2 datasets complete | 2/4 recordings extracted | 0 failed
 | "Configuration not found"                        | Invoke `/multi-recording-configuration` |
 | "Need at least 2 recordings"                     | Provide at least 2 recording paths      |
 | "Invalid recordings"                             | Verify paths exist and are directories  |
+
+### Partially accepted batches
+
+A batch that rejects some of its input still returns `success: true`, so you MUST read the rejection lists rather than
+treat the absence of an `error` as full acceptance. Report every rejected dataset to the user by name before proceeding,
+because the batch runs without it.
+
+| Key                      | Returned by                          | Meaning                                                     |
+|--------------------------|--------------------------------------|-------------------------------------------------------------|
+| `invalid_configurations` | both prepare and full-pipeline tools | A dataset entry was rejected, with its reason               |
+| `unsizable_datasets`     | `execute_full_pipeline_tool`         | The sizing models cannot size the dataset, so it is omitted |
+| `invalid_jobs`           | `execute_processing_jobs_tool`       | A job failed validation or sizing and was not dispatched    |
+
+A dataset the sizing pass cannot measure is excluded from the batch rather than aborting it, so a run that reports
+`started: true` may still cover fewer datasets than you submitted. `execute_full_pipeline_tool` returns no dataset count
+of its own, so name every entry of `invalid_configurations` and `unsizable_datasets` to the user rather than looking for
+a total to compare. Only the prepare tool returns `total_datasets`.
+
+These lists do not share one element shape. See [tool-responses.md](references/tool-responses.md) for the element
+shapes, the full return-key reference of every processing tool, and the terminal messages the engine writes to a
+tracker.
 
 ### Execution errors
 
@@ -381,7 +446,9 @@ When processing fails for some datasets/recordings, read the error messages and 
 | No trackable ROIs found                            | `/multi-recording-configuration` |
 | MCP tools unavailable, server connection errors    | `/cindra-mcp-environment-setup`  |
 
-Wait for the current execution session to complete before starting retries.
+Wait for the current execution session to complete before starting retries. `cancel_processing_jobs_tool` empties the
+admission pool and every class queue but never stops a job already dispatched, so poll `get_recording_status_tool` until
+the previously RUNNING jobs leave RUNNING before starting a new session.
 
 ---
 
@@ -409,7 +476,7 @@ Multi-Recording Processing Workflow:
 - [ ] Recordings grouped into datasets
 - [ ] Dataset names resolved via `resolve_dataset_name_tool`
 - [ ] Template configuration confirmed or created via `/multi-recording-configuration` (reusable across datasets)
-- [ ] CPU core allocation confirmed with user
+- [ ] Share of the machine to dedicate to processing confirmed with user
 - [ ] Batch prepared or full pipeline executed
 - [ ] Status monitored until all datasets complete or fail
 - [ ] Failed datasets routed to appropriate skill (see Error routing)

@@ -20,7 +20,7 @@ never has it. The tracking viewer offers `rois_only`, `mean_image`, `enhanced_me
 |------------------------|-----------------------|-------------------------------------------------------|
 | `rois_only`            | ROIs                  | Blank background with ROI overlays only               |
 | `mean_image`           | Mean Image            | Temporal mean image (channel 1 or 2 based on toggle)  |
-| `enhanced_mean_image`  | Mean Image (Enhanced) | High-pass filtered mean image                         |
+| `enhanced_mean_image`  | Mean Image (Enhanced) | Background-subtracted, contrast-normalized mean image |
 | `correlation_map`      | Correlation Map       | Pixel-wise activity correlation map                   |
 | `maximum_projection`   | Maximum Projection    | Maximum intensity projection                          |
 | `corrected_structural` | Corrected Structural  | Bleed-through-corrected structural channel mean image |
@@ -63,7 +63,8 @@ Reported in `mask_layer` state field (tracking viewer only).
 
 ## Coordinate spaces
 
-Reported in `coordinate_space` state field (tracking viewer only).
+Reported in `coordinate_space` state field (tracking viewer only). It selects the coordinate space of the background
+reference image alone, while `mask_layer` selects the mask geometry drawn over it.
 
 | Value         | Dropdown label | Description                                                    |
 |---------------|----------------|----------------------------------------------------------------|

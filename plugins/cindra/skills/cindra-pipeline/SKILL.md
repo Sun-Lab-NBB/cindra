@@ -67,7 +67,8 @@ Setup       →  Data Prep   →               →             →            �
 ### Stage 1: Environment setup
 
 - **Skill:** `/cindra-mcp-environment-setup`
-- **Actions:** Verify the cindra MCP server is connected and the `cindra` command is available
+- **Actions:** Verify the cindra and cindra-gui MCP servers are connected and both commands are available, then
+  confirm the numeric threading runtime is loadable with `check_threading_runtime_tool`
 - **Handoff condition:** cindra MCP tools are accessible
 - **Skip condition:** MCP already verified in this session
 

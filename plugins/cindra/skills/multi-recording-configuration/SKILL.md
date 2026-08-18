@@ -113,10 +113,14 @@ Runtime behavior settings shared with the single-recording pipeline.
 
 | Parameter               | Type | Default | Description                                          |
 |-------------------------|------|---------|------------------------------------------------------|
-| `display_progress_bars` | bool | False   | Show progress bars. Disable for parallel processing. |
+| `display_progress_bars` | bool | False   | Show progress bars. Batch tools force this False.    |
+
+`cindra run` displays progress bars by default and writes its choice into this field before dispatching, so the flag
+that suppresses them is `-np/--no-progress`. The batch MCP tools write False into every per-dataset configuration they
+create, because concurrent jobs sharing a terminal interleave their bars.
 
 Worker allocation reaches the discovery and extraction stages as an invocation argument, as described in the
-Configuration overview section. Omitting a worker option applies the measured default of 30 workers for discovery and 16
+Configuration overview section. Omitting a worker option applies the measured default of 2 workers for discovery and 16
 for extraction, published as `DISCOVERY_WORKERS` and `EXTRACTION_WORKERS` in `cindra.orchestration`. Setting a worker
 option to -1 requests every available core.
 
@@ -196,7 +200,7 @@ back to each recording's native space for signal extraction.
 | `final_grid_sampling`  | float | 16.0            | Knot spacing (pixels) at the finest scale. Lower = supports smaller images.   |
 | `scale_sampling`       | int   | 30              | Iterations per scale level. 20-30 typical. Higher = better but slower.        |
 | `speed_factor`         | float | 3.0             | Deformation strength. **Most important tuning parameter.** 1-5 typical.       |
-| `repeat_registration`  | bool  | False           | Re-run registration even if existing data is found.                           |
+| `repeat_registration`  | bool  | False           | Re-run registration, and the tracking and projection steps depending on it.   |
 
 ### Tuning guidance
 
@@ -231,7 +235,7 @@ native coordinates for fluorescence extraction.
 | `threshold`        | float           | 0.75       | Jaccard distance threshold for clustering. Lower = stricter matching.    |
 | `mask_prevalence`  | int             | 50         | Min % of recordings that must contain the ROI. Higher = more reliable.   |
 | `pixel_prevalence` | int             | 50         | Min % of a cluster's member masks a pixel must appear in.                |
-| `step_sizes`       | tuple[int, int] | (200, 200) | Spatial bin size [h, w] in pixels for partitioning the clustering space. |
+| `step_sizes`       | tuple[int, int] | (200, 200) | Spatial bin size [h, w] in pixels. Both must be equal.                   |
 | `bin_size`         | int             | 50         | Overlap margin (pixels) between adjacent bins for border ROI clustering. |
 | `maximum_distance` | int             | 20         | Max centroid distance (pixels) between masks to consider same ROI.       |
 | `minimum_size`     | int             | 25         | Min non-overlapping pixels for ROI-template assignment.                  |

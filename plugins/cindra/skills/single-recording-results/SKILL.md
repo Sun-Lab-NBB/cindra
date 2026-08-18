@@ -85,6 +85,30 @@ compare the returned `roi_index` values against what you requested. When every r
 `query_roi_statistics_tool` returns an empty `rois` list with `success=true`, while `query_traces_tool` fails with "No
 valid ROI indices provided", so a confidently "successful" empty result can only come from the statistics tool.
 
+`query_traces_tool` accepts at most 50 ROI indices per call and rejects a longer request with "Unable to query traces.
+Requested N ROIs, maximum is 50." before it resolves any path. `query_roi_statistics_tool` returns at most 500 ROIs.
+Batch a larger pull across several calls.
+
+**`plane_index` does not default the same way across the query tools.** `query_registration_quality_tool` defaults to
+`0`, which is the first imaging plane, while `query_detection_summary_tool`, `query_roi_statistics_tool`, and
+`query_traces_tool` default to `-1`, which is the combined view. Comparing a default registration-quality result
+against a default detection or trace result therefore compares one plane against the whole recording. You MUST pass
+`plane_index` explicitly whenever you relate the two, and an unknown plane fails with "Plane directory plane_N not
+found. Available: ...".
+
+| Argument            | Tools                                       | Accepted values                                                                                             |
+|---------------------|---------------------------------------------|-------------------------------------------------------------------------------------------------------------|
+| `plane_index`       | the four single-recording query tools       | `-1` combined view, `0`+ a specific plane                                                                   |
+| `trace_type`        | `query_traces_tool`, cross-recording traces | `fluorescence`, `neuropil`, `corrected`, `spikes`                                                           |
+| `downsample_factor` | `query_traces_tool`, cross-recording traces | `1` none, `N` every Nth sample. Below 1 clamps to 1                                                         |
+| `start_frame`       | `query_traces_tool`, cross-recording traces | inclusive, applied before downsampling, default `0`                                                         |
+| `end_frame`         | `query_traces_tool`, cross-recording traces | exclusive, applied before downsampling, default all                                                         |
+| `sort_by`           | `query_roi_statistics_tool`                 | `skewness`, `compactness`, `footprint`, `aspect_ratio`, `pixel_count`, `solidity`, `normalized_pixel_count` |
+| `top_n`             | `query_roi_statistics_tool`                 | with `sort_by`, the top N. Without it, the first N                                                          |
+
+`trace_type` names the trace, not the file: `corrected` returns the neuropil-subtracted trace and `spikes` returns the
+deconvolved trace. An unrecognized value fails with "Invalid trace_type '...'. Valid options: ...".
+
 ---
 
 ## Output data reference
