@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from ataraxis_base_utilities import error_format, ensure_directory_exists
 
-from cindra.io.binary import resolve_binarization_marker_path, resolve_registration_marker_path
+from cindra.io.binary import _resolve_binarization_marker_path, _resolve_registration_marker_path
 from cindra.dataclasses import (
     ROIMask,
     CombinedData,
@@ -347,7 +347,7 @@ class TestExtractMultiRecording:
             extract_traces(context=context, workers=1)
 
     @pytest.mark.parametrize(
-        "resolve_marker_path", [resolve_binarization_marker_path, resolve_registration_marker_path]
+        "resolve_marker_path", [_resolve_binarization_marker_path, _resolve_registration_marker_path]
     )
     def test_marked_plane_binary_raises(self, tmp_path: Path, resolve_marker_path: Callable[..., Path]) -> None:
         """Verifies that a plane binary either phase left marked is refused instead of read as a finished movie."""

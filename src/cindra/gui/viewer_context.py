@@ -200,12 +200,6 @@ class SingleRecordingData:
         return len(self.roi_statistics)
 
     @property
-    def cell_count(self) -> int:
-        """Returns the number of ROIs classified as cells in the current view."""
-        classification = self.cell_classification
-        return int(classification[:, 0].sum()) if classification.size else 0
-
-    @property
     def cell_fluorescence(self) -> NDArray[np.float32]:
         """Returns the cell fluorescence traces with shape (cells, frames) for the current view."""
         value = self._current_extraction.cell_fluorescence

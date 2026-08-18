@@ -4,7 +4,6 @@ import pytest
 from ataraxis_base_utilities import resolve_worker_count
 
 from cindra.orchestration import (
-    ALL_CORES_REQUEST,
     DISCOVERY_WORKERS,
     EXTRACTION_WORKERS,
     PROCESSING_WORKERS,
@@ -18,6 +17,7 @@ from cindra.orchestration import (
 )
 from cindra.orchestration.allocation import (
     _RESERVED_CORES,
+    ALL_CORES_REQUEST,
     COMBINATION_WORKERS,
     _BYTES_PER_MEGABYTE,
     _DISCOVERY_RESOURCES,

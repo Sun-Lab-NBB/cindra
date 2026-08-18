@@ -188,8 +188,8 @@
   with the other two conversions, or as a regression, and do not add a scaling variant of `resize_field` unless the
   user asks for one
 - Binarization and registration both write frames into a plane binary, each guarding its own write with its own marker,
-  `<binary>.binarizing` and `<binary>.registering`. `cindra.io` exports a create, clear, and path helper per phase plus
-  `resolve_active_binary_marker`, which reports whichever marker sits beside a binary and is what every reader calls.
+  `<binary>.binarizing` and `<binary>.registering`. `io/binary.py` defines a create and clear helper per phase, and
+  `cindra.io` exports the registration pair plus `resolve_active_binary_marker`, which every reader calls.
   `register_plane` refuses to run while either marker exists, and `binarize_recording` refuses a marked binary, a
   binary whose size disagrees with its plane's recorded frame geometry, and a two-channel plane holding no second
   channel binary. Preserve this protocol when modifying either stage, and keep `repeat_binarization` named as the

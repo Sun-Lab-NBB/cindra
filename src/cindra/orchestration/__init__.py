@@ -9,6 +9,7 @@ from .jobs import (
     PrerequisiteScope,
     MultiRecordingJobNames,
     SingleRecordingJobNames,
+    generate_job_ids,
     resolve_pipeline_jobs,
     order_phases_by_execution,
     resolve_downstream_phases,
@@ -18,7 +19,7 @@ from .jobs import (
     resolve_multi_recording_prerequisites,
     resolve_single_recording_prerequisites,
 )
-from .openmp import OpenMpStatus, resolve_openmp_runtime
+from .openmp import OpenMpStatus, OpenMpSummary, resolve_openmp_runtime
 from .worker import (
     prime_dataset,
     prime_recording,
@@ -51,7 +52,6 @@ from .execution import (
     cancel_execution_session,
 )
 from .allocation import (
-    ALL_CORES_REQUEST,
     DISCOVERY_WORKERS,
     EXTRACTION_WORKERS,
     PROCESSING_WORKERS,
@@ -78,7 +78,6 @@ from .footprints import (
 )
 
 __all__ = [
-    "ALL_CORES_REQUEST",
     "BINARIZATION_WORKERS",
     "COMBINATION_WORKERS",
     "DISCOVERY_WORKERS",
@@ -99,6 +98,7 @@ __all__ = [
     "MultiRecordingJobNames",
     "MultiRecordingJobs",
     "OpenMpStatus",
+    "OpenMpSummary",
     "PendingJob",
     "PipelinePhase",
     "PlaneGeometry",
@@ -112,6 +112,7 @@ __all__ = [
     "estimate_single_recording_job_memory_mb",
     "execute_multi_recording_job",
     "execute_single_recording_job",
+    "generate_job_ids",
     "get_execution_state",
     "load_multi_recording_configuration",
     "load_single_recording_configuration",

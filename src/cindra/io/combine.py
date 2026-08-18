@@ -18,92 +18,6 @@ if TYPE_CHECKING:
     from ..dataclasses import RuntimeContext
 
 
-def compute_plane_offsets(
-    plane_contexts: list[RuntimeContext],
-) -> tuple[NDArray[np.int32], NDArray[np.int32]]:
-    """Computes the pixel displacement for each plane to arrange them in a combined view.
-
-    Handles three scenarios based on the recording type. For standard multi-plane recordings without MROI data, computes
-    a simple grid layout where each plane is tiled sequentially. For MROI recordings with a single z-plane per ROI, uses
-    the MROI offsets directly to preserve spatial relationships between ROIs. For MROI recordings with multiple z-planes
-    per ROI, applies two-level tiling: ROI positions are preserved within each tile, and tiles are offset for each
-    z-plane to prevent overlap.
-
-    Notes:
-        The output of this function is used to properly arrange the data from multiple planes in the 'shared' recording
-        space, re-assembling the recording from individually processed planes. This is used as part of outputting the
-        cindra-processed data as a 'combined' dataset that integrates the data from all available planes.
-
-        The plane contexts are expected in the order produced by the single-recording context resolver. For MROI
-        recordings, that order is ROI-major, so a virtual plane's index equals its ROI index times the z-plane count
-        plus its z-plane index.
-
-    Args:
-        plane_contexts: A list of RuntimeContext instances, one for each plane being processed.
-
-    Returns:
-        A tuple of two elements. The first element is an array of y-displacement values, and the second element is an
-        array of x-displacement values.
-    """
-    first_context = plane_contexts[0]
-    plane_number = len(plane_contexts)
-
-    y_displacement = np.zeros(plane_number, dtype=np.int32)
-    x_displacement = np.zeros(plane_number, dtype=np.int32)
-
-    # Handles standard (non-MROI) recordings by computing a simple grid layout for all planes.
-    if first_context.runtime.io.mroi_y_offset is None or first_context.runtime.io.mroi_x_offset is None:
-        height = first_context.runtime.io.frame_height
-        width = first_context.runtime.io.frame_width
-
-        # Calculates the number of columns needed to arrange planes in a roughly square grid.
-        column_number = int(np.ceil(np.sqrt(height * width * plane_number) / width))
-
-        # Assigns each plane to a grid position based on its index.
-        for plane_index in range(plane_number):
-            x_displacement[plane_index] = (plane_index % column_number) * width
-            y_displacement[plane_index] = (plane_index // column_number) * height
-
-    # Handles MROI (Multi-ROI) recordings where each ROI has a known spatial position in the original field of view.
-    else:
-        # Starts with the MROI offsets, which position each ROI correctly relative to each other.
-        x_displacement = np.array([context.runtime.io.mroi_x_offset for context in plane_contexts], dtype=np.int32)
-        y_displacement = np.array([context.runtime.io.mroi_y_offset for context in plane_contexts], dtype=np.int32)
-
-        # Checks if multiple virtual planes share the same (x, y) position. This happens when MROI recordings have
-        # multiple z-planes per ROI: all z-planes within one ROI share the same spatial position.
-        unique_positions = np.unique(np.vstack((y_displacement, x_displacement)), axis=1)
-        roi_number = unique_positions.shape[1]
-
-        # Fewer unique positions than virtual planes means the recording holds multiple z-planes per ROI, which
-        # requires two-level tiling: ROI positions are preserved within each tile, and entire tiles are offset for
-        # each z-plane.
-        if roi_number < plane_number:
-            # Computes the number of z-planes (total virtual planes divided by unique ROI positions).
-            z_plane_number = plane_number // roi_number
-
-            heights_array = np.array([context.runtime.io.frame_height for context in plane_contexts])
-            widths_array = np.array([context.runtime.io.frame_width for context in plane_contexts])
-
-            # Calculates the tile size as the bounding box that contains all ROIs at their MROI positions.
-            maximum_height = (y_displacement + heights_array).max()
-            maximum_width = (x_displacement + widths_array).max()
-
-            # Calculates the number of columns needed to arrange z-plane tiles in a roughly square grid.
-            column_number = int(np.ceil(np.sqrt(maximum_height * maximum_width * z_plane_number) / maximum_width))
-
-            # Adds tile offsets to the base MROI positions. Each z-plane gets its own tile, and within each tile the
-            # ROIs maintain their relative MROI positions. The context resolver lays virtual planes out ROI-major, as
-            # virtual_plane_index = roi_index * z_plane_number + z_index, so a virtual plane's z-plane index is its own
-            # index modulo the z-plane count.
-            for virtual_plane_index in range(plane_number):
-                z_index = virtual_plane_index % z_plane_number
-                x_displacement[virtual_plane_index] += (z_index % column_number) * maximum_width
-                y_displacement[virtual_plane_index] += (z_index // column_number) * maximum_height
-
-    return y_displacement, x_displacement
-
-
 def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
     """Combines processed data from multiple planes into a unified dataset.
 
@@ -130,7 +44,7 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
 
     # Computes the y-axis and x-axis displacement for each plane. These displacement values are used to arrange
     # individual planes back into the original recording movie.
-    y_offsets, x_offsets = compute_plane_offsets(plane_contexts=plane_contexts)
+    y_offsets, x_offsets = _compute_plane_offsets(plane_contexts=plane_contexts)
 
     # Queries the height and width for each plane.
     heights = np.array([context.runtime.io.frame_height for context in plane_contexts], dtype=np.uint16)
@@ -499,6 +413,92 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
 
     console.echo(message="Combined data prepared successfully.", level=LogLevel.SUCCESS)
     return combined_data
+
+
+def _compute_plane_offsets(
+    plane_contexts: list[RuntimeContext],
+) -> tuple[NDArray[np.int32], NDArray[np.int32]]:
+    """Computes the pixel displacement for each plane to arrange them in a combined view.
+
+    Handles three scenarios based on the recording type. For standard multi-plane recordings without MROI data, computes
+    a simple grid layout where each plane is tiled sequentially. For MROI recordings with a single z-plane per ROI, uses
+    the MROI offsets directly to preserve spatial relationships between ROIs. For MROI recordings with multiple z-planes
+    per ROI, applies two-level tiling: ROI positions are preserved within each tile, and tiles are offset for each
+    z-plane to prevent overlap.
+
+    Notes:
+        The output of this function is used to properly arrange the data from multiple planes in the 'shared' recording
+        space, re-assembling the recording from individually processed planes. This is used as part of outputting the
+        cindra-processed data as a 'combined' dataset that integrates the data from all available planes.
+
+        The plane contexts are expected in the order produced by the single-recording context resolver. For MROI
+        recordings, that order is ROI-major, so a virtual plane's index equals its ROI index times the z-plane count
+        plus its z-plane index.
+
+    Args:
+        plane_contexts: A list of RuntimeContext instances, one for each plane being processed.
+
+    Returns:
+        A tuple of two elements. The first element is an array of y-displacement values, and the second element is an
+        array of x-displacement values.
+    """
+    first_context = plane_contexts[0]
+    plane_number = len(plane_contexts)
+
+    y_displacement = np.zeros(plane_number, dtype=np.int32)
+    x_displacement = np.zeros(plane_number, dtype=np.int32)
+
+    # Handles standard (non-MROI) recordings by computing a simple grid layout for all planes.
+    if first_context.runtime.io.mroi_y_offset is None or first_context.runtime.io.mroi_x_offset is None:
+        height = first_context.runtime.io.frame_height
+        width = first_context.runtime.io.frame_width
+
+        # Calculates the number of columns needed to arrange planes in a roughly square grid.
+        column_number = int(np.ceil(np.sqrt(height * width * plane_number) / width))
+
+        # Assigns each plane to a grid position based on its index.
+        for plane_index in range(plane_number):
+            x_displacement[plane_index] = (plane_index % column_number) * width
+            y_displacement[plane_index] = (plane_index // column_number) * height
+
+    # Handles MROI (Multi-ROI) recordings where each ROI has a known spatial position in the original field of view.
+    else:
+        # Starts with the MROI offsets, which position each ROI correctly relative to each other.
+        x_displacement = np.array([context.runtime.io.mroi_x_offset for context in plane_contexts], dtype=np.int32)
+        y_displacement = np.array([context.runtime.io.mroi_y_offset for context in plane_contexts], dtype=np.int32)
+
+        # Checks if multiple virtual planes share the same (x, y) position. This happens when MROI recordings have
+        # multiple z-planes per ROI: all z-planes within one ROI share the same spatial position.
+        unique_positions = np.unique(np.vstack((y_displacement, x_displacement)), axis=1)
+        roi_number = unique_positions.shape[1]
+
+        # Fewer unique positions than virtual planes means the recording holds multiple z-planes per ROI, which
+        # requires two-level tiling: ROI positions are preserved within each tile, and entire tiles are offset for
+        # each z-plane.
+        if roi_number < plane_number:
+            # Computes the number of z-planes (total virtual planes divided by unique ROI positions).
+            z_plane_number = plane_number // roi_number
+
+            heights_array = np.array([context.runtime.io.frame_height for context in plane_contexts])
+            widths_array = np.array([context.runtime.io.frame_width for context in plane_contexts])
+
+            # Calculates the tile size as the bounding box that contains all ROIs at their MROI positions.
+            maximum_height = (y_displacement + heights_array).max()
+            maximum_width = (x_displacement + widths_array).max()
+
+            # Calculates the number of columns needed to arrange z-plane tiles in a roughly square grid.
+            column_number = int(np.ceil(np.sqrt(maximum_height * maximum_width * z_plane_number) / maximum_width))
+
+            # Adds tile offsets to the base MROI positions. Each z-plane gets its own tile, and within each tile the
+            # ROIs maintain their relative MROI positions. The context resolver lays virtual planes out ROI-major, as
+            # virtual_plane_index = roi_index * z_plane_number + z_index, so a virtual plane's z-plane index is its own
+            # index modulo the z-plane count.
+            for virtual_plane_index in range(plane_number):
+                z_index = virtual_plane_index % z_plane_number
+                x_displacement[virtual_plane_index] += (z_index % column_number) * maximum_width
+                y_displacement[virtual_plane_index] += (z_index // column_number) * maximum_height
+
+    return y_displacement, x_displacement
 
 
 def _resolve_plane_frame_count(context: RuntimeContext) -> int | None:

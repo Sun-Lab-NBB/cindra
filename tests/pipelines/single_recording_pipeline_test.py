@@ -13,11 +13,11 @@ from ataraxis_base_utilities import error_format, ensure_directory_exists
 from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 
 from cindra.io import (
-    create_binarization_marker,
     create_registration_marker,
     resolve_active_binary_marker,
     resolve_single_recording_contexts,
 )
+from cindra.io.binary import create_binarization_marker
 from cindra.io.context import PARAMETERS_FILENAME
 from cindra.dataclasses import RuntimeContext, AcquisitionParameters, SingleRecordingConfiguration
 from cindra.orchestration import SingleRecordingJobNames

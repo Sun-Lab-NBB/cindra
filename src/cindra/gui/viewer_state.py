@@ -29,20 +29,6 @@ def generate_state_path(viewer_id: str) -> str:
     return str(Path(tempfile.gettempdir()) / f"cindra-gui-{viewer_id}.json")
 
 
-def write_viewer_state(state_path: Path, state: dict[str, Any]) -> None:
-    """Writes viewer state to a JSON file that the MCP server reads concurrently.
-
-    The state reaches its path through a rename, so the MCP server observes either the previous snapshot or the
-    complete new one.
-
-    Args:
-        state_path: The path to the state file.
-        state: The state dictionary to serialize.
-    """
-    with atomic_write(file_path=state_path) as state_file:
-        json.dump(state, state_file)
-
-
 def read_viewer_state(state_path: Path) -> dict[str, Any]:
     """Reads viewer state from a JSON file.
 
@@ -107,4 +93,18 @@ class StateWriter(QtCore.QObject):
         state = self._get_state()
         if state != self._last_state:
             self._last_state = state
-            write_viewer_state(state_path=self._state_path, state=state)
+            _write_viewer_state(state_path=self._state_path, state=state)
+
+
+def _write_viewer_state(state_path: Path, state: dict[str, Any]) -> None:
+    """Writes viewer state to a JSON file that the MCP server reads concurrently.
+
+    The state reaches its path through a rename, so the MCP server observes either the previous snapshot or the
+    complete new one.
+
+    Args:
+        state_path: The path to the state file.
+        state: The state dictionary to serialize.
+    """
+    with atomic_write(file_path=state_path) as state_file:
+        json.dump(state, state_file)

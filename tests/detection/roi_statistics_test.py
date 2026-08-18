@@ -15,7 +15,7 @@ from cindra.detection.roi_statistics import (
     compute_roi_statistics,
     _compute_distance_kernel,
     estimate_diameter_from_rois,
-    compute_median_pixel_position,
+    _compute_median_pixel_position,
 )
 
 if TYPE_CHECKING:
@@ -125,27 +125,27 @@ class TestEstimateDiameterFromRois:
 
 
 class TestComputeMedianPixelPosition:
-    """Tests compute_median_pixel_position."""
+    """Tests _compute_median_pixel_position."""
 
     def test_single_pixel(self) -> None:
         """Verifies that a single pixel returns itself."""
         y_pixels = np.array([5], dtype=np.int32)
         x_pixels = np.array([10], dtype=np.int32)
-        result = compute_median_pixel_position(y_pixels=y_pixels, x_pixels=x_pixels)
+        result = _compute_median_pixel_position(y_pixels=y_pixels, x_pixels=x_pixels)
         assert result == (5, 10)
 
     def test_symmetric_pixels(self) -> None:
         """Verifies that the center pixel is returned for a symmetric layout."""
         y_pixels = np.array([0, 1, 2], dtype=np.int32)
         x_pixels = np.array([0, 1, 2], dtype=np.int32)
-        result = compute_median_pixel_position(y_pixels=y_pixels, x_pixels=x_pixels)
+        result = _compute_median_pixel_position(y_pixels=y_pixels, x_pixels=x_pixels)
         assert result == (1, 1)
 
     def test_returns_actual_pixel(self) -> None:
         """Verifies that the result is an actual pixel from the input arrays."""
         y_pixels = np.array([0, 5, 10], dtype=np.int32)
         x_pixels = np.array([0, 3, 8], dtype=np.int32)
-        result_y, result_x = compute_median_pixel_position(y_pixels=y_pixels, x_pixels=x_pixels)
+        result_y, result_x = _compute_median_pixel_position(y_pixels=y_pixels, x_pixels=x_pixels)
         assert result_y in y_pixels
         assert result_x in x_pixels
 

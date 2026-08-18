@@ -13,7 +13,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from dataclasses import dataclass
 
-from ataraxis_data_structures import JobState, ProcessingStatus
+from ataraxis_data_structures import JobState, ProcessingStatus, ProcessingTracker
 
 from ..layout import resolve_plane_specifier
 
@@ -169,6 +169,29 @@ def resolve_multi_recording_jobs(recording_ids: Sequence[str]) -> list[tuple[str
         each extraction job carries its recording identifier.
     """
     return resolve_pipeline_jobs(phases=MULTI_RECORDING_PHASES, specifiers=list(recording_ids))
+
+
+def generate_job_ids(jobs: Iterable[tuple[str, str]]) -> dict[tuple[str, str], str]:
+    """Generates the processing job identifier of every job in a resolved job universe.
+
+    Notes:
+        The identifier derives from the job name and specifier alone, and a tracker records each job under the same
+        derivation. A caller therefore names a job for the pipeline and per-job entry points from the universe the
+        job resolvers return, rather than by reading the tracker the pipeline maintains.
+
+    Args:
+        jobs: The jobs to generate identifiers for, as the (job name, specifier) pairs the job resolvers return.
+
+    Returns:
+        The hexadecimal identifier of every job, keyed by its name and specifier.
+
+    Raises:
+        ValueError: If a job name or a specifier contains a colon.
+    """
+    return {
+        (job_name, specifier): ProcessingTracker.generate_job_id(job_name=job_name, specifier=specifier)
+        for job_name, specifier in jobs
+    }
 
 
 def resolve_single_recording_prerequisites(

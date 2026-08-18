@@ -39,25 +39,13 @@ _REGISTRATION_MARKER_CONTENTS: str = (
 """The text written into a registration marker, so that the marker explains itself to whoever finds it on disk."""
 
 
-def resolve_binarization_marker_path(binary_path: Path) -> Path:
-    """Returns the path of the marker that flags a binary as being mid-binarization.
-
-    Args:
-        binary_path: The path to the binary the marker guards.
-
-    Returns:
-        The marker path, which sits beside the binary it guards.
-    """
-    return binary_path.with_name(resolve_binarization_marker_name(binary_name=binary_path.name))
-
-
 def create_binarization_marker(binary_path: Path) -> None:
     """Marks a binary as being mid-binarization, which declares its contents indeterminate until the mark is cleared.
 
     Args:
         binary_path: The path to the binary whose conversion is about to begin.
     """
-    resolve_binarization_marker_path(binary_path=binary_path).write_text(_BINARIZATION_MARKER_CONTENTS)
+    _resolve_binarization_marker_path(binary_path=binary_path).write_text(_BINARIZATION_MARKER_CONTENTS)
 
 
 def clear_binarization_marker(binary_path: Path) -> None:
@@ -70,19 +58,7 @@ def clear_binarization_marker(binary_path: Path) -> None:
     Args:
         binary_path: The path to the binary to clear the mark from.
     """
-    resolve_binarization_marker_path(binary_path=binary_path).unlink(missing_ok=True)
-
-
-def resolve_registration_marker_path(binary_path: Path) -> Path:
-    """Returns the path of the marker that flags a binary as being mid-registration.
-
-    Args:
-        binary_path: The path to the binary the marker guards.
-
-    Returns:
-        The marker path, which sits beside the binary it guards.
-    """
-    return binary_path.with_name(resolve_registration_marker_name(binary_name=binary_path.name))
+    _resolve_binarization_marker_path(binary_path=binary_path).unlink(missing_ok=True)
 
 
 def create_registration_marker(binary_path: Path) -> None:
@@ -91,7 +67,7 @@ def create_registration_marker(binary_path: Path) -> None:
     Args:
         binary_path: The path to the binary whose rewrite is about to begin.
     """
-    resolve_registration_marker_path(binary_path=binary_path).write_text(_REGISTRATION_MARKER_CONTENTS)
+    _resolve_registration_marker_path(binary_path=binary_path).write_text(_REGISTRATION_MARKER_CONTENTS)
 
 
 def clear_registration_marker(binary_path: Path) -> None:
@@ -104,7 +80,7 @@ def clear_registration_marker(binary_path: Path) -> None:
     Args:
         binary_path: The path to the binary to clear the mark from.
     """
-    resolve_registration_marker_path(binary_path=binary_path).unlink(missing_ok=True)
+    _resolve_registration_marker_path(binary_path=binary_path).unlink(missing_ok=True)
 
 
 def resolve_active_binary_marker(binary_path: Path) -> Path | None:
@@ -123,8 +99,8 @@ def resolve_active_binary_marker(binary_path: Path) -> Path | None:
         The path of the marker guarding the binary, or None when no stage left one there.
     """
     for marker_path in (
-        resolve_binarization_marker_path(binary_path=binary_path),
-        resolve_registration_marker_path(binary_path=binary_path),
+        _resolve_binarization_marker_path(binary_path=binary_path),
+        _resolve_registration_marker_path(binary_path=binary_path),
     ):
         if marker_path.exists():
             return marker_path
@@ -656,3 +632,27 @@ class BinaryFileCombined:
             ] = file_data
 
         return data
+
+
+def _resolve_binarization_marker_path(binary_path: Path) -> Path:
+    """Returns the path of the marker that flags a binary as being mid-binarization.
+
+    Args:
+        binary_path: The path to the binary the marker guards.
+
+    Returns:
+        The marker path, which sits beside the binary it guards.
+    """
+    return binary_path.with_name(resolve_binarization_marker_name(binary_name=binary_path.name))
+
+
+def _resolve_registration_marker_path(binary_path: Path) -> Path:
+    """Returns the path of the marker that flags a binary as being mid-registration.
+
+    Args:
+        binary_path: The path to the binary the marker guards.
+
+    Returns:
+        The marker path, which sits beside the binary it guards.
+    """
+    return binary_path.with_name(resolve_registration_marker_name(binary_name=binary_path.name))

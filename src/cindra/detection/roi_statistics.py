@@ -48,22 +48,6 @@ def estimate_diameter_from_rois(rois: list[ROIMask], default_diameter: int = 10)
     return max(estimated_diameter, 1)
 
 
-def compute_median_pixel_position(y_pixels: NDArray[np.int32], x_pixels: NDArray[np.int32]) -> tuple[int, int]:
-    """Computes the ROI centroid as the y and x coordinates of the pixel closest to the coordinate-wise median.
-
-    Args:
-        y_pixels: The y-coordinates of the ROI's pixels.
-        x_pixels: The x-coordinates of the ROI's pixels.
-
-    Returns:
-        The (y, x) coordinates of the pixel closest to the median position.
-    """
-    y_median = np.median(y_pixels)
-    x_median = np.median(x_pixels)
-    min_index = np.argmin(np.square(x_pixels - x_median) + np.square(y_pixels - y_median))
-    return int(y_pixels[min_index]), int(x_pixels[min_index])
-
-
 def compute_roi_statistics(
     rois: list[ROIStatistics],
     frame_height: int,
@@ -109,7 +93,7 @@ def compute_roi_statistics(
     # Initializes centroids for ROIs that lack them. The centroid is required for computing radial statistics.
     for roi in rois:
         if not roi.mask.centroid or roi.mask.centroid == (0, 0):
-            roi.mask.centroid = compute_median_pixel_position(y_pixels=roi.mask.y_pixels, x_pixels=roi.mask.x_pixels)
+            roi.mask.centroid = _compute_median_pixel_position(y_pixels=roi.mask.y_pixels, x_pixels=roi.mask.x_pixels)
 
     # Resolves the ROI diameter for distance normalization. A sensible default is used when no diameter is provided.
     default_diameter = 10
@@ -174,6 +158,22 @@ def compute_roi_statistics(
         overlap_counts = _ROI.get_overlap_count_image(rois=roi_wrappers, height=frame_height, width=frame_width)
         for wrapper in roi_wrappers:
             wrapper.data.mask.overlap_mask = wrapper.get_overlap_mask(overlap_count_image=overlap_counts)
+
+
+def _compute_median_pixel_position(y_pixels: NDArray[np.int32], x_pixels: NDArray[np.int32]) -> tuple[int, int]:
+    """Computes the ROI centroid as the y and x coordinates of the pixel closest to the coordinate-wise median.
+
+    Args:
+        y_pixels: The y-coordinates of the ROI's pixels.
+        x_pixels: The x-coordinates of the ROI's pixels.
+
+    Returns:
+        The (y, x) coordinates of the pixel closest to the median position.
+    """
+    y_median = np.median(y_pixels)
+    x_median = np.median(x_pixels)
+    min_index = np.argmin(np.square(x_pixels - x_median) + np.square(y_pixels - y_median))
+    return int(y_pixels[min_index]), int(x_pixels[min_index])
 
 
 @dataclass(frozen=True, slots=True)

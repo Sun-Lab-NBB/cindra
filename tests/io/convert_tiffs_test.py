@@ -25,8 +25,8 @@ from cindra.io.binary import (
     clear_binarization_marker,
     create_registration_marker,
     resolve_active_binary_marker,
-    resolve_binarization_marker_path,
-    resolve_registration_marker_path,
+    _resolve_binarization_marker_path,
+    _resolve_registration_marker_path,
 )
 from cindra.io.context import PARAMETERS_FILENAME
 from cindra.dataclasses import (
@@ -984,7 +984,7 @@ class TestConvertTiffsToBinary:
         # The abandoned binary holds the exact byte count a finished conversion would leave behind, with every frame
         # still zero, so the mark beside it is the only record that its contents are incomplete.
         assert binary_path.stat().st_size == len(frame_values) * _FRAME_HEIGHT * _FRAME_WIDTH * 2
-        assert resolve_binarization_marker_path(binary_path=binary_path).exists()
+        assert _resolve_binarization_marker_path(binary_path=binary_path).exists()
 
 
 class TestResolveTiffConversionPlan:
@@ -1241,8 +1241,8 @@ class TestCreateBinaryFiles:
         # The binary is sized to its full frame count the moment it is opened, so nothing but the mark separates it
         # from a finished conversion until the caller writes every frame and clears the mark. The registration mark
         # described the binary just unlinked, so it goes with it.
-        assert resolve_binarization_marker_path(binary_path=binary_path).exists()
-        assert not resolve_registration_marker_path(binary_path=binary_path).exists()
+        assert _resolve_binarization_marker_path(binary_path=binary_path).exists()
+        assert not _resolve_registration_marker_path(binary_path=binary_path).exists()
 
     def test_marks_both_channel_binaries_it_opens(self, tmp_path: Path) -> None:
         """Verifies that a two-channel plane carries the mark on both of the binaries the conversion opens."""
@@ -1263,5 +1263,5 @@ class TestCreateBinaryFiles:
         channel_2_binaries[0].close()
 
         io_data = context.runtime.io
-        assert resolve_binarization_marker_path(binary_path=io_data.registered_binary_path).exists()
-        assert resolve_binarization_marker_path(binary_path=io_data.registered_binary_path_channel_2).exists()
+        assert _resolve_binarization_marker_path(binary_path=io_data.registered_binary_path).exists()
+        assert _resolve_binarization_marker_path(binary_path=io_data.registered_binary_path_channel_2).exists()
