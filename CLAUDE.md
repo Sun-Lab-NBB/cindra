@@ -262,9 +262,12 @@ outputs.
 - **Numba parallelization**: The Numba threading layer is configured in `__init__.py` (TBB on non-Mac, OpenMP on macOS)
   immediately after importing `numba.config` and before importing any modules that compile `@njit` functions. Functions
   use `@njit(cache=True, parallel=True)` with `prange` over each kernel's outermost independent axis, which is frames in
-  registration and ROIs in extraction. Numba is excluded from type checking via a `pyproject.toml` mypy override. The
-  `# type: ignore[import-untyped]` comments apply to the scikit-learn, threadpoolctl, and PyQtGraph imports, and
-  `# pragma: no cover` on JIT-compiled function bodies is expected. None of these should be removed.
+  registration and ROIs in extraction. A parallel kernel carries no eager signature. A signature compiles the kernel
+  when its module is imported, which starts the threading layer before `verify_openmp_runtime()` runs and fails a host
+  with no runtime at `import cindra` rather than at the stage that needs it. Numba is excluded from type checking via a
+  `pyproject.toml` mypy override. The `# type: ignore[import-untyped]` comments apply to the scikit-learn,
+  threadpoolctl, and PyQtGraph imports, and `# pragma: no cover` on JIT-compiled function bodies is expected. None of
+  these should be removed.
 - **Thread budget confinement**: Two ataraxis assets and one third-party context manager divide the work, and each
   covers a moment the others cannot. `limit_worker_threads` from `ataraxis-data-structures` encloses the batch
   engine's worker pool for the session's whole lifetime, so every worker process imports its numeric backends at a

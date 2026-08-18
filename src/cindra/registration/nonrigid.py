@@ -153,7 +153,7 @@ def compute_nonrigid_offsets(
         extracted_blocks[:, block_index] = frames[:, y_range[0] : y_range[1], x_range[0] : x_range[1]]
 
     # Applies taper mask and computes phase correlation.
-    extracted_blocks = apply_mask(extracted_blocks, taper_mask, mean_offset)
+    extracted_blocks = apply_mask(frames=extracted_blocks, mask=taper_mask, offset=mean_offset)
     batch_size = min(_CORRELATION_BATCH_SIZE, extracted_blocks.shape[1])
     for batch_start in np.arange(0, num_blocks, batch_size):
         batch_end = min(extracted_blocks.shape[1], batch_start + batch_size)
