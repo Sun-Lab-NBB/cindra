@@ -116,8 +116,7 @@ def launch_viewer_tool(
         command.extend(["--dataset", dataset])
 
     try:
-        # The executable resolves from sys.executable, and no shell is used.
-        process = subprocess.Popen(
+        process = subprocess.Popen(  # noqa: S603 - The executable resolves from sys.executable, and no shell is used.
             args=command,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
