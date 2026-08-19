@@ -171,18 +171,23 @@ Carries the same `-t` / `--transport` option, with the same choices and the same
 
 ## Error routing and failure modes
 
-Both groups run through a shared Click group that converts a failure into one readable line. A command that fails
-prints a single message and no traceback, so the message a user pastes back is the whole diagnostic.
+Every command of both CLIs carries a decorator that reports a failure through the console instead of an interpreter
+traceback. The message reaches stderr at the ERROR level, and the command still exits zero, so the exit code reports
+whether Click accepted the invocation rather than whether the work succeeded.
 
-| Observed                                                         | Exit | Meaning                                              |
-|------------------------------------------------------------------|------|------------------------------------------------------|
-| `Error: Unable to complete the '<command>' command. <Type>: ...` | 1    | A library error. The type and message name the cause |
-| `Usage: ...` followed by `Error: ...`                            | 2    | A rejected option value or a missing required option |
-| `Aborted!`                                                       | 1    | The user interrupted the command                     |
-| A report ending in an unresolved status, from `cindra omp`       | 1    | No OpenMP runtime resolved on this host              |
+| Observed                                                   | Exit | Meaning                                                              |
+|------------------------------------------------------------|------|----------------------------------------------------------------------|
+| An ERROR line naming the failure, and no traceback         | 0    | A library error. The message names the cause                         |
+| `Usage: ...` followed by `Error: ...`                      | 2    | A rejected option value, whether Click or the command body caught it |
+| `Aborted!`                                                 | 1    | The user interrupted the command                                     |
+| A report ending in an unresolved status, from `cindra omp` | 1    | No OpenMP runtime resolved on this host                              |
 
-**A traceback means an outdated build.** The guard covers every command of both groups, so a user reporting a Python
-stack dump is running a build from before it landed. Ask them to upgrade rather than trying to interpret the stack.
+**Never read a zero exit code as success.** A library failure exits zero, so ask the user for the terminal output
+rather than for the exit status, and read the ERROR line to decide what failed. A Click exception passes through the
+decorator, so every malformed invocation exits 2 whether Click's own validation or the command body caught it.
+
+**A traceback means an outdated build.** Every command of both groups carries the decorator, so a user reporting a
+Python stack dump is running a build from before it landed. Ask them to upgrade rather than interpreting the stack.
 
 The failures a user hits most, and where each belongs:
 
@@ -299,4 +304,5 @@ Handing a user a CLI command, reader-judged:
 - [ ] Warned about sequential dispatch and abort-on-first-failure before recommending `cindra run`
 - [ ] Confirmed no MCP session holds the tracker for that output directory
 - [ ] Asked the user to paste the terminal output, since neither CLI reports machine-readable results
+- [ ] Read the pasted output for an ERROR line rather than treating a zero exit code as success
 ```

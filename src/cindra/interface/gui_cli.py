@@ -11,12 +11,12 @@ from pathlib import Path
 import click
 from ataraxis_base_utilities import console
 
-from .cli import CONTEXT_SETTINGS, RoutedErrorGroup
+from .cli import CONTEXT_SETTINGS, report_command_failure
 from ..gui import run_roi_viewer, run_tracking_viewer, run_registration_viewer
 from .gui_mcp_server import run_gui_server
 
 
-@click.group("cindra-gui", cls=RoutedErrorGroup, context_settings=CONTEXT_SETTINGS)
+@click.group("cindra-gui", context_settings=CONTEXT_SETTINGS)
 def cindra_gui() -> None:
     """Launches cindra GUI applications for visualizing pipeline outputs."""
 
@@ -44,6 +44,7 @@ def cindra_gui() -> None:
     hidden=True,
     help="Path to the state file for cross-process state exchange with the GUI MCP server.",
 )
+@report_command_failure
 def gui_roi(recording_path: Path, dataset: str | None, state_file: Path | None) -> None:
     """Launches the ROI viewer for single-recording pipeline output.
 
@@ -68,6 +69,7 @@ def gui_roi(recording_path: Path, dataset: str | None, state_file: Path | None) 
     hidden=True,
     help="Path to the state file for cross-process state exchange with the GUI MCP server.",
 )
+@report_command_failure
 def gui_registration(recording_path: Path, state_file: Path | None) -> None:
     """Launches the registration quality viewer for inspecting motion correction results."""
     run_registration_viewer(recording_path=recording_path, state_path=state_file)
@@ -96,6 +98,7 @@ def gui_registration(recording_path: Path, state_file: Path | None) -> None:
     hidden=True,
     help="Path to the state file for cross-process state exchange with the GUI MCP server.",
 )
+@report_command_failure
 def gui_tracking(recording_path: Path, dataset: str | None, state_file: Path | None) -> None:
     """Launches the multi-recording tracking quality viewer for inspecting across-recording ROI tracking results."""
     run_tracking_viewer(recording_path=recording_path, dataset=dataset, state_path=state_file)
@@ -110,6 +113,7 @@ def gui_tracking(recording_path: Path, dataset: str | None, state_file: Path | N
     show_default=True,
     help="The transport protocol to use for MCP communication.",
 )
+@report_command_failure
 def gui_mcp(transport: Literal["stdio", "sse", "streamable-http"]) -> None:
     """Starts the GUI MCP server for agentic viewer lifecycle management and display state queries."""
     # The stdio transport carries the JSON-RPC message stream over stdout, which is also where the console writes
