@@ -23,6 +23,7 @@ from ataraxis_time import (
     convert_time,
     get_timestamp,
 )
+from ataraxis_base_utilities import console
 from ataraxis_data_structures import (
     ProcessingStatus,
     ProcessingTracker,
@@ -2605,10 +2606,11 @@ def _size_single_recording_universe(
 
     if not geometry.planes:
         message = (
-            f"The recording configured at {configuration_path} declares no imaging plane, so no stage of it can be "
-            f"sized. Verify that its acquisition parameters file is readable."
+            f"Unable to size the jobs of the recording configured at {configuration_path}. The recording must declare "
+            f"at least one imaging plane, but it declares none. Verify that its acquisition parameters file is "
+            f"readable."
         )
-        raise ValueError(message)
+        console.error(message=message, error=ValueError)
 
     sized: list[tuple[str, str, int, int]] = []
     for job_name, specifier in resolve_single_recording_jobs(plane_count=len(geometry.planes)):

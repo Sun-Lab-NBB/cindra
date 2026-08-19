@@ -108,10 +108,10 @@ across the dataset when comparing recordings.
 
 `query_cross_recording_traces_tool` and `query_traces_tool` accept at most 50 ROI indices per call, and
 `query_roi_statistics_tool` returns at most 500 ROIs, so batch a larger pull across several calls.
-`query_multi_recording_tracking_summary_tool` reports at most 200 per-template entries, and sets
-`templates_truncated: true` with `templates_shown: 200` when the dataset holds more. Read those two keys before
-summarizing tracking quality, because the cluster statistics the tool returns alongside them cover every template
-while the `templates` list does not.
+`query_multi_recording_tracking_summary_tool` reports at most 200 per-template entries, and sets `templates_truncated:
+true` with `templates_shown: 200` when the dataset holds more. Read those two keys before summarizing tracking quality,
+because the cluster statistics the tool returns alongside them cover every template while the `templates` list does
+not.
 
 `query_traces_tool` and `query_cross_recording_traces_tool` also take `trace_type` (`fluorescence`, `neuropil`,
 `corrected`, or `spikes`), `downsample_factor` (1 for none, N for every Nth sample, values below 1 clamped to 1), and a

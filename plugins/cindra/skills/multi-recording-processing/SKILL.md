@@ -301,8 +301,8 @@ To re-run specific phases (e.g., after changing tracking parameters):
 ## Resource management
 
 Discovery and extraction run under separate resource classes, each carrying its own measured per-job worker count. The
-session CPU budget is `cpu_count - 2`, with 2 cores reserved for system operations, and the dispatcher holds the sum of
-the cores committed by every class inside that budget, so the two classes interleave rather than each claiming the whole
+session CPU budget is `cpu_count - 2`, with 2 cores reserved for system operations. The dispatcher holds the sum of the
+cores committed by every class inside that budget, so the two classes interleave rather than each claiming the whole
 budget.
 
 | Phase    | Resource class | Cores per job | Concurrency cap    |
@@ -316,16 +316,15 @@ rather than a measured plateau, leaving room for the six to eight datasets a nod
 a sevenfold single-job speedup.
 
 Each class caps its own concurrency at `min(max(1, budget // cores_per_job), max(1, job_count))`. The discover phase
-contributes one job
-per dataset, and the extract phase contributes one job per recording. On a 128-core host, with a budget of 126,
-discovery's budget-derived bound is 63 jobs, so its dataset count binds first in any realistic batch, and
-extraction runs at most 7.
+contributes one job per dataset, and the extract phase contributes one job per recording. On a 128-core host, with a
+budget of 126, discovery's budget-derived bound is 63 jobs, so its dataset count binds first in any realistic batch,
+and extraction runs at most 7.
 
 No cap here is a fixed number the host outgrows. Both derive from the session core budget, so a wider host raises them
 on its own, and the dispatcher then admits against the live core and memory budgets rather than against the cap alone.
 The engine saturates the host it is given, so leave both parameters as None unless the user asks for an override.
 
-Extraction does not shrink on a small host: a 16-core machine still asks for 16 workers against a budget of 14 and
+Extraction holds its 16 workers on a small host too. A 16-core machine still asks for 16 against a budget of 14 and
 dispatches one job regardless, because the dispatcher always admits a single job even when the budget cannot cover it.
 
 Memory bounds dispatch separately from both class caps. Each job is estimated from the dataset it will process, and the
@@ -340,9 +339,9 @@ job the whole session core budget, while setting `max_parallel_jobs` to -1 lifts
 count bounds concurrency. An override is a single scalar applied to every non-fixed class alike, so passing
 `workers_per_job=20` sets discovery and extraction to 20 both. Both execute tools return a session-level `cpu_budget`, a
 session-level `memory_budget_mb`, and a `resource_classes` mapping keyed by class name, with `discovery` and
-`extraction` entries carrying `workers_per_job`, `max_parallel_jobs` and `job_count`.
-`get_processing_jobs_status_tool` returns the same mapping with `pending` and `active` in place of `job_count`, and adds
-a session-level `awaiting_prerequisites` count of the jobs still held in the admission pool.
+`extraction` entries carrying `workers_per_job`, `max_parallel_jobs` and `job_count`. `get_processing_jobs_status_tool`
+returns the same mapping with `pending` and `active` in place of `job_count`, and adds a session-level
+`awaiting_prerequisites` count of the jobs still held in the admission pool.
 
 ### Planning before dispatch
 

@@ -97,10 +97,9 @@ Runtime behavior settings shared between single-recording and multi-recording pi
 that suppresses them is `-np/--no-progress`. The batch MCP tools write False into every per-recording configuration
 they create, because concurrent jobs sharing a terminal interleave their bars.
 
-Worker allocation is not a configuration parameter. Each stage receives its worker count as an invocation argument, with
-measured defaults of 3 workers for binarization, 4 for registration and 10 for processing. Those defaults are published
-as `BINARIZATION_WORKERS`, `REGISTRATION_WORKERS`, `PROCESSING_WORKERS` and `COMBINATION_WORKERS` in
-`cindra.orchestration`.
+Worker allocation reaches each stage as an invocation argument, as described in the Configuration overview section. The
+measured defaults are published as `BINARIZATION_WORKERS`, `REGISTRATION_WORKERS`, `PROCESSING_WORKERS` and
+`COMBINATION_WORKERS` in `cindra.orchestration`.
 
 ---
 
@@ -176,11 +175,8 @@ image built from frames sampled across the recording. Each frame is shifted to a
 computed in batches and optionally smoothed temporally. Frames with outlier offsets are flagged as bad and excluded from
 downstream ROI detection.
 
-This section controls the rigid (global) component of motion correction. The recommended approach is to always use both
-rigid registration (this section) and nonrigid registration (Section 6) together. Rigid registration removes bulk
-translational motion, while nonrigid registration corrects the spatially non-uniform residual deformations that a single
-global offset cannot capture. Disabling nonrigid registration is only appropriate when processing speed is critical and
-the preparation is exceptionally stable.
+This section controls the rigid (global) component of motion correction. Section 6 owns the nonrigid component and the
+recommendation to run both together.
 
 | Parameter                                  | Type  | Default | Description                                                         |
 |--------------------------------------------|-------|---------|---------------------------------------------------------------------|
@@ -201,8 +197,7 @@ the preparation is exceptionally stable.
 ### Tuning guidance
 
 - **High motion artifacts**: Increase `maximum_offset_fraction` (0.15-0.2) and enable `two_step_registration` for
-  recordings with large, rapid animal movement. Always keep nonrigid registration enabled (Section 6) as large movements
-  typically produce non-uniform deformations.
+  recordings with large, rapid animal movement.
 - **Noisy or low-SNR data**: Increase `spatial_smoothing_sigma` (1.5-2.0) to stabilize phase correlation.
 - **Residual jitter after registration**: Enable `temporal_smoothing_sigma` (1.0-2.0 frames) for sub-pixel smoothing of
   offset traces.
@@ -222,7 +217,7 @@ phase-correlation accuracy in 1P recordings.
 |---------------------------|-------|---------|------------------------------------------------------------------------|
 | `enabled`                 | bool  | False   | Enable 1P preprocessing (high-pass filtering, tapering). False for 2P. |
 | `spatial_highpass_window` | int   | 42      | Spatial high-pass filter window (pixels).                              |
-| `pre_smoothing_sigma`     | float | 0.0     | Box filter window (pixels); the truncated int must be even. 0 = off.   |
+| `pre_smoothing_sigma`     | float | 0.0     | Box filter window (pixels). The truncated int must be even. 0 = off.   |
 | `edge_taper_pixels`       | float | 40.0    | Sigmoid taper falloff scale. The taper starts ~2x this inward.         |
 
 Enable this section only for widefield or miniscope (1-photon) data. The preprocessing removes background fluorescence
@@ -233,8 +228,7 @@ that interferes with phase-correlation registration. Never enable for 2P data.
 ## Section 6: nonrigid_registration
 
 Corrects spatially non-uniform motion by subdividing each frame into overlapping blocks, computing independent X/Y
-offsets per block via phase correlation, and applying smooth local warping. Runs after rigid registration to correct
-residual local deformations that a single global offset cannot capture.
+offsets per block via phase correlation, and applying smooth local warping. Runs after rigid registration.
 
 | Parameter                   | Type            | Default    | Description                                          |
 |-----------------------------|-----------------|------------|------------------------------------------------------|
@@ -243,19 +237,18 @@ residual local deformations that a single global offset cannot capture.
 | `signal_to_noise_threshold` | float           | 1.2        | SNR below which a block gets extra smoothing.        |
 | `maximum_block_offset`      | float           | 5.0        | Max block offset (pixels) relative to rigid offset.  |
 
-The recommended approach is to always keep nonrigid registration enabled alongside rigid registration (Section 4). Rigid
-registration removes bulk translational motion, while nonrigid registration corrects spatially varying residual
-deformations. In practice, nearly all in vivo recordings benefit from both.
+Keep nonrigid registration enabled alongside rigid registration (Section 4). Rigid registration removes bulk
+translational motion, while nonrigid registration corrects the spatially varying residual deformations a single global
+offset cannot capture, and nearly all in vivo recordings benefit from both.
 
 ### Tuning guidance
 
-- **Default (recommended)**: Keep `enabled=True`. The combination of rigid + nonrigid registration produces the best
-  motion correction for virtually all in vivo neural imaging data.
+- **Default (recommended)**: Keep `enabled=True`.
 - **Localized motion** (e.g., brain pulsation): Decrease `block_size` to (64, 64) for finer correction. Uses more
   memory.
 - **Severe local motion**: Increase `maximum_block_offset` (8-10) to allow larger block displacements.
-- **Speed-critical batch processing**: Disable nonrigid (`enabled=False`) only when processing speed is critical and the
-  preparation is exceptionally stable with minimal tissue deformation.
+- **Speed-critical batch processing**: Set `enabled=False` only when processing speed is critical and the preparation is
+  exceptionally stable with minimal tissue deformation.
 
 ---
 

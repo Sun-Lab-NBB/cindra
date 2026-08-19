@@ -120,13 +120,13 @@ functional, meaning both `main.first_channel_functional` and `main.second_channe
 two-channel recording produces, in each `plane_N/` directory, `channel_2_data.bin`,
 `detection_data/mean_image_channel_2.npy`, `cell_fluorescence_channel_2.npy`, and `neuropil_fluorescence_channel_2.npy`,
 plus the combined `detection_data/mean_image_channel_2.npy` at the root. A structural (non-functional) channel 2 still
-gets a full fluorescence extraction pass, but it borrows the channel 1 ROI masks instead of detecting its own ROIs, so
-its traces carry one row per channel 1 ROI and come with no independent detection, classification, or deconvolution.
-Every other channel 2 file requires both channels to be functional: the other three detection images at both levels, the
-ROI `.npz` files, `subtracted_fluorescence_channel_2.npy`, `spikes_channel_2.npy`, `cell_classification_channel_2.npy`,
-and the root-level combined `cell_fluorescence_channel_2.npy` and `neuropil_fluorescence_channel_2.npy`. Those last two
-are the asymmetry to watch, because combination omits them for a structural channel 2 even though every plane directory
-holds its own copy.
+gets a full fluorescence extraction pass, but it borrows the channel 1 ROI masks instead of detecting its own ROIs. Its
+traces therefore carry one row per channel 1 ROI and come with no independent detection, classification, or
+deconvolution. Every other channel 2 file requires both channels to be functional: the other three detection images at
+both levels, the ROI `.npz` files, `subtracted_fluorescence_channel_2.npy`, `spikes_channel_2.npy`,
+`cell_classification_channel_2.npy`, and the root-level combined `cell_fluorescence_channel_2.npy` and
+`neuropil_fluorescence_channel_2.npy`. Those last two are the asymmetry to watch, because combination omits them for a
+structural channel 2 even though every plane directory holds its own copy.
 
 ### Directory structure
 
@@ -184,14 +184,14 @@ cindra/
 
 **Phase 1 (binarization):** `configuration.yaml`, `acquisition_parameters.yaml`, and the initial per-plane
 `runtime_data.yaml` are already on disk before this phase runs, because `prepare_single_recording_batch_tool` (or the
-`cindra run` entry point) writes them while resolving the plane contexts, so their presence does not indicate that
-binarization ran. Phase 1 itself creates the per-plane `channel_1_data.bin` (and `channel_2_data.bin` if two-channel)
-and per-plane `detection_data/mean_image.npy` (plus `mean_image_channel_2.npy` if two-channel), then records
-`binarization_time` into each plane's `runtime_data.yaml`. Binarization consumes whole plane and channel interleave
-cycles, so every plane binary of the recording holds the same frame count, and channel 2 holds exactly as many frames
-as channel 1 of the same plane. Binarization refuses an existing binary whose size disagrees with its recorded plane
-geometry, one that an interrupted write left marked, and a two-channel plane holding no channel 2 binary, naming
-`repeat_binarization` as the remedy in each message.
+`cindra run` entry point) writes them while resolving the plane contexts. Their presence therefore says nothing about
+whether binarization ran. Phase 1 itself creates the per-plane `channel_1_data.bin` (and `channel_2_data.bin` if
+two-channel) and per-plane `detection_data/mean_image.npy` (plus `mean_image_channel_2.npy` if two-channel), then
+records `binarization_time` into each plane's `runtime_data.yaml`. Binarization consumes whole plane and channel
+interleave cycles, so every plane binary of the recording holds the same frame count, and channel 2 holds exactly as
+many frames as channel 1 of the same plane. Binarization refuses an existing binary whose size disagrees with its
+recorded plane geometry, one that an interrupted write left marked, and a two-channel plane holding no channel 2 binary,
+naming `repeat_binarization` as the remedy in each message.
 
 **Phase 2 (registration, per-plane):** Creates `registration_data/`, rewrites the plane binary in place, refreshes
 `detection_data/mean_image.npy`, and updates `runtime_data.yaml` with the registration section,
@@ -205,9 +205,9 @@ nothing else, because registration and binarization both refuse a binary carryin
 **Phase 3 (processing, per-plane):** Creates the remaining `detection_data/` images (`enhanced_mean_image.npy`,
 `maximum_projection.npy`, `correlation_map.npy`), the ROI `.npz` files, the fluorescence `.npy` traces, and updates
 `runtime_data.yaml` with `total_processing_time`, `processing_workers`, and `date_processed`. Detection also overwrites
-`detection_data/mean_image.npy` with the mean of the temporally binned frames, which drop the bad frames and are cropped
-to the registration valid range before being embedded into a full-frame array that is zero outside that range, so the
-surviving file is not the whole-movie temporal mean registration wrote.
+`detection_data/mean_image.npy` with the mean of the temporally binned frames. Those frames drop the bad frames and are
+cropped to the registration valid range before being embedded into a full-frame array that is zero outside that range,
+so the surviving file is not the whole-movie temporal mean registration wrote.
 
 **Phase 4 (combination):** Creates combined `detection_data/` and the combined ROI and trace files at the root level by
 merging all per-plane results, then writes `combined_metadata.npz` last, publishing it through an atomic write that

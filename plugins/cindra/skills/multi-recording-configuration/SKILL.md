@@ -277,9 +277,8 @@ ROIs are already known cells, so `classification_threshold` is not used during m
 
 ### Tuning guidance
 
-See `/single-recording-configuration` Section 8 for full tuning guidance. The same recommendations apply here, with two
-exceptions: `allow_overlap` is always True internally, and `classification_threshold` has no effect since tracked ROIs
-skip reclassification.
+See `/single-recording-configuration` Section 8 for full tuning guidance. The same recommendations apply here, except
+for the two parameters the paragraph above overrides.
 
 ---
 
@@ -419,13 +418,14 @@ Configuration files follow a two-tier lifecycle:
    by the pipeline. One template can serve multiple datasets that share the same processing parameters (only
    `dataset_name` differs, and this is handled by the batch tool).
 
-2. **Resolved copies**: When `prepare_multi_recording_batch_tool` runs, it loads the template, applies runtime-specific
-   overrides (`recording_io.dataset_name` lowercased to a filesystem-safe key, `recording_io.recording_directories`
-   natural-sorted from the supplied `recording_paths`, and `runtime.display_progress_bars=False`), and saves the
-   resolved copy as `multi_recording_configuration.yaml` inside the main recording's dataset output directory
-   (`cindra/multi_recording/{dataset_name}/`). The resolved copy stays immutable after the prepare step, because
-   `execute_processing_jobs_tool` resolves the worker allocation at dispatch time and passes it to each job as an
-   invocation argument. These resolved copies are what the pipeline actually executes against.
+2. **Resolved copies**: When `prepare_multi_recording_batch_tool` runs, it loads the template and applies
+   runtime-specific overrides (`recording_io.dataset_name` lowercased to a filesystem-safe key,
+   `recording_io.recording_directories` natural-sorted from the supplied `recording_paths`, and
+   `runtime.display_progress_bars=False`). It then saves the resolved copy as `multi_recording_configuration.yaml`
+   inside the main recording's dataset output directory (`cindra/multi_recording/{dataset_name}/`). The resolved copy
+   stays immutable after the prepare step, because `execute_processing_jobs_tool` resolves the worker allocation at
+   dispatch time and passes it to each job as an invocation argument. These resolved copies are what the pipeline
+   actually executes against.
 
 **Do NOT** create per-dataset configuration files manually. Pass a single template path to the batch tool and let it
 handle per-dataset fine-tuning automatically.

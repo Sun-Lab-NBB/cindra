@@ -149,12 +149,12 @@ class TestSummaryDescription:
 
     def test_description_reports_a_link_that_resolved_the_runtime(self):
         """Verifies that a successful link reports the runtime as loadable."""
-        summary = _summary(OpenMPStatus.LINKED, loadable=True)
+        summary = _summary(status=OpenMPStatus.LINKED, loadable=True)
         assert "the runtime now loads" in summary.describe()
 
     def test_description_reports_a_link_that_left_the_runtime_unloadable(self):
         """Verifies that a link leaving the runtime unloadable names the fallback remedy."""
-        summary = _summary(OpenMPStatus.LINKED, loadable=False)
+        summary = _summary(status=OpenMPStatus.LINKED, loadable=False)
         assert "DYLD_LIBRARY_PATH" in summary.describe()
 
 
