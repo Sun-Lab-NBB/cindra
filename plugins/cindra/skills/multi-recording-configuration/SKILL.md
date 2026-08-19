@@ -111,12 +111,16 @@ These parameters are set automatically by the pipeline and should not be manuall
 
 Runtime behavior settings shared with the single-recording pipeline.
 
-| Parameter               | Type | Default | Description                                          |
-|-------------------------|------|---------|------------------------------------------------------|
-| `display_progress_bars` | bool | False   | Show progress bars. Disable for parallel processing. |
+| Parameter               | Type | Default | Description                                       |
+|-------------------------|------|---------|---------------------------------------------------|
+| `display_progress_bars` | bool | False   | Show progress bars. Batch tools force this False. |
+
+`cindra run` displays progress bars by default and writes its choice into this field before dispatching, so the flag
+that suppresses them is `-np/--no-progress`. The batch MCP tools write False into every per-dataset configuration they
+create, because concurrent jobs sharing a terminal interleave their bars.
 
 Worker allocation reaches the discovery and extraction stages as an invocation argument, as described in the
-Configuration overview section. Omitting a worker option applies the measured default of 30 workers for discovery and 16
+Configuration overview section. Omitting a worker option applies the measured default of 2 workers for discovery and 16
 for extraction, published as `DISCOVERY_WORKERS` and `EXTRACTION_WORKERS` in `cindra.orchestration`. Setting a worker
 option to -1 requests every available core.
 
@@ -141,8 +145,6 @@ is enabled.
 
 - `recording_directories` is populated by the MCP batch tool from its `recording_paths` argument, or by
   `cindra run -rp/--recording-path`.
-- `dataset_name` **must be set by the user**. It identifies the output and must be unique per dataset in a batch. Use
-  `resolve_dataset_name_tool` to construct qualified names from a shared base name and a batch-specific specifier.
 - When `repeat_selection` is True, ROI selection is re-run using current criteria even if selections already exist. This
   allows updated single-recording results or modified selection criteria to be integrated.
 
@@ -196,7 +198,7 @@ back to each recording's native space for signal extraction.
 | `final_grid_sampling`  | float | 16.0            | Knot spacing (pixels) at the finest scale. Lower = supports smaller images.   |
 | `scale_sampling`       | int   | 30              | Iterations per scale level. 20-30 typical. Higher = better but slower.        |
 | `speed_factor`         | float | 3.0             | Deformation strength. **Most important tuning parameter.** 1-5 typical.       |
-| `repeat_registration`  | bool  | False           | Re-run registration even if existing data is found.                           |
+| `repeat_registration`  | bool  | False           | Re-run registration, and the tracking and projection steps depending on it.   |
 
 ### Tuning guidance
 
@@ -231,7 +233,7 @@ native coordinates for fluorescence extraction.
 | `threshold`        | float           | 0.75       | Jaccard distance threshold for clustering. Lower = stricter matching.    |
 | `mask_prevalence`  | int             | 50         | Min % of recordings that must contain the ROI. Higher = more reliable.   |
 | `pixel_prevalence` | int             | 50         | Min % of a cluster's member masks a pixel must appear in.                |
-| `step_sizes`       | tuple[int, int] | (200, 200) | Spatial bin size [h, w] in pixels for partitioning the clustering space. |
+| `step_sizes`       | tuple[int, int] | (200, 200) | Spatial bin size [h, w] in pixels. Both must be equal.                   |
 | `bin_size`         | int             | 50         | Overlap margin (pixels) between adjacent bins for border ROI clustering. |
 | `maximum_distance` | int             | 20         | Max centroid distance (pixels) between masks to consider same ROI.       |
 | `minimum_size`     | int             | 25         | Min non-overlapping pixels for ROI-template assignment.                  |
@@ -245,8 +247,10 @@ native coordinates for fluorescence extraction.
   `mask_prevalence` (30) and `pixel_prevalence` (40) to accept ROIs present in fewer recordings, and increase
   `maximum_distance` (25) to tolerate larger centroid shifts.
 - **Small ROIs lost**: Lower `minimum_size` (15-20) to retain templates with fewer non-overlapping pixels.
-- **Dense labeling**: Decrease `step_sizes` (e.g., (150, 150)) and increase `bin_size` (60-80) to improve clustering
-  accuracy in crowded fields by using smaller spatial bins with wider overlap margins.
+- **Dense labeling**: Tune `threshold` (0.65-0.70) and `maximum_distance` (15) to keep crowded neighbours from merging,
+  and raise `mask_prevalence` and `pixel_prevalence` to demand more cross-recording agreement. `step_sizes` and
+  `bin_size` govern peak memory and per-bin overhead rather than clustering accuracy, so leave them at their defaults
+  unless memory is the constraint.
 
 ---
 
@@ -271,9 +275,8 @@ ROIs are already known cells, so `classification_threshold` is not used during m
 
 ### Tuning guidance
 
-See `/single-recording-configuration` Section 8 for full tuning guidance. The same recommendations apply here, with two
-exceptions: `allow_overlap` is always True internally, and `classification_threshold` has no effect since tracked ROIs
-skip reclassification.
+See `/single-recording-configuration` Section 8 for full tuning guidance. The same recommendations apply here, except
+for the two parameters the paragraph above overrides.
 
 ---
 
@@ -297,12 +300,6 @@ See `/single-recording-configuration` Section 9 for full tuning guidance. The sa
 ---
 
 ## User-configurable vs auto-set parameters
-
-### Parameters users must configure
-
-| Parameter                   | Why required                                         |
-|-----------------------------|------------------------------------------------------|
-| `recording_io.dataset_name` | Uniquely identifies output, cannot be auto-generated |
 
 ### Parameters users should consider
 
@@ -406,20 +403,19 @@ spike_deconvolution:
 
 ## Configuration lifecycle
 
-Configuration files follow a two-tier lifecycle:
-
 1. **Template configs**: De-novo configurations generated via `generate_config_file_tool` or manually created. Templates
    can live anywhere (e.g., `/Data/CA1_GCaMP6f_MD.yaml`) and are reusable across datasets. Templates are never modified
    by the pipeline. One template can serve multiple datasets that share the same processing parameters (only
    `dataset_name` differs, and this is handled by the batch tool).
 
-2. **Resolved copies**: When `prepare_multi_recording_batch_tool` runs, it loads the template, applies runtime-specific
-   overrides (`recording_io.dataset_name` lowercased to a filesystem-safe key, `recording_io.recording_directories`
-   natural-sorted from the supplied `recording_paths`, and `runtime.display_progress_bars=False`), and saves the
-   resolved copy as `multi_recording_configuration.yaml` inside the main recording's dataset output directory
-   (`cindra/multi_recording/{dataset_name}/`). The resolved copy stays immutable after the prepare step, because
-   `execute_processing_jobs_tool` resolves the worker allocation at dispatch time and passes it to each job as an
-   invocation argument. These resolved copies are what the pipeline actually executes against.
+2. **Resolved copies**: When `prepare_multi_recording_batch_tool` runs, it loads the template and applies
+   runtime-specific overrides (`recording_io.dataset_name` lowercased to a filesystem-safe key,
+   `recording_io.recording_directories` natural-sorted from the supplied `recording_paths`, and
+   `runtime.display_progress_bars=False`). It then saves the resolved copy as `multi_recording_configuration.yaml`
+   inside the main recording's dataset output directory (`cindra/multi_recording/{dataset_name}/`). The resolved copy
+   stays immutable after the prepare step, because `execute_processing_jobs_tool` resolves the worker allocation at
+   dispatch time and passes it to each job as an invocation argument. These resolved copies are what the pipeline
+   actually executes against.
 
 **Do NOT** create per-dataset configuration files manually. Pass a single template path to the batch tool and let it
 handle per-dataset fine-tuning automatically.
@@ -453,6 +449,7 @@ handle per-dataset fine-tuning automatically.
 |-----------------------------------|--------------------------------------------------------------------------------|
 | `/cindra-pipeline`                | Overview: end-to-end phases, handoffs, and the single-vs-multi entry point     |
 | `/cindra-mcp-environment-setup`   | Prerequisite: MCP server must be connected for configuration tools             |
+| `/cli-reference`                  | Reference: `cindra configure` and the `cindra run` worker options              |
 | `/acquisition-data-preparation`   | Upstream: invoke if raw data is not yet prepared for the prerequisite chain    |
 | `/single-recording-processing`    | Prerequisite: single-recording processing must complete first                  |
 | `/single-recording-results`       | Prerequisite: single-recording outputs required as multi-recording input       |

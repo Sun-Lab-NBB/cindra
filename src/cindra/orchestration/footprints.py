@@ -409,8 +409,9 @@ def estimate_multi_recording_job_memory_mb(
         The memory the job occupies in megabytes.
 
     Raises:
-        FileNotFoundError: If no recording the dataset names carries a combined metadata archive, in which case
-            neither multi-recording stage can run.
+        FileNotFoundError: If the dataset names no recording directory, if any recording carries no combined metadata
+            archive, or if any recording reports no regions in its combined trace array, in which case neither
+            multi-recording stage can run.
     """
     cindra_roots = _resolve_cindra_directories(recording_directories=recording_directories)
     geometries = _resolve_dataset_geometries(job_name=job_name, cindra_roots=cindra_roots)
@@ -490,8 +491,9 @@ def size_multi_recording_job(
         The cores the job occupies and the memory it holds.
 
     Raises:
-        FileNotFoundError: If no recording the dataset names carries a combined metadata archive, in which case
-            neither multi-recording stage can run.
+        FileNotFoundError: If the dataset names no recording directory, if any recording carries no combined metadata
+            archive, or if any recording reports no regions in its combined trace array, in which case neither
+            multi-recording stage can run.
     """
     memory_mb = estimate_multi_recording_job_memory_mb(
         job_name=job_name,

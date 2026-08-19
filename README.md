@@ -62,7 +62,7 @@ ___
   API or CLI for local and remote parallelization.
 - Includes three interactive PySide6/PyQtGraph GUI viewers for inspecting ROI detection, registration quality, and
   multi-recording tracking results.
-- Exposes two MCP servers for AI agent integration: a data processing server with 30 tools for pipeline orchestration
+- Exposes two MCP servers for AI agent integration: a data processing server with 33 tools for pipeline orchestration
   and results querying, and a GUI server with 4 tools for viewer lifecycle management.
 - Natively supports two-channel functional imaging with independent ROI detection, colocalization analysis, and
   fluorescence extraction per channel.
@@ -787,7 +787,7 @@ md_config.to_yaml(Path("/path/to/md_config.yaml"))
 run_multi_recording_pipeline(configuration_path=Path("/path/to/md_config.yaml"))
 
 # Multi-recording phases also take their own worker allocations.
-run_multi_recording_pipeline(configuration_path=Path("/path/to/md_config.yaml"), discover=True, discovery_workers=30)
+run_multi_recording_pipeline(configuration_path=Path("/path/to/md_config.yaml"), discover=True, discovery_workers=4)
 run_multi_recording_pipeline(configuration_path=Path("/path/to/md_config.yaml"), extract=True, extraction_workers=16)
 ```
 
@@ -899,6 +899,9 @@ cindra mcp
 
 | Tool                                              | Description                                                         |
 |---------------------------------------------------|---------------------------------------------------------------------|
+| `get_pipeline_job_universe_tool`                  | Reports every declared job and which of them can run right now      |
+| `size_pipeline_jobs_tool`                         | Reports the cores and memory every job holds, without dispatching   |
+| `check_threading_runtime_tool`                    | Reports whether the host's numeric threading runtime is loadable    |
 | `generate_acquisition_parameters_file_tool`       | Generates a `cindra_parameters.json` file for a recording directory |
 | `validate_acquisition_parameters_file_tool`       | Validates an existing acquisition parameters file                   |
 | `validate_recording_readiness_tool`               | Validates that a recording is ready for pipeline processing         |

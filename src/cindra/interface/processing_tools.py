@@ -9,8 +9,10 @@ unified execution model that admits every job as soon as that job's own prerequi
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING, Any
 from pathlib import Path
+from importlib.util import find_spec
 
 import yaml
 from natsort import natsorted
@@ -21,6 +23,7 @@ from ataraxis_time import (
     convert_time,
     get_timestamp,
 )
+from ataraxis_base_utilities import console
 from ataraxis_data_structures import (
     ProcessingStatus,
     ProcessingTracker,
@@ -29,7 +32,7 @@ from ataraxis_data_structures import (
     discover_marker_files,
 )
 
-from ..io import resolve_multi_recording_contexts
+from ..io import resolve_dataset_recordings, resolve_multi_recording_contexts
 from ..layout import (
     OUTPUT_DIRECTORY_NAME,
     PLANE_SPECIFIER_PREFIX,
@@ -59,6 +62,7 @@ from ..orchestration import (
     SINGLE_RECORDING_PHASES,
     RESOURCE_CLASS_BY_JOB_NAME,
     PendingJob,
+    OpenMPStatus,
     MultiRecordingJobNames,
     SingleRecordingJobNames,
     prime_recording,
@@ -66,15 +70,21 @@ from ..orchestration import (
     set_execution_state,
     resolve_session_load,
     resolve_pipeline_jobs,
+    resolve_openmp_runtime,
     start_execution_session,
     cancel_execution_session,
+    size_multi_recording_job,
     order_phases_by_execution,
     resolve_downstream_phases,
+    size_single_recording_job,
+    resolve_recording_geometry,
     validate_job_prerequisites,
     resolve_multi_recording_jobs,
     resolve_single_recording_jobs,
     load_multi_recording_configuration,
     load_single_recording_configuration,
+    resolve_multi_recording_job_universe,
+    resolve_single_recording_job_universe,
     estimate_multi_recording_job_memory_mb,
     estimate_single_recording_job_memory_mb,
 )
@@ -1605,12 +1615,14 @@ def execute_full_pipeline_tool(
         string. Every outcome carries 'pipeline_type'. The rejection lists the preparation step produces,
         'invalid_paths', 'invalid_recordings', and 'invalid_configurations', and the lists this step's own sizing pass
         produces, 'unsizable_recordings' and 'unsizable_datasets', are forwarded when non-empty and together name every
-        recording or dataset the session omits. A batch whose preparation accepted no input at all returns success:False
-        alongside those lists, because it holds no phase to report as complete. On failure, contains success:False and
-        an 'error' describing the issue. Cascade-aborted downstream jobs are recorded in their trackers as FAILED with
-        the exact message "Unable to execute job. A preceding pipeline phase failed.", distinguishing them from genuine
-        per-job failures. A job aborted because its prerequisite phase is absent from the tracker instead records a
-        message naming that phase and asking for the prepare tool to be re-run, because no phase failed in that case.
+        recording or dataset the session omits. 'migrated_recordings' is forwarded on the same terms, naming every
+        recording whose tracker gained the missing per-plane register jobs. A batch whose preparation accepted no input
+        at all returns success:False alongside those lists, because it holds no phase to report as complete. On failure,
+        contains success:False and an 'error' describing the issue. Cascade-aborted downstream jobs are recorded in
+        their trackers as FAILED with the exact message "Unable to execute job. A preceding pipeline phase failed.",
+        distinguishing them from genuine per-job failures. A job aborted because its prerequisite phase is absent from
+        the tracker instead records a message naming that phase and asking for the prepare tool to be re-run, because no
+        phase failed in that case.
     """
     if pipeline_type not in ("single-recording", "multi-recording"):
         return {
@@ -1662,11 +1674,11 @@ def execute_full_pipeline_tool(
     if not manifest.get("success"):
         return manifest
 
-    # Carries the rejection lists the preparation step produces into every outcome below, so that no response accounts
-    # for the batch without naming the recordings or datasets it leaves out.
+    # Carries the lists the preparation step produces into every outcome below, so that no response accounts for the
+    # batch without naming the recordings or datasets it leaves out, or the trackers it migrated.
     rejection_fields: dict[str, object] = {
         key: manifest[key]
-        for key in ("invalid_paths", "invalid_recordings", "invalid_configurations")
+        for key in ("invalid_paths", "invalid_recordings", "invalid_configurations", "migrated_recordings")
         if key in manifest
     }
 
@@ -1818,6 +1830,239 @@ def execute_full_pipeline_tool(
         max_parallel_jobs=max_parallel_jobs,
         extra_result_fields=extra_fields,
     )
+
+
+@mcp.tool()
+def size_pipeline_jobs_tool(
+    configuration_path: str,
+    pipeline_type: str,
+    planned_roi_count: int | None = None,
+) -> dict[str, object]:
+    """Reports the cores and memory every job of a pipeline holds, without preparing or dispatching anything.
+
+    Sizes each job of the configuration's whole job universe from the data that exists right now, so a caller plans a
+    batch before any tracker or output directory is created. A single-recording job is sized from the recording's
+    acquisition metadata and one source file header, and a multi-recording job is sized from the completed
+    single-recording output the dataset runs on.
+
+    Important:
+        The figures are the same ones the execute tools charge against the session memory budget at dispatch, so a
+        batch whose peak_memory_mb exceeds a host's free memory will admit its jobs serially rather than concurrently.
+        Compare peak_memory_mb against the memory the host has free to predict that, and compare total_memory_mb
+        against it to learn whether every job could ever run at once.
+
+    Args:
+        configuration_path: The absolute path to the pipeline configuration YAML file.
+        pipeline_type: The pipeline type, either 'single-recording' or 'multi-recording'.
+        planned_roi_count: The regions to plan for across every plane of a single-recording job. Use None to accept
+            the ceiling the detection iteration bound provides. Must be a positive integer when supplied.
+
+    Returns:
+        On success, contains a 'jobs' list holding the 'name', 'specifier', 'cores', and 'memory_mb' of every job the
+        pipeline can execute, in execution order, plus 'total_jobs', the 'peak_memory_mb' of the single largest job,
+        the 'total_memory_mb' every job would hold at once, and the 'pipeline_type'. On failure, contains an 'error'
+        describing the issue, which names the recording or dataset that could not be sized. Both cases include a
+        'success' flag.
+    """
+    if pipeline_type not in ("single-recording", "multi-recording"):
+        return {
+            "success": False,
+            "error": (
+                f"Unable to size pipeline jobs. Invalid pipeline_type '{pipeline_type}'. "
+                f"Must be 'single-recording' or 'multi-recording'."
+            ),
+        }
+
+    configuration_file = Path(configuration_path)
+    if not configuration_file.exists():
+        return {
+            "success": False,
+            "error": f"Unable to size pipeline jobs. Configuration file not found: {configuration_path}.",
+        }
+
+    # Sizing reads the data the recording or dataset already holds, so an input the models cannot measure raises
+    # instead of returning a figure. Reporting the reason keeps the caller from treating an unsizable input as free.
+    try:
+        if pipeline_type == "single-recording":
+            sized_jobs = _size_single_recording_universe(
+                configuration_path=configuration_file, planned_roi_count=planned_roi_count
+            )
+        else:
+            sized_jobs = _size_multi_recording_universe(configuration_path=configuration_file)
+    except Exception as error:
+        return {"success": False, "error": f"Unable to size pipeline jobs. {error}"}
+
+    memory_figures = [memory_mb for _, _, _, memory_mb in sized_jobs]
+
+    return {
+        "success": True,
+        "pipeline_type": pipeline_type,
+        "jobs": [
+            {"name": name, "specifier": specifier, "cores": cores, "memory_mb": memory_mb}
+            for name, specifier, cores, memory_mb in sized_jobs
+        ],
+        "total_jobs": len(sized_jobs),
+        "peak_memory_mb": max(memory_figures) if memory_figures else 0,
+        "total_memory_mb": sum(memory_figures),
+    }
+
+
+@mcp.tool()
+def check_threading_runtime_tool() -> dict[str, object]:
+    """Reports whether the numeric threading layer every parallelized stage needs is loadable on this host.
+
+    The library selects the OpenMP threading layer on macOS and the TBB layer on every other platform. A macOS host
+    carrying no loadable OpenMP runtime aborts every job at the pipeline entry point, before any stage runs, because
+    both pipeline entry points verify the runtime first. Every other platform carries no such check, so a host missing
+    the TBB runtime instead fails at the job's first parallelized call. Either outcome surfaces as a per-job tracker
+    failure rather than as a tool error, so call this before dispatching a batch to gate on 'ready'.
+
+    Returns:
+        Always contains a 'success' flag indicating the tool ran, a 'ready' flag reporting whether the layer loads,
+        the 'platform' this host runs, the 'required_layer' the library selects for it ('omp' or 'tbb'), and a
+        'detail' sentence describing the outcome. A host that is not ready also carries a 'remedy' naming the command
+        that resolves it. On macOS, the report additionally carries 'discovered_runtimes' holding the single runtime the
+        discovery would link, which is the first candidate that resolves to a file, and 'searched_paths' listing the
+        candidates examined. When no runtime was found, 'discovered_runtimes' is empty while 'searched_paths' still
+        lists every candidate the discovery examined. Both are empty only when the runtime already loads, because a
+        host that already loads one runs no discovery.
+    """
+    platform_name = sys.platform
+
+    if platform_name != "darwin":
+        # Every non-macOS platform runs TBB, whose runtime ships in the tbb4py distribution rather than with Numba.
+        tbb_available = find_spec(name="tbb") is not None
+        result: dict[str, object] = {
+            "success": True,
+            "ready": tbb_available,
+            "platform": platform_name,
+            "required_layer": "tbb",
+        }
+        if tbb_available:
+            result["detail"] = "The TBB threading layer runtime is installed, so every parallelized stage can run."
+        else:
+            result["detail"] = (
+                "The TBB threading layer runtime is missing, so every parallelized stage fails at its first "
+                "parallelized call."
+            )
+            result["remedy"] = "pip install tbb4py"
+        return result
+
+    summary = resolve_openmp_runtime(execute=False)
+
+    # describe() phrases its outcome for the 'cindra omp' command, which names flags an MCP caller cannot pass, so the
+    # ready case carries its own sentence and every other case reuses the discovery detail describe() already builds.
+    detail = (
+        "The OpenMP runtime loads, so every parallelized stage can run."
+        if summary.status == OpenMPStatus.AVAILABLE
+        else summary.describe()
+    )
+
+    result = {
+        "success": True,
+        "ready": summary.loadable,
+        "platform": platform_name,
+        "required_layer": "omp",
+        "discovered_runtimes": [str(summary.runtime_path)] if summary.runtime_path is not None else [],
+        "searched_paths": [str(path) for path in summary.searched_paths],
+        "detail": detail,
+    }
+
+    if not summary.loadable:
+        result["remedy"] = (
+            "brew install libomp" if summary.status == OpenMPStatus.UNRESOLVED else "sudo cindra omp --yes"
+        )
+
+    return result
+
+
+@mcp.tool()
+def get_pipeline_job_universe_tool(configuration_path: str, pipeline_type: str) -> dict[str, object]:
+    """Reports every job a recording or dataset declares and which of them can run right now.
+
+    Reads the inventory the output directories already hold, so it answers what is runnable before a tracker exists and
+    without preparing anything. A recording carrying nothing resolves to an empty universe rather than failing, which
+    makes this safe to call on an unprocessed recording.
+
+    Important:
+        The 'ready' flag reports that a job's own input exists on disk, which is a different question from whether its
+        prerequisite job has succeeded on a tracker. Use this tool to plan a selective re-run, and
+        get_recording_status_tool to read recorded job outcomes once a batch has been prepared.
+
+    Args:
+        configuration_path: The absolute path to the pipeline configuration YAML file.
+        pipeline_type: The pipeline type, either 'single-recording' or 'multi-recording'.
+
+    Returns:
+        On success, contains a 'jobs' list holding the 'name', 'specifier', and 'ready' flag of every job the pipeline
+        declares, in execution order, plus 'total_jobs', 'ready_jobs' counting the runnable subset, a 'resolved' flag
+        reporting whether the universe follows from the recording's own parameters rather than from their absence, and
+        the 'pipeline_type'. A single-recording report also carries 'plane_count', and a multi-recording report carries
+        'dataset_name' and 'recording_ids'. On failure, contains an 'error' describing the issue. Both cases include a
+        'success' flag.
+    """
+    if pipeline_type not in ("single-recording", "multi-recording"):
+        return {
+            "success": False,
+            "error": (
+                f"Unable to resolve the pipeline job universe. Invalid pipeline_type '{pipeline_type}'. "
+                f"Must be 'single-recording' or 'multi-recording'."
+            ),
+        }
+
+    configuration_file = Path(configuration_path)
+    if not configuration_file.exists():
+        return {
+            "success": False,
+            "error": (
+                f"Unable to resolve the pipeline job universe. Configuration file not found: {configuration_path}."
+            ),
+        }
+
+    # Both universe resolvers report an empty universe for a recording or dataset carrying nothing rather than
+    # raising, but the configuration load and the identifier derivation behind them both can, so the guard spans them.
+    try:
+        if pipeline_type == "single-recording":
+            configuration, output_path = load_single_recording_configuration(configuration_path=configuration_file)
+            single_universe = resolve_single_recording_job_universe(
+                output_root=output_path, data_path=configuration.file_io.data_path
+            )
+            possible = set(single_universe.possible)
+            return {
+                "success": True,
+                "pipeline_type": pipeline_type,
+                "resolved": single_universe.resolved,
+                "plane_count": single_universe.plane_count,
+                "jobs": [
+                    {"name": name, "specifier": specifier, "ready": (name, specifier) in possible}
+                    for name, specifier in single_universe.universe
+                ],
+                "total_jobs": len(single_universe.universe),
+                "ready_jobs": len(single_universe.possible),
+            }
+
+        dataset_configuration = load_multi_recording_configuration(configuration_path=configuration_file)
+        multi_universe = resolve_multi_recording_job_universe(
+            recording_roots=dataset_configuration.recording_io.recording_directories,
+            dataset_name=dataset_configuration.recording_io.dataset_name,
+        )
+    except Exception as error:
+        return {"success": False, "error": f"Unable to resolve the pipeline job universe. {error}"}
+
+    multi_possible = set(multi_universe.possible)
+    return {
+        "success": True,
+        "pipeline_type": pipeline_type,
+        "resolved": multi_universe.resolved,
+        "dataset_name": multi_universe.dataset_name,
+        "recording_ids": list(multi_universe.recording_ids),
+        "jobs": [
+            {"name": name, "specifier": specifier, "ready": (name, specifier) in multi_possible}
+            for name, specifier in multi_universe.universe
+        ],
+        "total_jobs": len(multi_universe.universe),
+        "ready_jobs": len(multi_universe.possible),
+    }
 
 
 def _check_active_session(action: str) -> dict[str, object] | None:
@@ -2330,3 +2575,88 @@ def _resolve_job_identifiers(tracker: ProcessingTracker, jobs: list[tuple[str, s
     """
     job_ids = tracker.initialize_jobs(jobs=jobs)
     return dict(zip(jobs, job_ids, strict=True))
+
+
+def _size_single_recording_universe(
+    configuration_path: Path, planned_roi_count: int | None
+) -> list[tuple[str, str, int, int]]:
+    """Sizes every job the single-recording pipeline can execute for one recording.
+
+    Notes:
+        The plane count comes from the recording's acquisition geometry rather than from a tracker, so the universe
+        resolves before the recording has been prepared.
+
+    Args:
+        configuration_path: The path to the recording's configuration file.
+        planned_roi_count: The regions to plan for across every plane, or None to accept the detection ceiling.
+
+    Returns:
+        The name, specifier, cores, and memory in megabytes of every job, in execution order.
+
+    Raises:
+        FileNotFoundError: If the recording's raw imaging directory holds no readable source file.
+        ValueError: If planned_roi_count is not a positive integer, or if the recording declares no imaging plane.
+    """
+    configuration, output_path = load_single_recording_configuration(configuration_path=configuration_path)
+    geometry = resolve_recording_geometry(
+        output_root=output_path,
+        data_path=configuration.file_io.data_path,
+        ignored_file_names=configuration.file_io.ignored_file_names,
+    )
+
+    if not geometry.planes:
+        message = (
+            f"Unable to size the jobs of the recording configured at {configuration_path}. The recording must declare "
+            f"at least one imaging plane, but it declares none. Verify that its acquisition parameters file is "
+            f"readable."
+        )
+        console.error(message=message, error=ValueError)
+
+    sized: list[tuple[str, str, int, int]] = []
+    for job_name, specifier in resolve_single_recording_jobs(plane_count=len(geometry.planes)):
+        sizing = size_single_recording_job(
+            job_name=SingleRecordingJobNames(job_name),
+            specifier=specifier,
+            output_root=output_path,
+            configuration=configuration,
+            data_path=configuration.file_io.data_path,
+            planned_roi_count=planned_roi_count,
+        )
+        sized.append((job_name, specifier, sizing.cores, sizing.memory_mb))
+
+    return sized
+
+
+def _size_multi_recording_universe(configuration_path: Path) -> list[tuple[str, str, int, int]]:
+    """Sizes every job the multi-recording pipeline can execute for one tracked dataset.
+
+    Notes:
+        The recording identifiers come from a read-only inventory of the completed single-recording output, so the
+        universe resolves before the dataset has been prepared.
+
+    Args:
+        configuration_path: The path to the dataset's configuration file.
+
+    Returns:
+        The name, specifier, cores, and memory in megabytes of every job, in execution order.
+
+    Raises:
+        FileNotFoundError: If no recording the dataset names carries a combined metadata archive.
+    """
+    configuration = load_multi_recording_configuration(configuration_path=configuration_path)
+    recording_directories = configuration.recording_io.recording_directories
+    inventory = resolve_dataset_recordings(
+        recording_roots=recording_directories, dataset_name=configuration.recording_io.dataset_name
+    )
+
+    sized: list[tuple[str, str, int, int]] = []
+    for job_name, specifier in resolve_multi_recording_jobs(recording_ids=inventory.recording_ids):
+        sizing = size_multi_recording_job(
+            job_name=MultiRecordingJobNames(job_name),
+            specifier=specifier,
+            recording_directories=recording_directories,
+            configuration=configuration,
+        )
+        sized.append((job_name, specifier, sizing.cores, sizing.memory_mb))
+
+    return sized

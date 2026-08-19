@@ -101,9 +101,22 @@ The `dataset` argument is required by `verify_multi_recording_output_tool`, `que
 multi-recording mode. It resolves as an exact directory lookup (`{cindra_root}/multi_recording/{dataset}`) against a
 name the pipeline lowercases at preparation time, so pass the value `resolve_dataset_name_tool` or
 `prepare_multi_recording_batch_tool` returned rather than the user's original casing. `query_roi_statistics_tool` and
-`query_traces_tool` additionally accept `recording_index` (0-based, default 0 = the entry recording). Without it, a
-per-recording query silently reports only the entry recording, so iterate it across the dataset when comparing
-recordings.
+`query_traces_tool` additionally accept `recording_index` (0-based, default 0). It indexes the dataset's own
+`dataset_output_paths` list, so index 0 is the main recording rather than the recording `recording_path` names. Without
+it, a per-recording query silently reports the main recording whichever recording you addressed, so iterate the index
+across the dataset when comparing recordings.
+
+`query_cross_recording_traces_tool` and `query_traces_tool` accept at most 50 ROI indices per call, and
+`query_roi_statistics_tool` returns at most 500 ROIs, so batch a larger pull across several calls.
+`query_multi_recording_tracking_summary_tool` reports at most 200 per-template entries, and sets `templates_truncated:
+true` with `templates_shown: 200` when the dataset holds more. Read those two keys before summarizing tracking quality,
+because the cluster statistics the tool returns alongside them cover every template while the `templates` list does
+not.
+
+`query_traces_tool` and `query_cross_recording_traces_tool` also take `trace_type` (`fluorescence`, `neuropil`,
+`corrected`, or `spikes`), `downsample_factor` (1 for none, N for every Nth sample, values below 1 clamped to 1), and a
+`start_frame`/`end_frame` window applied before downsampling. `query_roi_statistics_tool` takes `sort_by` (`skewness`,
+`compactness`, `footprint`, `aspect_ratio`, `pixel_count`, `solidity`, or `normalized_pixel_count`) and `top_n`.
 
 ---
 
@@ -182,7 +195,8 @@ Saved in `registration_arrays/` subdirectory. All files are `.npy` format, float
 | `transformed_enhanced_mean_image.npy` | (height, width) | Enhanced mean image warped to shared visual space |
 | `transformed_maximum_projection.npy`  | (height, width) | Maximum projection warped to shared visual space  |
 
-**Channel 2 transformed images (dual-channel only, same shape and dtype):**
+**Channel 2 transformed images (same shape and dtype). The mean image appears for any dual-channel recording, while the
+enhanced mean and the maximum projection require both channels to be functional:**
 
 | File                                            | Description                                     |
 |-------------------------------------------------|-------------------------------------------------|
@@ -275,7 +289,7 @@ matches that recording's single-recording combined `frame_count`.
 | `subtracted_fluorescence.npy` | (num_rois, frames) | Neuropil-and-baseline-subtracted fluorescence |
 | `spikes.npy`                  | (num_rois, frames) | Deconvolved spike estimates                   |
 
-**Channel 2 (dual-channel only, same shapes):**
+**Channel 2 (both channels functional only, same shapes):**
 
 | File                                    | Description                       |
 |-----------------------------------------|-----------------------------------|
@@ -286,7 +300,7 @@ matches that recording's single-recording combined `frame_count`.
 
 If `spike_deconvolution.extract_spikes` is False, `subtracted_fluorescence.npy` and `spikes.npy` are filled with zeroes.
 
-**Optional colocalization file (dual-channel only):**
+**Optional colocalization file (both channels functional only):**
 
 | File                      | Shape         | Description                                                                            |
 |---------------------------|---------------|----------------------------------------------------------------------------------------|
@@ -335,7 +349,7 @@ separate `.npy`/`.npz` files (documented above).
 
 The fluorescence trace and colocalization `.npy` files are saved with `allow_pickle=False`. The
 `registration_arrays/*.npy` files use NumPy save defaults but contain only numeric arrays that load safely with
-`allow_pickle=False`. Arrays support memory-mapped loading via `np.load(path, mmap_mode='r+')` for efficient access to
+`allow_pickle=False`. Arrays support memory-mapped loading via `np.load(path, mmap_mode='r')` for efficient access to
 large datasets. NPZ archives do not support memory mapping and are always eagerly loaded.
 
 ---
@@ -355,9 +369,11 @@ large datasets. NPZ archives do not support memory mapping and are always eagerl
 
 ## Verification checklist
 
-Use `verify_multi_recording_output_tool` to automate this verification. The tool checks all expected files and NPZ keys
-across every recording in the dataset and returns a completeness verdict with any missing items listed. Fall back to the
-manual checklist below only if the MCP tool is unavailable.
+Use `verify_multi_recording_output_tool` to automate the file-presence and NPZ-key parts of this verification. The tool
+checks every channel 1 output file and the required NPZ keys across every recording in the dataset and returns a
+completeness verdict with any missing items listed. It validates no array shape, and it checks no channel 2 file under
+`registration_arrays/`, so run those two items by hand. Fall back to the whole manual checklist below only if the MCP
+tool is unavailable.
 
 ```text
 Multi-Recording Output Completeness:
@@ -375,11 +391,12 @@ Registration data (per recording):
 - [ ] `registration_arrays/transformed_enhanced_mean_image.npy` exists
 - [ ] `registration_arrays/transformed_maximum_projection.npy` exists
 - [ ] `registration_deformed_masks.npz` exists and contains `pixel_counts`, `y_pixels`, `x_pixels` keys
-- [ ] Channel 2 registration files exist if dual-channel
+- [ ] Channel 2 registration files exist if both channels are functional, except
+      `registration_arrays/transformed_mean_image_channel_2.npy`, which exists for any dual-channel recording
 
 Tracking data (per recording, identical across recordings):
 - [ ] `tracking_template_masks.npz` exists and contains `pixel_counts`, `cluster_id`, `recording_count` keys
-- [ ] Channel 2 tracking files exist if dual-channel
+- [ ] Channel 2 tracking files exist if both channels are functional
 
 Extraction data (per recording):
 - [ ] `roi_masks.npz` exists with backward-transformed template masks
@@ -388,7 +405,7 @@ Extraction data (per recording):
 - [ ] `neuropil_fluorescence.npy` exists with shape matching cell_fluorescence
 - [ ] `subtracted_fluorescence.npy` exists with shape matching cell_fluorescence
 - [ ] `spikes.npy` exists with shape matching cell_fluorescence
-- [ ] Channel 2 trace files exist if dual-channel
-- [ ] `cell_colocalization.npy` exists if dual-channel with shape (num_rois, 2)
+- [ ] Channel 2 trace files exist if both channels are functional
+- [ ] `cell_colocalization.npy` exists if both channels are functional, with shape (num_rois, 2)
 - [ ] Fluorescence trace shapes are consistent across all per-recording files
 ```
