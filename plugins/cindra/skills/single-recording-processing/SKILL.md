@@ -134,13 +134,9 @@ Every job is admitted as soon as its own prerequisites succeed on its own tracke
 submitted in one call. One plane starts processing while its peers are still registering, and each recording advances
 independently.
 
-Dispatch runs in two passes. The first honors every reservation, so the conversion jobs at the root of the chain keep
-their share of the host while planes are still registering. The second releases the reservations over whatever capacity
-the first left unused, so a deep queue runs at its full width rather than idling the host. Memory bounds dispatch
-rather than concurrency: `execute_processing_jobs_tool` sizes every job it submits from the recording it will process,
-and a job whose geometry cannot be read is not dispatched at all. It joins `invalid_jobs` with the reason "Unable to
-size the job from its configuration", while `execute_full_pipeline_tool` drops that recording into
-`unsizable_recordings` and runs the rest of the batch.
+A job whose geometry cannot be read is not dispatched at all. It joins `invalid_jobs` with the reason "Unable to size
+the job from its configuration", while `execute_full_pipeline_tool` drops that recording into `unsizable_recordings`
+and runs the rest of the batch. Resource management states how the dispatcher admits the jobs that do size.
 
 Every job runs in its own spawned process, so a job that exhausts memory takes down its own worker rather than the
 batch, and the engine records a terminal outcome for every job the resulting pool failure strands.
@@ -201,8 +197,7 @@ For fine-grained control (e.g., running only specific phases, custom resource al
    do not ask the user to choose them. Ask only how much of the machine this run may take, because that is the one
    allocation question the engine cannot answer: it claims every core but two and the memory available when the session
    starts. Confirm that the host is free for the run, or take an explicit ceiling from the user and pass it as
-   `max_parallel_jobs`. Report the resolved per-class allocation after dispatch, from the `resource_classes` mapping
-   the execute tool returns, rather than predicting it beforehand.
+   `max_parallel_jobs`.
 
 6. **Execute**: Choose one of two approaches:
 
@@ -307,16 +302,16 @@ holds the sum of the cores committed by every class inside that budget. The one 
 running the dispatcher admits a single job regardless, so a job whose worker count exceeds the whole budget still runs
 rather than stalling the session.
 
-| Phase    | Resource class | Cores per job | Concurrency                            |
-|----------|----------------|---------------|----------------------------------------|
-| BINARIZE | `binarization` | 3             | Hard ceiling of 4                      |
-| REGISTER | `registration` | 4             | Session CPU budget, 4 jobs reserved    |
-| PROCESS  | `processing`   | 10            | Session CPU budget, 5 jobs reserved    |
-| COMBINE  | `combination`  | 1             | Session CPU budget                     |
+| Phase    | Resource class | Cores per job | Concurrency                         |
+|----------|----------------|---------------|-------------------------------------|
+| BINARIZE | `binarization` | 3             | Hard ceiling of 4                   |
+| REGISTER | `registration` | 4             | Session CPU budget, 4 jobs reserved |
+| PROCESS  | `processing`   | 10            | Session CPU budget, 5 jobs reserved |
+| COMBINE  | `combination`  | 1             | Session CPU budget                  |
 
 Every cap but binarization's derives from the host as `min(max(1, budget // cores_per_job), max(1, job_count))`, so a
-wider machine raises it without being asked, and the dispatcher then admits against the live core and memory budgets
-rather than against the cap alone. The engine saturates the host it is given, so leave both parameters as None unless
+wider machine raises it without being asked. The dispatcher then admits against the live core and memory budgets rather
+than against the cap alone. The engine saturates the host it is given, so leave both parameters as None unless
 the user asks for an override. Binarization's ceiling of 4 is the exception it never lifts, because the stage decodes at
 the storage's rate rather than the host's core count, and that class alone ignores both `workers_per_job` and
 `max_parallel_jobs`.
@@ -339,9 +334,7 @@ stage has no parallel critical path.
 Report the resolved allocation after dispatch, from the `resource_classes` mapping the execute tool returns, rather
 than predicting it beforehand. When the user does ask for an override, a `workers_per_job` value of 30 overrides the
 processing default of 10 and lowers the processing concurrency to at most the CPU budget divided by 30. That override
-therefore reduces the memory the class holds. A positive `max_parallel_jobs` replaces the derived cap outright, but it
-cannot exhaust memory on its own: the dispatcher still holds the running jobs' estimated memory inside the session
-memory budget whatever cap a class carries.
+therefore reduces the memory the class holds. A positive `max_parallel_jobs` replaces the derived cap outright.
 
 ### Planning before dispatch
 
@@ -472,6 +465,7 @@ session state immediately, so a new session can start while cancelled jobs still
 |-----------------------------------|----------------------------------------------------------------------------|
 | `/cindra-pipeline`                | Overview: end-to-end phases, handoffs, and the single-vs-multi entry point |
 | `/cindra-mcp-environment-setup`   | Prerequisite: MCP server connectivity                                      |
+| `/cli-reference`                  | Reference: `cindra run`, the manual counterpart this workflow replaces     |
 | `/acquisition-data-preparation`   | Input: raw data preparation and validation                                 |
 | `/single-recording-configuration` | Configuration: parameter reference and file creation                       |
 | `/single-recording-results`       | Output: verify and explain processing results                              |

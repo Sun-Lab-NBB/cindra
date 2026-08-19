@@ -1,7 +1,7 @@
 ---
 name: cindra-pipeline
 description: >-
-  End-to-end orchestration guide for the cindra neural imaging pipeline and the entry point for cindra work.
+  Orchestrates the cindra neural imaging pipeline end to end and serves as the entry point for cindra work.
   Covers canonical stage ordering with handoff conditions for the single-recording and multi-recording pipelines,
   the single-vs-multi-recording decision, dataset planning, and the MCP-first execution model. Use when planning a
   full processing workflow, deciding which pipeline to run, or orienting at the start of a cindra session.
@@ -47,9 +47,8 @@ Does the goal require tracking the SAME ROIs across multiple recordings (e.g. cr
         ALREADY be fully single-recording processed first.
 ```
 
-The multi-recording pipeline is not a replacement for the single-recording pipeline. It is a downstream pipeline that
-consumes single-recording outputs. Every recording in a multi-recording dataset must complete all four single-recording
-phases before multi-recording processing can run.
+The multi-recording pipeline is a downstream pipeline that consumes single-recording outputs rather than a replacement
+for the single-recording pipeline.
 
 ---
 
@@ -159,7 +158,7 @@ Complete (all)   →                →               →               →  Ins
 
 A dataset is a named group of recordings tracked together. Plan datasets before preparing a multi-recording batch.
 
-- **Prerequisite chain:** If any recording is not single-recording complete, route to the earliest missing step:
+- **Prerequisite chain:** Route an incomplete recording to the earliest missing step:
   `/acquisition-data-preparation` → `/single-recording-configuration` → `/single-recording-processing`.
 - **Grouping:** Group recordings by common parent directory, explicit user grouping, or semantic analysis of recording
   paths. Each group becomes one dataset.
@@ -184,7 +183,9 @@ Cindra is MCP-first for agentic work. Every stage skill mandates the cindra MCP 
 
 The `cindra` and `cindra-gui` CLIs (`cindra run`, `cindra-gui roi`, etc.) exist for manual, non-agentic execution. You
 MUST NOT drive the pipeline through the CLI or direct Python imports during agentic work. Use the MCP tools so resource
-management, prerequisite validation, and phase sequencing are handled consistently.
+management, prerequisite validation, and phase sequencing are handled consistently. `/cli-reference` documents every
+command and option for the user who asks what one does, and names the commands to hand over when the MCP server cannot
+be restored.
 
 ---
 
@@ -208,27 +209,27 @@ management, prerequisite validation, and phase sequencing are handled consistent
 
 ### Cross-day ROI tracking
 
-1. Confirm every recording is single-recording complete (run the single-recording pipeline first if not)
-2. `/multi-recording-configuration`, to create the multi-recording template configuration
-3. `/multi-recording-processing`, to group into datasets, resolve dataset names, run discover and extract
-4. `/multi-recording-results`, to verify tracking outputs
-5. `/visualization`, to confirm tracking quality across recordings
+1. `/multi-recording-configuration`, to create the multi-recording template configuration
+2. `/multi-recording-processing`, to group into datasets, resolve dataset names, run discover and extract
+3. `/multi-recording-results`, to verify tracking outputs
+4. `/visualization`, to confirm tracking quality across recordings
 
 ---
 
 ## Related skills
 
-| Skill                             | Relationship                                               |
-|-----------------------------------|------------------------------------------------------------|
-| `/cindra-mcp-environment-setup`   | Prerequisite (both pipelines): MCP server connectivity     |
-| `/acquisition-data-preparation`   | Single-recording stage 2: raw data preparation             |
-| `/single-recording-configuration` | Single-recording stage 3: configuration reference          |
-| `/single-recording-processing`    | Single-recording stage 4: processing orchestration         |
-| `/single-recording-results`       | Single-recording stage 5: output verification and querying |
-| `/multi-recording-configuration`  | Multi-recording stage 1: configuration reference           |
-| `/multi-recording-processing`     | Multi-recording stage 2: processing orchestration          |
-| `/multi-recording-results`        | Multi-recording stage 3: output verification and querying  |
-| `/visualization`                  | Final stage (both pipelines): visual inspection of results |
+| Skill                             | Relationship                                                                 |
+|-----------------------------------|------------------------------------------------------------------------------|
+| `/cindra-mcp-environment-setup`   | Prerequisite (both pipelines): MCP server connectivity                       |
+| `/cli-reference`                  | Reference: what each `cindra` and `cindra-gui` command does, for manual runs |
+| `/acquisition-data-preparation`   | Single-recording stage 2: raw data preparation                               |
+| `/single-recording-configuration` | Single-recording stage 3: configuration reference                            |
+| `/single-recording-processing`    | Single-recording stage 4: processing orchestration                           |
+| `/single-recording-results`       | Single-recording stage 5: output verification and querying                   |
+| `/multi-recording-configuration`  | Multi-recording stage 1: configuration reference                             |
+| `/multi-recording-processing`     | Multi-recording stage 2: processing orchestration                            |
+| `/multi-recording-results`        | Multi-recording stage 3: output verification and querying                    |
+| `/visualization`                  | Final stage (both pipelines): visual inspection of results                   |
 
 ---
 

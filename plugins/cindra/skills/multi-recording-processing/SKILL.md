@@ -58,9 +58,8 @@ diagnose and resolve connectivity issues.
 
 ## Prerequisites
 
-All recordings must have completed single-recording processing (`get_recording_status_tool` returns single-recording
-status `completed`). If any recording is incomplete, invoke the earliest missing step in the chain:
-`/acquisition-data-preparation` → `/single-recording-configuration` → `/single-recording-processing`.
+An incomplete recording routes to the earliest missing step in the chain `/acquisition-data-preparation` →
+`/single-recording-configuration` → `/single-recording-processing`. Workflow step 1 states the check itself.
 
 ---
 
@@ -286,15 +285,26 @@ carries `executor_id` when the dataset's tracker already existed.
 
 ### Re-running specific phases
 
-To re-run specific phases (e.g., after changing tracking parameters):
-
 1. Use `reset_processing_phases_tool` with `tracker_path`, `phases`, and `pipeline_type="multi-recording"` to reset the
    target phases to SCHEDULED status. Downstream phases are automatically reset (e.g., resetting `discovery` also resets
    `extraction`).
 2. Optionally modify the configuration file before re-execution.
-3. Optionally use `clean_processing_output_tool` to delete output files from the reset phases (requires
+3. Use `clean_processing_output_tool` to delete output files from the reset phases (requires
    `pipeline_type="multi-recording"` plus the lowercased `dataset` name).
 4. Call `execute_processing_jobs_tool` with the reset jobs from the manifest.
+
+**Discovery is not idempotent under a reset alone.** A reset returns the phase to SCHEDULED and deletes nothing, so
+each substage re-reads the output the previous run left and returns early.
+
+| Sub-stage     | Skips while                                                   | Forced by             |
+|---------------|---------------------------------------------------------------|-----------------------|
+| ROI selection | Channel 1 selections exist, and channel 2 when it has data    | `repeat_selection`    |
+| Registration  | Every recording reports itself registered                     | `repeat_registration` |
+| Tracking      | `tracking_template_masks.npz` exists in the first output path | `repeat_registration` |
+
+Such a re-run reports SUCCEEDED while writing byte-identical output, so the new parameter never takes effect. Clean
+the `discovery` phase, which deletes the template masks, or set `repeat_selection` in `recording_io` and
+`repeat_registration` in `diffeomorphic_registration`, both owned by `/multi-recording-configuration`.
 
 ---
 
@@ -457,6 +467,7 @@ the previously RUNNING jobs leave RUNNING before starting a new session.
 |-----------------------------------|-----------------------------------------------------------------------------|
 | `/cindra-pipeline`                | Overview: end-to-end phases, handoffs, and the single-vs-multi entry point  |
 | `/cindra-mcp-environment-setup`   | Prerequisite: MCP server connectivity                                       |
+| `/cli-reference`                  | Reference: `cindra run`, the manual counterpart this workflow replaces      |
 | `/acquisition-data-preparation`   | Upstream: raw data preparation                                              |
 | `/single-recording-configuration` | Prerequisite chain: configure recordings before single-recording processing |
 | `/single-recording-processing`    | Prerequisite: all recordings must be single-recording complete              |
@@ -477,6 +488,7 @@ Multi-Recording Processing Workflow:
 - [ ] Template configuration confirmed or created via `/multi-recording-configuration` (reusable across datasets)
 - [ ] Share of the machine to dedicate to processing confirmed with user
 - [ ] Batch prepared or full pipeline executed
+- [ ] Parameter-change re-run cleaned the `discovery` phase or set the matching repeat flag
 - [ ] Status monitored until all datasets complete or fail
 - [ ] Failed datasets routed to appropriate skill (see Error routing)
 - [ ] Successful datasets verified via `/multi-recording-results`
