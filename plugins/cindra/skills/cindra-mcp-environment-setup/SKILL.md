@@ -82,8 +82,6 @@ active before launching Claude Code.
 
 ### Dual-distribution model
 
-cindra's Claude Code integration is split across two distribution channels:
-
 | Component                                        | Distributed via           | What it provides                                                        |
 |--------------------------------------------------|---------------------------|-------------------------------------------------------------------------|
 | Skills (`/single-recording-processing`, etc.)    | cindra Claude Code plugin | Skill files that guide agents through workflows                         |
@@ -294,7 +292,7 @@ The `cindra omp` half of this step is macOS-only. Linux and Windows select Numba
 (`tbb4py` and `intel-cmplr-lib-rt` are declared as `sys_platform != 'darwin'` dependencies), so Numba never loads
 `omppool` and `cindra omp` errors when run there. Run `check_threading_runtime_tool` on every platform regardless,
 because a Linux or Windows host missing the TBB runtime fails every parallelized stage exactly as a macOS host missing
-`libomp.dylib` does, and the tool reports that case with `required_layer: "tbb"` and a `pip install tbb4py` remedy.
+`libomp.dylib` does. The tool reports that case with `required_layer: "tbb"` and a `pip install tbb4py` remedy.
 
 ### Step 7: Restart the MCP server
 
@@ -342,6 +340,7 @@ the MCP tools on the next session, since the current session's MCP subprocesses 
 | `/multi-recording-processing`     | Requires the cindra MCP server to be connected before processing               |
 | `/multi-recording-results`        | Requires the cindra MCP server for query and verification tool access          |
 | `/visualization`                  | Requires the cindra-gui server for viewer tools, query tools are on cindra-mcp |
+| `/cli-reference`                  | Reference: the CLI surface, and the fallback commands when MCP stays down      |
 
 ---
 

@@ -1,6 +1,6 @@
 """Provides the terminal-based interface for running all processing pipelines supported by the library."""
 
-from typing import Literal
+from typing import Any, Literal
 from pathlib import Path
 
 import click
@@ -20,7 +20,37 @@ CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
 """The Click context settings that ensure displayed help messages are formatted according to the cindra standard."""
 
 
-@click.group("cindra", context_settings=CONTEXT_SETTINGS)
+class RoutedErrorGroup(click.Group):
+    """Reports the errors raised by the subcommands of a Click group as single-line terminal messages.
+
+    Click renders a ClickException as one 'Error:' line and suppresses the traceback, while every other exception
+    reaches the interpreter and prints the full stack.
+    """
+
+    def invoke(self, ctx: click.Context) -> Any:
+        """Runs the requested subcommand, converting the errors it raises into Click exceptions.
+
+        Args:
+            ctx: The Click context holding the subcommand to run.
+
+        Returns:
+            The value the invoked subcommand returns.
+        """
+        try:
+            return super().invoke(ctx)
+        except click.ClickException, click.Abort, click.exceptions.Exit:
+            # Click renders each of these itself. Abort and Exit subclass RuntimeError, so they have to be re-raised
+            # ahead of the generic handler below to keep an interrupt and an explicit exit code intact.
+            raise
+        except Exception as error:
+            command = ctx.invoked_subcommand if ctx.invoked_subcommand is not None else self.name
+            message = f"Unable to complete the '{command}' command. {type(error).__name__}: {error}"
+            console.error(message=message, error=click.ClickException)
+            # Satisfies ruff RET503. console.error() is NoReturn, so this line never executes.
+            return None
+
+
+@click.group("cindra", cls=RoutedErrorGroup, context_settings=CONTEXT_SETTINGS)
 def cindra_cli() -> None:
     """Provides the entry-point for all headless command-line interactions with the cindra library."""
 
@@ -96,7 +126,7 @@ def cindra_omp(source: Path | None, target: Path | None, *, force: bool, yes: bo
         summary = resolve_openmp_runtime(runtime_path=source, link_path=target, execute=yes, force=force)
     except RuntimeError as error:
         message = f"Unable to resolve the macOS OpenMP runtime. {error}"
-        console.error(message=message, error=RuntimeError)
+        console.error(message=message, error=click.ClickException)
 
     if summary.searched_paths:
         console.echo(message=f"searched: {', '.join(str(path) for path in summary.searched_paths)}", raw=True)
@@ -145,7 +175,7 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
             f"Unable to generate the pipeline configuration file. The configuration file name must carry at least one "
             f"non-whitespace character, but got {resolved_name!r}."
         )
-        console.error(message=message, error=ValueError)
+        console.error(message=message, error=click.UsageError)
 
     # Appends the extension the pipeline loader requires, keeping every component of the supplied name. Path
     # 'with_suffix' would instead replace the component that follows the name's last dot.
@@ -436,7 +466,7 @@ def cindra_run(
                 "Unable to run the single-recording pipeline. The output_path must be configured either in the "
                 "configuration file or via the --output-path flag, but it is currently None."
             )
-            console.error(message=message, error=ValueError)
+            console.error(message=message, error=click.UsageError)
         configuration.save(file_path=input_path)
 
         run_single_recording_pipeline(

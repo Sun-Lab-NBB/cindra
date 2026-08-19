@@ -23,6 +23,7 @@ Launches, manages, and assists with cindra GUI viewers for visual inspection of 
 - Guiding users through viewer controls and interaction patterns
 - Viewer prerequisites and data requirements
 - Combining GUI viewer state with headless query tools for data-driven assistance
+- Curating cell/non-cell labels in the ROI viewer and exporting them as a classifier training dataset
 
 **Does not cover:**
 - Processing workflow orchestration (see `/single-recording-processing`, `/multi-recording-processing`)
@@ -32,8 +33,7 @@ Launches, manages, and assists with cindra GUI viewers for visual inspection of 
 
 **Handoff rules:** If the user asks about processing status or batch jobs, invoke `/single-recording-processing` or
 `/multi-recording-processing`. If the user asks about output file formats or data interpretation without a viewer,
-invoke `/single-recording-results` or `/multi-recording-results`. If cindra-gui MCP tools are unavailable, invoke
-`/cindra-mcp-environment-setup`.
+invoke `/single-recording-results` or `/multi-recording-results`.
 
 ---
 
@@ -97,7 +97,6 @@ launch_viewer_tool(viewer_type="roi", recording_path="<path>", dataset="<name>")
 ```
 
 **Prerequisites:**
-- Single-recording processing must be complete (`combined_metadata.npz` exists)
 - For multi-recording mode, multi-recording processing must be complete for the specified dataset
 
 **Parameters:**
@@ -111,7 +110,10 @@ launch_viewer_tool(viewer_type="roi", recording_path="<path>", dataset="<name>")
   probability, recording count, cell probability, correlations, classification)
 - Inspect fluorescence traces (raw, neuropil, corrected, spikes) for selected ROIs
 - Toggle channel 2 overlay for dual-channel recordings
-- Reclassify ROIs by toggling cell/non-cell labels in classify mode (a click flips the clicked ROI's label)
+- Reclassify ROIs by toggling cell/non-cell labels in classify mode, which never rewrites the recording's
+  `cell_classification.npy`
+- Export the flipped labels as a classifier training dataset through the Classifier panel, which the Classifier
+  curation workflow covers
 - Adjust opacity and colormap
 - View multi-recording tracked ROIs across datasets
 
@@ -150,9 +152,6 @@ frame-by-frame playback and a PC viewer for principal component metrics.
 ```python
 launch_viewer_tool(viewer_type="registration", recording_path="<path>")
 ```
-
-**Prerequisites:**
-- Single-recording processing must be complete through the combination phase (`combined_metadata.npz` exists)
 
 **Parameters:**
 - `recording_path`: Absolute path to the recording directory containing `cindra/` output
@@ -209,24 +208,24 @@ depends on the viewer type.
 
 ### Tracking viewer state
 
-| Field                       | Type              | Description                                               |                                                    |
-| --------------------------- | ----------------- | --------------------------------------------------------- |                                                    |
-| `viewer_type`               | str               | Always `"tracking"`                                       |                                                    |
-| `loaded`                    | bool              | Whether multi-recording data has finished loading         |                                                    |
-| `active_dataset`            | str               | Active multi-recording dataset name                       |                                                    |
-| `available_datasets`        | list[str]         | List of available dataset names                           |                                                    |
-| `current_recording_index`   | int               | Index of the currently displayed recording                |                                                    |
-| `current_recording_id`      | str               | Identifier of the currently displayed recording           |                                                    |
-| `recording_count`           | int               | Total number of recordings in the dataset                 |                                                    |
-| `background_view`           | str               | Active background image (see Background views)            |                                                    |
-| `coordinate_space`          | str               | Active coordinate space (`"native"` or `"transformed"`)   |                                                    |
-| `mask_layer`                | str               | Active mask layer (see Mask layers)                       |                                                    |
-| `channel_2_active`          | bool              | Whether channel 2 overlay is toggled on                   |                                                    |
-| `opacity`                   | int               | ROI overlay opacity (slider value)                        |                                                    |
-| `selected_roi_indices`      | list[int]\        | null                                                      | Selected ROI indices, or null when all are visible |
-| `last_clicked_roi_index`    | int\              | null                                                      | Index of the most recently clicked ROI, or null    |
-| `mask_count`                | int               | Number of masks in the active layer                       |                                                    |
-| `auto_cycling`              | bool              | Whether auto-recording cycling is active                  |                                                    |
+| Field                     | Type            | Description                                             |
+|---------------------------|-----------------|---------------------------------------------------------|
+| `viewer_type`             | str             | Always `"tracking"`                                     |
+| `loaded`                  | bool            | Whether multi-recording data has finished loading       |
+| `active_dataset`          | str             | Active multi-recording dataset name                     |
+| `available_datasets`      | list[str]       | List of available dataset names                         |
+| `current_recording_index` | int             | Index of the currently displayed recording              |
+| `current_recording_id`    | str             | Identifier of the currently displayed recording         |
+| `recording_count`         | int             | Total number of recordings in the dataset               |
+| `background_view`         | str             | Active background image (see Background views)          |
+| `coordinate_space`        | str             | Active coordinate space (`"native"` or `"transformed"`) |
+| `mask_layer`              | str             | Active mask layer (see Mask layers)                     |
+| `channel_2_active`        | bool            | Whether channel 2 overlay is toggled on                 |
+| `opacity`                 | int             | ROI overlay opacity (slider value)                      |
+| `selected_roi_indices`    | list[int]\|null | Selected ROI indices, or null when all are visible      |
+| `last_clicked_roi_index`  | int\|null       | Index of the most recently clicked ROI, or null         |
+| `mask_count`              | int             | Number of masks in the active layer                     |
+| `auto_cycling`            | bool            | Whether auto-recording cycling is active                |
 
 ### Registration viewer state
 
@@ -266,7 +265,7 @@ Returns a nested dictionary with two sub-viewers:
 ## Enum value reference
 
 Enum-valued state fields report a lowercase value whose on-screen dropdown label can differ from the title-cased form.
-Read the exact label from the Dropdown label column in [references/viewer-enums.md](references/viewer-enums.md), which
+Read the exact label from the Dropdown label column in [viewer-enums.md](references/viewer-enums.md), which
 holds the full value lists for `background_view`, `roi_color_mode`, `mask_layer`, and `coordinate_space`.
 
 ---
@@ -279,6 +278,12 @@ holds the full value lists for `background_view`, `roi_color_mode`, `mask_layer`
    cindra MCP server, and require `single_recording.status` to equal `completed`. The values `binarizing`,
    `registering`, `processing`, and `combining` report a run that is still in flight, and `not_started`, `scheduled`,
    and `failed` report a recording with no viewable output.
+
+   For `viewer_type="tracking"`, and for a `roi` launch that passes `dataset`, also require the `multi_recording`
+   section of the same response to report that dataset complete, or `verify_multi_recording_output_tool` to return
+   `complete: true`. `launch_viewer_tool` validates only that the path is an existing directory and discards the
+   subprocess output, so a viewer over a dataset that never ran still reports a live `viewer_id` and only fails later
+   inside the query tools. Invoke `/multi-recording-processing` when the dataset is incomplete.
 
 2. **Launch viewer**. Call `launch_viewer_tool` with the appropriate `viewer_type`, `recording_path`, and optional
    `dataset`. Store the returned `viewer_id`.
@@ -294,7 +299,34 @@ holds the full value lists for `background_view`, `roi_color_mode`, `mask_layer`
 
 5. **Clean up**. When the user is done, close the viewer with `close_viewer_tool`. If the user closes the viewer window
    directly, the next `list_viewers_tool` or `query_viewer_state_tool` call will detect the dead process and clean up
-   automatically.
+   automatically. When the session flipped any label in classify mode, prompt the user to export the labels through the
+   Classifier panel before the viewer closes, because closing discards every unexported flip.
+
+### Classifier curation workflow
+
+Produces the custom classifier training dataset that the `main.custom_classifier_path` configuration parameter
+consumes. The ROI viewer's Classifier panel is the only interface that writes this file.
+
+1. **Launch the ROI viewer** over a recording whose single-recording processing completed, omitting `dataset`. Both
+   builder buttons return without acting in tracked ROI mode.
+
+2. **Enable Classify**. Toggling the Classify button makes a click flip the clicked ROI's label instead of selecting it
+   for trace plotting.
+
+3. **Correct the labels**. Ask the user to flip every ROI the built-in classifier judged wrongly. The flips stay in the
+   viewer session, so `query_roi_statistics_tool` keeps reporting the on-disk labels while the viewer shows the flipped
+   ones.
+
+4. **Export**. **New** writes the labels and their three features to a `.npz` chosen through a save dialog. **Add to
+   Existing** concatenates them onto a dataset chosen through an open dialog and writes the merged result. Neither
+   button refits the classifier, so the exported file holds training data alone.
+
+5. **Accumulate to the sample floor**. The classifier fits a 100-node probability grid and rejects a dataset holding
+   fewer than 100 samples when it loads one. A recording carrying fewer ROIs than that reaches a usable file only after
+   **Add to Existing** merges it with others.
+
+6. **Hand off**. Supply the finished file to the pipeline through `main.custom_classifier_path`, which
+   `/single-recording-configuration` owns.
 
 ### State-driven assistance workflow
 
@@ -410,6 +442,7 @@ artifacts not captured by registration.
 |-----------------------------------|----------------------------------------------------------------------------|
 | `/cindra-pipeline`                | Overview: end-to-end phases, handoffs, and the single-vs-multi entry point |
 | `/cindra-mcp-environment-setup`   | Prerequisite: cindra-gui MCP server connectivity                           |
+| `/cli-reference`                  | Reference: the `cindra-gui` commands behind the viewer launch tools        |
 | `/single-recording-processing`    | Upstream: produces the data this skill visualizes                          |
 | `/multi-recording-processing`     | Upstream: produces the data this skill visualizes                          |
 | `/single-recording-results`       | Reference: output data formats for single-recording query tools            |
@@ -435,10 +468,13 @@ You SHOULD proactively invoke this skill when:
 Visualization Workflow:
 - [ ] cindra-gui MCP server connected (if not, invoke `/cindra-mcp-environment-setup`)
 - [ ] `get_recording_status_tool` reports single_recording.status == completed for the target recording(s)
+- [ ] For a tracking viewer, or a roi viewer launched with 'dataset', the multi_recording section reports
+      that dataset complete (or `verify_multi_recording_output_tool` returns complete true)
 - [ ] Correct viewer type selected for the inspection goal
 - [ ] Viewer launched via `launch_viewer_tool` with correct parameters
 - [ ] Viewer loading confirmed via `query_viewer_state_tool` ('loaded' true for the ROI and tracking
       viewers, 'pc_viewer.loaded' true for the registration viewer)
 - [ ] User questions answered using combined viewer state + headless query tools
+- [ ] Classify-mode flips exported through the Classifier panel before the viewer is closed
 - [ ] Viewer closed when inspection is complete (or user-closed detected)
 ```

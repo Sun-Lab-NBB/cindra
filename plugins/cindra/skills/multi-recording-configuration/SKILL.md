@@ -111,9 +111,9 @@ These parameters are set automatically by the pipeline and should not be manuall
 
 Runtime behavior settings shared with the single-recording pipeline.
 
-| Parameter               | Type | Default | Description                                          |
-|-------------------------|------|---------|------------------------------------------------------|
-| `display_progress_bars` | bool | False   | Show progress bars. Batch tools force this False.    |
+| Parameter               | Type | Default | Description                                       |
+|-------------------------|------|---------|---------------------------------------------------|
+| `display_progress_bars` | bool | False   | Show progress bars. Batch tools force this False. |
 
 `cindra run` displays progress bars by default and writes its choice into this field before dispatching, so the flag
 that suppresses them is `-np/--no-progress`. The batch MCP tools write False into every per-dataset configuration they
@@ -145,8 +145,6 @@ is enabled.
 
 - `recording_directories` is populated by the MCP batch tool from its `recording_paths` argument, or by
   `cindra run -rp/--recording-path`.
-- `dataset_name` **must be set by the user**. It identifies the output and must be unique per dataset in a batch. Use
-  `resolve_dataset_name_tool` to construct qualified names from a shared base name and a batch-specific specifier.
 - When `repeat_selection` is True, ROI selection is re-run using current criteria even if selections already exist. This
   allows updated single-recording results or modified selection criteria to be integrated.
 
@@ -303,12 +301,6 @@ See `/single-recording-configuration` Section 9 for full tuning guidance. The sa
 
 ## User-configurable vs auto-set parameters
 
-### Parameters users must configure
-
-| Parameter                   | Why required                                         |
-|-----------------------------|------------------------------------------------------|
-| `recording_io.dataset_name` | Uniquely identifies output, cannot be auto-generated |
-
 ### Parameters users should consider
 
 | Parameter                                 | When to change                                     |
@@ -411,8 +403,6 @@ spike_deconvolution:
 
 ## Configuration lifecycle
 
-Configuration files follow a two-tier lifecycle:
-
 1. **Template configs**: De-novo configurations generated via `generate_config_file_tool` or manually created. Templates
    can live anywhere (e.g., `/Data/CA1_GCaMP6f_MD.yaml`) and are reusable across datasets. Templates are never modified
    by the pipeline. One template can serve multiple datasets that share the same processing parameters (only
@@ -459,6 +449,7 @@ handle per-dataset fine-tuning automatically.
 |-----------------------------------|--------------------------------------------------------------------------------|
 | `/cindra-pipeline`                | Overview: end-to-end phases, handoffs, and the single-vs-multi entry point     |
 | `/cindra-mcp-environment-setup`   | Prerequisite: MCP server must be connected for configuration tools             |
+| `/cli-reference`                  | Reference: `cindra configure` and the `cindra run` worker options              |
 | `/acquisition-data-preparation`   | Upstream: invoke if raw data is not yet prepared for the prerequisite chain    |
 | `/single-recording-processing`    | Prerequisite: single-recording processing must complete first                  |
 | `/single-recording-results`       | Prerequisite: single-recording outputs required as multi-recording input       |

@@ -2,8 +2,8 @@
 
 ## Session start behavior
 
-At the beginning of each coding session, before making any code changes, you should build a comprehensive understanding
-of the codebase by invoking the `/explore-codebase` skill.
+At the beginning of each coding session, before making any code changes, you MUST build a comprehensive understanding of
+the codebase by invoking the `/explore-codebase` skill.
 
 ## Style guide compliance
 
@@ -57,18 +57,19 @@ phase-specific skills.
 
 **Cindra plugin skills** (`plugins/cindra/skills/`):
 
-| Skill                             | Description                                                      |
-|-----------------------------------|------------------------------------------------------------------|
-| `/cindra-pipeline`                | Orchestrates the end-to-end pipeline and opens a cindra session  |
-| `/single-recording-processing`    | Orchestrates single-recording batch processing via MCP           |
-| `/multi-recording-processing`     | Orchestrates multi-recording batch processing via MCP            |
-| `/single-recording-configuration` | Documents single-recording configuration parameters and tools    |
-| `/multi-recording-configuration`  | Documents multi-recording configuration parameters and tools     |
-| `/single-recording-results`       | Documents single-recording output data formats and verification  |
-| `/multi-recording-results`        | Documents multi-recording output data formats and verification   |
-| `/acquisition-data-preparation`   | Prepares raw imaging data and acquisition parameter files        |
-| `/visualization`                  | Launches and manages cindra GUI viewers for visual inspection    |
-| `/cindra-mcp-environment-setup`   | Diagnoses and resolves MCP server connectivity issues            |
+| Skill                             | Description                                                     |
+|-----------------------------------|-----------------------------------------------------------------|
+| `/cindra-pipeline`                | Orchestrates the end-to-end pipeline and opens a cindra session |
+| `/single-recording-processing`    | Orchestrates single-recording batch processing via MCP          |
+| `/multi-recording-processing`     | Orchestrates multi-recording batch processing via MCP           |
+| `/single-recording-configuration` | Documents single-recording configuration parameters and tools   |
+| `/multi-recording-configuration`  | Documents multi-recording configuration parameters and tools    |
+| `/single-recording-results`       | Documents single-recording output data formats and verification |
+| `/multi-recording-results`        | Documents multi-recording output data formats and verification  |
+| `/acquisition-data-preparation`   | Prepares raw imaging data and acquisition parameter files       |
+| `/visualization`                  | Launches and manages cindra GUI viewers for visual inspection   |
+| `/cli-reference`                  | Documents the human-facing cindra and cindra-gui CLI commands   |
+| `/cindra-mcp-environment-setup`   | Diagnoses and resolves MCP server connectivity issues           |
 
 **Ataraxis automation plugin skills** (external, shared across projects):
 

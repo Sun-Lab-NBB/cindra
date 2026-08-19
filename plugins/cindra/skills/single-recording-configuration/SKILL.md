@@ -127,7 +127,9 @@ independent ROI detection on both channels.
   stored for colocalization analysis but not used for ROI detection.
 - **Custom classifier**: Provide `custom_classifier_path` when imaging non-standard cell types or preparations where the
   built-in classifier performs poorly. The `.npz` file must hold `training_labels`, at least 100 training samples, and
-  at least one of the `normalized_pixel_count`, `compactness`, and `skewness` feature arrays.
+  at least one of the `normalized_pixel_count`, `compactness`, and `skewness` feature arrays. The ROI viewer's
+  Classifier panel is the only interface that writes this file, so invoke `/visualization` to curate the labels of a
+  processed recording and export them, merging several recordings when one carries fewer than 100 ROIs.
 
 ---
 
@@ -393,8 +395,6 @@ authored file that omits it is rejected by both `validate_config_file_tool` and 
 
 ## Configuration lifecycle
 
-Configuration files follow a two-tier lifecycle:
-
 1. **Template configs**: de-novo configurations generated via `generate_config_file_tool` or manually created. Templates
    can live anywhere (e.g., `/Data/CA1_GCaMP6f_SD.yaml`) and are reusable across recordings. Templates are never
    modified by the pipeline.
@@ -437,6 +437,7 @@ handle per-recording fine-tuning automatically.
 |----------------------------------|----------------------------------------------------------------------------|
 | `/cindra-pipeline`               | Overview: end-to-end phases, handoffs, and the single-vs-multi entry point |
 | `/cindra-mcp-environment-setup`  | Prerequisite: MCP server must be connected for configuration tools         |
+| `/cli-reference`                 | Reference: `cindra configure` and the `cindra run` worker options          |
 | `/acquisition-data-preparation`  | Prerequisite: raw data must be prepared before configuring the pipeline    |
 | `/single-recording-processing`   | Next step: processing workflow that consumes this configuration            |
 | `/single-recording-results`      | Output data format reference for evaluating processing results             |
