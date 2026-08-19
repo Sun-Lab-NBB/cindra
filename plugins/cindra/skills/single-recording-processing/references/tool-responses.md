@@ -9,16 +9,21 @@ that skill.
 
 ## Rejection list element shapes
 
-The five lists a single-recording caller can receive do not share one element shape. Three hold plain strings and two
+The six lists a single-recording caller can receive do not share one element shape. Three hold plain strings and three
 hold objects, so a caller that formats them uniformly prints `[object Object]` for the object ones.
 
-| Key                    | Returned by            | Element shape                                        |
-|------------------------|------------------------|------------------------------------------------------|
-| `invalid_paths`        | prepare, full-pipeline | string, the offending path as supplied               |
-| `invalid_recordings`   | prepare, full-pipeline | string, `"{recording_path}: {error}"`                |
-| `migrated_recordings`  | prepare, full-pipeline | string, the recording key whose tracker was migrated |
-| `unsizable_recordings` | full-pipeline          | object, `{"recording": str, "error": str}`           |
-| `invalid_jobs`         | execute                | object, `{"job_id": str, "reason": str}`             |
+| Key                    | Returned by            | Element shape                                                      |
+|------------------------|------------------------|--------------------------------------------------------------------|
+| `invalid_paths`        | prepare, full-pipeline | string, the offending path as supplied                             |
+| `invalid_recordings`   | prepare, full-pipeline | string, `"{raw_data_path}: {error}"`                               |
+| `migrated_recordings`  | prepare, full-pipeline | string, the raw data path whose tracker was migrated               |
+| `path_conflicts`       | prepare, full-pipeline | object, `{"recording", "field", "stored", "passed", "resolution"}` |
+| `unsizable_recordings` | full-pipeline          | object, `{"recording": str, "error": str}`                         |
+| `invalid_jobs`         | execute                | object, `{"job_id": str, "reason": str}`                           |
+
+A `path_conflicts` entry holds five string values, and its `field` is `file_io.data_path` or `file_io.output_path`,
+naming which of the two stored paths disagrees with the one passed. One entry is emitted per disagreeing field, so a
+recording whose stored raw data path and output path both differ contributes two entries.
 
 `invalid_jobs` uses `{"job": str, "reason": str}` instead, keyed on the stringified descriptor, when the descriptor is
 missing one of the four required keys and therefore carries no usable `job_id`.
@@ -63,15 +68,18 @@ loads one runs no discovery.
 | `memory_budget_mb` | Session memory budget, sampled once at session start                   |
 | `resource_classes` | Per class, its `workers_per_job`, `max_parallel_jobs`, and `job_count` |
 
-`execute_full_pipeline_tool` additionally returns `phase_count`, a per-phase `phases` list, and the preparation lists
-it forwards, including `migrated_recordings`. It returns `started: false` with a `message` and a `next_step` when every
-phase is already complete.
+`execute_full_pipeline_tool` additionally returns `pipeline_type`, `phase_count`, a per-phase `phases` list, and the
+preparation lists it forwards, including `migrated_recordings` and `path_conflicts`. It returns `started: false` with a
+`message` and a `next_step` when every phase is already complete.
 
 ### get_processing_jobs_status_tool
 
 Returns `active`, `jobs`, a `summary` counting pending, running, succeeded, and failed, plus `awaiting_prerequisites`
 for the jobs still held in the admission pool. Its `resource_classes` mapping carries `pending` and `active` in place
-of `job_count`. Once the session drains it returns `active: false`, empty `jobs`, a zero `summary`, and a `note`.
+of `job_count`. Each `jobs` entry carries the `tracker_path` its `job_id` belongs to, because a `job_id` identifies a
+job only within its own tracker. Passing `summary_only: true` omits the `jobs` list and returns the session fields and
+the counts alone, which is what to poll a wide batch with, because the list grows with the job count while the counts
+it summarizes do not. Once the session drains it returns `active: false`, empty `jobs`, a zero `summary`, and a `note`.
 
 ### get_active_execution_timing_tool
 
@@ -91,13 +99,17 @@ a `note`.
 
 ### reset_processing_phases_tool
 
-Returns `reset`, `requested_phases`, `effective_phases` after downstream expansion in pipeline execution order, and a
-`jobs` list. That list is a post-reset snapshot of **every** job of every valid phase, not only the jobs the reset
-touched, so selecting from it dispatches jobs that were already succeeded. Select from the prepare manifest instead.
+Returns `reset`, `tracker_path`, `requested_phases`, `effective_phases` after downstream expansion in pipeline
+execution order, and a `jobs` list. That list is a post-reset snapshot of **every** job of every valid phase, not only
+the jobs the reset touched, so selecting from it dispatches jobs that were already succeeded. Select from the prepare
+manifest instead. A `warnings` list of sentences is present when a reset phase is governed by a repeat flag that is
+false while that phase's output already exists on disk, and each sentence names the dotted flag to set with
+`set_config_values_tool`. Act on every warning before dispatching the reset phase, because the stage otherwise returns
+immediately and records success without redoing its work. The list is empty when the configuration cannot be read.
 
 ### clean_processing_output_tool
 
-Returns `cleaned`, `recording_path`, `deleted_files`, `deleted_dirs`, `total_deleted`, `requested_phases`, and
+Returns `cleaned`, `output_root`, `deleted_files`, `deleted_dirs`, `total_deleted`, `requested_phases`, and
 `effective_phases`, plus `errors` when a deletion failed. The `cleaned` flag reports that the tool ran rather than that
 every deletion succeeded, so gate on an empty `errors` list.
 
@@ -111,7 +123,7 @@ this list whenever it is present.
 
 ### get_recording_status_tool
 
-Returns `recording_path`, a `single_recording` section, and a `multi_recording` section. Each section reports
+Returns `output_root`, a `single_recording` section, and a `multi_recording` section. Each section reports
 `status: "not_started"` when no tracker exists. The single-recording section carries `tracker_path`, a synthesized
 `status`, a `summary` of per-status counts, and a `jobs` mapping whose four keys are `binarize`, `register`, `process`,
 and `combine`. The `register` and `process` keys map each `plane_{index}` specifier to a lowercased status string.

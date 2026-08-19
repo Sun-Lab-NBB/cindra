@@ -26,8 +26,8 @@ class _ViewerProcess:
     """The unique identifier for this viewer instance."""
     viewer_type: Literal["roi", "tracking", "registration"]
     """The kind of viewer this process renders."""
-    recording_path: str
-    """The path to the recording loaded in the viewer."""
+    output_root: str
+    """The path to the pipeline output root loaded in the viewer."""
     dataset: str | None
     """The multi-recording dataset name, or None for single-recording mode."""
     state_path: str
@@ -67,7 +67,7 @@ def run_gui_server(transport: Literal["stdio", "sse", "streamable-http"] = "stdi
 @_gui_mcp.tool()
 def launch_viewer_tool(
     viewer_type: Literal["roi", "tracking", "registration"],
-    recording_path: str,
+    output_root: str,
     dataset: str | None = None,
 ) -> dict[str, Any]:
     """Launches a GUI viewer in a subprocess for the user to interact with.
@@ -83,23 +83,24 @@ def launch_viewer_tool(
     Args:
         viewer_type: The type of viewer to launch. 'roi' for ROI inspection, 'tracking' for multi-recording tracking
             quality, 'registration' for registration quality (binary player + PC viewer).
-        recording_path: Absolute path to the cindra pipeline output directory for the recording to visualize.
+        output_root: Absolute path to the pipeline output root of the recording to visualize, which is the parent of
+            its cindra directory.
         dataset: Multi-recording dataset name to load on startup. Only used by 'roi' and 'tracking' viewers.
 
     Returns:
-        A JSON dictionary containing 'success' flag, and on success 'viewer_id', 'viewer_type', 'recording_path',
-        and 'dataset'. On failure, contains an 'error' message.
+        A JSON dictionary containing 'success' flag, and on success 'viewer_id', 'viewer_type', 'output_root', and
+        'dataset'. On failure, contains an 'error' message.
     """
-    path = Path(recording_path)
+    path = Path(output_root)
     if not path.exists():
-        return {"success": False, "error": f"Unable to launch viewer. Path does not exist: {recording_path}"}
+        return {"success": False, "error": f"Unable to launch viewer. Path does not exist: {output_root}"}
 
     # The spawned command accepts a directory alone, and its usage error is written to a stream this server discards,
     # so the requirement is enforced here instead.
     if not path.is_dir():
         return {
             "success": False,
-            "error": f"Unable to launch viewer. Path is not a cindra output directory: {recording_path}",
+            "error": f"Unable to launch viewer. Path is not a pipeline output root directory: {output_root}",
         }
 
     viewer_id = uuid.uuid4().hex[:12]
@@ -111,7 +112,7 @@ def launch_viewer_tool(
         command.extend(["--dataset", dataset])
 
     try:
-        process = subprocess.Popen(  # noqa: S603 - The executable resolves from sys.executable, and no shell is used.
+        process = subprocess.Popen(
             args=command,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -123,7 +124,7 @@ def launch_viewer_tool(
     entry = _ViewerProcess(
         viewer_id=viewer_id,
         viewer_type=viewer_type,
-        recording_path=recording_path,
+        output_root=output_root,
         dataset=dataset,
         state_path=state_path,
         process=process,
@@ -135,7 +136,7 @@ def launch_viewer_tool(
         "success": True,
         "viewer_id": viewer_id,
         "viewer_type": viewer_type,
-        "recording_path": recording_path,
+        "output_root": output_root,
         "dataset": dataset,
     }
 
@@ -149,7 +150,7 @@ def list_viewers_tool() -> dict[str, Any]:
 
     Returns:
         A JSON dictionary containing 'success' flag, 'viewers' list (each with 'viewer_id', 'viewer_type',
-        'recording_path', 'dataset', 'active_dataset', and 'alive' flag), and 'count' of listed viewers. A viewer
+        'output_root', 'dataset', 'active_dataset', and 'alive' flag), and 'count' of listed viewers. A viewer
         whose process has exited is listed once with 'alive' set to False and is then dropped from the registry, so
         'count' can exceed the number of live viewers on that one call.
     """
@@ -167,7 +168,7 @@ def list_viewers_tool() -> dict[str, Any]:
             viewer_info: dict[str, Any] = {
                 "viewer_id": viewer_id,
                 "viewer_type": entry.viewer_type,
-                "recording_path": entry.recording_path,
+                "output_root": entry.output_root,
                 "dataset": entry.dataset,
                 "alive": alive,
                 "active_dataset": None,

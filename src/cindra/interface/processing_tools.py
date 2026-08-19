@@ -32,7 +32,15 @@ from ataraxis_data_structures import (
     discover_marker_files,
 )
 
-from ..io import resolve_dataset_recordings, resolve_multi_recording_contexts
+from ..io import (
+    is_plane_converted,
+    find_data_directory,
+    is_dataset_discovered,
+    resolve_recording_planes,
+    resolve_dataset_recordings,
+    resolve_source_frame_geometry,
+    resolve_multi_recording_contexts,
+)
 from ..layout import (
     OUTPUT_DIRECTORY_NAME,
     PLANE_SPECIFIER_PREFIX,
@@ -98,24 +106,27 @@ _MINIMUM_RECORDING_COUNT: int = 2
 _SECONDS_PER_HOUR: float = 3600.0
 """The number of seconds in one hour, which scales an elapsed second count into the reported job throughput."""
 
+_TIFF_HINT_SEARCH_DEPTH: int = 2
+"""The number of directory levels below a rejected raw data path that are examined for the TIFF files it is missing."""
+
 
 @mcp.tool()
-def get_recording_status_tool(recording_path: str) -> dict[str, object]:
+def get_recording_status_tool(output_root: str) -> dict[str, object]:
     """Gets the processing status for a recording by reading all available ProcessingTracker files.
 
     Checks for both single-recording and multi-recording trackers under the recording's cindra output directory and
     returns status for all pipelines found. For single-recording, reads the tracker at
-    <recording_path>/cindra/single_recording_tracker.yaml and returns per-phase job status (binarize, register,
-    process, combine). For multi-recording, searches under <recording_path>/cindra/multi_recording/<dataset>/ for
+    <output_root>/cindra/single_recording_tracker.yaml and returns per-phase job status (binarize, register,
+    process, combine). For multi-recording, searches under <output_root>/cindra/multi_recording/<dataset>/ for
     tracker files and returns per-dataset status (discover, extract).
 
     Args:
-        recording_path: The absolute path to the recording OUTPUT directory, which is the parent of the cindra/ folder
-            and equals the recording_output_paths entries returned by the prepare tool when the output root differs from
-            the raw-data root. The cindra/ subdirectory is resolved directly under it with no fallback.
+        output_root: The absolute path to the pipeline output root, which is the parent of the cindra/ folder and
+            equals the output_roots entries passed to the prepare tool. The cindra/ subdirectory is resolved directly
+            under it with no fallback.
 
     Returns:
-        On success, contains the 'recording_path', 'single_recording' status (per-phase jobs, summary, and synthesized
+        On success, contains the 'output_root', 'single_recording' status (per-phase jobs, summary, and synthesized
         status string), and 'multi_recording' status (per-dataset tracker status). Each section reports 'not_started'
         when no tracker exists. On failure, contains an 'error' describing the issue. Both cases include a 'success'
         flag. The synthesized single-recording status string is one of completed, failed, scheduled, binarizing,
@@ -124,18 +135,18 @@ def get_recording_status_tool(recording_path: str) -> dict[str, object]:
         vocabulary of pending, running, succeeded, and failed, which describes the same jobs (pending equals scheduled,
         and running spans the *-ing phases).
     """
-    recording = Path(recording_path)
+    recording = Path(output_root)
 
     if not recording.exists():
         return {
             "success": False,
-            "error": f"Unable to get recording status. Recording directory not found: {recording_path}.",
+            "error": f"Unable to get recording status. Output root not found: {output_root}.",
         }
 
     single_tracker_path = recording / OUTPUT_DIRECTORY_NAME / SINGLE_RECORDING_TRACKER_FILENAME
     if single_tracker_path.exists():
         single_recording_status = _read_single_recording_tracker(
-            tracker_path=single_tracker_path, recording_path=recording
+            tracker_path=single_tracker_path, output_root=recording
         )
     else:
         single_recording_status = {"status": "not_started"}
@@ -164,7 +175,7 @@ def get_recording_status_tool(recording_path: str) -> dict[str, object]:
 
     return {
         "success": True,
-        "recording_path": str(recording),
+        "output_root": str(recording),
         "single_recording": single_recording_status,
         MULTI_RECORDING_DIRECTORY_NAME: multi_recording_status,
     }
@@ -221,17 +232,17 @@ def get_batch_status_overview_tool(root_directory: str) -> dict[str, object]:
         single_tracker_paths: list[Path] = list(tracker_index[SINGLE_RECORDING_TRACKER_FILENAME])
         multi_tracker_paths: list[Path] = list(tracker_index[MULTI_RECORDING_TRACKER_FILENAME])
     except OSError as error:
-        permission_errors.append(f"Access denied during the processing tracker search: {error}")
+        permission_errors.append(
+            _collapse_whitespace(text=f"Access denied during the processing tracker search: {error}")
+        )
         single_tracker_paths = list(root.rglob(SINGLE_RECORDING_TRACKER_FILENAME))
         multi_tracker_paths = list(root.rglob(MULTI_RECORDING_TRACKER_FILENAME))
 
-    # Reads single-recording trackers. Derives recording_path from tracker location.
-    single_recordings: list[dict[str, object]] = []
-    for tracker_path in natsorted(single_tracker_paths, key=str):
-        recording_path = tracker_path.parent.parent
-        single_recordings.append(
-            _read_single_recording_tracker(tracker_path=tracker_path, recording_path=recording_path)
-        )
+    # The tracker sits in the recording's cindra output directory, so a tracker file's grandparent is the output root.
+    single_recordings: list[dict[str, object]] = [
+        _read_single_recording_tracker(tracker_path=tracker_path, output_root=tracker_path.parent.parent)
+        for tracker_path in natsorted(single_tracker_paths, key=str)
+    ]
 
     # Reads multi-recording trackers. Extracts dataset name from parent directory.
     multi_recordings: list[dict[str, object]] = []
@@ -291,9 +302,9 @@ def get_batch_status_overview_tool(root_directory: str) -> dict[str, object]:
 
 @mcp.tool()
 def prepare_single_recording_batch_tool(
-    recording_paths: list[str],
+    raw_data_paths: list[str],
     configuration_path: str,
-    recording_output_paths: list[str],
+    output_roots: list[str],
 ) -> dict[str, object]:
     """Prepares an execution manifest for single-recording batch processing without starting execution.
 
@@ -311,36 +322,43 @@ def prepare_single_recording_batch_tool(
         configuration file this tool writes stays immutable and is safe to share between concurrently dispatched jobs.
 
     Args:
-        recording_paths: List of absolute paths to recording root directories (used as file_io.data_path per
-            recording). These should be session-level roots, not sub-paths to raw data. The pipeline resolves
-            raw data locations internally via recursive search.
+        raw_data_paths: List of absolute paths to each recording's raw imaging data (used as file_io.data_path per
+            recording). An entry may name the imaging directory itself or any parent of it, because the conversion
+            locates the cindra_parameters.json file beneath the path and reads the directory holding it. The TIFF
+            files must sit beside that file, since only that one directory is scanned. A path whose subtree carries
+            no source file the conversion accepts is rejected here rather than at dispatch.
         configuration_path: The absolute path to the template configuration YAML file.
-        recording_output_paths: List of absolute paths for per-recording output directories (used as
-            file_io.output_path). Must match the length of recording_paths.
+        output_roots: List of absolute paths to the pipeline output roots, each the parent of the cindra/ folder the
+            recording's results are written under (used as file_io.output_path). Must match the length of
+            raw_data_paths.
 
     Returns:
-        On success, contains per-recording manifests in 'recordings' keyed by recording path. Each entry lists its
-        configuration_path, tracker_path, output_path, pipeline_type, and per-phase job entries (binarize_job,
+        On success, contains per-recording manifests in 'recordings' keyed by the raw data path. Each entry lists its
+        configuration_path, tracker_path, output_root, pipeline_type, and per-phase job entries (binarize_job,
         register_jobs, process_jobs, combine_job) including job_id, name, specifier, and current status, plus
-        executor_id for a tracker that already existed. The output_path is the absolute output directory and the parent
-        of the cindra/ directory, where configuration_path equals <output_path>/cindra/configuration.yaml, so downstream
-        verify, status, and clean tools need no re-derivation. Also includes 'total_recordings' and 'total_jobs' counts,
-        plus 'migrated_recordings' listing any recording whose tracker gained the missing register jobs and
-        'invalid_paths' listing any provided path that is not an existing directory. A recording whose preparation
-        fails, such as one holding no acquisition parameters file, is reported with its reason under
-        'invalid_recordings' while every other recording keeps its manifest. A caller MUST therefore read that key
-        rather than treat the absence of an 'error' as full preparation. On failure, contains an 'error' describing the
-        issue.
+        executor_id for a tracker that already existed. The output_root is the absolute output directory and the parent
+        of the cindra/ directory, where configuration_path equals <output_root>/cindra/configuration.yaml, so downstream
+        verify, status, and clean tools need no re-derivation. A job_id is derived from the job name and specifier
+        alone, so the same phase carries the same identifier in every recording and (tracker_path, job_id) is the only
+        key that identifies a job across the batch. Keying a dictionary by job_id alone merges recordings. Also
+        includes 'total_recordings' and 'total_jobs' counts, plus 'migrated_recordings' listing any recording whose
+        tracker gained the missing register jobs and 'invalid_paths' listing any provided path that is not an existing
+        directory. A recording whose preparation fails, such as one holding no readable TIFF file or no acquisition
+        parameters file, is reported with its reason under 'invalid_recordings' and receives no manifest, while every
+        other recording keeps its manifest. A recording whose existing configuration records paths other than the ones
+        passed here is reported under 'path_conflicts', naming the recording, the stored value, and the passed value.
+        A caller MUST read both keys rather than treat the absence of an 'error' as full preparation. On failure,
+        contains an 'error' describing the issue.
     """
-    if not recording_paths:
-        return {"success": False, "error": "Unable to prepare batch. At least one recording path is required."}
+    if not raw_data_paths:
+        return {"success": False, "error": "Unable to prepare batch. At least one raw data path is required."}
 
-    if len(recording_output_paths) != len(recording_paths):
+    if len(output_roots) != len(raw_data_paths):
         return {
             "success": False,
             "error": (
-                f"Unable to prepare batch. The recording_output_paths length "
-                f"({len(recording_output_paths)}) must match the recording_paths length ({len(recording_paths)})."
+                f"Unable to prepare batch. The output_roots length ({len(output_roots)}) must match the "
+                f"raw_data_paths length ({len(raw_data_paths)})."
             ),
         }
 
@@ -361,7 +379,7 @@ def prepare_single_recording_batch_tool(
     valid_paths: list[Path] = []
     invalid_paths: list[str] = []
 
-    for index, path_string in enumerate(recording_paths):
+    for index, path_string in enumerate(raw_data_paths):
         path = Path(path_string)
         if path.exists() and path.is_dir():
             valid_paths.append(path)
@@ -372,20 +390,29 @@ def prepare_single_recording_batch_tool(
     if not valid_paths:
         return {
             "success": False,
-            "error": "Unable to prepare batch. No valid recording paths provided.",
+            "error": "Unable to prepare batch. No valid raw data paths provided.",
             "invalid_paths": invalid_paths,
         }
 
-    resolved_output_paths: list[Path] = [Path(recording_output_paths[index]) for index in valid_indices]
+    resolved_output_roots: list[Path] = [Path(output_roots[index]) for index in valid_indices]
+
+    # Reads the ignored file stems the template declares, so the raw data scan below accepts exactly the files the
+    # conversion would accept. A template the loader rejects leaves the tuple empty, and every recording then reports
+    # that rejection through its own configuration load.
+    try:
+        ignored_file_names = SingleRecordingConfiguration.from_yaml(file_path=template_path).file_io.ignored_file_names
+    except Exception:
+        ignored_file_names = ()
 
     recordings_manifest: dict[str, dict[str, object]] = {}
     migrated_recordings: list[str] = []
     invalid_recordings: list[str] = []
+    path_conflicts: list[dict[str, str]] = []
     total_jobs = 0
 
-    for data_path, output_path in zip(valid_paths, resolved_output_paths, strict=True):
+    for data_path, output_root in zip(valid_paths, resolved_output_roots, strict=True):
         recording_key = str(data_path)
-        cindra_root = output_path / OUTPUT_DIRECTORY_NAME
+        cindra_root = output_root / OUTPUT_DIRECTORY_NAME
         tracker_path = cindra_root / SINGLE_RECORDING_TRACKER_FILENAME
 
         if tracker_path.exists():
@@ -398,6 +425,28 @@ def prepare_single_recording_batch_tool(
             register_jobs = tracker.find_jobs(job_name=SingleRecordingJobNames.REGISTER)
             process_jobs = tracker.find_jobs(job_name=SingleRecordingJobNames.PROCESS)
             combine_jobs = tracker.find_jobs(job_name=SingleRecordingJobNames.COMBINE)
+
+            # A recording whose binarization has already succeeded never reads its raw data again, so the scan of
+            # the raw imaging directory only excludes a recording whose conversion is still outstanding.
+            if any(registry[job_id].status != ProcessingStatus.SUCCEEDED for job_id in binarize_jobs):
+                raw_data_failure = _resolve_raw_data_failure(
+                    raw_data_path=data_path, ignored_file_names=ignored_file_names
+                )
+                if raw_data_failure is not None:
+                    invalid_recordings.append(f"{recording_key}: {raw_data_failure}")
+                    continue
+
+            # Reports the paths the existing configuration records when they disagree with the ones the caller passed.
+            # The tracker is never reinitialized, so the recording keeps running against the stored paths until its
+            # output directory is removed.
+            path_conflicts.extend(
+                _resolve_single_recording_path_conflicts(
+                    recording_key=recording_key,
+                    configuration_path=configuration_file_path,
+                    output_root=output_root,
+                    data_path=data_path,
+                )
+            )
 
             # A tracker that carries process jobs but no register jobs would leave every processing job permanently
             # unable to satisfy its prerequisite. Registering the missing phase is additive, so every existing job
@@ -464,7 +513,7 @@ def prepare_single_recording_batch_tool(
             recordings_manifest[recording_key] = {
                 "configuration_path": str(configuration_file_path),
                 "tracker_path": str(tracker_path),
-                "output_path": str(output_path),
+                "output_root": str(output_root),
                 "pipeline_type": "single-recording",
                 "binarize_job": binarize_entry,
                 "register_jobs": register_entries,
@@ -472,6 +521,14 @@ def prepare_single_recording_batch_tool(
                 "combine_job": combine_entry,
             }
         else:
+            # A recording whose subtree holds nothing the conversion reads cannot run any stage, so it is rejected
+            # here rather than at dispatch, and no tracker is written for it. The gate resolves the imaging directory
+            # the way the conversion does, so it accepts every path the conversion would.
+            raw_data_failure = _resolve_raw_data_failure(raw_data_path=data_path, ignored_file_names=ignored_file_names)
+            if raw_data_failure is not None:
+                invalid_recordings.append(f"{recording_key}: {raw_data_failure}")
+                continue
+
             # New recording: creates per-recording config, resolves planes, and initializes tracker. The bootstrap
             # reads the recording's acquisition parameters, so a recording that carries none, or whose configuration
             # the pipeline rejects, is reported through 'invalid_recordings' instead of aborting the batch and
@@ -479,7 +536,7 @@ def prepare_single_recording_batch_tool(
             try:
                 recording_configuration = SingleRecordingConfiguration.from_yaml(file_path=template_path)
                 recording_configuration.file_io.data_path = data_path
-                recording_configuration.file_io.output_path = output_path
+                recording_configuration.file_io.output_path = output_root
                 recording_configuration.runtime.display_progress_bars = False
 
                 cindra_root.mkdir(parents=True, exist_ok=True)
@@ -525,7 +582,7 @@ def prepare_single_recording_batch_tool(
                     identifiers=identifiers, job_name=SingleRecordingJobNames.COMBINE, specifier=""
                 )
             except Exception as error:
-                invalid_recordings.append(f"{recording_key}: {error}")
+                invalid_recordings.append(_collapse_whitespace(text=f"{recording_key}: {error}"))
                 continue
 
             total_jobs += len(jobs)
@@ -533,7 +590,7 @@ def prepare_single_recording_batch_tool(
             recordings_manifest[recording_key] = {
                 "configuration_path": str(recording_configuration_path),
                 "tracker_path": str(tracker_path),
-                "output_path": str(output_path),
+                "output_root": str(output_root),
                 "pipeline_type": "single-recording",
                 "binarize_job": binarize_entry,
                 "register_jobs": register_entries,
@@ -557,6 +614,9 @@ def prepare_single_recording_batch_tool(
     if invalid_recordings:
         result["invalid_recordings"] = invalid_recordings
 
+    if path_conflicts:
+        result["path_conflicts"] = path_conflicts
+
     return result
 
 
@@ -578,20 +638,27 @@ def prepare_multi_recording_batch_tool(
         configuration file this tool writes stays immutable and is safe to share between concurrently dispatched jobs.
 
     Args:
-        dataset_configurations: List of dataset configurations, each a dictionary with 'configuration_path' (absolute
-            path to the multi-recording YAML configuration), 'recording_paths' (list of absolute paths to recording
-            directories), and 'dataset_name' (unique name for this dataset). At least 2 recording paths per dataset
-            are required.
+        dataset_configurations: List of dataset configurations, each a dictionary with three keys. 'configuration_path'
+            is the absolute path to the multi-recording YAML configuration. 'output_roots' is the list of absolute paths
+            to the pipeline output roots of the COMPLETED single-recording runs the dataset spans, each the parent of a
+            cindra/ folder. 'dataset_name' is a unique name for this dataset. At least 2 output roots per dataset are
+            required. These are output roots rather than raw imaging directories, because the dataset tracks ROIs across
+            finished single-recording results.
 
     Returns:
         On success, contains per-dataset manifests in 'datasets' keyed by the lowercased dataset name. Each entry lists
         its configuration_path, tracker_path, dataset_name, pipeline_type, and per-phase job entries (discover_job,
         extract_jobs) including job_id, name, specifier, and current status, plus executor_id for a tracker that already
         existed. The dataset_name field is the resolved lowercased dataset name. To verify a dataset, call
-        verify_multi_recording_output_tool with the dataset_name plus any recording_path belonging to the dataset (one
-        of the input recording_paths, whose cindra/ subdirectory is resolved automatically). Also includes
-        'total_datasets' and 'total_jobs' counts, plus 'invalid_configurations' listing every rejected dataset entry
-        with its reason. On failure, contains an 'error' describing the issue.
+        verify_multi_recording_output_tool with the dataset_name plus any output_root belonging to the dataset (one of
+        the input output_roots, whose cindra/ subdirectory is resolved automatically). A job_id is derived from the job
+        name and specifier alone, so the same phase carries the same identifier in every dataset and (tracker_path,
+        job_id) is the only key that identifies a job across the batch. Keying a dictionary by job_id alone merges
+        datasets. Also includes 'total_datasets' and 'total_jobs' counts, plus 'invalid_configurations' listing every
+        rejected dataset entry with its reason. A dataset whose existing configuration records output roots other than
+        the ones passed here is reported under 'path_conflicts', naming the dataset, the stored value, and the passed
+        value. A caller MUST read that key rather than treat the returned manifest as proof the passed paths were
+        adopted. On failure, contains an 'error' describing the issue.
     """
     if not dataset_configurations:
         return {
@@ -603,7 +670,7 @@ def prepare_multi_recording_batch_tool(
     invalid_configurations: list[str] = []
 
     for dataset_configuration in dataset_configurations:
-        required_keys = {"configuration_path", "recording_paths", "dataset_name"}
+        required_keys = {"configuration_path", "output_roots", "dataset_name"}
         if not required_keys.issubset(dataset_configuration):
             invalid_configurations.append(f"Missing required keys: {dataset_configuration}")
             continue
@@ -618,16 +685,16 @@ def prepare_multi_recording_batch_tool(
             invalid_configurations.append(f"Configuration not found: {dataset_configuration_path}")
             continue
 
-        raw_recording_paths = dataset_configuration["recording_paths"]
-        if not isinstance(raw_recording_paths, list):
-            invalid_configurations.append(f"recording_paths must be a list: {dataset_configuration_path}")
+        raw_output_roots = dataset_configuration["output_roots"]
+        if not isinstance(raw_output_roots, list):
+            invalid_configurations.append(f"output_roots must be a list: {dataset_configuration_path}")
             continue
-        dataset_recording_paths = [Path(str(path)) for path in raw_recording_paths]
-        if len(dataset_recording_paths) < _MINIMUM_RECORDING_COUNT:
+        dataset_output_roots = [Path(str(path)) for path in raw_output_roots]
+        if len(dataset_output_roots) < _MINIMUM_RECORDING_COUNT:
             invalid_configurations.append(f"Need at least 2 recordings: {dataset_configuration_path}")
             continue
 
-        invalid_recordings = [str(path) for path in dataset_recording_paths if not path.exists() or not path.is_dir()]
+        invalid_recordings = [str(path) for path in dataset_output_roots if not path.exists() or not path.is_dir()]
         if invalid_recordings:
             invalid_configurations.append(f"Invalid recordings for {dataset_configuration_path}: {invalid_recordings}")
             continue
@@ -635,11 +702,13 @@ def prepare_multi_recording_batch_tool(
         try:
             MultiRecordingConfiguration.from_yaml(file_path=dataset_configuration_path)
         except Exception as error:
-            invalid_configurations.append(f"Unable to load configuration {dataset_configuration_path}: {error}")
+            invalid_configurations.append(
+                _collapse_whitespace(text=f"Unable to load configuration {dataset_configuration_path}: {error}")
+            )
             continue
 
         dataset_key = dataset_name.lower()
-        valid_datasets.append((dataset_key, dataset_configuration_path, dataset_recording_paths))
+        valid_datasets.append((dataset_key, dataset_configuration_path, dataset_output_roots))
 
     if not valid_datasets:
         return {
@@ -649,29 +718,42 @@ def prepare_multi_recording_batch_tool(
         }
 
     datasets_manifest: dict[str, dict[str, object]] = {}
+    path_conflicts: list[dict[str, str]] = []
     total_jobs = 0
 
-    for dataset_key, dataset_configuration_path, dataset_recording_paths in valid_datasets:
+    for dataset_key, dataset_configuration_path, dataset_output_roots in valid_datasets:
         configuration = MultiRecordingConfiguration.from_yaml(file_path=dataset_configuration_path)
         configuration.recording_io.dataset_name = dataset_key
-        configuration.recording_io.recording_directories = tuple(natsorted(dataset_recording_paths))
+        resolved_output_roots = tuple(natsorted(dataset_output_roots))
+        configuration.recording_io.recording_directories = resolved_output_roots
         configuration.runtime.display_progress_bars = False
 
         contexts = resolve_multi_recording_contexts(configuration=configuration)
         recording_ids = [context.runtime.io.recording_id for context in contexts]
-        main_recording_path = contexts[0].runtime.output_path
+        dataset_directory = contexts[0].runtime.output_path
 
-        if main_recording_path is None:
+        if dataset_directory is None:
             invalid_configurations.append(f"Unable to resolve output path for dataset '{dataset_key}'.")
             continue
 
-        tracker_path = main_recording_path / MULTI_RECORDING_TRACKER_FILENAME
-        configuration_file_path = main_recording_path / MULTI_RECORDING_CONFIGURATION_FILENAME
+        tracker_path = dataset_directory / MULTI_RECORDING_TRACKER_FILENAME
+        configuration_file_path = dataset_directory / MULTI_RECORDING_CONFIGURATION_FILENAME
 
         if tracker_path.exists():
             # Idempotent path: tracker already exists, returns current state without reinitializing.
             tracker = ProcessingTracker(file_path=tracker_path)
             registry = tracker.snapshot()
+
+            # Reports the output roots the stored dataset configuration records when they disagree with the ones the
+            # caller passed. The tracker is never reinitialized, so the dataset keeps running against the stored roots
+            # until its output directory is removed.
+            path_conflicts.extend(
+                _resolve_multi_recording_path_conflicts(
+                    dataset_key=dataset_key,
+                    configuration_path=configuration_file_path,
+                    output_roots=resolved_output_roots,
+                )
+            )
 
             discover_jobs = tracker.find_jobs(job_name=MultiRecordingJobNames.DISCOVER)
             extract_jobs = tracker.find_jobs(job_name=MultiRecordingJobNames.EXTRACT)
@@ -749,6 +831,9 @@ def prepare_multi_recording_batch_tool(
     if invalid_configurations:
         result["invalid_configurations"] = invalid_configurations
 
+    if path_conflicts:
+        result["path_conflicts"] = path_conflicts
+
     return result
 
 
@@ -780,8 +865,11 @@ def reset_processing_phases_tool(
 
     Returns:
         On success, contains a 'reset' flag, the 'requested_phases' as provided, the 'effective_phases' after
-        dependency expansion, and per-job status showing updated states. On failure, contains an 'error' describing
-        the issue.
+        dependency expansion, and per-job status showing updated states. A 'warnings' list is present when a reset
+        phase is governed by a repeat flag that is false while that phase's output already exists on disk, because the
+        stage then returns immediately and records success without redoing its work. Each warning names the dotted
+        configuration flag to set and set_config_values_tool as the way to set it, and a caller MUST act on it before
+        dispatching the reset phase. On failure, contains an 'error' describing the issue.
     """
     path = Path(tracker_path)
     if not path.exists():
@@ -841,7 +929,11 @@ def reset_processing_phases_tool(
         if state.job_name in valid_phases
     ]
 
-    return {
+    # A stage whose output already exists returns immediately unless its repeat flag is set, so resetting its tracker
+    # entry alone produces a job that reports success without redoing any work.
+    warnings = _resolve_repeat_flag_warnings(tracker_path=path, phase_names=phases, single_recording=single_recording)
+
+    result: dict[str, object] = {
         "success": True,
         "reset": True,
         "tracker_path": tracker_path,
@@ -850,10 +942,15 @@ def reset_processing_phases_tool(
         "jobs": updated_jobs,
     }
 
+    if warnings:
+        result["warnings"] = warnings
+
+    return result
+
 
 @mcp.tool()
 def clean_processing_output_tool(
-    recording_path: str,
+    output_root: str,
     phases: list[str],
     pipeline_type: str,
     dataset: str = "",
@@ -881,9 +978,9 @@ def clean_processing_output_tool(
         be rebuilt from the raw TIFF files.
 
     Args:
-        recording_path: The absolute path to the recording OUTPUT directory, which is the parent of the cindra/ folder
-            and equals the recording_output_paths entries returned by the prepare tool when the output root differs from
-            the raw-data root. The cindra/ subdirectory is resolved directly under it with no fallback.
+        output_root: The absolute path to the pipeline output root, which is the parent of the cindra/ folder and
+            equals the output_roots entries passed to the prepare tool. The cindra/ subdirectory is resolved directly
+            under it with no fallback.
         phases: List of phase names to clean. For single-recording: 'binarization', 'registration', 'processing',
             'combination'. For multi-recording: 'discovery', 'extraction'. Downstream phases are automatically
             included.
@@ -893,16 +990,16 @@ def clean_processing_output_tool(
             cindra/multi_recording/<dataset>, and the match is case-sensitive.
 
     Returns:
-        On success, contains a 'cleaned' flag, the 'recording_path', 'deleted_files', 'deleted_dirs', 'total_deleted',
+        On success, contains a 'cleaned' flag, the 'output_root', 'deleted_files', 'deleted_dirs', 'total_deleted',
         and the 'requested_phases' and 'effective_phases' after dependency expansion, plus 'errors' when a deletion
         failed. On failure, contains an 'error' describing the issue. Both cases include a 'success' flag.
     """
-    recording = Path(recording_path)
+    recording = Path(output_root)
 
     if not recording.exists():
         return {
             "success": False,
-            "error": f"Unable to clean processing output. Recording directory not found: {recording_path}.",
+            "error": f"Unable to clean processing output. Output root not found: {output_root}.",
         }
 
     if pipeline_type not in ("single-recording", "multi-recording"):
@@ -945,7 +1042,7 @@ def clean_processing_output_tool(
         if not cindra_root.exists():
             return {
                 "success": False,
-                "error": f"Unable to clean processing output. No cindra directory found at: {recording_path}.",
+                "error": f"Unable to clean processing output. No cindra directory found at: {output_root}.",
             }
 
         effective_set = set(effective_phases)
@@ -1107,7 +1204,7 @@ def clean_processing_output_tool(
     result: dict[str, object] = {
         "success": True,
         "cleaned": True,
-        "recording_path": recording_path,
+        "output_root": output_root,
         "requested_phases": requested_phases,
         "effective_phases": effective_phases,
         "deleted_files": deleted_files,
@@ -1233,7 +1330,12 @@ def execute_processing_jobs_tool(
                 single=single_recording,
             )
         except Exception as error:
-            invalid_jobs.append({"job_id": job_id, "reason": f"Unable to size the job from its configuration: {error}"})
+            invalid_jobs.append(
+                {
+                    "job_id": job_id,
+                    "reason": _collapse_whitespace(text=f"Unable to size the job from its configuration: {error}"),
+                }
+            )
             continue
 
         candidate_jobs.append(
@@ -1279,23 +1381,31 @@ def execute_processing_jobs_tool(
 
 
 @mcp.tool()
-def get_processing_jobs_status_tool() -> dict[str, object]:
+def get_processing_jobs_status_tool(*, summary_only: bool = False) -> dict[str, object]:
     """Returns the current status of the active job execution session.
 
     Reads ProcessingTracker files from disk for each job in the execution session to report per-job progress. Per-job
     status comes from the on-disk tracker files rather than in-memory state, while the session-level 'active',
     'awaiting_prerequisites', and 'resource_classes' fields come from the in-memory execution state.
 
+    Args:
+        summary_only: Determines whether the response omits the per-job 'jobs' list and carries the session fields and
+            the summary counts alone. Poll a large batch with this enabled, because the full list grows with the job
+            count while the counts it summarizes do not.
+
     Returns:
         Always contains a 'success' flag indicating the tool ran. On an active session, also contains an 'active' flag,
         per-job status entries in 'jobs', a 'summary' with counts for pending, running, succeeded, and failed jobs, and
-        an 'awaiting_prerequisites' count of jobs still in the admission pool. An active session further reports a
-        'resource_classes' mapping with the resolved 'workers_per_job' and 'max_parallel_jobs' of every class in the
-        session, together with its 'pending' job count and the list of 'active' dispatch keys. The 'active' flag
-        reflects manager-thread liveness, not whether jobs ever ran. The execution manager clears session state once
-        the session drains, so afterwards this tool reports active:False with empty 'jobs' and a zero 'summary' plus a
-        'note'. Final per-job outcomes must then be re-read via get_recording_status_tool,
-        get_batch_status_overview_tool, or verify_*_output_tool.
+        an 'awaiting_prerequisites' count of jobs still in the admission pool. The 'jobs' list is absent when
+        summary_only is enabled. An active session further reports a 'resource_classes' mapping with the resolved
+        'workers_per_job' and 'max_parallel_jobs' of every class in the session, together with its 'pending' job count
+        and the list of 'active' dispatch keys. A job_id identifies a job only within its own tracker, because it is
+        derived from the job name and specifier alone. Each 'jobs' entry therefore carries the 'tracker_path' its
+        'job_id' belongs to, and only that pair identifies a job across recordings. A dictionary keyed by job_id alone
+        merges recordings. The 'active' flag reflects manager-thread liveness, not whether jobs ever ran. The execution
+        manager clears session state once the session drains, so afterwards this tool reports active:False with empty
+        'jobs' and a zero 'summary' plus a 'note'. Final per-job outcomes must then be re-read via
+        get_recording_status_tool, get_batch_status_overview_tool, or verify_*_output_tool.
     """
     # Binds the session to a local name, because the execution manager clears the module-level reference the moment
     # the session drains and this tool must keep reporting on the session it started with.
@@ -1343,6 +1453,9 @@ def get_processing_jobs_status_tool() -> dict[str, object]:
         elif status == ProcessingStatus.FAILED:
             summary_counts["failed"] += 1
 
+        if summary_only:
+            continue
+
         job_entry: dict[str, object] = {
             "job_id": pending_job.job_id,
             "name": job_info.job_name,
@@ -1354,20 +1467,24 @@ def get_processing_jobs_status_tool() -> dict[str, object]:
         }
 
         if job_info.error_message:
-            job_entry["error"] = job_info.error_message
+            job_entry["error"] = _collapse_whitespace(text=job_info.error_message)
 
         jobs_status.append(job_entry)
 
     manager_alive = state.manager_thread is not None and state.manager_thread.is_alive()
 
-    return {
+    result: dict[str, object] = {
         "success": True,
         "active": manager_alive,
         "awaiting_prerequisites": awaiting_prerequisites,
         "resource_classes": class_status,
-        "jobs": jobs_status,
         "summary": summary_counts,
     }
+
+    if not summary_only:
+        result["jobs"] = jobs_status
+
+    return result
 
 
 @mcp.tool()
@@ -1572,9 +1689,9 @@ def cancel_processing_jobs_tool() -> dict[str, object]:
 def execute_full_pipeline_tool(
     pipeline_type: str,
     *,
-    recording_paths: list[str] | None = None,
+    raw_data_paths: list[str] | None = None,
     configuration_path: str | None = None,
-    recording_output_paths: list[str] | None = None,
+    output_roots: list[str] | None = None,
     dataset_configurations: list[dict[str, object]] | None = None,
     workers_per_job: int | None = None,
     max_parallel_jobs: int | None = None,
@@ -1591,12 +1708,18 @@ def execute_full_pipeline_tool(
 
     Args:
         pipeline_type: The pipeline type, either 'single-recording' or 'multi-recording'.
-        recording_paths: List of absolute paths to recording directories. Required for single-recording pipelines.
+        raw_data_paths: List of absolute paths to each recording's raw imaging data. An entry may name the imaging
+            directory itself or any parent of it, because the conversion locates the cindra_parameters.json file
+            beneath the path and reads the directory holding it. The TIFF files must sit beside that file, since only
+            that one directory is scanned. A path whose subtree carries no source file the conversion accepts is
+            rejected during preparation. Required for single-recording pipelines.
         configuration_path: Absolute path to the template configuration file. Required for single-recording pipelines.
-        recording_output_paths: List of per-recording output paths for single-recording pipelines. Required for
-            single-recording pipelines and must match the length of recording_paths.
+        output_roots: List of absolute paths to the pipeline output roots, each the parent of the cindra/ folder a
+            recording's results are written under. Required for single-recording pipelines and must match the length
+            of raw_data_paths.
         dataset_configurations: List of dataset configuration dictionaries. Required for multi-recording pipelines.
-            Each must contain 'configuration_path', 'recording_paths', and 'dataset_name'.
+            Each must contain 'configuration_path', 'output_roots' (the output roots of the completed
+            single-recording runs the dataset spans), and 'dataset_name'.
         workers_per_job: CPU cores per job, overriding the measured default of every class that carries no hard
             concurrency ceiling. Leave as None to accept the measured defaults of 3 cores for binarization, 1 for
             combination, 4 for registration, 10 for processing, 2 for multi-recording discovery, and 16 for
@@ -1612,14 +1735,15 @@ def execute_full_pipeline_tool(
         aggregate, and a 'resource_classes' mapping with the resolved allocation of every class in the session. When all
         phases are already complete, returns {success:True, started:False, message:"All pipeline phases are already
         completed.", pipeline_type:<the requested type>, total_jobs:0, phase_count:0, phases:[]} plus a 'next_step'
-        string. Every outcome carries 'pipeline_type'. The rejection lists the preparation step produces,
-        'invalid_paths', 'invalid_recordings', and 'invalid_configurations', and the lists this step's own sizing pass
-        produces, 'unsizable_recordings' and 'unsizable_datasets', are forwarded when non-empty and together name every
-        recording or dataset the session omits. 'migrated_recordings' is forwarded on the same terms, naming every
-        recording whose tracker gained the missing per-plane register jobs. A batch whose preparation accepted no input
-        at all returns success:False alongside those lists, because it holds no phase to report as complete. On failure,
-        contains success:False and an 'error' describing the issue. Cascade-aborted downstream jobs are recorded in
-        their trackers as FAILED with the exact message "Unable to execute job. A preceding pipeline phase failed.",
+        string. Every outcome carries 'pipeline_type'. The preparation step produces the rejection lists
+        'invalid_paths', 'invalid_recordings', 'invalid_configurations', and 'path_conflicts', and this step's own
+        sizing pass produces 'unsizable_recordings' and 'unsizable_datasets'. Each of those lists is forwarded when
+        non-empty, and together they name every recording or dataset the session omits or runs against paths other than
+        the ones passed here. 'migrated_recordings' is forwarded on the same terms, naming every recording whose tracker
+        gained the missing per-plane register jobs. A batch whose preparation accepted no input at all returns
+        success:False alongside those lists, because it holds no phase to report as complete. On failure, contains
+        success:False and an 'error' describing the issue. Cascade-aborted downstream jobs are recorded in their
+        trackers as FAILED with the exact message "Unable to execute job. A preceding pipeline phase failed.",
         distinguishing them from genuine per-job failures. A job aborted because its prerequisite phase is absent from
         the tracker instead records a message naming that phase and asking for the prepare tool to be re-run, because no
         phase failed in that case.
@@ -1639,28 +1763,26 @@ def execute_full_pipeline_tool(
 
     manifest: dict[str, object]
     if pipeline_type == "single-recording":
-        if not recording_paths:
+        if not raw_data_paths:
             return {
                 "success": False,
-                "error": "Unable to execute full pipeline. 'recording_paths' is required for single-recording.",
+                "error": "Unable to execute full pipeline. 'raw_data_paths' is required for single-recording.",
             }
         if not configuration_path:
             return {
                 "success": False,
                 "error": "Unable to execute full pipeline. 'configuration_path' is required for single-recording.",
             }
-        if not recording_output_paths:
+        if not output_roots:
             return {
                 "success": False,
-                "error": (
-                    "Unable to execute full pipeline. 'recording_output_paths' is required for single-recording."
-                ),
+                "error": "Unable to execute full pipeline. 'output_roots' is required for single-recording.",
             }
 
         manifest = prepare_single_recording_batch_tool(
-            recording_paths=recording_paths,
+            raw_data_paths=raw_data_paths,
             configuration_path=configuration_path,
-            recording_output_paths=recording_output_paths,
+            output_roots=output_roots,
         )
     else:
         if not dataset_configurations:
@@ -1678,7 +1800,13 @@ def execute_full_pipeline_tool(
     # batch without naming the recordings or datasets it leaves out, or the trackers it migrated.
     rejection_fields: dict[str, object] = {
         key: manifest[key]
-        for key in ("invalid_paths", "invalid_recordings", "invalid_configurations", "migrated_recordings")
+        for key in (
+            "invalid_paths",
+            "invalid_recordings",
+            "invalid_configurations",
+            "migrated_recordings",
+            "path_conflicts",
+        )
         if key in manifest
     }
 
@@ -1714,7 +1842,9 @@ def execute_full_pipeline_tool(
                         tracker_path=tracker_path,
                     )
                 except Exception as error:
-                    unsizable_recordings.append({"recording": str(recording_key), "error": str(error)})
+                    unsizable_recordings.append(
+                        {"recording": str(recording_key), "error": _collapse_whitespace(text=str(error))}
+                    )
                     continue
 
                 binarize_phase_jobs.extend(recording_jobs[0])
@@ -1751,7 +1881,9 @@ def execute_full_pipeline_tool(
                         tracker_path=tracker_path,
                     )
                 except Exception as error:
-                    unsizable_datasets.append({"dataset": str(dataset_key), "error": str(error)})
+                    unsizable_datasets.append(
+                        {"dataset": str(dataset_key), "error": _collapse_whitespace(text=str(error))}
+                    )
                     continue
 
                 discover_phase_jobs.extend(dataset_jobs[0])
@@ -1890,7 +2022,7 @@ def size_pipeline_jobs_tool(
         else:
             sized_jobs = _size_multi_recording_universe(configuration_path=configuration_file)
     except Exception as error:
-        return {"success": False, "error": f"Unable to size pipeline jobs. {error}"}
+        return {"success": False, "error": _collapse_whitespace(text=f"Unable to size pipeline jobs. {error}")}
 
     memory_figures = [memory_mb for _, _, _, memory_mb in sized_jobs]
 
@@ -2047,7 +2179,10 @@ def get_pipeline_job_universe_tool(configuration_path: str, pipeline_type: str) 
             dataset_name=dataset_configuration.recording_io.dataset_name,
         )
     except Exception as error:
-        return {"success": False, "error": f"Unable to resolve the pipeline job universe. {error}"}
+        return {
+            "success": False,
+            "error": _collapse_whitespace(text=f"Unable to resolve the pipeline job universe. {error}"),
+        }
 
     multi_possible = set(multi_universe.possible)
     return {
@@ -2063,6 +2198,267 @@ def get_pipeline_job_universe_tool(configuration_path: str, pipeline_type: str) 
         "total_jobs": len(multi_universe.universe),
         "ready_jobs": len(multi_universe.possible),
     }
+
+
+def _collapse_whitespace(text: str) -> str:
+    """Folds every run of whitespace in a message into a single space.
+
+    Notes:
+        The console wraps its messages at a fixed column, so an exception raised through it carries hard newlines that
+        would otherwise reach the caller inside a JSON string.
+
+    Args:
+        text: The message to fold.
+
+    Returns:
+        The message on a single line.
+    """
+    return " ".join(text.split())
+
+
+def _resolve_raw_data_failure(raw_data_path: Path, ignored_file_names: tuple[str, ...]) -> str | None:
+    """Reports why the conversion would find no usable source file in one raw imaging directory.
+
+    Notes:
+        Resolves the imaging directory the way the conversion does, by locating the acquisition parameters file
+        beneath the named path and reading the directory that holds it. A path that parents the imaging directory
+        therefore passes this gate exactly as it passes the conversion, and only a path whose subtree carries no
+        usable source file is rejected.
+
+    Args:
+        raw_data_path: The path the caller named as the recording's raw imaging path.
+        ignored_file_names: The file stems the configuration excludes from discovery.
+
+    Returns:
+        None when the conversion would find at least one TIFF file beneath the path, or the reason it would find none.
+    """
+    try:
+        data_directory = find_data_directory(data_path=raw_data_path)
+    except FileNotFoundError, OSError, ValueError:
+        data_directory = raw_data_path
+
+    try:
+        resolve_source_frame_geometry(data_directory=data_directory, ignored_file_names=ignored_file_names)
+    except FileNotFoundError:
+        message = (
+            f"The conversion would find no TIFF file it accepts beneath {raw_data_path}. The conversion reads the "
+            f"directory holding the recording's cindra_parameters.json file, and scans that one directory without "
+            f"descending further, so the TIFF files must sit beside that file."
+        )
+        subdirectory = _resolve_tiff_subdirectory(raw_data_path=raw_data_path, ignored_file_names=ignored_file_names)
+        if subdirectory is not None:
+            message = f"{message} The subdirectory {subdirectory} holds such files and is the likely intended path."
+        return message
+    except Exception as error:
+        return _collapse_whitespace(text=f"Unable to read the source files of {raw_data_path}: {error}")
+
+    return None
+
+
+def _resolve_tiff_subdirectory(raw_data_path: Path, ignored_file_names: tuple[str, ...]) -> Path | None:
+    """Searches the directories below a rejected raw data path for the one holding the recording's TIFF files.
+
+    Notes:
+        The search spans the levels _TIFF_HINT_SEARCH_DEPTH covers, which reaches the layout a session root nests its
+        imaging directory in while leaving a deep tree unwalked.
+
+    Args:
+        raw_data_path: The directory the caller named, which holds no TIFF file the conversion accepts.
+        ignored_file_names: The file stems the configuration excludes from discovery.
+
+    Returns:
+        The first subdirectory holding a TIFF file the conversion accepts, or None when the search finds none.
+    """
+    frontier: list[Path] = [raw_data_path]
+    for _level in range(_TIFF_HINT_SEARCH_DEPTH):
+        children: list[Path] = []
+        for directory in frontier:
+            try:
+                children.extend(entry for entry in natsorted(directory.iterdir(), key=str) if entry.is_dir())
+            except OSError:
+                continue
+
+        for child in children:
+            # A child that cannot be read is simply not the imaging directory. The reason is not reported, because
+            # this search only ever refines a hint inside an error the caller already receives.
+            try:
+                resolve_source_frame_geometry(data_directory=child, ignored_file_names=ignored_file_names)
+            except Exception:  # noqa: S112 - The failure only means this child is not the imaging directory.
+                continue
+            return child
+
+        frontier = children
+
+    return None
+
+
+def _resolve_single_recording_path_conflicts(
+    recording_key: str, configuration_path: Path, output_root: Path, data_path: Path
+) -> list[dict[str, str]]:
+    """Compares the paths a prepared recording already records against the paths the caller passed.
+
+    Args:
+        recording_key: The raw data path the manifest keys the recording by.
+        configuration_path: The path to the per-recording configuration file the previous preparation wrote.
+        output_root: The output root the caller passed.
+        data_path: The raw imaging directory the caller passed.
+
+    Returns:
+        One entry per disagreeing path, naming the recording, the stored value, the passed value, and the removal that
+        allows the recording to be prepared again. The list is empty when both paths agree or the stored configuration
+        cannot be read.
+    """
+    try:
+        configuration = SingleRecordingConfiguration.from_yaml(file_path=configuration_path)
+    except Exception:
+        return []
+
+    resolution = (
+        f"Preparation does not reinitialize an existing tracker, so the recording keeps running against the stored "
+        f"paths. Remove {output_root / OUTPUT_DIRECTORY_NAME} to prepare this recording again with different paths."
+    )
+
+    return [
+        {
+            "recording": recording_key,
+            "field": field_name,
+            "stored": str(stored_path),
+            "passed": str(passed_path),
+            "resolution": resolution,
+        }
+        for field_name, stored_path, passed_path in (
+            ("file_io.data_path", configuration.file_io.data_path, data_path),
+            ("file_io.output_path", configuration.file_io.output_path, output_root),
+        )
+        if stored_path is None or Path(stored_path) != passed_path
+    ]
+
+
+def _resolve_multi_recording_path_conflicts(
+    dataset_key: str, configuration_path: Path, output_roots: tuple[Path, ...]
+) -> list[dict[str, str]]:
+    """Compares the output roots a prepared dataset already records against the ones the caller passed.
+
+    Args:
+        dataset_key: The lowercased dataset name the manifest keys the dataset by.
+        configuration_path: The path to the dataset configuration file the previous preparation wrote.
+        output_roots: The output roots the caller passed, in the order the preparation would store them.
+
+    Returns:
+        A single entry naming the dataset, the stored roots, the passed roots, and the removal that allows the dataset
+        to be prepared again. The list is empty when the roots agree or the stored configuration cannot be read.
+    """
+    try:
+        configuration = MultiRecordingConfiguration.from_yaml(file_path=configuration_path)
+    except Exception:
+        return []
+
+    stored_roots = tuple(Path(path) for path in configuration.recording_io.recording_directories)
+    if stored_roots == tuple(output_roots):
+        return []
+
+    return [
+        {
+            "dataset": dataset_key,
+            "field": "recording_io.recording_directories",
+            "stored": ", ".join(str(path) for path in stored_roots),
+            "passed": ", ".join(str(path) for path in output_roots),
+            "resolution": (
+                f"Preparation does not reinitialize an existing tracker, so the dataset keeps running against the "
+                f"stored output roots. Remove {configuration_path.parent} to prepare this dataset again with "
+                f"different output roots."
+            ),
+        }
+    ]
+
+
+def _resolve_repeat_flag_warnings(tracker_path: Path, phase_names: list[str], *, single_recording: bool) -> list[str]:
+    """Reports every reset phase whose stage would skip its work because its repeat flag is disabled.
+
+    Notes:
+        Binarization, registration, and multi-recording discovery each read their own output before running and return
+        immediately when it exists and their repeat flag is false. Resetting the tracker entry of such a phase
+        therefore produces a job that records success in seconds without redoing the work.
+
+    Args:
+        tracker_path: The path to the tracker the reset was applied to, whose directory holds the configuration file.
+        phase_names: The phases the reset covers after downstream expansion.
+        single_recording: Determines whether the tracker belongs to the single-recording or multi-recording pipeline.
+
+    Returns:
+        One sentence per phase that would skip its work, naming the configuration flag that lifts the skip. The list
+        is empty when the configuration cannot be read.
+    """
+    warnings: list[str] = []
+
+    if single_recording:
+        try:
+            configuration = SingleRecordingConfiguration.from_yaml(
+                file_path=tracker_path.parent / SINGLE_RECORDING_CONFIGURATION_FILENAME
+            )
+        except Exception:
+            return warnings
+
+        output_root = configuration.file_io.output_path
+        if output_root is None:
+            return warnings
+
+        planes = resolve_recording_planes(output_root=output_root, data_path=configuration.file_io.data_path)
+        converted = any(
+            is_plane_converted(output_root=output_root, plane_index=plane_index)
+            for plane_index in range(planes.plane_count)
+        )
+
+        if (
+            SingleRecordingJobNames.BINARIZE in phase_names
+            and not configuration.file_io.repeat_binarization
+            and converted
+        ):
+            warnings.append(
+                "The binarization phase was reset while file_io.repeat_binarization is false and at least one plane "
+                "binary already exists, so the job reuses that binary and records success without rebuilding it. Set "
+                "file_io.repeat_binarization to true with set_config_values_tool before dispatching the phase."
+            )
+
+        if (
+            SingleRecordingJobNames.REGISTER in phase_names
+            and not configuration.registration.repeat_registration
+            and planes.registered_planes
+        ):
+            warnings.append(
+                "The registration phase was reset while registration.repeat_registration is false and at least one "
+                "plane already carries registration output, so the job returns immediately and records success "
+                "without re-registering. Set registration.repeat_registration to true with set_config_values_tool "
+                "before dispatching the phase."
+            )
+
+        return warnings
+
+    try:
+        dataset_configuration = MultiRecordingConfiguration.from_yaml(
+            file_path=tracker_path.parent / MULTI_RECORDING_CONFIGURATION_FILENAME
+        )
+    except Exception:
+        return warnings
+
+    dataset_name = dataset_configuration.recording_io.dataset_name
+    discovered = any(
+        is_dataset_discovered(output_root=recording_root, dataset_name=dataset_name)
+        for recording_root in dataset_configuration.recording_io.recording_directories
+    )
+
+    if (
+        MultiRecordingJobNames.DISCOVER in phase_names
+        and not dataset_configuration.recording_io.repeat_selection
+        and discovered
+    ):
+        warnings.append(
+            "The discovery phase was reset while recording_io.repeat_selection is false and the dataset already "
+            "carries selected ROIs, so the job reuses that selection and records success without repeating it. Set "
+            "recording_io.repeat_selection to true with set_config_values_tool before dispatching the phase."
+        )
+
+    return warnings
 
 
 def _check_active_session(action: str) -> dict[str, object] | None:
@@ -2112,7 +2508,7 @@ def _start_session(
             all_jobs=all_jobs, workers_per_job=workers_per_job, max_parallel_jobs=max_parallel_jobs
         )
     except ValueError as error:
-        return {"success": False, "started": False, "error": str(error)}
+        return {"success": False, "started": False, "error": _collapse_whitespace(text=str(error))}
 
     result: dict[str, object] = {"success": True, "started": True, **session}
     result.update(extra_result_fields)
@@ -2132,16 +2528,16 @@ def _group_jobs_by_name(registry: dict[str, JobState], job_name: str) -> dict[st
     return {job_id: job_state for job_id, job_state in registry.items() if job_state.job_name == job_name}
 
 
-def _read_single_recording_tracker(tracker_path: Path, recording_path: Path) -> dict[str, object]:
+def _read_single_recording_tracker(tracker_path: Path, output_root: Path) -> dict[str, object]:
     """Reads a single-recording ProcessingTracker and returns structured status information.
 
     Args:
         tracker_path: The path to the ProcessingTracker YAML file.
-        recording_path: The path to the recording directory (for display purposes).
+        output_root: The pipeline output root the tracker belongs to, reported back to the caller.
 
     Returns:
-        A dictionary containing a success flag, the recording path, tracker path, per-phase job status, summary
-        counts, and an overall synthesized status string.
+        A dictionary containing a success flag, the output root, tracker path, per-phase job status, summary counts,
+        and an overall synthesized status string.
     """
     # Reads the whole registry once and derives every phase grouping, the counts, and the overall status from that one
     # snapshot. Asking the tracker for each phase separately costs one lock acquisition and one YAML parse per
@@ -2157,7 +2553,7 @@ def _read_single_recording_tracker(tracker_path: Path, recording_path: Path) -> 
     for job_state in binarize_jobs.values():
         binarize_status["status"] = job_state.status.name.lower()
         if job_state.error_message:
-            binarize_status["error"] = job_state.error_message
+            binarize_status["error"] = _collapse_whitespace(text=job_state.error_message)
 
     register_status: dict[str, object] = {
         job_state.specifier: job_state.status.name.lower() for job_state in register_jobs.values()
@@ -2171,7 +2567,7 @@ def _read_single_recording_tracker(tracker_path: Path, recording_path: Path) -> 
     for job_state in combine_jobs.values():
         combine_status["status"] = job_state.status.name.lower()
         if job_state.error_message:
-            combine_status["error"] = job_state.error_message
+            combine_status["error"] = _collapse_whitespace(text=job_state.error_message)
 
     # Synthesizes overall status from tracker state, reporting the furthest phase the recording has reached.
     statuses = [job_state.status for job_state in registry.values()]
@@ -2205,7 +2601,7 @@ def _read_single_recording_tracker(tracker_path: Path, recording_path: Path) -> 
 
     return {
         "success": True,
-        "recording_path": str(recording_path),
+        "output_root": str(output_root),
         "tracker_path": str(tracker_path),
         "status": overall_status,
         "jobs": {
@@ -2237,7 +2633,7 @@ def _read_multi_recording_tracker(tracker_path: Path) -> dict[str, object]:
     for job_state in discover_jobs.values():
         discover_status["status"] = job_state.status.name.lower()
         if job_state.error_message:
-            discover_status["error"] = job_state.error_message
+            discover_status["error"] = _collapse_whitespace(text=job_state.error_message)
 
     extract_status: dict[str, object] = {
         job_state.specifier: job_state.status.name.lower() for job_state in extract_jobs.values()
@@ -2290,7 +2686,7 @@ def _delete_file(path: Path, deleted: list[str], errors: list[str]) -> None:
         path.unlink()
         deleted.append(str(path))
     except Exception as error:
-        errors.append(f"Unable to delete file {path}: {error}")
+        errors.append(_collapse_whitespace(text=f"Unable to delete file {path}: {error}"))
 
 
 def _delete_directory(path: Path, deleted: list[str], errors: list[str]) -> None:
@@ -2312,7 +2708,7 @@ def _delete_directory(path: Path, deleted: list[str], errors: list[str]) -> None
     try:
         delete_directory(directory_path=path)
     except Exception as error:
-        errors.append(f"Unable to delete directory {path}: {error}")
+        errors.append(_collapse_whitespace(text=f"Unable to delete directory {path}: {error}"))
         return
 
     if path.exists():

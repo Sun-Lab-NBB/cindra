@@ -1,15 +1,16 @@
-"""Provides MCP tools for pipeline configuration generation, reading, validation, recording discovery, and dataset name
-resolution.
+"""Provides MCP tools for pipeline configuration generation, reading, validation, modification, recording discovery,
+and dataset name resolution.
 
 These tools enable AI agents to generate default configuration files for both single-recording and multi-recording
-pipelines, read and validate configuration files, discover recordings available for processing under a
+pipelines, read, validate, and modify configuration files, discover recordings available for processing under a
 given root directory, and construct qualified dataset names for multi-recording processing.
 """
 
 from __future__ import annotations
 
 from enum import Enum
-from typing import Literal
+from types import NoneType, UnionType
+from typing import Literal, get_args, get_origin, get_type_hints
 from os.path import commonpath
 from pathlib import Path
 from dataclasses import (
@@ -24,6 +25,7 @@ from ataraxis_data_structures import discover_marker_roots
 from ..io import resolve_recording_roots
 from ..layout import (
     PARAMETERS_FILENAME,
+    OUTPUT_DIRECTORY_NAME,
     COMBINED_METADATA_FILENAME,
 )
 from ..dataclasses import (
@@ -97,10 +99,10 @@ def discover_recordings_tool(root_directory: str) -> dict[str, object]:
 
     Searches recursively for cindra_parameters.json files (marking raw recordings ready for single-recording
     processing) and combined_metadata.npz files (marking completed single-recording outputs ready for
-    multi-recording processing). Returns recording root directories (not raw data or output subdirectories) so
-    that downstream tools receive meaningful session-level paths. Recording roots are resolved via
-    ``resolve_recording_roots``, which maps a pipeline output directory to its parent and strips the trailing
-    components a raw-data directory shares with its peers.
+    multi-recording processing). Every candidate carries the session-level recording root together with the specific
+    path the tools that consume it take, so a discovered entry feeds the next step without any path arithmetic by the
+    caller. Recording roots are resolved via ``resolve_recording_roots``, which maps a pipeline output directory to
+    its parent and strips the trailing components a raw-data directory shares with its peers.
 
     Notes:
         The marker search keeps only the entries that resolve to files, so a directory carrying a marker's name is not
@@ -112,9 +114,16 @@ def discover_recordings_tool(root_directory: str) -> dict[str, object]:
         root_directory: The absolute path to the root directory to search.
 
     Returns:
-        On success, contains 'single_recording_candidates' and 'multi_recording_candidates' lists of recording root
-        paths with their respective counts. On failure, contains an 'error' describing the issue. Both cases include
-        a 'success' flag.
+        On success, contains the 'single_recording_candidates' and 'multi_recording_candidates' lists together with
+        the matching 'single_recording_count' and 'multi_recording_count'. Every single-recording candidate maps
+        'recording_root' to the session-level root and 'raw_data_path' to the directory holding the discovered
+        cindra_parameters.json marker. That 'raw_data_path' is the value validate_recording_readiness_tool and
+        generate_acquisition_parameters_file_tool take, and the value the 'raw_data_paths' argument of
+        prepare_single_recording_batch_tool takes. Every multi-recording candidate maps 'recording_root' to the
+        session-level root and 'output_root' to the parent of the cindra directory holding the discovered
+        combined_metadata.npz marker. That 'output_root' is the value the status, cleaning, and results tools take,
+        and the value the 'output_roots' entries of prepare_multi_recording_batch_tool take. On failure, contains an
+        'error' describing the issue. Both cases include a 'success' flag.
     """
     root_path = Path(root_directory)
 
@@ -136,33 +145,36 @@ def discover_recordings_tool(root_directory: str) -> dict[str, object]:
     # the pipeline owns, so a denial falls back to the tolerant scan rather than reporting no candidate at all.
     single_marker_parents = _discover_marker_parents(root_path=root_path, marker_name=PARAMETERS_FILENAME)
 
-    single_recording_paths = (
-        natsorted(str(root) for root in resolve_recording_roots(paths=single_marker_parents))
-        if single_marker_parents
-        else []
-    )
+    # The raw data directory a readiness check and a batch preparation take is the directory holding the marker,
+    # which is the recording root only when the recording keeps its TIFF files at the top of its own tree.
+    single_recording_candidates = [
+        {"recording_root": str(recording_root), "raw_data_path": str(marker_parent)}
+        for recording_root, marker_parent in _pair_marker_parents_with_roots(marker_parents=single_marker_parents)
+    ]
 
     multi_marker_parents = _discover_marker_parents(root_path=root_path, marker_name=COMBINED_METADATA_FILENAME)
 
-    multi_recording_paths = (
-        natsorted(str(root) for root in resolve_recording_roots(paths=multi_marker_parents))
-        if multi_marker_parents
-        else []
-    )
+    multi_recording_candidates = [
+        {
+            "recording_root": str(recording_root),
+            "output_root": str(_resolve_marker_output_root(recording_root=recording_root, marker_parent=marker_parent)),
+        }
+        for recording_root, marker_parent in _pair_marker_parents_with_roots(marker_parents=multi_marker_parents)
+    ]
 
     return {
         "success": True,
-        "single_recording_candidates": single_recording_paths,
-        "single_recording_count": len(single_recording_paths),
-        "multi_recording_candidates": multi_recording_paths,
-        "multi_recording_count": len(multi_recording_paths),
+        "single_recording_candidates": single_recording_candidates,
+        "single_recording_count": len(single_recording_candidates),
+        "multi_recording_candidates": multi_recording_candidates,
+        "multi_recording_count": len(multi_recording_candidates),
     }
 
 
 @mcp.tool()
 def resolve_dataset_name_tool(
     dataset_name: str,
-    recording_paths: list[str],
+    output_roots: list[str],
     specifier: str = "",
 ) -> dict[str, object]:
     """Constructs a qualified dataset name by combining a shared base name with a batch-specific specifier.
@@ -172,18 +184,18 @@ def resolve_dataset_name_tool(
     specifier that distinguishes the group.
 
     When no specifier is provided, one is derived automatically from the deepest common parent directory of the
-    recording paths. For example, recordings under /data/animal_A/rec1 and /data/animal_A/rec2 yield specifier
-    'animal_a', because all returned names are lowercased. The agent can also determine the specifier through
-    semantic decomposition of recording names or directory structure, or the user can provide one explicitly.
+    output roots. For example, recordings whose output roots are /data/animal_A/rec1 and /data/animal_A/rec2 yield
+    specifier 'animal_a', because all returned names are lowercased. The agent can also determine the specifier
+    through semantic decomposition of recording names or directory structure, or the user can provide one explicitly.
 
     Args:
         dataset_name: The shared name identifying the analysis type (e.g., 'learning_task'). This is the base name
             common to all groups in a batch.
-        recording_paths: The absolute paths to the recording directories in this group. Used to derive the specifier
-            when none is explicitly provided.
+        output_roots: The absolute pipeline output root of every recording in this group, each the parent of that
+            recording's cindra directory. Used to derive the specifier when none is explicitly provided.
         specifier: An explicit batch-specific label distinguishing this group of recordings (e.g., an animal ID, brain
             region, or session group). When empty, the specifier is derived from the common parent directory of the
-            recording paths.
+            output roots.
 
     Returns:
         On success, contains the qualified 'dataset_name' (specifier_base), the 'base_name', and the 'specifier'
@@ -200,14 +212,14 @@ def resolve_dataset_name_tool(
     if dataset_name_error is not None:
         return {"success": False, "error": dataset_name_error}
 
-    if not recording_paths:
+    if not output_roots:
         return {
             "success": False,
-            "error": "Unable to resolve dataset name. At least one recording path is required.",
+            "error": "Unable to resolve dataset name. At least one output root is required.",
         }
 
     if not specifier:
-        resolved_paths = [Path(path) for path in recording_paths]
+        resolved_paths = [Path(path) for path in output_roots]
         if len(resolved_paths) == 1:
             specifier = resolved_paths[0].parent.name
         else:
@@ -219,8 +231,8 @@ def resolve_dataset_name_tool(
                 return {
                     "success": False,
                     "error": (
-                        f"Unable to resolve dataset name. The recording paths must share a common parent directory, "
-                        f"but deriving one from {list(recording_paths)} failed: {error}."
+                        f"Unable to resolve dataset name. The output roots must share a common parent directory, "
+                        f"but deriving one from {list(output_roots)} failed: {error}."
                     ),
                 }
             specifier = common.name
@@ -228,7 +240,7 @@ def resolve_dataset_name_tool(
         if not specifier:
             return {
                 "success": False,
-                "error": "Unable to resolve dataset name. Could not derive a specifier from the recording paths.",
+                "error": "Unable to resolve dataset name. Could not derive a specifier from the output roots.",
             }
 
     specifier_error = _validate_filesystem_name(name=specifier, field_label="specifier")
@@ -415,6 +427,163 @@ def validate_config_file_tool(file_path: str) -> dict[str, str | bool | list[str
     return result
 
 
+@mcp.tool()
+def set_config_values_tool(file_path: str, values: dict[str, object]) -> dict[str, object]:
+    """Writes new values for the named tunable parameters into an existing cindra configuration file.
+
+    Loads the file through the configuration dataclass matching its pipeline type, applies every requested value, and
+    writes the whole document back atomically. Each parameter is addressed by the same 'section.parameter' dotted path
+    validate_config_file_tool reports under 'non_default_parameters', so the two tools speak one vocabulary.
+
+    Notes:
+        The pipeline reads its configuration from disk when it dispatches a job, so a value written while a batch is
+        executing reaches the jobs of that batch which have not started yet. Write configuration values before
+        preparing and dispatching a batch, and never against a configuration whose jobs are currently running.
+
+        Every requested value is resolved before any of them is applied, so a call naming one unknown section, one
+        unknown parameter, or one value of the wrong type writes nothing and reports every rejection it found at once.
+        A value is supplied in the form the configuration document carries it, so a path is a string, an enumeration
+        is its raw value, and a tuple is a list. An integer is accepted for a parameter typed as a floating point
+        number, and no other type substitution is.
+
+        The document is rewritten from the configuration dataclass, so a key the current schema does not declare is
+        dropped and the surviving keys follow the dataclass field order.
+
+    Args:
+        file_path: The absolute path to the cindra configuration YAML file to modify.
+        values: Maps each 'section.parameter' dotted path to the value written to that parameter.
+
+    Returns:
+        On success, contains the resolved 'file_path' and the 'changed' map pairing every requested dotted path with its
+        'previous' and 'current' values. A successful response also carries the 'valid' status the written file
+        validates to, plus the 'errors' and 'warnings' of that validation when either is non-empty. A 'success' value of
+        True only means the file was written, so gate downstream steps on 'valid'. On failure, contains an 'error'
+        describing the issue, joined by an 'errors' list naming every rejected entry when the failure is a rejected
+        value. Both cases include a 'success' flag.
+    """
+    path = Path(file_path)
+
+    if not path.exists():
+        return {
+            "success": False,
+            "error": f"Unable to set configuration values. The file does not exist: {file_path}",
+        }
+
+    if path.suffix not in (".yaml", ".yml"):
+        return {
+            "success": False,
+            "error": (
+                f"Unable to set configuration values. Expected a '.yaml' or '.yml' file, but received: {file_path}"
+            ),
+        }
+
+    if not values:
+        return {
+            "success": False,
+            "error": "Unable to set configuration values. At least one 'section.parameter' entry is required.",
+        }
+
+    try:
+        with path.open() as file:
+            raw_data = yaml.safe_load(file)
+    except yaml.YAMLError as error:
+        return {
+            "success": False,
+            "error": f"Unable to parse YAML file at '{file_path}': {error}",
+        }
+
+    raw_pipeline_type = raw_data.get("pipeline_type") if isinstance(raw_data, dict) else None
+    if raw_pipeline_type not in ("single-recording", "multi-recording"):
+        return {
+            "success": False,
+            "error": (
+                f"Unable to set configuration values. The 'pipeline_type' field is missing or unrecognized "
+                f"(found: {raw_pipeline_type!r}). Expected 'single-recording' or 'multi-recording'."
+            ),
+        }
+
+    configuration: SingleRecordingConfiguration | MultiRecordingConfiguration
+    try:
+        if raw_pipeline_type == "single-recording":
+            configuration = SingleRecordingConfiguration.load(file_path=path)
+        else:
+            configuration = MultiRecordingConfiguration.load(file_path=path)
+    except Exception as error:
+        return {
+            "success": False,
+            "error": (
+                f"Unable to deserialize {raw_pipeline_type} configuration from '{file_path}': "
+                f"{type(error).__name__}: {error}"
+            ),
+        }
+
+    # Resolves every entry against the schema before writing any of them, so a rejected entry leaves the file as it
+    # was rather than applying the entries that happened to precede it.
+    assignments: list[tuple[str, object, str, object]] = []
+    rejections: list[str] = []
+    for dotted_path, value in values.items():
+        resolution = _resolve_parameter_assignment(configuration=configuration, dotted_path=dotted_path, value=value)
+        if isinstance(resolution, str):
+            rejections.append(resolution)
+            continue
+        owner, field_name, resolved_value = resolution
+        assignments.append((dotted_path, owner, field_name, resolved_value))
+
+    if rejections:
+        return {
+            "success": False,
+            "error": (
+                f"Unable to set configuration values in '{file_path}'. {len(rejections)} of {len(values)} requested "
+                f"entries were rejected, and the file was left unchanged."
+            ),
+            "errors": rejections,
+        }
+
+    changed: dict[str, dict[str, object]] = {}
+    for dotted_path, owner, field_name, resolved_value in assignments:
+        previous_value = getattr(owner, field_name)
+        setattr(owner, field_name, resolved_value)
+        changed[dotted_path] = {
+            "previous": _convert_to_json_compatible(value=previous_value),
+            "current": _convert_to_json_compatible(value=resolved_value),
+        }
+
+    # The configuration writer publishes the document through a temporary file, so a reader of the path observes
+    # either the previous configuration or the complete new one.
+    configuration.save(file_path=path)
+
+    written: SingleRecordingConfiguration | MultiRecordingConfiguration
+    try:
+        if raw_pipeline_type == "single-recording":
+            written = SingleRecordingConfiguration.load(file_path=path)
+            validation_errors, validation_warnings = _validate_single_recording(config=written)
+        else:
+            written = MultiRecordingConfiguration.load(file_path=path)
+            validation_errors, validation_warnings = _validate_multi_recording(config=written)
+    except Exception as error:
+        return {
+            "success": False,
+            "error": (
+                f"Unable to re-read the {raw_pipeline_type} configuration written to '{file_path}': "
+                f"{type(error).__name__}: {error}"
+            ),
+        }
+
+    result: dict[str, object] = {
+        "success": True,
+        "file_path": str(path),
+        "changed": changed,
+        "valid": not validation_errors,
+    }
+
+    if validation_errors:
+        result["errors"] = validation_errors
+    if validation_warnings:
+        result["warnings"] = validation_warnings
+
+    return result
+
+
 def _discover_marker_parents(root_path: Path, marker_name: str) -> list[Path]:
     """Discovers the directories owning every marker file with the target name under the root directory.
 
@@ -435,6 +604,52 @@ def _discover_marker_parents(root_path: Path, marker_name: str) -> list[Path]:
         return discover_marker_roots(directory=root_path, marker_name=marker_name)
     except OSError:
         return [marker_file.parent for marker_file in root_path.rglob(marker_name)]
+
+
+def _pair_marker_parents_with_roots(marker_parents: list[Path]) -> list[tuple[Path, Path]]:
+    """Pairs every discovered marker directory with the recording root that owns it.
+
+    Notes:
+        The root resolver deduplicates the directories it receives and reports the roots in its own grouping order, so
+        each marker directory is matched back to its root by ancestry rather than by position. A directory matching
+        several roots takes the deepest of them, and a directory matching none stands as its own root.
+
+    Args:
+        marker_parents: The parent directory of every discovered marker file.
+
+    Returns:
+        The (recording root, marker directory) pair of every unique marker directory, ordered by recording root and
+        then by marker directory.
+    """
+    if not marker_parents:
+        return []
+
+    roots = resolve_recording_roots(paths=marker_parents)
+
+    pairs: list[tuple[Path, Path]] = []
+    for marker_parent in dict.fromkeys(marker_parents):
+        ancestors = [root for root in roots if root == marker_parent or root in marker_parent.parents]
+        recording_root = max(ancestors, key=lambda root: len(root.parts)) if ancestors else marker_parent
+        pairs.append((recording_root, marker_parent))
+
+    return natsorted(pairs, key=lambda pair: (str(pair[0]), str(pair[1])))
+
+
+def _resolve_marker_output_root(recording_root: Path, marker_parent: Path) -> Path:
+    """Resolves the pipeline output root that owns a discovered combined metadata marker.
+
+    Args:
+        recording_root: The recording root the marker directory resolved to.
+        marker_parent: The directory holding the discovered marker file.
+
+    Returns:
+        The parent of the cindra output directory holding the marker, which falls back to the recording root for a
+        marker found outside such a directory.
+    """
+    if marker_parent.name == OUTPUT_DIRECTORY_NAME:
+        return marker_parent.parent
+
+    return recording_root
 
 
 def _convert_to_json_compatible(value: object) -> object:
@@ -899,3 +1114,185 @@ def _validate_filesystem_name(name: str, field_label: str, action: str = "resolv
         return f"Unable to {action}. The {field_label} contains control characters."
 
     return None
+
+
+def _resolve_parameter_assignment(
+    configuration: object, dotted_path: str, value: object
+) -> tuple[object, str, object] | str:
+    """Resolves one dotted configuration path and the value written to it against the configuration schema.
+
+    Args:
+        configuration: The loaded configuration dataclass instance the path is resolved against.
+        dotted_path: The 'section.parameter' path naming the parameter to write.
+        value: The value the caller asked to write to the parameter.
+
+    Returns:
+        The section instance owning the parameter, the parameter's field name, and the value coerced to the field's
+        annotated type. Returns an error message string instead when the path names no writable parameter or when the
+        value does not match the parameter's annotation.
+    """
+    owner: object = configuration
+    parts = dotted_path.split(".")
+
+    for index, part in enumerate(parts[:-1]):
+        writable = _resolve_writable_fields(instance=owner)
+        traversed = ".".join(parts[: index + 1])
+        if part not in writable:
+            return (
+                f"Unable to set '{dotted_path}'. The configuration holds no section named '{traversed}'. Available "
+                f"names: {sorted(writable)}."
+            )
+        section = getattr(owner, part)
+        if not is_dataclass(section):
+            return f"Unable to set '{dotted_path}'. The path component '{traversed}' names a parameter, not a section."
+        owner = section
+
+    name = parts[-1]
+    writable = _resolve_writable_fields(instance=owner)
+    if name not in writable:
+        return (
+            f"Unable to set '{dotted_path}'. The configuration holds no writable parameter named '{name}'. Available "
+            f"names: {sorted(writable)}."
+        )
+
+    if is_dataclass(getattr(owner, name)):
+        return (
+            f"Unable to set '{dotted_path}'. The path names a configuration section, so address the parameters it "
+            f"holds one dotted path at a time."
+        )
+
+    annotation = writable[name]
+    coerced_value, matched = _coerce_parameter_value(value=value, annotation=annotation)
+    if not matched:
+        return (
+            f"Unable to set '{dotted_path}'. The parameter is typed as {_describe_annotation(annotation=annotation)}, "
+            f"but received {type(value).__name__}: {value!r}."
+        )
+
+    return owner, name, coerced_value
+
+
+def _resolve_writable_fields(instance: object) -> dict[str, object]:
+    """Resolves the fields of a configuration dataclass instance the constructor accepts a value for.
+
+    Notes:
+        The configuration modules defer their annotations, so each annotation is resolved against the module that
+        defines the dataclass rather than read from the field descriptor, which carries it as a string.
+
+    Args:
+        instance: The configuration dataclass instance whose fields are resolved.
+
+    Returns:
+        A dictionary mapping the name of every writable field to that field's resolved annotation.
+    """
+    annotations = get_type_hints(type(instance))
+    fields = dataclass_fields(instance)  # type: ignore[arg-type]
+
+    return {field.name: annotations[field.name] for field in fields if field.init}
+
+
+def _coerce_parameter_value(value: object, annotation: object) -> tuple[object, bool]:
+    """Coerces one caller-supplied value to the type the target configuration field is annotated with.
+
+    Notes:
+        A value arrives in the form the configuration document carries it, so a path arrives as a string, an
+        enumeration as its raw value, and a tuple as a list. An integer is accepted for a field annotated as a
+        floating point number, which is the only widening performed here. A boolean is refused for a numeric field
+        despite being an integer subclass, because the two carry different meanings in every configuration section.
+
+    Args:
+        value: The value the caller asked to write.
+        annotation: The resolved annotation of the field the value is written to.
+
+    Returns:
+        The coerced value paired with the flag reporting whether the value matches the annotation. The coerced value
+        is None whenever that flag is False.
+    """
+    origin = get_origin(annotation)
+
+    if origin is UnionType:
+        for member in get_args(annotation):
+            coerced_value, matched = _coerce_parameter_value(value=value, annotation=member)
+            if matched:
+                return coerced_value, True
+        return None, False
+
+    if origin is tuple:
+        return _coerce_tuple_value(value=value, annotation=annotation)
+
+    if annotation is NoneType:
+        return None, value is None
+
+    if annotation is bool:
+        return (value, True) if isinstance(value, bool) else (None, False)
+
+    if annotation is int:
+        return (value, True) if isinstance(value, int) and not isinstance(value, bool) else (None, False)
+
+    if annotation is float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None, False
+        return float(value), True
+
+    if annotation is str:
+        return (value, True) if isinstance(value, str) else (None, False)
+
+    if annotation is Path:
+        return (Path(value), True) if isinstance(value, (str, Path)) else (None, False)
+
+    if isinstance(annotation, type) and issubclass(annotation, Enum):
+        try:
+            return annotation(value), True
+        except TypeError, ValueError:
+            return None, False
+
+    return None, False
+
+
+def _coerce_tuple_value(value: object, annotation: object) -> tuple[object, bool]:
+    """Coerces one caller-supplied sequence to the tuple type the target configuration field is annotated with.
+
+    Args:
+        value: The value the caller asked to write, which matches only when it is a list or a tuple whose length and
+            element types the annotation accepts.
+        annotation: The resolved tuple annotation of the field the value is written to.
+
+    Returns:
+        The coerced tuple paired with the flag reporting whether the value matches the annotation. The coerced value
+        is None whenever that flag is False.
+    """
+    if not isinstance(value, (list, tuple)):
+        return None, False
+
+    # A variadic annotation constrains every element to one type, while a fixed-length one constrains the sequence's
+    # length as well.
+    arguments = get_args(annotation)
+    variadic = bool(arguments) and arguments[-1] is Ellipsis
+    if not variadic and len(arguments) != len(value):
+        return None, False
+
+    element_annotations = [arguments[0]] * len(value) if variadic else list(arguments)
+
+    elements: list[object] = []
+    for item, element_annotation in zip(value, element_annotations, strict=True):
+        coerced_value, matched = _coerce_parameter_value(value=item, annotation=element_annotation)
+        if not matched:
+            return None, False
+        elements.append(coerced_value)
+
+    return tuple(elements), True
+
+
+def _describe_annotation(annotation: object) -> str:
+    """Describes a resolved field annotation in the form an error message names it.
+
+    Args:
+        annotation: The resolved annotation of a configuration field.
+
+    Returns:
+        The annotation's own name for a plain class, and its string form for a union or a parameterized generic.
+    """
+    if isinstance(annotation, type):
+        return annotation.__name__
+
+    return str(annotation)

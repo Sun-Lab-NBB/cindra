@@ -70,6 +70,9 @@ _TEST_WORKERS: int = 1
 serial. The tests that drive the stages through run_single_recording_pipeline get the measured stage defaults
 instead."""
 
+_SENTINEL_REGISTRATION_SECONDS: int = 4242
+"""The registration duration a skipped re-run must leave untouched."""
+
 _BINARY_ITEM_SIZE: int = 2
 """The number of bytes one pixel occupies inside a cindra binary, which stores int16 samples."""
 
@@ -729,6 +732,25 @@ class TestRegisterRecordingPlane:
         register_recording_plane(configuration=configuration, plane_index=0, workers=_TEST_WORKERS)
 
         assert not (tmp_path / "output" / "cindra" / "plane_0").exists()
+
+    def test_skipped_re_run_preserves_the_recorded_timing(self, tmp_path: Path) -> None:
+        """Verifies that re-running a registered plane reports the skip and leaves the measured timing intact."""
+        configuration = _process_to_disk(root=tmp_path)
+        cindra_root = tmp_path / "output" / "cindra"
+
+        # Stamps a value no run of this recording could measure, so a re-run that overwrote the recorded timing with
+        # the elapsed time of its own skip would be visible rather than hidden behind a duration that rounds to zero.
+        context = RuntimeContext.load(root_path=cindra_root, plane_index=0)
+        assert not isinstance(context, list)
+        context.runtime.timing.total_registration_time = _SENTINEL_REGISTRATION_SECONDS
+        context.save_runtime()
+
+        assert not configuration.registration.repeat_registration
+        register_recording_plane(configuration=configuration, plane_index=0, workers=_TEST_WORKERS)
+
+        reloaded = RuntimeContext.load(root_path=cindra_root, plane_index=0)
+        assert not isinstance(reloaded, list)
+        assert reloaded.runtime.timing.total_registration_time == _SENTINEL_REGISTRATION_SECONDS
 
     def test_missing_output_path_raises(self) -> None:
         """Verifies that a configuration without an output path raises a ValueError before loading runtime data."""
