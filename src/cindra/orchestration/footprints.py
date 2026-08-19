@@ -15,6 +15,7 @@ from ataraxis_base_utilities import console
 
 from ..io import (
     SourceFrameGeometry,
+    find_data_directory,
     find_cindra_directory,
     extract_unique_components,
     resolve_source_frame_geometry,
@@ -22,7 +23,9 @@ from ..io import (
 )
 from .jobs import MultiRecordingJobNames, SingleRecordingJobNames
 from ..layout import (
+    PARAMETERS_FILENAME,
     COMBINED_METADATA_FILENAME,
+    ACQUISITION_PARAMETERS_FILENAME,
     RecordingArrays,
     resolve_array_path,
     parse_plane_specifier,
@@ -216,6 +219,64 @@ class RecordingGeometry:
     single-recording output they run on."""
     resolved: bool = False
     """Determines whether the geometry follows from the recording's own data rather than from its absence."""
+    acquisition_resolved: bool = False
+    """Determines whether the recording's acquisition parameters were readable, which the raw acquisition resolution
+    alone reports."""
+    source_resolved: bool = False
+    """Determines whether the recording's source files were readable, which the raw acquisition resolution alone
+    reports."""
+
+    def _describe_unresolved_inputs(self, data_path: Path | None) -> str:
+        """Describes the input that left the recording without an imaging plane, together with the remedy it calls for.
+
+        Notes:
+            The acquisition parameters and the source files fail independently and call for different remedies, so the
+            resolution keeps the two apart rather than reporting one absence for both. A recording whose two inputs were
+            both readable can still describe no imaging plane. That case is reported on its own, because its inputs
+            disagree rather than go missing.
+
+        Args:
+            data_path: The raw imaging directory the recording was configured with, or None when it names none.
+
+        Returns:
+            The sentences naming the unresolved input and its remedy, empty when the recording holds a plane.
+        """
+        if self.planes:
+            return ""
+
+        source_absence = (
+            f"The configured data path {data_path} holds no readable source files"
+            if data_path is not None
+            else "The recording's configuration names no raw imaging data path"
+        )
+        source_remedy = (
+            "The imaging directory is resolved by locating the acquisition parameters file beneath the data path, "
+            "and only the directory holding that file is scanned, so the recording's TIFF files must sit beside it."
+            if data_path is not None
+            else "Point the configured data path at the recording's imaging directory, or at any parent of it that "
+            "carries the acquisition parameters file beneath it."
+        )
+        parameters_remedy = (
+            f"Verify that {ACQUISITION_PARAMETERS_FILENAME} sits in the recording's output directory or that "
+            f"{PARAMETERS_FILENAME} sits under its raw imaging directory."
+        )
+
+        if not self.acquisition_resolved and not self.source_resolved:
+            return (
+                f"Neither of its two inputs resolved. {source_absence}, and its acquisition parameters were not "
+                f"readable either. {source_remedy} {parameters_remedy}"
+            )
+        if not self.acquisition_resolved:
+            return (
+                f"Its acquisition parameters were not readable, so the planes its conversion writes cannot be "
+                f"derived. {parameters_remedy}"
+            )
+        if not self.source_resolved:
+            return f"{source_absence}, so the frames its conversion reads cannot be counted. {source_remedy}"
+        return (
+            "Its acquisition parameters and its source files were both readable, but together they describe fewer "
+            "frames than one whole plane and channel interleave cycle, so the conversion writes no imaging plane."
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,11 +302,14 @@ def resolve_recording_geometry(
 
     Args:
         output_root: The output root the recording was configured with.
-        data_path: The raw imaging directory holding the recording's source files.
+        data_path: The recording's configured raw imaging path, which is either the directory holding its source files
+            or any parent of the directory that holds its acquisition parameters file. Every estimate reads the header
+            of the first source file that directory holds.
         ignored_file_names: The source file stems the recording excludes from conversion.
 
     Returns:
-        The recording's geometry, whose resolved flag is False when the raw acquisition is unreadable.
+        The recording's geometry, whose resolved flag is False when the raw acquisition is unreadable and whose
+        acquisition_resolved and source_resolved flags report which of its two inputs failed.
     """
     acquisition = resolve_acquisition_parameters(output_root=output_root, data_path=data_path)
     source = _read_source_geometry(data_path=data_path, ignored_file_names=ignored_file_names)
@@ -257,6 +321,8 @@ def resolve_recording_geometry(
         source_element_bytes=source.element_bytes if source is not None else _INTERNAL_ELEMENT_BYTES,
         two_channels=acquisition is not None and acquisition.channel_number > 1,
         resolved=bool(planes),
+        acquisition_resolved=acquisition is not None,
+        source_resolved=source is not None,
     )
 
 
@@ -306,8 +372,9 @@ def estimate_single_recording_job_memory_mb(
         specifier: The job's tracker specifier, which names a plane for the per-plane stages and is empty otherwise.
         output_root: The output root the recording was configured with.
         configuration: The recording's processing configuration.
-        data_path: The raw imaging directory holding the recording's source files, whose header every estimate
-            reads.
+        data_path: The recording's configured raw imaging path, which is either the directory holding its source files
+            or any parent of the directory that holds its acquisition parameters file. Every estimate reads the header
+            of the first source file that directory holds.
         planned_roi_count: The regions to plan for, counting every plane of the recording together. Use None to
             accept the ceiling the detection iteration bound provides. Must be a positive integer when supplied.
 
@@ -315,10 +382,11 @@ def estimate_single_recording_job_memory_mb(
         The memory the job occupies in megabytes.
 
     Raises:
-        FileNotFoundError: If the recording's raw imaging directory holds no readable source file, in which case no
-            stage of it can run.
-        ValueError: If planned_roi_count is supplied and is not a positive integer, or if a per-plane job's specifier
-            names an imaging plane the recording does not hold.
+        FileNotFoundError: If the recording's acquisition parameters were not readable or its raw imaging directory
+            holds no readable source file, in which case no stage of it can run.
+        ValueError: If planned_roi_count is supplied and is not a positive integer, if both inputs were readable and
+            still describe no whole imaging plane, or if a per-plane job's specifier names an imaging plane the
+            recording does not hold.
     """
     if planned_roi_count is not None and planned_roi_count <= 0:
         message = (
@@ -336,10 +404,11 @@ def estimate_single_recording_job_memory_mb(
     if not geometry.planes:
         message = (
             f"Unable to estimate the memory of the '{job_name}' job. The recording configured with the output root "
-            f"{output_root} carries no readable raw imaging data, so no stage of it can run. Verify that the "
-            f"configured data path holds the recording's source files."
+            f"{output_root} declares no imaging plane, so no stage of it can run. "
+            f"{geometry._describe_unresolved_inputs(data_path=data_path)}"
         )
-        console.error(message=message, error=FileNotFoundError)
+        error = ValueError if geometry.acquisition_resolved and geometry.source_resolved else FileNotFoundError
+        console.error(message=message, error=error)
 
     regions = _resolve_planned_regions(
         geometry=geometry, configuration=configuration, planned_roi_count=planned_roi_count
@@ -446,8 +515,9 @@ def size_single_recording_job(
         specifier: The job's tracker specifier, which names a plane for the per-plane stages and is empty otherwise.
         output_root: The output root the recording was configured with.
         configuration: The recording's processing configuration.
-        data_path: The raw imaging directory holding the recording's source files, whose header every estimate
-            reads.
+        data_path: The recording's configured raw imaging path, which is either the directory holding its source files
+            or any parent of the directory that holds its acquisition parameters file. Every estimate reads the header
+            of the first source file that directory holds.
         planned_roi_count: The regions to plan for, counting every plane of the recording together. Use None to
             accept the ceiling the detection iteration bound provides. Must be a positive integer when supplied.
 
@@ -455,10 +525,11 @@ def size_single_recording_job(
         The cores the job occupies and the memory it holds.
 
     Raises:
-        FileNotFoundError: If the recording's raw imaging directory holds no readable source file, in which case no
-            stage of it can run.
-        ValueError: If planned_roi_count is supplied and is not a positive integer, or if a per-plane job's specifier
-            names an imaging plane the recording does not hold.
+        FileNotFoundError: If the recording's acquisition parameters were not readable or its raw imaging directory
+            holds no readable source file, in which case no stage of it can run.
+        ValueError: If planned_roi_count is supplied and is not a positive integer, if both inputs were readable and
+            still describe no whole imaging plane, or if a per-plane job's specifier names an imaging plane the
+            recording does not hold.
     """
     memory_mb = estimate_single_recording_job_memory_mb(
         job_name=job_name,
@@ -820,17 +891,29 @@ def _derive_plane_geometries(
 def _read_source_geometry(data_path: Path | None, ignored_file_names: tuple[str, ...]) -> SourceFrameGeometry | None:
     """Reads the geometry a recording's source files hold, tolerating their absence.
 
+    Notes:
+        Resolves the imaging directory the way the conversion does, by locating the acquisition parameters file beneath
+        the configured path and reading the directory that holds it. Sizing a recording therefore measures the same
+        files the conversion will read. The resolution accepts a configured path that parents the imaging directory and
+        reads the geometry from the files that directory holds.
+
     Args:
-        data_path: The raw imaging directory, or None when the caller named none.
+        data_path: The configured raw imaging path, or None when the caller named none.
         ignored_file_names: The source file stems the recording excludes from conversion.
 
     Returns:
-        The geometry the source files hold, or None when the directory holds none the discovery accepts.
+        The geometry the source files hold, or None when the path holds none the discovery accepts.
     """
     if data_path is None or not data_path.is_dir():
         return None
     try:
-        return resolve_source_frame_geometry(data_directory=data_path, ignored_file_names=ignored_file_names)
+        data_directory = find_data_directory(data_path=data_path)
+    except FileNotFoundError, OSError, ValueError:
+        # A path carrying no acquisition parameters file still sizes from its own imaging files, because the
+        # geometry the conversion needs is the frame shape rather than the metadata that names the planes.
+        data_directory = data_path
+    try:
+        return resolve_source_frame_geometry(data_directory=data_directory, ignored_file_names=ignored_file_names)
     except FileNotFoundError, OSError, ValueError:
         return None
 

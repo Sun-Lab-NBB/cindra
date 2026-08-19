@@ -108,7 +108,7 @@ def resolve_source_frame_geometry(
         understates, which is the direction an estimate has to err in.
 
     Args:
-        data_directory: The directory holding the recording's source TIFF files.
+        data_directory: The directory holding the recording's source TIFF files, which is scanned non-recursively.
         ignored_file_names: The file stems to exclude from discovery.
 
     Returns:
@@ -121,7 +121,11 @@ def resolve_source_frame_geometry(
     # per job and a stdio server carries that output on the same stream as its protocol messages.
     tiff_files = _collect_tiff_files(data_directory=data_directory, ignored_file_names=ignored_file_names)
     if not tiff_files:
-        message = f"Unable to find any TIFF files in the data directory: {data_directory}."
+        message = (
+            f"Unable to find any TIFF files in the data directory: {data_directory}. Only this directory is "
+            f"scanned, so the recording's TIFF files must sit beside its cindra_parameters.json file rather than "
+            f"deeper in the tree."
+        )
         console.error(message=message, error=FileNotFoundError)
 
     with TiffFile(tiff_files[0]) as tiff:
@@ -493,7 +497,11 @@ def _discover_tiff_files(
 
     file_paths = _collect_tiff_files(data_directory=data_directory, ignored_file_names=ignored_file_names)
     if not file_paths:
-        message = f"Unable to find any TIFF files in the data directory: {data_directory}."
+        message = (
+            f"Unable to find any TIFF files in the data directory: {data_directory}. Only this directory is "
+            f"scanned, so the recording's TIFF files must sit beside its cindra_parameters.json file rather than "
+            f"deeper in the tree."
+        )
         console.error(message=message, error=FileNotFoundError)
 
     message = f"Found {len(file_paths)} valid TIFF files."

@@ -2,29 +2,36 @@
 
 from __future__ import annotations
 
+import json
 import time
 from typing import TYPE_CHECKING
 
+import numpy as np
 import pytest
+from tifffile import imwrite
 from ataraxis_data_structures import ProcessingTracker
 
 from cindra.layout import (
+    PARAMETERS_FILENAME,
     OUTPUT_DIRECTORY_NAME,
     DEFORMED_MASKS_FILENAME,
     CHANNEL_1_BINARY_FILENAME,
     COMBINED_METADATA_FILENAME,
     DETECTION_DATA_DIRECTORY_NAME,
     MULTI_RECORDING_DIRECTORY_NAME,
+    ACQUISITION_PARAMETERS_FILENAME,
     TRACKING_TEMPLATE_MASKS_FILENAME,
     SINGLE_RECORDING_TRACKER_FILENAME,
     MULTI_RECORDING_ARRAYS_DIRECTORY_NAME,
     MULTI_RECORDING_RUNTIME_DATA_FILENAME,
+    SINGLE_RECORDING_CONFIGURATION_FILENAME,
     DetectionImages,
     RecordingArrays,
+    resolve_plane_path,
     resolve_plane_specifier,
 )
 from cindra.interface import processing_tools
-from cindra.dataclasses import SingleRecordingConfiguration
+from cindra.dataclasses import AcquisitionParameters, SingleRecordingConfiguration
 from cindra.orchestration import (
     RESOURCE_CLASS_BY_JOB_NAME,
     PendingJob,
@@ -34,9 +41,12 @@ from cindra.orchestration import (
 )
 from cindra.orchestration.execution import JobExecutionState
 from cindra.interface.processing_tools import (
+    get_recording_status_tool,
     execute_full_pipeline_tool,
     clean_processing_output_tool,
     execute_processing_jobs_tool,
+    reset_processing_phases_tool,
+    get_processing_jobs_status_tool,
     get_active_execution_timing_tool,
     prepare_single_recording_batch_tool,
 )
@@ -50,6 +60,9 @@ _SETTLE_SECONDS: float = 0.05
 
 _MINIMUM_THROUGHPUT: float = 1000.0
 """The rate a session measured in tens of milliseconds must exceed, expressed in jobs per hour."""
+
+_SOURCE_FRAME_SHAPE: tuple[int, int, int] = (2, 16, 16)
+"""The frame count, height, and width of the TIFF file the raw data gate accepts as a readable source file."""
 
 
 @pytest.fixture(autouse=True)
@@ -71,14 +84,7 @@ class TestActiveExecutionTiming:
         with tracker.run_job(job_id=job_id):
             pass
 
-        pending_job = PendingJob(
-            configuration_path=tmp_path / "configuration.yaml",
-            tracker_path=tracker_path,
-            job_id=job_id,
-            single_recording=True,
-            resource_class=RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.BINARIZE],
-        )
-        set_execution_state(state=JobExecutionState(all_jobs={pending_job.dispatch_key: pending_job}))
+        set_execution_state(state=_build_execution_state(tmp_path=tmp_path, tracker_path=tracker_path, job_id=job_id))
         time.sleep(_SETTLE_SECONDS)
 
         result = get_active_execution_timing_tool()
@@ -119,24 +125,163 @@ class TestExecuteProcessingJobs:
         assert get_execution_state() is None
 
 
+class TestProcessingJobsStatus:
+    """Tests the two response shapes the job status tool returns for one active session."""
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_summary_only_omits_the_per_job_list(self, tmp_path: Path) -> None:
+        """Verifies that the summary counts survive the omission of the per-job entries they summarize."""
+        tracker_path = tmp_path / SINGLE_RECORDING_TRACKER_FILENAME
+        tracker, job_id = _initialize_binarization_job(tracker_path=tracker_path)
+        with tracker.run_job(job_id=job_id):
+            pass
+
+        set_execution_state(state=_build_execution_state(tmp_path=tmp_path, tracker_path=tracker_path, job_id=job_id))
+
+        summary_result = get_processing_jobs_status_tool(summary_only=True)
+        full_result = get_processing_jobs_status_tool()
+
+        assert "jobs" not in summary_result
+        assert summary_result["summary"] == {"pending": 0, "running": 0, "succeeded": 1, "failed": 0}
+        assert full_result["summary"] == summary_result["summary"]
+        assert [entry["job_id"] for entry in full_result["jobs"]] == [job_id]
+        assert full_result["jobs"][0]["tracker_path"] == str(tracker_path)
+
+
+class TestRecordingStatus:
+    """Tests the output root the status tool resolves its trackers under and reports back."""
+
+    def test_absent_output_root_is_reported(self, tmp_path: Path) -> None:
+        """Verifies that a path holding no directory reports the output root it was given."""
+        result = get_recording_status_tool(output_root=str(tmp_path / "absent"))
+
+        assert result["success"] is False
+        assert "Output root not found" in result["error"]
+
+    def test_prepared_recording_reports_its_output_root(self, tmp_path: Path) -> None:
+        """Verifies that both the response and its single-recording section name the passed output root."""
+        tracker_path = tmp_path / OUTPUT_DIRECTORY_NAME / SINGLE_RECORDING_TRACKER_FILENAME
+        tracker_path.parent.mkdir(parents=True)
+        _initialize_binarization_job(tracker_path=tracker_path)
+
+        result = get_recording_status_tool(output_root=str(tmp_path))
+
+        assert result["success"] is True
+        assert result["output_root"] == str(tmp_path)
+        assert result["single_recording"]["output_root"] == str(tmp_path)
+        assert result["single_recording"]["status"] == "scheduled"
+
+
 class TestPrepareSingleRecordingBatch:
-    """Tests the manifest the preparation tool builds for a batch holding an unprepared recording."""
+    """Tests the manifest the preparation tool builds, the raw data gate it applies through the resolved imaging
+    directory, and the stored-path conflicts it reports."""
 
     def test_recordings_without_parameters_are_reported(self, tmp_path: Path) -> None:
         """Verifies that a recording whose bootstrap fails is listed with its reason instead of aborting the batch."""
-        configuration_path, recording_paths, output_paths = _build_unpreparable_batch(tmp_path=tmp_path)
+        configuration_path, raw_data_paths, output_roots = _build_unpreparable_batch(tmp_path=tmp_path)
 
         result = prepare_single_recording_batch_tool(
-            recording_paths=recording_paths,
+            raw_data_paths=raw_data_paths,
             configuration_path=configuration_path,
-            recording_output_paths=output_paths,
+            output_roots=output_roots,
         )
 
         assert result["success"] is True
         assert result["recordings"] == {}
         assert result["total_jobs"] == 0
         assert len(result["invalid_recordings"]) == 2
-        assert all(any(path in entry for entry in result["invalid_recordings"]) for path in recording_paths)
+        assert all(any(path in entry for entry in result["invalid_recordings"]) for path in raw_data_paths)
+
+    def test_a_session_root_carrying_its_parameters_file_deeper_is_prepared(self, tmp_path: Path) -> None:
+        """Verifies that a session root is prepared, because the conversion resolves the imaging directory itself."""
+        configuration_path = tmp_path / "template.yaml"
+        SingleRecordingConfiguration().save(file_path=configuration_path)
+        session_root = tmp_path / "session"
+        imaging_directory = session_root / "mesoscope_data"
+        imaging_directory.mkdir(parents=True)
+        _write_source_file(directory=imaging_directory)
+        (imaging_directory / PARAMETERS_FILENAME).write_text(
+            json.dumps(obj={"frame_rate": 30.0, "plane_number": 1, "channel_number": 1})
+        )
+        output_root = tmp_path / "output"
+
+        result = prepare_single_recording_batch_tool(
+            raw_data_paths=[str(session_root)],
+            configuration_path=str(configuration_path),
+            output_roots=[str(output_root)],
+        )
+
+        assert result["success"] is True
+        assert "invalid_recordings" not in result
+        assert str(session_root) in result["recordings"]
+        assert (output_root / OUTPUT_DIRECTORY_NAME).exists()
+
+    def test_raw_data_path_without_source_files_names_the_subdirectory_holding_them(self, tmp_path: Path) -> None:
+        """Verifies that a path whose subtree carries no parameters file is rejected and given the likely path."""
+        configuration_path = tmp_path / "template.yaml"
+        SingleRecordingConfiguration().save(file_path=configuration_path)
+        session_root = tmp_path / "session"
+        imaging_directory = session_root / "mesoscope_data"
+        imaging_directory.mkdir(parents=True)
+        _write_source_file(directory=imaging_directory)
+        output_root = tmp_path / "output"
+
+        result = prepare_single_recording_batch_tool(
+            raw_data_paths=[str(session_root)],
+            configuration_path=str(configuration_path),
+            output_roots=[str(output_root)],
+        )
+
+        assert result["success"] is True
+        assert result["recordings"] == {}
+        assert result["total_jobs"] == 0
+        rejection = result["invalid_recordings"][0]
+        assert str(session_root) in rejection
+        assert "without descending further" in rejection
+        assert str(imaging_directory) in rejection
+        assert not (output_root / OUTPUT_DIRECTORY_NAME).exists()
+
+    def test_outstanding_binarization_rejects_an_unreadable_raw_data_path(self, tmp_path: Path) -> None:
+        """Verifies that an existing tracker whose conversion has not run is gated on its raw data like a new one."""
+        configuration_path, raw_data_path, output_root, _ = _build_prepared_recording(tmp_path=tmp_path)
+
+        result = prepare_single_recording_batch_tool(
+            raw_data_paths=[str(raw_data_path)],
+            configuration_path=str(configuration_path),
+            output_roots=[str(output_root)],
+        )
+
+        assert result["success"] is True
+        assert result["recordings"] == {}
+        assert f"{raw_data_path}: " in result["invalid_recordings"][0]
+        assert "path_conflicts" not in result
+
+    def test_completed_binarization_keeps_its_manifest_and_reports_the_stored_paths(self, tmp_path: Path) -> None:
+        """Verifies that a converted recording survives an archived raw directory and names the paths it keeps."""
+        configuration_path, raw_data_path, output_root, tracker_path = _build_prepared_recording(tmp_path=tmp_path)
+        tracker = ProcessingTracker(file_path=tracker_path)
+        job_id = next(iter(tracker.find_jobs(job_name=SingleRecordingJobNames.BINARIZE)))
+        with tracker.run_job(job_id=job_id):
+            pass
+        passed_raw_data_path = tmp_path / "passed_raw"
+        passed_raw_data_path.mkdir()
+
+        result = prepare_single_recording_batch_tool(
+            raw_data_paths=[str(passed_raw_data_path)],
+            configuration_path=str(configuration_path),
+            output_roots=[str(output_root)],
+        )
+
+        assert result["success"] is True
+        assert "invalid_recordings" not in result
+        assert result["recordings"][str(passed_raw_data_path)]["output_root"] == str(output_root)
+        conflicts = result["path_conflicts"]
+        assert len(conflicts) == 1
+        assert conflicts[0]["recording"] == str(passed_raw_data_path)
+        assert conflicts[0]["field"] == "file_io.data_path"
+        assert conflicts[0]["stored"] == str(raw_data_path)
+        assert conflicts[0]["passed"] == str(passed_raw_data_path)
+        assert str(output_root / OUTPUT_DIRECTORY_NAME) in conflicts[0]["resolution"]
 
 
 class TestExecuteFullPipeline:
@@ -145,21 +290,54 @@ class TestExecuteFullPipeline:
     @pytest.mark.xdist_group(name="execution_state")
     def test_batch_without_prepared_recordings_reports_its_rejections(self, tmp_path: Path) -> None:
         """Verifies that a batch whose every recording fails preparation names them instead of claiming completion."""
-        configuration_path, recording_paths, output_paths = _build_unpreparable_batch(tmp_path=tmp_path)
+        configuration_path, raw_data_paths, output_roots = _build_unpreparable_batch(tmp_path=tmp_path)
 
         result = execute_full_pipeline_tool(
             pipeline_type="single-recording",
-            recording_paths=recording_paths,
+            raw_data_paths=raw_data_paths,
             configuration_path=configuration_path,
-            recording_output_paths=output_paths,
+            output_roots=output_roots,
         )
 
         assert result["success"] is False
         assert result["started"] is False
         assert "accepted none of the provided inputs" in result["error"]
         assert len(result["invalid_recordings"]) == 2
-        assert all(any(path in entry for entry in result["invalid_recordings"]) for path in recording_paths)
+        assert all(any(path in entry for entry in result["invalid_recordings"]) for path in raw_data_paths)
         assert get_execution_state() is None
+
+
+class TestResetProcessingPhases:
+    """Tests the repeat-flag warnings the reset tool derives from the output the reset phases already hold."""
+
+    def test_disabled_repeat_flag_over_existing_output_is_reported(self, tmp_path: Path) -> None:
+        """Verifies that resetting binarization over an existing plane binary names the flag that lifts the skip."""
+        _, _, output_root, tracker_path = _build_prepared_recording(tmp_path=tmp_path)
+        plane_path = resolve_plane_path(output_root=output_root, plane_index=0)
+        plane_path.mkdir(parents=True)
+        (plane_path / CHANNEL_1_BINARY_FILENAME).write_bytes(b"")
+
+        result = reset_processing_phases_tool(
+            tracker_path=str(tracker_path), phases=["binarization"], pipeline_type="single-recording"
+        )
+
+        assert result["success"] is True
+        assert result["requested_phases"] == ["binarization"]
+        warnings = result["warnings"]
+        assert len(warnings) == 1
+        assert "file_io.repeat_binarization" in warnings[0]
+        assert "set_config_values_tool" in warnings[0]
+
+    def test_reset_without_existing_output_reports_no_warning(self, tmp_path: Path) -> None:
+        """Verifies that a phase whose output does not exist yet carries no skip warning."""
+        _, _, _, tracker_path = _build_prepared_recording(tmp_path=tmp_path)
+
+        result = reset_processing_phases_tool(
+            tracker_path=str(tracker_path), phases=["binarization"], pipeline_type="single-recording"
+        )
+
+        assert result["success"] is True
+        assert "warnings" not in result
 
 
 class TestCleanProcessingOutput:
@@ -176,10 +354,11 @@ class TestCleanProcessingOutput:
         (plane_directory / DETECTION_DATA_DIRECTORY_NAME / DetectionImages.MEAN_IMAGE).write_bytes(b"")
 
         result = clean_processing_output_tool(
-            recording_path=str(tmp_path), phases=["binarization"], pipeline_type="single-recording"
+            output_root=str(tmp_path), phases=["binarization"], pipeline_type="single-recording"
         )
 
         deleted_files = result["deleted_files"]
+        assert result["output_root"] == str(tmp_path)
         assert deleted_files[0] == str(cindra_root / COMBINED_METADATA_FILENAME)
         assert deleted_files.index(str(plane_directory / CHANNEL_1_BINARY_FILENAME)) > 0
         assert deleted_files.index(str(cindra_root / RecordingArrays.CELL_FLUORESCENCE)) > 0
@@ -214,7 +393,7 @@ class TestCleanProcessingOutput:
         monkeypatch.setattr(processing_tools, "_delete_directory", _spy_directory)
 
         result = clean_processing_output_tool(
-            recording_path=str(tmp_path),
+            output_root=str(tmp_path),
             phases=["discovery"],
             pipeline_type="multi-recording",
             dataset="animal_a_task",
@@ -233,15 +412,55 @@ def _initialize_binarization_job(tracker_path: Path) -> tuple[ProcessingTracker,
     return tracker, job_id
 
 
+def _build_execution_state(tmp_path: Path, tracker_path: Path, job_id: str) -> JobExecutionState:
+    """Builds a session state holding the single binarization job the given tracker registers."""
+    pending_job = PendingJob(
+        configuration_path=tmp_path / "configuration.yaml",
+        tracker_path=tracker_path,
+        job_id=job_id,
+        single_recording=True,
+        resource_class=RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.BINARIZE],
+    )
+    return JobExecutionState(all_jobs={pending_job.dispatch_key: pending_job})
+
+
+def _write_source_file(directory: Path) -> None:
+    """Writes the TIFF file that makes a directory readable to the conversion's non-recursive source scan."""
+    imwrite(directory / "recording.tif", data=np.zeros(_SOURCE_FRAME_SHAPE, dtype=np.uint16))
+
+
 def _build_unpreparable_batch(tmp_path: Path) -> tuple[str, list[str], list[str]]:
-    """Creates a template configuration and two recording directories that hold no acquisition parameters file."""
+    """Creates a template configuration and two raw data directories holding TIFF files but no parameters file."""
     configuration_path = tmp_path / "template.yaml"
     SingleRecordingConfiguration().save(file_path=configuration_path)
-    recording_paths: list[str] = []
-    output_paths: list[str] = []
+    raw_data_paths: list[str] = []
+    output_roots: list[str] = []
     for name in ("recA", "recB"):
-        recording = tmp_path / name
-        recording.mkdir()
-        recording_paths.append(str(recording))
-        output_paths.append(str(tmp_path / f"out_{name}"))
-    return str(configuration_path), recording_paths, output_paths
+        raw_data_path = tmp_path / name
+        raw_data_path.mkdir()
+        _write_source_file(directory=raw_data_path)
+        raw_data_paths.append(str(raw_data_path))
+        output_roots.append(str(tmp_path / f"out_{name}"))
+    return str(configuration_path), raw_data_paths, output_roots
+
+
+def _build_prepared_recording(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
+    """Writes the template, configuration, acquisition parameters, and tracker a prepared recording carries on disk."""
+    template_path = tmp_path / "template.yaml"
+    SingleRecordingConfiguration().save(file_path=template_path)
+
+    raw_data_path = tmp_path / "stored_raw"
+    raw_data_path.mkdir()
+    output_root = tmp_path / "stored_output"
+    cindra_root = output_root / OUTPUT_DIRECTORY_NAME
+    cindra_root.mkdir(parents=True)
+
+    configuration = SingleRecordingConfiguration()
+    configuration.file_io.data_path = raw_data_path
+    configuration.file_io.output_path = output_root
+    configuration.save(file_path=cindra_root / SINGLE_RECORDING_CONFIGURATION_FILENAME)
+    AcquisitionParameters(frame_rate=30.0).to_yaml(file_path=cindra_root / ACQUISITION_PARAMETERS_FILENAME)
+
+    tracker_path = cindra_root / SINGLE_RECORDING_TRACKER_FILENAME
+    _initialize_binarization_job(tracker_path=tracker_path)
+    return template_path, raw_data_path, output_root, tracker_path

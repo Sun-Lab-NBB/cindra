@@ -547,6 +547,39 @@ class TestTrackedRecordingGeometry:
         assert _read_tracked_recording_geometry(cindra_root=output_path).two_channels
 
 
+class TestUnresolvedInputReporting:
+    """Tests the unresolved-input description a recording geometry reports for each of its input states."""
+
+    def test_a_resolved_geometry_describes_nothing(self) -> None:
+        """Verifies that a recording holding a plane reports no unresolved input."""
+        geometry = RecordingGeometry(
+            planes=(PlaneGeometry(height=512, width=512, frame_count=1000, sampling_rate=30.0),),
+            resolved=True,
+            acquisition_resolved=True,
+            source_resolved=True,
+        )
+
+        assert geometry._describe_unresolved_inputs(data_path=None) == ""
+
+    def test_unreadable_acquisition_parameters_are_named_alone(self, tmp_path: Path) -> None:
+        """Verifies that a recording whose source files resolved blames its acquisition parameters alone."""
+        geometry = RecordingGeometry(acquisition_resolved=False, source_resolved=True)
+
+        description = geometry._describe_unresolved_inputs(data_path=tmp_path)
+
+        assert "Its acquisition parameters were not readable" in description
+        assert ACQUISITION_PARAMETERS_FILENAME in description
+        assert "holds no readable source files" not in description
+
+    def test_two_readable_inputs_describing_no_whole_cycle_are_named(self, tmp_path: Path) -> None:
+        """Verifies that a recording whose inputs both resolved blames the interleave cycle they describe."""
+        geometry = RecordingGeometry(acquisition_resolved=True, source_resolved=True)
+
+        description = geometry._describe_unresolved_inputs(data_path=tmp_path)
+
+        assert "fewer frames than one whole plane and channel interleave cycle" in description
+
+
 class TestJobSizing:
     """Tests the sizing entry points that pair each job's cores with its memory estimate."""
 
@@ -660,8 +693,12 @@ class TestUnsizableJobs:
         """Verifies that every single-recording stage rejects a recording that resolves no geometry."""
         message = (
             f"Unable to estimate the memory of the '{job_name}' job. The recording configured with the output root "
-            f"{tmp_path} carries no readable raw imaging data, so no stage of it can run. Verify that the configured "
-            f"data path holds the recording's source files."
+            f"{tmp_path} declares no imaging plane, so no stage of it can run. Neither of its two inputs resolved. The "
+            f"recording's configuration names no raw imaging data path, and its acquisition parameters were not "
+            f"readable either. Point the configured data path at the recording's imaging directory, or at any parent "
+            f"of it that carries the acquisition parameters file beneath it. Verify that "
+            f"{ACQUISITION_PARAMETERS_FILENAME} sits in the recording's output directory or that {PARAMETERS_FILENAME} "
+            f"sits under its raw imaging directory."
         )
 
         with pytest.raises(FileNotFoundError, match=error_format(message=message)):
@@ -678,8 +715,10 @@ class TestUnsizableJobs:
         _write_combined(output_root=tmp_path)
         message = (
             f"Unable to estimate the memory of the '{SingleRecordingJobNames.COMBINE}' job. The recording configured "
-            f"with the output root {tmp_path} carries no readable raw imaging data, so no stage of it can run. Verify "
-            f"that the configured data path holds the recording's source files."
+            f"with the output root {tmp_path} declares no imaging plane, so no stage of it can run. The recording's "
+            f"configuration names no raw imaging data path, so the frames its conversion reads cannot be counted. "
+            f"Point the configured data path at the recording's imaging directory, or at any parent of it that "
+            f"carries the acquisition parameters file beneath it."
         )
 
         with pytest.raises(FileNotFoundError, match=error_format(message=message)):

@@ -62,7 +62,7 @@ Qt.
 |---------------------------|---------|--------------------------------------------------------|--------------------------------------------------------------|
 | `cindra`                  | group   | Entry point. Dispatches to the subcommands             | None, dispatch only                                          |
 | `cindra mcp`              | command | Starts the data processing MCP server                  | None, it hosts the server                                    |
-| `cindra omp`              | command | Reports and links the macOS OpenMP runtime Numba loads | `check_threading_runtime_tool`, reporting only               |
+| `cindra omp`              | command | Reports and links the macOS OpenMP runtime Numba loads | None, and the command errors off macOS                       |
 | `cindra configure`        | command | Generates a default pipeline configuration file        | `generate_config_file_tool`                                  |
 | `cindra run`              | command | Runs a pipeline from a configuration file              | `execute_full_pipeline_tool`, `execute_processing_jobs_tool` |
 | `cindra-gui`              | group   | Entry point. Dispatches to the viewer subcommands      | None, dispatch only                                          |
@@ -71,9 +71,12 @@ Qt.
 | `cindra-gui tracking`     | command | Launches the multi-recording tracking viewer           | `launch_viewer_tool(viewer_type="tracking")`                 |
 | `cindra-gui mcp`          | command | Starts the GUI MCP server                              | None, it hosts the server                                    |
 
-`cindra omp` is the only command carrying no MCP substitute for its main effect.
-`check_threading_runtime_tool` reports whether the runtime is loadable and names a remedy, and creating the link needs
-the CLI because the write target usually requires sudo.
+`cindra omp` is the only command carrying no MCP substitute for its main effect, and it is also the only command
+confined to one platform. It runs on macOS alone and errors on every other host, so it reports nothing about the TBB
+runtime a Linux or Windows host needs. `check_threading_runtime_tool` is the portable check. It runs everywhere,
+reports the layer the host's platform selects under `required_layer`, and names a remedy, so it substitutes for the
+report half of `cindra omp` on macOS alone and covers every other host on its own. Creating the macOS link still needs
+the CLI, because the write target usually requires sudo.
 
 ---
 
@@ -109,11 +112,14 @@ Without `-y` the command is a report. `/cindra-mcp-environment-setup` owns the w
 | `-od` | `--output-path` | existing directory                                          | none    | required | Names the directory to write into            |
 | `-n`  | `--name`        | string                                                      | `None`  | optional | Names the file, defaulting per pipeline type |
 
-Omitting `-n` writes `cindra_sd_conf.yaml` for a single-recording pipeline and `cindra_md_conf.yaml` for a multi-
-recording one. The name keeps every component it carries and gains the `.yaml` suffix, so `-n mouse5_2024.03.01` writes
-`mouse5_2024.03.01.yaml` rather than truncating at the last dot. A `.yml` name is normalized to `.yaml`. The MCP
-equivalent accepts no name and derives the suffix differently, so a user reproducing an agent's file by hand gets a
-different filename unless they pass `-n`.
+Omitting `-n` writes `cindra_sd_conf.yaml` for a single-recording pipeline and `cindra_md_conf.yaml` for a
+multi-recording one. The name keeps every component it carries and gains the `.yaml` suffix, so `-n mouse5_2024.03.01`
+writes `mouse5_2024.03.01.yaml` rather than truncating at the last dot. A `.yml` name is normalized to `.yaml`. The MCP
+equivalent takes the whole file path, name included, as its `output_path`, and normalizes any suffix other than `.yaml`
+through `Path.with_suffix('.yaml')`, which replaces the component following the last dot. The two paths therefore agree
+on every name carrying no dot and on every name ending in `.yaml` or `.yml`. They diverge on any other name carrying a
+dot, where the MCP tool writes `mouse5_2024.03.yaml` for the name the CLI writes in full. Ask a user reproducing an
+agent's file by hand for a dotless name, or hand them the `file_path` the MCP tool returned.
 
 ### `cindra run`
 
@@ -151,17 +157,27 @@ The five worker options follow the shared sentinel convention. Omitting the opti
 that stage, `-1` requests every available core, and a positive integer is used exactly. Any other non-positive value is
 rejected. `/single-recording-configuration` owns that convention.
 
+**A single-recording run needs an output path before it starts.** The command applies `-dp` and `-s` to the loaded
+configuration, then aborts with a usage error when `file_io.output_path` is still None, naming both the field and the
+`--output-path` flag. A freshly generated configuration carries None there, and `generate_config_file_tool` leaves it
+None as well, so a template the agent produced runs only once the user passes `-s <output-root>` or sets the field in
+the file. That output root is the parent of the `cindra` directory the run writes, which is the same value the MCP
+tools name `output_root`. Include `-s` in every single-recording `cindra run` command you hand over, and confirm the
+field is set before omitting it.
+
 ### `cindra-gui roi`, `cindra-gui registration`, and `cindra-gui tracking`
 
 | Short | Long               | Type               | Default | Status   | Effect                                          |
 |-------|--------------------|--------------------|---------|----------|-------------------------------------------------|
-| `-r`  | `--recording-path` | existing directory | none    | required | Names the recording directory to open           |
+| `-r`  | `--recording-path` | existing directory | none    | required | Names the pipeline output root to open          |
 | `-d`  | `--dataset`        | string             | `None`  | optional | Selects the multi-recording dataset             |
 | `-sf` | `--state-file`     | file path          | `None`  | optional | Names the file the viewer writes its state into |
 
 `cindra-gui registration` declares no `--dataset`, so passing it there is a usage error. On `roi`, supplying
-`--dataset` switches the viewer into tracked ROI mode. `launch_viewer_tool` builds exactly these invocations and always
-supplies `--state-file`, which is how the MCP path reads live viewer state.
+`--dataset` switches the viewer into tracked ROI mode. `--recording-path` takes the pipeline output root, which is the
+parent of the recording's `cindra` directory, and `launch_viewer_tool` names that same value `output_root` while
+passing it through this flag. `launch_viewer_tool` builds exactly these invocations and always supplies `--state-file`,
+which is how the MCP path reads live viewer state.
 
 ### `cindra-gui mcp`
 
@@ -199,7 +215,7 @@ The failures a user hits most, and where each belongs:
 | TIFF frames of differing shape                          | The data directory mixes frame geometries               | `/acquisition-data-preparation`   |
 | A plane that must be registered before detection        | A phase flag ran a phase out of order                   | `/single-recording-processing`    |
 | No `combined_metadata.npz` under a recording            | A multi-recording input never finished single-recording | `/single-recording-processing`    |
-| No `configuration.yaml` under a viewer's recording path | The recording was never processed                       | `/single-recording-processing`    |
+| No `configuration.yaml` under a viewer's output root    | The recording was never processed                       | `/single-recording-processing`    |
 | An OpenMP runtime that cannot be located, on macOS      | The threading runtime is not on the loader search path  | `/cindra-mcp-environment-setup`   |
 | A lock acquisition that timed out                       | Another cindra process holds the tracker                | See the contention warning below  |
 
@@ -251,20 +267,27 @@ A hand-launched viewer is untracked. `launch_viewer_tool` records the process so
 | Blocked MCP tool                                             | Tell the user to run                             |
 |--------------------------------------------------------------|--------------------------------------------------|
 | `generate_config_file_tool`                                  | `cindra configure -p single-recording -od <dir>` |
-| `prepare_single_recording_batch_tool` plus the execute tools | `cindra run -i <config>`                         |
+| `prepare_single_recording_batch_tool` plus the execute tools | `cindra run -i <config> -s <output-root>`        |
 | `prepare_multi_recording_batch_tool` plus the execute tools  | `cindra run -i <config>`                         |
-| `check_threading_runtime_tool`                               | `cindra omp`                                     |
-| `launch_viewer_tool(viewer_type="roi")`                      | `cindra-gui roi -r <recording>`                  |
-| `launch_viewer_tool(viewer_type="registration")`             | `cindra-gui registration -r <recording>`         |
-| `launch_viewer_tool(viewer_type="tracking")`                 | `cindra-gui tracking -r <recording> -d <name>`   |
+| `check_threading_runtime_tool`, on macOS alone               | `cindra omp`                                     |
+| `launch_viewer_tool(viewer_type="roi")`                      | `cindra-gui roi -r <output-root>`                |
+| `launch_viewer_tool(viewer_type="registration")`             | `cindra-gui registration -r <output-root>`       |
+| `launch_viewer_tool(viewer_type="tracking")`                 | `cindra-gui tracking -r <output-root> -d <name>` |
 
 Every rule the divergence section states applies to these rows. One caveat is new here, that neither CLI reports its
 results in a machine-readable form, so ask the user to paste the terminal output.
 
+Two rows carry a condition the table cannot hold. The single-recording `cindra run` row keeps `-s` because the run
+aborts without a configured output path, and the multi-recording row omits it because that pipeline reads
+`recording_io.recording_directories` and `recording_io.dataset_name` from the file instead. The `cindra omp` row holds
+on macOS alone, so on Linux and Windows tell the user to check the TBB runtime with `python -c "import tbb"` in the
+environment cindra runs in, and to install `tbb4py` when that import fails.
+
 Everything else blocks until the server is back. That covers acquisition parameter generation and validation, recording
-discovery, dataset name resolution, configuration reading and validation, every batch status, timing, cancel, reset, and
-cleanup tool, all output verification and query tools, and live viewer state. Say so plainly rather than improvising a
-substitute.
+discovery, dataset name resolution, and configuration reading, validation, and modification. It also covers both
+planning tools `get_pipeline_job_universe_tool` and `size_pipeline_jobs_tool`, every batch status, timing, cancel,
+reset, and cleanup tool, all output verification and query tools, and live viewer state. Say so plainly rather than
+improvising a substitute.
 
 ---
 
@@ -300,6 +323,8 @@ Answering a CLI question, reader-judged:
 Handing a user a CLI command, reader-judged:
 - [ ] Confirmed MCP is genuinely unavailable via `/cindra-mcp-environment-setup` first
 - [ ] Printed the command for the user instead of running it
+- [ ] Passed `-s <output-root>` on a single-recording `cindra run`, or confirmed `file_io.output_path` is already set
+- [ ] Named `check_threading_runtime_tool` rather than `cindra omp` for a threading check off macOS
 - [ ] Warned that `cindra run` rewrites the configuration file `-i` names
 - [ ] Warned about sequential dispatch and abort-on-first-failure before recommending `cindra run`
 - [ ] Confirmed no MCP session holds the tracker for that output directory

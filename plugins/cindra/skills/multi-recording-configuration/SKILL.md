@@ -3,8 +3,9 @@ name: multi-recording-configuration
 description: >-
   Complete reference for multi-recording pipeline configuration parameters, prerequisites, and MCP configuration tools.
   Documents all 7 configuration sections, parameter meanings, default values, prerequisites from single-recording
-  processing, and available MCP tools for generating configurations and discovering candidates. Use when configuring
-  multi-recording processing or when the user asks about multi-recording configuration parameters.
+  processing, and available MCP tools for generating, modifying, and validating configurations and discovering
+  candidates. Use when configuring multi-recording processing or when the user asks about multi-recording
+  configuration parameters.
 user-invocable: true
 ---
 
@@ -21,7 +22,7 @@ Complete parameter reference for the multi-recording (cross-recording) cindra RO
 - Default values, types, and descriptions for every parameter
 - Prerequisites from single-recording processing
 - Pipeline-set parameters
-- MCP tools for configuration generation and recording discovery
+- MCP tools for configuration generation, modification, validation, and recording discovery
 - Registration and tracking tuning guidance
 - Configuration compliance verification
 
@@ -52,6 +53,19 @@ introspection.
 | `resolve_dataset_name_tool` | Constructs qualified dataset names from base name + specifier             |
 | `read_config_file_tool`     | Reads any YAML file as a raw dictionary (supports legacy and non-cindra)  |
 | `validate_config_file_tool` | Validates a cindra config against schema, reports errors and non-defaults |
+| `set_config_values_tool`    | Writes new values into an existing configuration file, atomically         |
+
+`set_config_values_tool` is the only supported way to change a parameter of an existing file. It addresses each
+parameter by the `section.parameter` dotted path `validate_config_file_tool` reports under `non_default_parameters`,
+resolves every entry before applying any of them so a rejected entry writes nothing, and re-validates what it wrote.
+Supply each value in the form the YAML carries it, so a path is a string, an enumeration is its raw value, and a tuple
+is a list. Gate on the returned `valid` flag rather than on `success`, and never call it against a configuration whose
+jobs are executing, because the pipeline reads configuration from disk when it dispatches a job.
+
+`discover_recordings_tool` returns candidate objects rather than bare paths. Each `multi_recording_candidates` entry
+maps `recording_root` to the session-level root and `output_root` to the parent of the `cindra/` directory holding the
+discovered `combined_metadata.npz`. Read `candidate["output_root"]` for the `output_roots` of
+`resolve_dataset_name_tool` and `prepare_multi_recording_batch_tool`.
 
 ---
 
@@ -73,8 +87,8 @@ worker count as an invocation argument, supplied by the `cindra run` options `-d
 
 Before multi-recording processing, all recordings must have completed single-recording processing through all four
 phases (binarization, registration, processing, combination). The multi-recording pipeline locates single-recording
-output by recursively searching each recording directory for a `combined_metadata.npz` file. The parent directory of
-this file becomes the cindra root for that recording.
+output by recursively searching each output root for a `combined_metadata.npz` file, and it rejects an output root
+holding more than one. The parent directory of this file becomes the cindra root for that recording.
 
 **Required single-recording outputs per recording:**
 
@@ -100,10 +114,14 @@ recording's full frame range.
 
 These parameters are set automatically by the pipeline and should not be manually configured:
 
-| Parameter                            | Set by  | Value                                                |
-|--------------------------------------|---------|------------------------------------------------------|
-| `recording_io.recording_directories` | CLI/MCP | List of recording paths (`recording_paths` or `-rp`) |
-| `runtime.display_progress_bars`      | CLI/MCP | Whether to show progress bars                        |
+| Parameter                            | Set by  | Value                                             |
+|--------------------------------------|---------|---------------------------------------------------|
+| `recording_io.recording_directories` | CLI/MCP | List of output roots (`output_roots` or `-rp`)    |
+| `recording_io.dataset_name`          | MCP     | The qualified dataset name the prepare tool takes |
+| `runtime.display_progress_bars`      | CLI/MCP | Whether to show progress bars                     |
+
+The on-disk field keeps the name `recording_directories` while the MCP argument that fills it is `output_roots`. Both
+name one concept, a completed single-recording run's output root, the parent of that recording's `cindra/` directory.
 
 ---
 
@@ -143,8 +161,10 @@ is enabled.
 
 ### Important notes on `recording_io`
 
-- `recording_directories` is populated by the MCP batch tool from its `recording_paths` argument, or by
-  `cindra run -rp/--recording-path`.
+- `recording_directories` is populated by the MCP batch tool from its `output_roots` argument, or by
+  `cindra run -rp/--recording-path`. Both take completed single-recording output roots.
+- `dataset_name` reaches the resolved per-dataset copy through `prepare_multi_recording_batch_tool`, as the
+  Configuration lifecycle section states.
 - When `repeat_selection` is True, ROI selection is re-run using current criteria even if selections already exist. This
   allows updated single-recording results or modified selection criteria to be integrated.
 
@@ -382,22 +402,10 @@ roi_tracking:
   bin_size: 50
   maximum_distance: 20
   minimum_size: 25
-
-signal_extraction:
-  extract_neuropil: true
-  allow_overlap: false
-  minimum_neuropil_pixels: 350
-  inner_neuropil_border_radius: 2
-  cell_probability_percentile: 50
-
-spike_deconvolution:
-  extract_spikes: true
-  neuropil_coefficient: 0.7
-  baseline_method: "maximin"
-  baseline_window: 60.0
-  baseline_sigma: 10.0
-  baseline_percentile: 8.0
 ```
+
+The `signal_extraction` and `spike_deconvolution` sections take the same keys and defaults their tables above list,
+and both are left at those defaults in the common case.
 
 ---
 
@@ -410,22 +418,27 @@ spike_deconvolution:
 
 2. **Resolved copies**: When `prepare_multi_recording_batch_tool` runs, it loads the template and applies
    runtime-specific overrides (`recording_io.dataset_name` lowercased to a filesystem-safe key,
-   `recording_io.recording_directories` natural-sorted from the supplied `recording_paths`, and
+   `recording_io.recording_directories` natural-sorted from the supplied `output_roots`, and
    `runtime.display_progress_bars=False`). It then saves the resolved copy as `multi_recording_configuration.yaml`
    inside the main recording's dataset output directory (`cindra/multi_recording/{dataset_name}/`). The resolved copy
    stays immutable after the prepare step, because `execute_processing_jobs_tool` resolves the worker allocation at
    dispatch time and passes it to each job as an invocation argument. These resolved copies are what the pipeline
    actually executes against.
 
+   A second preparation of a dataset whose tracker already exists never rewrites the resolved copy, so the dataset
+   keeps running against the output roots it was first prepared with. The prepare tool reports that disagreement under
+   `path_conflicts`, naming the stored value, the passed value, and the directory to remove to prepare it again.
+
 **Do NOT** create per-dataset configuration files manually. Pass a single template path to the batch tool and let it
-handle per-dataset fine-tuning automatically.
+handle per-dataset fine-tuning automatically. Change a parameter of a resolved copy or of a template with
+`set_config_values_tool` rather than by hand.
 
 ---
 
 ## Configuration workflow
 
 1. **Discover candidates** using `discover_recordings_tool` to find recordings with completed single-recording output
-   (check the `multi_recording_candidates` list in the response).
+   (read `candidate["output_root"]` from each `multi_recording_candidates` entry).
 2. **Verify prerequisites**: Confirm all discovered recordings have completed single-recording processing (all four
    phases). If any recording is incomplete, invoke `/single-recording-processing` (or `/acquisition-data-preparation` if
    raw data is not yet prepared) to complete the prerequisite chain before continuing.
@@ -433,8 +446,14 @@ handle per-dataset fine-tuning automatically.
    it at a user-chosen location (e.g., `/Data/CA1_GCaMP6f_MD.yaml`). Alternatively, use `read_config_file_tool` to
    inspect an existing or legacy configuration for conversion.
 4. **Set `dataset_name`**: Use `resolve_dataset_name_tool` to construct a qualified name from a shared base name and a
-   batch-specific specifier derived from recording paths. This is the only required user parameter.
-5. **Review and tune** registration and tracking parameters based on expected tissue drift.
+   batch-specific specifier derived from the group's `output_roots`. This is the only required user parameter. The tool
+   is a pure string computation that writes no file, so the name reaches a configuration one of two ways. Passing it as
+   a dataset's `dataset_name` to `prepare_multi_recording_batch_tool` is the normal path, which the Configuration
+   lifecycle section covers. To set the field on the template itself, call `set_config_values_tool` with
+   `{"recording_io.dataset_name": "<qualified name>"}`. A template validates with any non-empty, filesystem-safe string,
+   because the prepare tool overwrites it per dataset.
+5. **Review and tune** registration and tracking parameters based on expected tissue drift, writing every change with
+   `set_config_values_tool`.
 6. **Validate** the configuration using `validate_config_file_tool` to check for errors, warnings, and non-default
    parameters.
 7. **Configuration complete**: The validated template file is ready for use. This skill does not start processing. If
@@ -470,6 +489,7 @@ parameter detection.
 Multi-Recording Configuration Compliance:
 - [ ] cindra MCP server is connected (if not, invoke `/cindra-mcp-environment-setup`)
 - [ ] `validate_config_file_tool` reports no errors (run this first)
+- [ ] Every parameter change was written with `set_config_values_tool`, whose `valid` flag reported true
 - [ ] `recording_io.dataset_name` is set to a unique, non-empty string (prepare overwrites it with the qualified name)
 - [ ] `roi_selection.probability_threshold` is appropriate for the dataset (0.85 default)
 - [ ] `diffeomorphic_registration.speed_factor` matches expected tissue drift (1-5 range)
