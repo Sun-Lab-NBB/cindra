@@ -53,12 +53,12 @@ headless query tools provide the underlying data.
 
 ### Viewer lifecycle tools (cindra-gui MCP server)
 
-| Tool                      | Purpose                                                                     |
-|---------------------------|-----------------------------------------------------------------------------|
-| `launch_viewer_tool`      | Spawns a GUI viewer subprocess for the user to interact with                |
-| `list_viewers_tool`       | Lists active viewers with type, path, alive status, and live active dataset |
-| `close_viewer_tool`       | Terminates a viewer subprocess and cleans up state files                    |
-| `query_viewer_state_tool` | Returns the live display state of an active viewer                          |
+| Tool                      | Purpose                                                                       |
+|---------------------------|-------------------------------------------------------------------------------|
+| `launch_viewer_tool`      | Spawns a GUI viewer subprocess for the user to interact with                  |
+| `list_viewers_tool`       | Lists active viewers with type, output root, alive status, and active dataset |
+| `close_viewer_tool`       | Terminates a viewer subprocess and cleans up state files                      |
+| `query_viewer_state_tool` | Returns the live display state of an active viewer                            |
 
 ### Headless query tools (cindra MCP server)
 
@@ -85,6 +85,10 @@ server) is also used to confirm processing is complete before launching a viewer
 All three viewers load the recording's combined dataset (`combined_metadata.npz`) on startup, so the single-recording
 combination phase must have succeeded for the target recording before any viewer is launched.
 
+Every viewer takes one path, `output_root`, which is the recording's pipeline output root and therefore the parent of
+its `cindra` directory. It is the same value `get_recording_status_tool` and every results query tool take, and
+`launch_viewer_tool` and `list_viewers_tool` both report it back under that name.
+
 ### ROI viewer
 
 Inspects ROI masks and fluorescence traces from single-recording or multi-recording data.
@@ -92,15 +96,15 @@ Inspects ROI masks and fluorescence traces from single-recording or multi-record
 **Launch:**
 
 ```python
-launch_viewer_tool(viewer_type="roi", recording_path="<path>")
-launch_viewer_tool(viewer_type="roi", recording_path="<path>", dataset="<name>")
+launch_viewer_tool(viewer_type="roi", output_root="<path>")
+launch_viewer_tool(viewer_type="roi", output_root="<path>", dataset="<name>")
 ```
 
 **Prerequisites:**
 - For multi-recording mode, multi-recording processing must be complete for the specified dataset
 
 **Parameters:**
-- `recording_path`: Absolute path to the recording directory containing `cindra/` output
+- `output_root`: Absolute path to the recording's pipeline output root, the parent of its `cindra/` directory
 - `dataset`: Optional multi-recording dataset name, which enables tracked ROI mode when provided
 
 **Capabilities:**
@@ -124,14 +128,14 @@ Inspects multi-recording ROI tracking quality across recordings within a dataset
 **Launch:**
 
 ```python
-launch_viewer_tool(viewer_type="tracking", recording_path="<path>", dataset="<name>")
+launch_viewer_tool(viewer_type="tracking", output_root="<path>", dataset="<name>")
 ```
 
 **Prerequisites:**
 - Multi-recording processing must be complete for the specified dataset
 
 **Parameters:**
-- `recording_path`: Absolute path to any recording in the multi-recording dataset
+- `output_root`: Absolute path to the output root of any recording in the multi-recording dataset
 - `dataset`: Multi-recording dataset name (defaults to first available if omitted)
 
 **Capabilities:**
@@ -150,11 +154,11 @@ frame-by-frame playback and a PC viewer for principal component metrics.
 **Launch:**
 
 ```python
-launch_viewer_tool(viewer_type="registration", recording_path="<path>")
+launch_viewer_tool(viewer_type="registration", output_root="<path>")
 ```
 
 **Parameters:**
-- `recording_path`: Absolute path to the recording directory containing `cindra/` output
+- `output_root`: Absolute path to the recording's pipeline output root, the parent of its `cindra/` directory
 - `dataset`: Ignored, because the registration viewer reads a single recording's own registration output
 
 **Capabilities:**
@@ -285,7 +289,7 @@ holds the full value lists for `background_view`, `roi_color_mode`, `mask_layer`
    subprocess output, so a viewer over a dataset that never ran still reports a live `viewer_id` and only fails later
    inside the query tools. Invoke `/multi-recording-processing` when the dataset is incomplete.
 
-2. **Launch viewer**. Call `launch_viewer_tool` with the appropriate `viewer_type`, `recording_path`, and optional
+2. **Launch viewer**. Call `launch_viewer_tool` with the appropriate `viewer_type`, `output_root`, and optional
    `dataset`. Store the returned `viewer_id`.
 
 3. **Wait for loading**. Query state with `query_viewer_state_tool` until `loaded` is `true`. The viewer subprocess

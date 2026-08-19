@@ -78,11 +78,18 @@ quality is visual inspection: confirm that backward-deformed templates overlap w
 
 ### Query tool argument semantics
 
-The `recording_path` argument for the verify and query tools must be the recording output directory, the parent of the
-`cindra/` folder. This equals the `recording_paths` entries passed to `prepare_multi_recording_batch_tool`, which are
-the per-recording output directories the single-recording pipeline wrote into (the `recording_output_paths` given to
-`prepare_single_recording_batch_tool`, echoed back as each entry's `output_path`), not the raw-data path itself. The
-tools resolve the `cindra/` subdirectory automatically.
+The `output_root` argument for the verify and query tools must be the pipeline output root, the parent of the `cindra/`
+folder. This equals the `output_roots` entries passed to `prepare_multi_recording_batch_tool`, which are the output
+roots the single-recording pipeline wrote into (the `output_roots` given to `prepare_single_recording_batch_tool`,
+echoed back as each manifest entry's `output_root`). It is not the `raw_data_path` holding the recording's TIFF files,
+because the query tools read pipeline output rather than raw imaging data. The tools resolve the `cindra/`
+subdirectory automatically.
+
+The per-recording entries these tools return name two further paths under distinct keys.
+`verify_multi_recording_output_tool` and `query_multi_recording_overview_tool` both report `dataset_output_path`, the
+recording's own directory inside the dataset tree (`{cindra_root}/multi_recording/{dataset}/`), and the overview also
+reports `cindra_path`, that recording's single-recording cindra output directory. Neither is an `output_root`, so pass
+neither one back into a tool taking `output_root`.
 
 The ROI indices accepted by `query_traces_tool`, `query_roi_statistics_tool`, and `query_cross_recording_traces_tool`
 are 0-based positional row indices into the per-recording arrays. They are not the tracking `cluster_id`, which is a
@@ -102,7 +109,7 @@ multi-recording mode. It resolves as an exact directory lookup (`{cindra_root}/m
 name the pipeline lowercases at preparation time, so pass the value `resolve_dataset_name_tool` or
 `prepare_multi_recording_batch_tool` returned rather than the user's original casing. `query_roi_statistics_tool` and
 `query_traces_tool` additionally accept `recording_index` (0-based, default 0). It indexes the dataset's own
-`dataset_output_paths` list, so index 0 is the main recording rather than the recording `recording_path` names. Without
+`dataset_output_paths` list, so index 0 is the main recording rather than the recording `output_root` names. Without
 it, a per-recording query silently reports the main recording whichever recording you addressed, so iterate the index
 across the dataset when comparing recordings.
 
@@ -133,8 +140,9 @@ when the second channel is structural.
 
 ```text
 {cindra_root}/multi_recording/{dataset_name}/
-├── multi_recording_configuration.yaml                     # Shared config (main recording only)
-├── multi_recording_runtime_data.yaml                      # Per-recording runtime metadata
+├── multi_recording_configuration.yaml              # Shared config (main recording only)
+├── multi_recording_tracker.yaml                    # Processing tracker (main recording only)
+├── multi_recording_runtime_data.yaml               # Per-recording runtime metadata
 ├── registration_arrays/                            # Diffeomorphic registration data
 │   ├── deform_field_y.npy
 │   ├── deform_field_x.npy
@@ -154,10 +162,10 @@ when the second channel is structural.
 
 ### Processing phase and file creation timeline
 
-**Phase 1 (Discovery):** Executed once across all recordings. `multi_recording_configuration.yaml` (main recording only)
-and `multi_recording_runtime_data.yaml` for each recording already exist before this phase runs, because
-`prepare_multi_recording_batch_tool` (or the CLI pipeline entry) writes them while bootstrapping the dataset. The phase
-runs the following sub-steps:
+**Phase 1 (Discovery):** Executed once across all recordings. `multi_recording_configuration.yaml`,
+`multi_recording_tracker.yaml` (main recording only), and `multi_recording_runtime_data.yaml` for each recording
+already exist before this phase runs, because `prepare_multi_recording_batch_tool` (or the CLI pipeline entry) writes
+them while bootstrapping the dataset. The phase runs the following sub-steps:
 
 1. **Context resolution:** Reloads the bootstrap the prepare step wrote. The discovery job is load-only here and fails
    outright if a recording's `multi_recording_runtime_data.yaml` is missing.
@@ -321,7 +329,11 @@ separate `.npy`/`.npz` files (documented above).
 | `io`           | Recording identity, dataset membership, and selected ROI indices, itemized below. |
 | `registration` | Deformation fields, transformed images, and deformed ROI masks, itemized below.   |
 | `tracking`     | Consensus template masks and template diameters, itemized below.                  |
+| `extraction`   | Backward-transformed ROI statistics and the extracted traces, itemized below.     |
 | `timing`       | Stage durations, phase totals, and version stamps, itemized below.                |
+
+The file's top level additionally carries `output_path`, the dataset output directory this metadata describes, and
+`combined_data`, which is always null because the single-recording data it references is reloaded on demand.
 
 - `io`: `recording_id`, `data_path`, `dataset_name`, `mroi_region_borders`, `dataset_output_paths`,
   `selected_roi_indices`, `selected_roi_indices_channel_2`.
@@ -331,6 +343,12 @@ separate `.npy`/`.npz` files (documented above).
   as `.npy` files in `registration_arrays/` and `.npz` files at the dataset output root.
 - `tracking`: `template_masks`, `template_masks_channel_2`, `template_diameter`, `template_diameter_channel_2`. The mask
   fields are saved as NPZ and set to None in the YAML.
+- `extraction`: `roi_statistics`, `cell_fluorescence`, `neuropil_fluorescence`, `subtracted_fluorescence`, `spikes`,
+  `cell_classification`, `cell_colocalization`, `corrected_structural_mean_image`, and the `*_channel_2` variants of
+  the first six. Every field is an array or list field, set to None in the YAML because its data is saved separately as
+  the `.npy` and `.npz` files at the dataset output root. `cell_classification` stays None for tracked ROIs, which are
+  already known cells, and `corrected_structural_mean_image` stays None because multi-recording dual-channel
+  processing uses spatial colocalization rather than the intensity-based path that computes it.
 - `timing`: `registration_time`, `tracking_time`, `backward_transform_time`, `total_discovery_time`, `extraction_time`,
   `deconvolution_time`, `total_extraction_time`, `date_processed`, `python_version`, `cindra_version`.
 
@@ -374,6 +392,12 @@ checks every channel 1 output file and the required NPZ keys across every record
 completeness verdict with any missing items listed. It validates no array shape, and it checks no channel 2 file under
 `registration_arrays/`, so run those two items by hand. Fall back to the whole manual checklist below only if the MCP
 tool is unavailable.
+
+Gate on `complete`, which is false whenever `missing` is non-empty. The `failed` count covers the required checks that
+did not pass, so it always equals the length of `missing`. The tool also returns `optional_absent` when the dataset
+holds none of an optional output, listing the channel 2 arrays and `cell_colocalization.npy` each recording lacks in
+the same label form `missing` uses. That list is informational, so report it as expected for a single-channel dataset
+and never treat it as an incomplete run.
 
 ```text
 Multi-Recording Output Completeness:

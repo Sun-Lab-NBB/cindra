@@ -62,7 +62,7 @@ ___
   API or CLI for local and remote parallelization.
 - Includes three interactive PySide6/PyQtGraph GUI viewers for inspecting ROI detection, registration quality, and
   multi-recording tracking results.
-- Exposes two MCP servers for AI agent integration: a data processing server with 33 tools for pipeline orchestration
+- Exposes two MCP servers for AI agent integration: a data processing server with 34 tools for pipeline orchestration
   and results querying, and a GUI server with 4 tools for viewer lifecycle management.
 - Natively supports two-channel functional imaging with independent ROI detection, colocalization analysis, and
   fluorescence extraction per channel.
@@ -150,10 +150,13 @@ z-stack stored alongside the functional recording, would otherwise corrupt the i
 file with the `file_io.ignored_file_names` configuration parameter, which matches on the file stem without its
 extension.
 
-The pipeline expects a flat directory containing one or more `.tif` / `.tiff` files. For multi-plane or multichannel
-acquisitions, frames must be interleaved in the following order within each TIFF file: plane0_channel1, plane0_channel2,
-plane1_channel1, plane1_channel2, and so on, repeating for each time point. This interleaving pattern continues
-across TIFF file boundaries when a recording spans multiple files.
+The pipeline expects a flat directory containing one or more `.tif` / `.tiff` files. That directory holds the
+recording's `cindra_parameters.json` file as well. The imaging directory is located by searching the configured data
+path for that file, so the data path may name the imaging directory itself or any parent of it. The TIFF files must sit
+beside the parameters file rather than deeper still. For multi-plane or multichannel acquisitions, frames must be
+interleaved in the following order within each TIFF file: plane0_channel1, plane0_channel2, plane1_channel1,
+plane1_channel2, and so on, repeating for each time point. This interleaving pattern continues across TIFF file
+boundaries when a recording spans multiple files.
 
 One interleave cycle carries one frame of every plane on every channel, and binarization consumes whole cycles, so the
 total frame count across every TIFF file should be a multiple of `plane_number * channel_number`. The frames of a final
@@ -187,6 +190,9 @@ region:
 | `roi_lines`         | list of list of int | Line indices in the raw frame belonging to each ROI region                            |
 | `roi_x_coordinates` | list of int         | Horizontal pixel position of each ROI's top-left corner in the combined field of view |
 | `roi_y_coordinates` | list of int         | Vertical pixel position of each ROI's top-left corner in the combined field of view   |
+
+Because `roi_lines` enumerates every row of every region, `generate_acquisition_parameters_file_tool` also accepts
+`roi_line_spans`, one inclusive `[first, last]` pair per region, and expands the pairs into the stored form on write.
 
 In MROI mode, each ROI-plane combination is treated as a separate virtual plane for processing. The pipeline uses
 `roi_lines` to slice each raw frame into region-specific strips and uses `roi_x_coordinates` / `roi_y_coordinates` to
@@ -245,8 +251,8 @@ including defaults and valid ranges.
 
 ### Data Structures
 
-All per-plane data is stored under
-`<output_path>/cindra/plane_<i>/`, and combined data at the `<output_path>/cindra/` root.
+All per-plane data is stored under `<output_root>/cindra/plane_<i>/`, and combined data at the `<output_root>/cindra/`
+root.
 
 #### Binary Imaging Data
 
@@ -325,7 +331,7 @@ Channel 2 variants (`cell_fluorescence_channel_2.npy`, etc.) are saved when both
 
 #### Combined Data
 
-Stored at `<output_path>/cindra/`:
+Stored at `<output_root>/cindra/`:
 
 | File                    | Description                                                                           |
 |-------------------------|---------------------------------------------------------------------------------------|
@@ -341,7 +347,7 @@ and channel 2 variants) follows the same naming convention at the combined level
 
 #### Multi-Recording Data
 
-Stored under `<recording_directory>/cindra/multi_recording/<dataset_name>/` per recording:
+Stored under `<output_root>/cindra/multi_recording/<dataset_name>/` per recording:
 
 | File / Directory                         | Description                                               |
 |------------------------------------------|-----------------------------------------------------------|
@@ -887,6 +893,13 @@ multi-recording results for a specific dataset.
 
 This library provides two MCP servers that expose neural imaging pipeline functionality for AI agent integration.
 
+Every tool names a filesystem path by what that path holds, and the same name means the same thing in every tool. A
+`raw_data_path` names one recording's imaging directory, which holds its TIFF files beside its `cindra_parameters.json`
+file, or any parent of that directory. An `output_root` is the parent of the `cindra/` folder a pipeline writes that
+recording's results under, and a `root_directory` is a tree searched for recordings. The plural `raw_data_paths` and
+`output_roots` name lists of the same two concepts, and a `configuration_path`, a `tracker_path`, or a `file_path` names
+one specific file.
+
 #### Data Processing Server
 
 Start the data processing MCP server using the CLI:
@@ -902,7 +915,7 @@ cindra mcp
 | `get_pipeline_job_universe_tool`                  | Reports every declared job and which of them can run right now      |
 | `size_pipeline_jobs_tool`                         | Reports the cores and memory every job holds, without dispatching   |
 | `check_threading_runtime_tool`                    | Reports whether the host's numeric threading runtime is loadable    |
-| `generate_acquisition_parameters_file_tool`       | Generates a `cindra_parameters.json` file for a recording directory |
+| `generate_acquisition_parameters_file_tool`       | Generates a `cindra_parameters.json` file for a raw data directory  |
 | `validate_acquisition_parameters_file_tool`       | Validates an existing acquisition parameters file                   |
 | `validate_recording_readiness_tool`               | Validates that a recording is ready for pipeline processing         |
 | `generate_config_file_tool`                       | Generates a default YAML configuration file                         |
@@ -910,6 +923,7 @@ cindra mcp
 | `resolve_dataset_name_tool`                       | Constructs a qualified multi-recording dataset name                 |
 | `read_config_file_tool`                           | Reads and returns the contents of a configuration YAML file         |
 | `validate_config_file_tool`                       | Validates a configuration file and reports non-default parameters   |
+| `set_config_values_tool`                          | Writes new values for named parameters into a configuration file    |
 | `get_recording_status_tool`                       | Gets the processing status of a single recording                    |
 | `get_batch_status_overview_tool`                  | Gets an overview of batch processing status across recordings       |
 | `prepare_single_recording_batch_tool`             | Prepares single-recording batch processing jobs without execution   |

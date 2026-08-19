@@ -50,6 +50,16 @@ file reads whenever possible.
 |---------------------------------------|-----------------------------------------------------------------|
 | `verify_single_recording_output_tool` | Verifies completeness of all expected output files and NPZ keys |
 
+The verification response reports `complete`, `plane_count` counted from the plane directories on disk, `two_channels`,
+`total_checks`, `passed`, `failed`, `missing`, and `warnings`. `failed` counts the required checks that did not pass, so
+it always equals the length of `missing`, and `complete` is False whenever `missing` is non-empty. The `warnings` list
+is always present and holds non-fatal issues such as a registered-binary path that does not resolve on disk, so a
+response carrying warnings can still report `complete` as True. An `optional_absent` list appears only when it holds
+entries, carrying the same label form for the optional outputs the recording does not hold. It is informational and
+never gates `complete`. The three principal-component registration arrays land there whenever the recording holds fewer
+than 1500 frames, which is the threshold below which the registration metrics are skipped. A recording naming flyback
+planes also carries `flyback_planes`, whose registration, projection, and extraction items count as optional.
+
 ### Query tools
 
 | Tool                                   | Purpose                                                                               |
@@ -70,10 +80,10 @@ file reads whenever possible.
 
 ### Query tool argument semantics
 
-The `recording_path` argument for the verify and query tools must be the recording output directory, the parent of the
-`cindra/` folder. This equals the `recording_output_paths` entries passed to and returned by the prepare tool when the
-output root differs from the raw-data root, not the raw-data path itself. The tools resolve the `cindra/` subdirectory
-automatically.
+The verify and query tools all name their path argument `output_root`. It must be the pipeline output root, the parent
+of the `cindra/` folder, which equals the `output_roots` entries passed to the prepare tool and the per-recording
+`output_root` entries it returns. It is never the `raw_data_paths` entry, which is the directory holding the TIFF
+files. The tools resolve the `cindra/` subdirectory automatically.
 
 `query_single_recording_metadata_tool` reports the top-level `frame_count` from the combined traces and each
 `plane_timing` entry's `frame_count` from that plane's `runtime_data.yaml`. The counts agree, because binarization
@@ -88,6 +98,10 @@ valid ROI indices provided", so a confidently "successful" empty result can only
 `query_traces_tool` accepts at most 50 ROI indices per call and rejects a longer request with "Unable to query traces.
 Requested N ROIs, maximum is 50." before it resolves any path. `query_roi_statistics_tool` returns at most 500 ROIs.
 Batch a larger pull across several calls.
+
+Every `plane_index` argument names a VIRTUAL plane, so it indexes the `plane_N/` directories on disk rather than the
+`plane_number` of the acquisition parameters. On an MROI recording the two differ, as the Output data reference
+explains.
 
 **`plane_index` does not default the same way across the query tools.** `query_registration_quality_tool` defaults to
 `0`, which is the first imaging plane, while `query_detection_summary_tool`, `query_roi_statistics_tool`, and
@@ -114,19 +128,30 @@ deconvolved trace. An unrecognized value fails with "Invalid trace_type '...'. V
 
 ## Output data reference
 
-All results are saved under `{output_path}/cindra/`. The pipeline produces combined (multi-plane merged) data at the
-root level and per-plane data in numbered subdirectories. Channel 2 output depends on whether the second channel is
-functional, meaning both `main.first_channel_functional` and `main.second_channel_functional` are True. Every
-two-channel recording produces, in each `plane_N/` directory, `channel_2_data.bin`,
-`detection_data/mean_image_channel_2.npy`, `cell_fluorescence_channel_2.npy`, and `neuropil_fluorescence_channel_2.npy`,
-plus the combined `detection_data/mean_image_channel_2.npy` at the root. A structural (non-functional) channel 2 still
-gets a full fluorescence extraction pass, but it borrows the channel 1 ROI masks instead of detecting its own ROIs. Its
-traces therefore carry one row per channel 1 ROI and come with no independent detection, classification, or
-deconvolution. Every other channel 2 file requires both channels to be functional: the other three detection images at
-both levels, the ROI `.npz` files, `subtracted_fluorescence_channel_2.npy`, `spikes_channel_2.npy`,
-`cell_classification_channel_2.npy`, and the root-level combined `cell_fluorescence_channel_2.npy` and
-`neuropil_fluorescence_channel_2.npy`. Those last two are the asymmetry to watch, because combination omits them for a
-structural channel 2 even though every plane directory holds its own copy.
+All results are saved under `{output_root}/cindra/`. The pipeline produces combined (multi-plane merged) data at the
+root level and per-plane data in numbered subdirectories.
+
+**The number of `plane_N/` directories is the VIRTUAL plane count, not `plane_number`.** For standard imaging, where
+`roi_number` is 1, the two are equal. For MROI line-scanning acquisitions, where `roi_number` is above 1, the pipeline
+creates one virtual plane per ROI and physical-plane combination, so the directory count is `roi_number *
+plane_number`. A recording with `plane_number` 1 and `roi_number` 3 therefore produces `plane_0/`, `plane_1/`, and
+`plane_2/`. Virtual planes are numbered ROI-major, so `roi_index = virtual_plane_index // plane_number` and the first
+`plane_number` directories all belong to ROI 0. Each carries that ROI's line block and its x and y offsets into the
+combined field of view. The per-plane sampling rate stays `frame_rate / plane_number`, because splitting a frame into
+ROIs adds no acquisition time.
+
+Channel 2 output depends on whether the second channel is functional, meaning both `main.first_channel_functional` and
+`main.second_channel_functional` are True. Every two-channel recording produces, in each `plane_N/` directory,
+`channel_2_data.bin`, `detection_data/mean_image_channel_2.npy`, `cell_fluorescence_channel_2.npy`, and
+`neuropil_fluorescence_channel_2.npy`, plus the combined `detection_data/mean_image_channel_2.npy` at the root. A
+structural (non-functional) channel 2 still gets a full fluorescence extraction pass, but it borrows the channel 1 ROI
+masks instead of detecting its own ROIs. Its traces therefore carry one row per channel 1 ROI and come with no
+independent detection, classification, or deconvolution. Every other channel 2 file requires both channels to be
+functional: the other three detection images at both levels, the ROI `.npz` files,
+`subtracted_fluorescence_channel_2.npy`, `spikes_channel_2.npy`, `cell_classification_channel_2.npy`, and the root-level
+combined `cell_fluorescence_channel_2.npy` and `neuropil_fluorescence_channel_2.npy`. Those last two are the asymmetry
+to watch, because combination omits them for a structural channel 2 even though every plane directory holds its own
+copy.
 
 ### Directory structure
 
@@ -147,7 +172,7 @@ cindra/
 ├── subtracted_fluorescence.npy
 ├── spikes.npy
 ├── cell_classification.npy
-├── plane_0/                                    # Per-plane processing results
+├── plane_0/                                    # Per-VIRTUAL-plane processing results
 │   ├── runtime_data.yaml                       # Plane runtime metadata
 │   ├── channel_1_data.bin                      # Registered binary data
 │   ├── channel_1_data.bin.binarizing           # Present only while binarization fills the binary
@@ -247,7 +272,8 @@ of the single-recording outputs the multi-recording pipeline consumes, see `/mul
 
 Use `verify_single_recording_output_tool` to automate this verification. The tool checks all expected files and NPZ keys
 and returns a completeness verdict with any missing items listed. Fall back to the manual checklist below only if the
-MCP tool is unavailable. Replace N with the expected plane count from the acquisition parameters.
+MCP tool is unavailable. Replace N with the recording's virtual plane count, which is `roi_number * plane_number` from
+the acquisition parameters and equals `plane_number` only when `roi_number` is 1.
 
 ```text
 Single-Recording Output Completeness:
@@ -281,7 +307,7 @@ Combined extraction data (cindra/):
       level for a structural channel 2 even though each plane directory holds them
 
 Per-plane directories (cindra/plane_0/ through cindra/plane_{N-1}/):
-- [ ] Each expected plane directory exists
+- [ ] Each of the `roi_number * plane_number` virtual plane directories exists
 - [ ] A plane named by `main.ignored_flyback_planes` is binarized and never registered or processed, so only its
       `runtime_data.yaml`, `channel_1_data.bin`, and `detection_data/mean_image.npy` are required.
       `verify_single_recording_output_tool` reports those indices under `flyback_planes` and treats every registration,

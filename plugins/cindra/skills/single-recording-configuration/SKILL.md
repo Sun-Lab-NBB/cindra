@@ -51,7 +51,17 @@ introspection.
 | `discover_recordings_tool`          | Discovers single and multi-recording candidates under a root directory    |
 | `read_config_file_tool`             | Reads any YAML file as a raw dictionary (supports legacy and non-cindra)  |
 | `validate_config_file_tool`         | Validates a cindra config against schema, reports errors and non-defaults |
-| `validate_recording_readiness_tool` | Validates that raw TIFFs and acquisition parameters are ready to process  |
+| `set_config_values_tool`            | Writes new values into an existing cindra configuration file              |
+| `validate_recording_readiness_tool` | Validates the raw TIFFs and acquisition parameters of a `raw_data_path`   |
+
+`set_config_values_tool` takes the `file_path` of an existing configuration and a `values` map keyed by the same
+`section.parameter` dotted paths `validate_config_file_tool` reports under `non_default_parameters`. Every entry is
+resolved before any is applied, so one rejected entry leaves the file byte-identical and reports every rejection at
+once under `errors`. Values arrive in the form the YAML document carries them, so a path is a string, an enumeration is
+its raw value, and a tuple is a list. An integer is accepted for a float-typed parameter, and no other substitution is,
+`bool` included. The response carries `changed`, pairing each dotted path with its `previous` and `current` values, and
+the `valid` status the rewritten file validates to. Gate on `valid` rather than on `success`. The pipeline reads its
+configuration from disk when it dispatches a job, so never write against a configuration whose jobs are running.
 
 ---
 
@@ -77,11 +87,11 @@ resource class alike.
 
 These parameters are set automatically by the pipeline and should not be manually configured:
 
-| Parameter                       | Set by     | Value                                               |
-|---------------------------------|------------|-----------------------------------------------------|
-| `file_io.data_path`             | batch tool | Recording's session root path, above the raw data   |
-| `file_io.output_path`           | user/batch | Recording's processed output path (required)        |
-| `runtime.display_progress_bars` | CLI/MCP    | Whether to show progress bars                       |
+| Parameter                       | Set by     | Value                                         |
+|---------------------------------|------------|-----------------------------------------------|
+| `file_io.data_path`             | batch tool | The `raw_data_paths` entry, holding the TIFFs |
+| `file_io.output_path`           | user/batch | The `output_roots` entry, parent of `cindra/` |
+| `runtime.display_progress_bars` | CLI/MCP    | Whether to show progress bars                 |
 
 ---
 
@@ -196,6 +206,12 @@ recommendation to run both together.
 | `compute_bidirectional_phase_offset`       | bool  | False   | Compute bidirectional phase offset for 2P line scanning.            |
 | `bidirectional_phase_offset_override`      | int   | 0       | Manual bidiphase offset override. 0 = auto-detect.                  |
 
+`repeat_registration` governs every re-run of the registration phase. A plane that already carries its registration
+output is skipped while this is false, so the job records success in seconds and leaves the earlier timing in place.
+Set it to true with `set_config_values_tool` before re-dispatching a reset registration phase, which is the same role
+`file_io.repeat_binarization` plays for binarization. Processing and combination carry no such flag and always
+recompute.
+
 ### Tuning guidance
 
 - **High motion artifacts**: Increase `maximum_offset_fraction` (0.15-0.2) and enable `two_step_registration` for
@@ -297,8 +313,8 @@ This is the most impactful section for controlling ROI yield.
 
 Extracts fluorescence time series from detected ROIs. For each ROI, the raw signal is computed by averaging pixel
 intensities within the cell mask across all frames. A neuropil signal is estimated from a surrounding annular region
-(excluding other cells), and ROIs are given a final cell/non-cell classification using the full feature set
-(compactness, skewness, pixel count).
+(excluding other cells), and ROIs are given a final cell/non-cell classification using the full three-feature set, in
+order: `normalized_pixel_count`, `compactness`, and `skewness`.
 
 | Parameter                      | Type  | Default | Description                                                     |
 |--------------------------------|-------|---------|-----------------------------------------------------------------|
@@ -396,16 +412,21 @@ authored file that omits it is rejected by both `validate_config_file_tool` and 
 ## Configuration lifecycle
 
 1. **Template configs**: de-novo configurations generated via `generate_config_file_tool` or manually created. Templates
-   can live anywhere (e.g., `/Data/CA1_GCaMP6f_SD.yaml`) and are reusable across recordings. Templates are never
-   modified by the pipeline.
+   can live anywhere (e.g., `/Data/CA1_GCaMP6f_SD.yaml`) and are reusable across recordings. The batch MCP tools never
+   modify a template, but `cindra run -i <file>` DOES write back into the file it is given, saving
+   `runtime.display_progress_bars` and any `--data-path` or `--output-path` override into it before dispatching. Never
+   pass a shared template to `cindra run`, because the first run stamps one recording's paths into the file every other
+   recording shares. Pass a per-recording copy, or the resolved copy the prepare tool already wrote.
 
 2. **Resolved copies**: when `prepare_single_recording_batch_tool` runs, it loads the template, applies
-   recording-specific overrides (`file_io.data_path` from `recording_paths`, `file_io.output_path` from the required
-   `recording_output_paths` parameter, `runtime.display_progress_bars=False`), and saves the resolved copy as
-   `cindra/configuration.yaml` inside each recording's output directory. The per-recording copy is immutable once
-   written. `execute_processing_jobs_tool` resolves worker allocation at dispatch time and passes it to each job as a
-   dispatch argument, so one configuration file serves every job dispatched against it. These resolved copies are what
-   the pipeline actually executes against.
+   recording-specific overrides (`file_io.data_path` from `raw_data_paths`, `file_io.output_path` from the required
+   `output_roots` parameter, `runtime.display_progress_bars=False`), and saves the resolved copy as
+   `cindra/configuration.yaml` inside each recording's output root. Preparation never rewrites a copy it already wrote,
+   so a re-prepare with different paths reports them under `path_conflicts` and keeps the stored ones. Amend a resolved
+   copy with `set_config_values_tool` instead, and only while none of its jobs are running.
+   `execute_processing_jobs_tool` resolves worker allocation at dispatch time and passes it to each job as a dispatch
+   argument, so one configuration file serves every job dispatched against it. These resolved copies are what the
+   pipeline actually executes against.
 
 **Do NOT** create per-recording configuration files manually. Pass a single template path to the batch tool and let it
 handle per-recording fine-tuning automatically.
@@ -414,17 +435,26 @@ handle per-recording fine-tuning automatically.
 
 ## Configuration workflow
 
-1. **Discover recordings** using `discover_recordings_tool` (check the `single_recording_candidates` list) to find
-   directories with raw data.
-2. **Verify data readiness**: use `validate_recording_readiness_tool` on each discovered recording to confirm that raw
-   data and acquisition parameters are ready. If any recording fails validation, invoke `/acquisition-data-preparation`
-   to resolve before continuing.
+1. **Discover recordings** using `discover_recordings_tool` to find directories with raw data. Every entry of
+   `single_recording_candidates` is an object carrying `recording_root` and `raw_data_path`, so read
+   `candidate["raw_data_path"]` for every downstream tool and `candidate["recording_root"]` only when naming the session
+   to the user. The recording root is a session-level directory that usually does not hold the TIFF files itself. Every
+   tool taking a raw data path accepts it too, because each resolves the imaging directory by locating
+   `cindra_parameters.json` beneath the path it is given.
+2. **Verify data readiness**: use `validate_recording_readiness_tool` with `raw_data_path` set to that
+   `candidate["raw_data_path"]`, which is the directory that directly holds the TIFF files and the
+   `cindra_parameters.json` file. Passing `candidate["recording_root"]` works equally well, because the tool resolves
+   the imaging directory the way step 1 describes. If any recording fails validation, invoke
+   `/acquisition-data-preparation` to resolve before continuing.
 3. **Generate a template configuration** using `generate_config_file_tool` with `pipeline_type="single-recording"`. Save
    it at a user-chosen location (e.g., `/Data/CA1_GCaMP6f_SD.yaml`). Alternatively, use `read_config_file_tool` to
    inspect an existing or legacy configuration for conversion.
-4. **Review and modify** the template YAML file, setting at minimum `main.tau` and `main.two_channels`.
+4. **Review and modify** the template using `set_config_values_tool`, setting at minimum `main.tau` and
+   `main.two_channels`. Pass every change in one `values` map, because a rejected entry leaves the file unchanged.
 5. **Validate** the configuration using `validate_config_file_tool` to check for errors, warnings, and non-default
-   parameters.
+   parameters. The generated template leaves `file_io.output_path` as None, which the planning tools
+   `size_pipeline_jobs_tool` and `get_pipeline_job_universe_tool` reject, so set `file_io.data_path` and
+   `file_io.output_path` on a per-recording copy before planning against it.
 6. **Configuration complete**: the validated template file is ready for use. This skill does not start processing. If
    invoked standalone, the configuration is ready. To run it, proceed to `/single-recording-processing`. If invoked from
    another skill, return control to the caller.
@@ -463,5 +493,7 @@ Single-Recording Configuration Compliance:
 - [ ] `file_io.ignored_file_names` excludes every TIFF in the data directory that is not part of the recording (a
       differently shaped file, such as an anatomical z-stack, fails binarization)
 - [ ] Review any warnings from `validate_config_file_tool` (pipeline-set parameters, channel consistency)
-- [ ] Acquisition data prepared, `validate_recording_readiness_tool` passed (else run `/acquisition-data-preparation`)
+- [ ] Acquisition data prepared, `validate_recording_readiness_tool` passed against each `raw_data_path` (else run
+      `/acquisition-data-preparation`)
+- [ ] No shared template was passed to `cindra run -i`, which writes back into the file it is given
 ```

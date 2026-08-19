@@ -79,11 +79,17 @@ Setup       →  Data Prep   →               →             →            �
 - **Handoff condition:** `validate_recording_readiness_tool` reports the recording ready
 - **Skip condition:** Recording already binarized or beyond (confirm via `get_recording_status_tool`)
 
+The `raw_data_path` these tools take is the recording's imaging directory or any parent of it, which
+`/acquisition-data-preparation` defines in full. It is the value `prepare_single_recording_batch_tool` takes as its
+`raw_data_paths`, and it is a different concept from the `output_root` every status, results, and viewer tool takes,
+which is the parent of the recording's `cindra` directory. `get_recording_status_tool` therefore takes the output root
+rather than the raw data path.
+
 ### Stage 3: Configuration
 
 - **Skill:** `/single-recording-configuration`
 - **Actions:** Generate a template configuration with `generate_config_file_tool`, set `main.tau` and
-  `main.two_channels`, validate with `validate_config_file_tool`
+  `main.two_channels` with `set_config_values_tool`, validate with `validate_config_file_tool`
 - **Handoff condition:** A validated template configuration file exists (one template can serve many recordings)
 
 ### Stage 4: Processing
@@ -125,8 +131,8 @@ Complete (all)   →                →               →               →  Ins
 
 - **Skill:** `/multi-recording-configuration`
 - **Actions:** Generate a multi-recording template configuration, set `recording_io.dataset_name` to a non-empty name
-  (`resolve_dataset_name_tool` builds a qualified one), set ROI selection and registration/tracking parameters, validate
-  it
+  with `set_config_values_tool` (`resolve_dataset_name_tool` builds a qualified one from the group's `output_roots`),
+  set ROI selection and registration/tracking parameters, validate it
 - **Handoff condition:** A validated multi-recording template configuration file exists. A freshly generated
   multi-recording template leaves `recording_io.dataset_name` empty, which `validate_config_file_tool` reports as an
   error, so set it before validating. `prepare_multi_recording_batch_tool` later writes the lowercased dataset name into
@@ -136,7 +142,9 @@ Complete (all)   →                →               →               →  Ins
 
 - **Skill:** `/multi-recording-processing`
 - **Actions:** Confirm all recordings are single-recording complete, group recordings into datasets, resolve dataset
-  names with `resolve_dataset_name_tool`, then prepare and execute the two-phase pipeline (discover, extract)
+  names with `resolve_dataset_name_tool`, then prepare and execute the two-phase pipeline (discover, extract). Every
+  path this stage handles is a completed single-recording `output_root`, which is what the `output_roots` entries of
+  `prepare_multi_recording_batch_tool` take
 - **Handoff condition:** All datasets report `completed`. `verify_multi_recording_output_tool` returns `complete: true`
 
 ### Stage 3: Results
@@ -162,8 +170,9 @@ A dataset is a named group of recordings tracked together. Plan datasets before 
   `/acquisition-data-preparation` → `/single-recording-configuration` → `/single-recording-processing`.
 - **Grouping:** Group recordings by common parent directory, explicit user grouping, or semantic analysis of recording
   paths. Each group becomes one dataset.
-- **Dataset names:** Call `resolve_dataset_name_tool` once per group to construct a unique qualified name from a shared
-  base name and a per-batch specifier. See `/multi-recording-processing` for the full workflow.
+- **Dataset names:** Call `resolve_dataset_name_tool` once per group with that group's `output_roots` to construct a
+  unique qualified name from a shared base name and a per-batch specifier. See `/multi-recording-processing` for the
+  full workflow.
 
 Multi-recording input preparation is "single-recording processing complete", so the single-recording pipeline handles
 raw-data preparation for both pipelines and there is no separate multi-recording preparation skill.
