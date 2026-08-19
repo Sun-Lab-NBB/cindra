@@ -12,13 +12,13 @@ that skill.
 The five lists a single-recording caller can receive do not share one element shape. Three hold plain strings and two
 hold objects, so a caller that formats them uniformly prints `[object Object]` for the object ones.
 
-| Key                    | Returned by                      | Element shape                                        |
-|------------------------|----------------------------------|------------------------------------------------------|
-| `invalid_paths`        | prepare, full-pipeline           | string, the offending path as supplied               |
-| `invalid_recordings`   | prepare, full-pipeline           | string, `"{recording_path}: {error}"`                |
-| `migrated_recordings`  | prepare, full-pipeline           | string, the recording key whose tracker was migrated |
-| `unsizable_recordings` | full-pipeline                    | object, `{"recording": str, "error": str}`           |
-| `invalid_jobs`         | execute                          | object, `{"job_id": str, "reason": str}`             |
+| Key                    | Returned by            | Element shape                                        |
+|------------------------|------------------------|------------------------------------------------------|
+| `invalid_paths`        | prepare, full-pipeline | string, the offending path as supplied               |
+| `invalid_recordings`   | prepare, full-pipeline | string, `"{recording_path}: {error}"`                |
+| `migrated_recordings`  | prepare, full-pipeline | string, the recording key whose tracker was migrated |
+| `unsizable_recordings` | full-pipeline          | object, `{"recording": str, "error": str}`           |
+| `invalid_jobs`         | execute                | object, `{"job_id": str, "reason": str}`             |
 
 `invalid_jobs` uses `{"job": str, "reason": str}` instead, keyed on the stringified descriptor, when the descriptor is
 missing one of the four required keys and therefore carries no usable `job_id`.
@@ -55,13 +55,13 @@ loads one runs no discovery.
 
 ### execute_processing_jobs_tool and execute_full_pipeline_tool
 
-| Key                | Meaning                                                                        |
-|--------------------|--------------------------------------------------------------------------------|
-| `started`          | Whether a session was dispatched. Gate on this, not on `success`               |
-| `total_jobs`       | Jobs the session holds, including those still awaiting prerequisites          |
-| `cpu_budget`       | Session core budget, which is the host core count minus 2                      |
-| `memory_budget_mb` | Session memory budget, sampled once at session start                           |
-| `resource_classes` | Per class, its `workers_per_job`, `max_parallel_jobs`, and `job_count`         |
+| Key                | Meaning                                                                |
+|--------------------|------------------------------------------------------------------------|
+| `started`          | Whether a session was dispatched. Gate on this, not on `success`       |
+| `total_jobs`       | Jobs the session holds, including those still awaiting prerequisites   |
+| `cpu_budget`       | Session core budget, which is the host core count minus 2              |
+| `memory_budget_mb` | Session memory budget, sampled once at session start                   |
+| `resource_classes` | Per class, its `workers_per_job`, `max_parallel_jobs`, and `job_count` |
 
 `execute_full_pipeline_tool` additionally returns `phase_count`, a per-phase `phases` list, and the preparation lists
 it forwards, including `migrated_recordings`. It returns `started: false` with a `message` and a `next_step` when every
@@ -123,14 +123,14 @@ and `combine`. The `register` and `process` keys map each `plane_{index}` specif
 These come from the execution engine rather than from a pipeline stage, so they name no data or configuration problem
 and no upstream skill resolves them.
 
-| Message                                                                                                                                                                          | Cause                             |
-|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------|
-| `Unable to execute job. A preceding pipeline phase failed.`                                                                                                                      | Cascade abort of a downstream job |
-| `Unable to execute job. The worker process pool was terminated, which happens when a job's process is killed by the host, most often for exhausting memory.`                     | A worker process died             |
-| `Unable to execute job. The worker process pool canceled the job before any worker started it, which happens when the pool shuts down while the job is still waiting inside it.` | Queued when the pool shut down    |
-| `Unable to execute job. Its prerequisite jobs never succeeded and no queued job can still satisfy them.`                                                                        | Session drained while job pooled  |
+| Message                                                                                                                                                                                      | Cause                             |
+|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------|
+| `Unable to execute job. A preceding pipeline phase failed.`                                                                                                                                  | Cascade abort of a downstream job |
+| `Unable to execute job. The worker process pool was terminated, which happens when a job's process is killed by the host, most often for exhausting memory.`                                 | A worker process died             |
+| `Unable to execute job. The worker process pool canceled the job before any worker started it, which happens when the pool shuts down while the job is still waiting inside it.`             | Queued when the pool shut down    |
+| `Unable to execute job. Its prerequisite jobs never succeeded and no queued job can still satisfy them.`                                                                                     | Session drained while job pooled  |
 | `Unable to execute job. The worker process raised {type} outside the job's own error handling, which leaves the job holding no terminal state of its own. The reported reason is '{error}'.` | Worker raised outside the job     |
-| `Unable to complete job. Worker terminated without reaching a terminal state.`                                                                                                  | Worker exited recording nothing   |
+| `Unable to complete job. Worker terminated without reaching a terminal state.`                                                                                                               | Worker exited recording nothing   |
 
 A job aborted because its prerequisite phase is absent from the tracker records a message naming that phase and asking
 for the prepare tool to be re-run, because no phase failed in that case.

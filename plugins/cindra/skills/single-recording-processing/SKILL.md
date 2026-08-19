@@ -242,7 +242,7 @@ For fine-grained control (e.g., running only specific phases, custom resource al
    already-complete state. Route errors to the appropriate skill (see Error routing section). On success, invoke
    `/single-recording-results` to verify outputs, then `/visualization` for visual inspection.
 
-#### Output-directory path rule
+### Output-directory path rule
 
 `get_recording_status_tool`, `verify_single_recording_output_tool`, and `clean_processing_output_tool` all take the
 recording OUTPUT directory (the parent of the `cindra/` folder), which equals the `recording_output_paths` / per-entry
@@ -315,11 +315,11 @@ rather than stalling the session.
 | COMBINE  | `combination`  | 1             | Session CPU budget                     |
 
 Every cap but binarization's derives from the host as `min(max(1, budget // cores_per_job), max(1, job_count))`, so a
-wider machine
-raises it without being asked, and the dispatcher then admits against the live core and memory budgets rather than
-against the cap alone. The engine saturates the host it is given, so leave both parameters as None unless the user asks
-for an override. Binarization's ceiling of 4 is the exception it never lifts, because the stage decodes at the storage's
-rate rather than the host's core count, and that class alone ignores both `workers_per_job` and `max_parallel_jobs`.
+wider machine raises it without being asked, and the dispatcher then admits against the live core and memory budgets
+rather than against the cap alone. The engine saturates the host it is given, so leave both parameters as None unless
+the user asks for an override. Binarization's ceiling of 4 is the exception it never lifts, because the stage decodes at
+the storage's rate rather than the host's core count, and that class alone ignores both `workers_per_job` and
+`max_parallel_jobs`.
 
 A reservation binds only in the dispatcher's first pass. The second pass releases it over whatever capacity the first
 left unused, so a reserved class runs at its full derived width whenever no other queue can use the room.
@@ -338,8 +338,8 @@ stage has no parallel critical path.
 
 Report the resolved allocation after dispatch, from the `resource_classes` mapping the execute tool returns, rather
 than predicting it beforehand. When the user does ask for an override, a `workers_per_job` value of 30 overrides the
-processing default of 10 and lowers the processing concurrency to at most the CPU budget divided by 30, so it reduces
-rather than raises the memory the class holds. A positive `max_parallel_jobs` replaces the derived cap outright, but it
+processing default of 10 and lowers the processing concurrency to at most the CPU budget divided by 30. That override
+therefore reduces the memory the class holds. A positive `max_parallel_jobs` replaces the derived cap outright, but it
 cannot exhaust memory on its own: the dispatcher still holds the running jobs' estimated memory inside the session
 memory budget whatever cap a class carries.
 
@@ -347,7 +347,7 @@ memory budget whatever cap a class carries.
 
 `get_pipeline_job_universe_tool` answers which jobs can run right now. It reads the inventory the output directories
 already hold, so it works before a tracker exists and returns `resolved: false` with an empty universe for a recording
-carrying nothing rather than failing. Each entry carries a `ready` flag reporting that the job's own input exists: the
+carrying nothing rather than failing. Each entry carries a `ready` flag reporting that the job's own input exists. The
 conversion job is ready once the acquisition parameters resolve, a registration job once its plane carries the channel
 binary, a processing job once its plane carries the reference image, and the combination job once every plane carries
 its traces. Use it to plan a selective re-run, and `get_recording_status_tool` to read recorded outcomes once a batch
@@ -364,8 +364,8 @@ the session memory budget, so a batch whose peak exceeds free memory admits its 
 
 `check_threading_runtime_tool` reports whether the numeric threading layer this host needs is loadable, which is OpenMP
 on macOS and TBB elsewhere. Gate a batch on its `ready` flag. A macOS host that is not ready aborts every job at the
-pipeline entry point before any stage runs, because both entry points verify the runtime first, while a non-macOS host
-missing TBB instead fails at the job's first parallelized call. Either way the outcome surfaces as a per-job tracker
+pipeline entry point before any stage runs, because both entry points verify the runtime first. A non-macOS host missing
+TBB instead fails at the job's first parallelized call. Either way the outcome surfaces as a per-job tracker
 failure rather than as a tool error, so checking first replaces parsing those failures. The response carries a `remedy`
 command when the host is not ready.
 
@@ -390,9 +390,8 @@ Summary: 10/30 recordings complete | 2 processing | 18 queued | 0 failed
 ```
 
 The `single_recording.jobs` mapping that `get_recording_status_tool` returns holds exactly four keys, `binarize`,
-`register`, `process`,
-and `combine`. The `register` and `process` keys map each `plane_{index}` specifier to a lowercased status string. You
-MUST give the table a column for each of the four keys.
+`register`, `process`, and `combine`. The `register` and `process` keys map each `plane_{index}` specifier to a
+lowercased status string. You MUST give the table a column for each of the four keys.
 
 ---
 
@@ -427,8 +426,8 @@ count of its own, so name every entry of `invalid_paths`, `invalid_recordings`, 
 `total_recordings`. A migrated recording is not rejected, but its dispatched job set differs from the one it last
 carried, so report it alongside the rejections.
 
-These lists do not share one element shape, and every job is sized from the recording's raw acquisition geometry rather
-than from a per-stage allowance, so a recording with unreadable raw data loses every one of its jobs rather than the
+These lists do not share one element shape. Every job is sized from the recording's raw acquisition geometry rather than
+from a per-stage allowance, so a recording with unreadable raw data loses every one of its jobs rather than the
 conversion job alone. See [tool-responses.md](references/tool-responses.md) for the element shapes, the return-key
 reference of the planning, execution, management, and status tools, and the terminal messages the engine writes to a
 tracker.

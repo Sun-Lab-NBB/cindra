@@ -94,8 +94,8 @@ Installing the plugin alone registers the MCP servers and makes skills available
 because the `cindra` and `cindra-gui` CLI commands are not present. The pip package must also be installed in the active
 Python environment for the MCP servers to function.
 
-This is the most common cause of MCP failures after initial setup: the plugin is installed but the pip package is not,
-or the pip package is installed in a different Python environment than the one active when Claude Code launches.
+This is the most common cause of MCP failures after initial setup. Either the plugin is installed while the pip package
+is missing, or the pip package sits in a different Python environment than the one active when Claude Code launches.
 
 ### Package version requirement
 
@@ -211,16 +211,15 @@ Then confirm the resolved package version:
 python -c "from importlib.metadata import version; print(version('cindra'))"
 ```
 
-The version MUST be 2.0.0+. Any pre-release build of the 2.0.0 line satisfies this, because cindra is distributed as a
-pre-release, so treat a version that starts with `2.0.0` as passing. A version from an earlier release line means pip
-resolved a build whose MCP tools predate the documented tool surface, and the fix is to upgrade with the `--pre` flag:
+Apply the floor the Package version requirement section states, so treat any version that starts with `2.0.0` as passing
+and upgrade anything below that line:
 
 ```bash
 pip install --upgrade --pre cindra
 ```
 
 You MUST report a version from a release line below 2.0.0 as a failed diagnostic even when every earlier step passed,
-because the servers start and connect while their tools reject the arguments the other cindra skills send.
+because those servers start and connect while their tools reject the arguments the other cindra skills send.
 
 ### Step 6: Verify the OpenMP runtime on macOS
 
@@ -313,20 +312,20 @@ the MCP tools on the next session, since the current session's MCP subprocesses 
 
 ## Common issues and resolutions
 
-| Symptom                                                   | Cause                                                       | Resolution                                                                                                           |
-|-----------------------------------------------------------|-------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------|
-| `cindra: command not found`                               | Environment not activated                                   | Activate conda/venv, then restart Claude Code                                                                        |
-| `cindra: command not found`                               | cindra not installed                                        | `pip install --pre cindra` in the active environment                                                                 |
-| `cindra-gui: command not found`                           | Environment not activated                                   | Activate conda/venv, then restart Claude Code                                                                        |
-| Import error on `cindra mcp`                              | Missing or incompatible dependency                          | `pip install --force-reinstall --pre cindra`                                                                         |
-| Import error on `cindra-gui mcp`                          | Broken Qt/PySide6 install                                   | `pip install --force-reinstall --pre cindra` (PySide6 is a core dependency, not an extra)                            |
-| Python version mismatch                                   | Wrong environment activated                                 | Activate environment with Python 3.14                                                                                |
-| MCP server starts but tools are missing                   | Outdated cindra version                                     | `pip install --upgrade --pre cindra`                                                                                 |
-| MCP tool rejects a documented phase or argument           | Installed cindra predates the 2.0.0 line                    | `pip install --upgrade --pre cindra`, then restart Claude Code                                                       |
-| MCP server connected but tools fail                       | Not an environment issue                                    | Check tool-specific error messages                                                                                   |
-| cindra-gui tools unavailable                              | Plugin not installed or outdated                            | Reinstall the cindra Claude Code plugin                                                                              |
-| Skills available but MCP tools missing                    | Plugin installed without pip package                        | `pip install --pre cindra` in the active environment                                                                 |
-| `RuntimeError: Unable to locate the OpenMP runtime` on macOS | `libomp.dylib` is not on the loader's search path        | `sudo cindra omp --yes`, after `brew install libomp` when `cindra omp` reports no runtime                            |
+| Symptom                                                      | Cause                                             | Resolution                                                                                |
+|--------------------------------------------------------------|---------------------------------------------------|-------------------------------------------------------------------------------------------|
+| `cindra: command not found`                                  | Environment not activated                         | Activate conda/venv, then restart Claude Code                                             |
+| `cindra: command not found`                                  | cindra not installed                              | `pip install --pre cindra` in the active environment                                      |
+| `cindra-gui: command not found`                              | Environment not activated                         | Activate conda/venv, then restart Claude Code                                             |
+| Import error on `cindra mcp`                                 | Missing or incompatible dependency                | `pip install --force-reinstall --pre cindra`                                              |
+| Import error on `cindra-gui mcp`                             | Broken Qt/PySide6 install                         | `pip install --force-reinstall --pre cindra` (PySide6 is a core dependency, not an extra) |
+| Python version mismatch                                      | Wrong environment activated                       | Activate environment with Python 3.14                                                     |
+| MCP server starts but tools are missing                      | Outdated cindra version                           | `pip install --upgrade --pre cindra`                                                      |
+| MCP tool rejects a documented phase or argument              | Installed cindra predates the 2.0.0 line          | `pip install --upgrade --pre cindra`, then restart Claude Code                            |
+| MCP server connected but tools fail                          | Not an environment issue                          | Check tool-specific error messages                                                        |
+| cindra-gui tools unavailable                                 | Plugin not installed or outdated                  | Reinstall the cindra Claude Code plugin                                                   |
+| Skills available but MCP tools missing                       | Plugin installed without pip package              | `pip install --pre cindra` in the active environment                                      |
+| `RuntimeError: Unable to locate the OpenMP runtime` on macOS | `libomp.dylib` is not on the loader's search path | `sudo cindra omp --yes`, after `brew install libomp` when `cindra omp` reports no runtime |
 
 ---
 
