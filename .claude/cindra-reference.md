@@ -71,24 +71,40 @@
   files, avoiding Qt dependency loading during headless pipeline execution. The `cindra-gui` CLI entry point is separate
   from `cindra` for this reason.
 - **MCP tool organization**: Tools are split across four modules (`acquisition_tools`, `configuration_tools`,
-  `processing_tools`, `results_tools`) imported at module level to trigger `@mcp.tool()` registration. Processing uses a
-  prepare-then-execute model: preparation tools create execution manifests (trackers, per-recording configurations, job
-  lists) without starting computation, and execution tools dispatch jobs with prerequisite validation, per-class
-  resource allocation, and automatic phase sequencing. Three planning tools sit ahead of both halves.
-  `get_pipeline_job_universe_tool` reports every job a configuration declares and which of them can run right now, and
-  `size_pipeline_jobs_tool` reports the cores and memory each of those jobs holds. `check_threading_runtime_tool`
-  reports whether the host carries the numeric threading layer the platform selects, so an agent gates a batch on a flag
-  rather than on parsing a per-job tracker failure. The dispatch half lives in `cindra.orchestration`, so the execute,
-  monitor, and cancel tools hold only argument validation and response shaping. The prepare tools stay in the interface
-  layer, because building a manifest is a user-facing operation over paths and configuration files rather than part of
-  the scheduling model. Every job class carries a measured per-job worker count from `cindra.orchestration`, and the
-  combination class holds the single core its serial merge needs. Concurrency follows three separate terms. The
-  binarization class carries a hard ceiling, because it decodes at the storage's rate rather than the host's core count.
-  A wider batch finishes the same work more slowly while holding cores other work could use, so spare capacity never
-  lifts it. The registration and processing classes carry soft reservations, which hold capacity back for the stages
-  that wait on no other job and are released once nothing else can use the room. Every other class derives its
-  concurrency from the session CPU budget alone. Memory bounds admission rather than concurrency, because the memory one
-  job holds follows the recording it processes rather than the class it belongs to.
+  `processing_tools`, `results_tools`) imported at module level to trigger `@mcp.tool()` registration. Every tool names
+  a filesystem path by the thing that path holds, and the vocabulary is identical across parameter names, response keys,
+  docstrings, and messages. `raw_data_path` and `raw_data_paths` name a recording's raw imaging path, which resolves to
+  the directory holding its TIFF files and its `cindra_parameters.json` file. `output_root` and `output_roots` name the
+  pipeline output root that parents the `cindra` directory, and `root_directory` names a tree searched for recordings.
+  `configuration_path`, `tracker_path`, `output_path`, and `file_path` name one specific file. `output_path` is the
+  configuration file `generate_config_file_tool` writes, and `file_path` is the normalized path it returns. Three names
+  reach the caller only as response keys. `recording_root` is the session-level root `discover_recordings_tool` reports
+  beside each candidate's `raw_data_path` or `output_root`, `cindra_path` is the `cindra` output directory the results
+  tools report, and `dataset_output_path` is one recording's directory inside a multi-recording dataset tree. The
+  configuration fields `file_io.data_path` and `file_io.output_path` and the YAML field
+  `recording_io.recording_directories` keep their own names, because they are on-disk schema rather than tool surface.
+  The "Adding or modifying MCP tools" workflow below holds a new tool and a new response key to this vocabulary. The
+  configuration module also modifies a configuration. `set_config_values_tool` writes the dotted `section.parameter`
+  paths `validate_config_file_tool` reports under `non_default_parameters`, resolving every entry before applying any,
+  so a rejected entry leaves the file byte-identical. It must not run against a configuration whose jobs are executing,
+  because the pipeline reads its configuration from disk at dispatch. Processing uses a prepare-then-execute model:
+  preparation tools create execution manifests (trackers, per-recording configurations, job lists) without starting
+  computation, and execution tools dispatch jobs with prerequisite validation, per-class resource allocation, and
+  automatic phase sequencing. Three planning tools sit ahead of both halves. `get_pipeline_job_universe_tool` reports
+  every job a configuration declares and which of them can run right now, and `size_pipeline_jobs_tool` reports the
+  cores and memory each of those jobs holds. `check_threading_runtime_tool` reports whether the host carries the numeric
+  threading layer the platform selects, so an agent gates a batch on a flag rather than on parsing a per-job tracker
+  failure. The dispatch half lives in `cindra.orchestration`, so the execute, monitor, and cancel tools hold only
+  argument validation and response shaping. The prepare tools stay in the interface layer, because building a manifest
+  is a user-facing operation over paths and configuration files rather than part of the scheduling model. Every job
+  class carries a measured per-job worker count from `cindra.orchestration`, and the combination class holds the single
+  core its serial merge needs. Concurrency follows three separate terms. The binarization class carries a hard ceiling,
+  because it decodes at the storage's rate rather than the host's core count. A wider batch finishes the same work more
+  slowly while holding cores other work could use, so spare capacity never lifts it. The registration and processing
+  classes carry soft reservations, which hold capacity back for the stages that wait on no other job and are released
+  once nothing else can use the room. Every other class derives its concurrency from the session CPU budget alone.
+  Memory bounds admission rather than concurrency, because the memory one job holds follows the recording it processes
+  rather than the class it belongs to.
 - **Process-isolated jobs**: The batch engine dispatches every job into a `ProcessPoolExecutor` sized to the
   concurrency the per-class caps allow, so admission remains the only thing bounding how many jobs run. Isolation buys
   two things a thread pool cannot. A job's BLAS width belongs to its process, so concurrent jobs at different widths no
@@ -303,6 +319,10 @@
    worker process pinned by `limit_worker_threads` and `initialize_worker_threads`
 4. Return JSON-serializable dictionaries. `run_server` and `run_gui_server` enable JSON responses only when they
    start the streamable-http transport
+5. Name every path parameter and every path-valued response key from the shared vocabulary the MCP tool organization
+   entry above defines (`raw_data_path`, `output_root`, `root_directory`, and the file-path names). Do not invent a
+   per-tool word for a concept another tool already names, because one word carrying two of these concepts leaves the
+   caller unable to tell which path a tool wants
 
 **Adding or modifying CLI commands:**
 
@@ -361,4 +381,15 @@
   declared plane count spans. A directory that count no longer covers therefore loses the results measured from the
   frames the conversion replaces, while keeping the binary the conversion does not rewrite. Keep the sweep reading the
   directories off disk, because the declared count comes from a user-editable file
+- The imaging directory is resolved, then scanned flat. `find_data_directory` in `io/context.py` searches the configured
+  data path for `cindra_parameters.json` and returns the directory holding it, and `_collect_tiff_files` in `io/tiff.py`
+  then globs that one directory without descending. A data path may therefore name the imaging directory or any parent
+  of it, while the TIFF files must sit beside the parameters file. Every reader shares that resolution.
+  `resolve_tiff_conversion_plan` calls it before converting, `_read_source_geometry` calls it before sizing, and the
+  prepare tools' raw data gate calls it before writing a manifest. `validate_recording_readiness_tool` calls it before
+  validating, and `_find_acquisition_parameters` calls it before loading the acquisition metadata, so all five reach the
+  same verdict for the same path. Keep any new reader on `find_data_directory` rather than scanning a configured path
+  directly, because a reader that scans it directly rejects a recording the conversion would have processed. Correct a
+  claim of recursive TIFF discovery rather than implementing one, because a caller who assumes recursion hands the batch
+  the wrong directory
 - Use `console.error()` from ataraxis-base-utilities for all error handling (no bare `raise`)

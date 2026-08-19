@@ -192,11 +192,20 @@ def register_recording_plane(configuration: SingleRecordingConfiguration, plane_
         The stage writes the registration offsets, the valid pixel ranges, and the bad-frame mask to disk. Multiple
         planes can be registered in parallel, but each plane may use significant memory and CPU resources.
 
+        A plane that already holds its registration outputs is skipped unless 'repeat_registration' is enabled in the
+        Registration configuration section. A skip runs no registration work, so it reports the plane as skipped and
+        leaves the timing and the worker allocation an earlier run recorded in place.
+
     Args:
         configuration: The single-recording pipeline configuration.
         plane_index: The index of the imaging plane to register.
         workers: The number of parallel workers allocated to this registration job. Must be a positive integer, which
             the caller resolves before invoking this function.
+
+    Raises:
+        ValueError: If output_path is not configured, or if the plane contains fewer frames than the processing
+            minimum.
+        TypeError: If the runtime context loader returns multiple contexts for the target plane.
     """
     context = _resolve_plane_context(
         configuration=configuration,
@@ -209,11 +218,28 @@ def register_recording_plane(configuration: SingleRecordingConfiguration, plane_
     if context is None:
         return
 
+    # Resolves the skip decision from the same registration state and configuration the registration stage itself
+    # reads, before the call reaches the point where it would replace either. The elapsed time of a skip measures no
+    # registration work, so overwriting the recorded timing with it would erase the duration an earlier run measured.
+    registration_skipped = (
+        context.runtime.registration.is_registered(output_path=context.runtime.io.output_path)
+        and not context.configuration.registration.repeat_registration
+    )
+
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
 
     # Runs registration (motion correction) and the registration quality metrics computation.
     register_plane(context=context, workers=workers)
+
+    if registration_skipped:
+        message = (
+            f"Plane {plane_index} registration skipped. The plane is already registered and "
+            f"'registration.repeat_registration' is disabled, so its recorded registration time of "
+            f"{context.runtime.timing.total_registration_time} seconds stands."
+        )
+        console.echo(message=message, level=LogLevel.SUCCESS)
+        return
 
     # Records the allocation the stage actually used.
     context.runtime.timing.total_registration_time = timer.elapsed

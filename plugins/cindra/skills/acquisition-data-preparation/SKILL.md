@@ -54,20 +54,31 @@ introspection.
 | `validate_recording_readiness_tool`         | Final readiness gate: validates parameters, TIFFs, and cross-consistency        |
 
 **Notes:**
-- `generate_acquisition_parameters_file_tool` validates all parameters before writing. MROI fields (`roi_lines`,
-  `roi_x_coordinates`, `roi_y_coordinates`) are required when `roi_number > 1`.
-- `validate_recording_readiness_tool` requires `cindra_parameters.json` to sit directly inside the directory it is
-  given, because it performs no recursive search of its own. It validates the acquisition parameters, discovers and
-  inspects all TIFF files (page count, dimensions, dtype) without loading frame data, and cross-validates TIFF metadata
-  against the acquisition parameters (interleave cycle remainder, frames-per-plane thresholds, MROI roi_lines bounds,
-  dtype compatibility). Use this tool as the final verification step before committing compute resources to pipeline
-  processing.
+- `generate_acquisition_parameters_file_tool` and `validate_recording_readiness_tool` take the raw imaging directory as
+  `raw_data_path`, which `prepare_single_recording_batch_tool` takes under `raw_data_paths` and
+  `discover_recordings_tool` reports per candidate. It is not the `output_root` the status, results, and viewer tools
+  take, and the file itself is `file_path` on the file validator.
+- `generate_acquisition_parameters_file_tool` validates all parameters before writing. When `roi_number > 1` it
+  requires `roi_x_coordinates`, `roi_y_coordinates`, and the region rows as either `roi_line_spans`, one inclusive
+  `[first, last]` pair per region, or `roi_lines` enumerated in full. Prefer spans. Supplying both is rejected.
+- `validate_recording_readiness_tool` accepts the raw imaging directory or any parent of it, because it resolves the
+  directory holding `cindra_parameters.json` beneath the named path the same way the conversion does, and reports that
+  directory as `raw_data_path`. It validates the acquisition parameters, discovers and inspects all TIFF files (page
+  count, dimensions, dtype) without loading frame data, and cross-validates TIFF metadata against the acquisition
+  parameters (interleave cycle remainder, frames-per-plane thresholds, MROI roi_lines bounds and block layout, dtype
+  compatibility). Use it as the final verification step before committing compute resources to processing. Given a path
+  whose subtree holds no `cindra_parameters.json`, it reports that the file is stored neither inside that path nor
+  anywhere beneath it. It then asks for `generate_acquisition_parameters_file_tool` to create one inside the directory
+  that directly holds the raw TIFF files, naming that directory or a parent of it as `raw_data_path`.
 - `generate_acquisition_parameters_file_tool` and `validate_acquisition_parameters_file_tool` do not inspect TIFF files.
   Acquisition metadata must come from the user, experiment logs, microscope software output, or other external sources.
   Use `validate_recording_readiness_tool` for combined parameter + TIFF validation.
 - `validate_acquisition_parameters_file_tool` and `validate_recording_readiness_tool` return a `success` flag that only
   reports whether the tool ran. Gate every downstream step on the separate `valid` field, which is False whenever the
   tool collects any validation errors and can be False while `success` is True.
+- All three tools summarize `roi_lines` rather than echoing it, returning one entry per ROI holding `roi`,
+  `line_count`, `span`, and a `contiguous` flag. That flag is true when the block covers every row of its span exactly
+  once. The `span` a summary reports is the same inclusive pair `roi_line_spans` accepts, so it round-trips.
 
 ---
 
@@ -76,15 +87,18 @@ introspection.
 Each recording must have a single directory containing:
 
 ```text
-recording_directory/
+raw_data_path/
   cindra_parameters.json     <-- acquisition metadata (created by MCP tool or manually)
   file_001.tif               <-- raw TIFF files (any .tif/.tiff extension)
   file_002.tif
   ...
 ```
 
-The `cindra_parameters.json` file may also be in a subdirectory, since the pipeline searches recursively. However, TIFF
-files must be in the same directory as the JSON file (non-recursive TIFF scan).
+That directory is the `raw_data_path` `generate_acquisition_parameters_file_tool` writes into, and the one
+`validate_recording_readiness_tool` and the prepare tools resolve from a path naming it or a parent. The flat TIFF scan
+runs against that resolved directory, so the TIFF files must sit beside `cindra_parameters.json`, and a JSON one level
+down resolves identically on every surface. Only a path whose subtree carries no acceptable source file is rejected,
+reported under `invalid_recordings` with no manifest and no tracker while naming the subdirectory holding the files.
 
 ---
 
@@ -220,17 +234,14 @@ When the user knows their acquisition metadata (frame rate, planes, channels):
 
 When the user has imaging data but is unsure about the acquisition configuration:
 
-1. **Identify the data source**. Ask what microscope and acquisition software was used.
-2. **Locate metadata**. Guide the user to find metadata files or headers specific to their system.
-3. **Extract parameters**. Help the user read metadata using appropriate tools or libraries.
-4. **Confirm with user**. Present the extracted parameters and ask the user to verify.
-5. **Create parameters file**. Use `generate_acquisition_parameters_file_tool` with the confirmed values.
-6. **Verify readiness**. Use `validate_recording_readiness_tool` to confirm the recording is ready for processing.
+1. **Extract the parameters**. Work through Gathering acquisition parameters above, helping the user read the metadata
+   of their system with the appropriate tools or libraries, then present the values and ask the user to verify them.
+2. **Create parameters file**. Use `generate_acquisition_parameters_file_tool` with the confirmed values.
+3. **Verify readiness**. Use `validate_recording_readiness_tool` to confirm the recording is ready for processing.
 
 ### Workflow 3: ScanImage recordings
 
-ScanImage recordings typically save multipage TIFF files with metadata embedded in the TIFF headers. The key metadata to
-extract:
+ScanImage recordings typically save multipage TIFFs with metadata embedded in the TIFF headers. Key metadata to extract:
 
 | ScanImage metadata                | cindra field     |
 |-----------------------------------|------------------|
@@ -250,8 +261,7 @@ For MROI (multi-region) recordings, additional metadata is needed:
 ScanImage typically handles the frame interleaving correctly. Flyback frames (if included in the TIFF) should be
 accounted for using `main.ignored_flyback_planes` in the pipeline configuration.
 
-After creating the parameters file, use `validate_recording_readiness_tool` to verify TIFF dimensions, interleave
-consistency, and MROI roi_lines bounds against actual frame data.
+After creating the parameters file, run `validate_recording_readiness_tool` as the final gate (see Available tools).
 
 ### Workflow 4: Migrating from suite2p
 
@@ -295,7 +305,6 @@ original raw TIFF files. If the user no longer has the raw TIFFs, place it along
 **Step 3: Adopt suite2p binary files.**
 
 Follow Workflow 6 (direct binary file adoption) to place suite2p's `data.bin` files into the cindra output structure.
-Suite2p's binary format is directly compatible with cindra.
 
 **Step 4: Process with cindra.**
 
@@ -307,13 +316,12 @@ input, and all downstream processing is independent.
 
 When the user's data is in a format other than multipage TIFF:
 
-1. **Identify the format**. Ask the user what format their data is in (HDF5, NWB, .nd2, .czi, binary, etc.).
-2. **Find the right reader**. Use web searches to identify the appropriate Python library for reading the format.
-3. **Write a conversion script**. Help the user write a script that reads the source data and writes multipage TIFFs
-   using `tifffile.imwrite`, ensuring the correct frame interleaving order.
-4. **Verify output**. Confirm the converted TIFFs have the expected frame count and dimensions.
-5. **Create parameters file**. Use `generate_acquisition_parameters_file_tool` with the acquisition metadata.
-6. **Verify readiness**. Use `validate_recording_readiness_tool` to confirm TIFF data and parameters are consistent.
+1. **Convert the data**. Ask what format the data holds, then follow Non-TIFF source data above to find the reader
+   library. Help the user write a conversion script that reads the source data and writes multipage TIFFs using
+   `tifffile.imwrite`, ensuring the correct frame interleaving order.
+2. **Verify output**. Confirm the converted TIFFs have the expected frame count and dimensions.
+3. **Create parameters file**. Use `generate_acquisition_parameters_file_tool` with the acquisition metadata.
+4. **Verify readiness**. Use `validate_recording_readiness_tool` to confirm TIFF data and parameters are consistent.
 
 ### Workflow 6: Direct binary file adoption (potentially unsafe)
 
@@ -406,10 +414,8 @@ registered before ROI detection...", so a binarize-then-process dispatch stops a
 ### Frame count leaves a remainder over plane_number * channel_number
 
 **Causes and fixes:**
-- **Incomplete final volume:** The recording was stopped mid-volume. This is not an error and needs no fix. Binarization
-  discards the trailing frames of that incomplete cycle and warns with their count, leaving every plane binary of the
-  recording the same length. Tell the user how many frames a run drops, since those frames hold real signal on the
-  planes they reached.
+- **Incomplete final volume:** The recording was stopped mid-volume. This is not an error and needs no fix. Tell the
+  user how many frames a run drops, since those frames hold real signal on the planes they reached.
 - **Flyback frames included:** Some microscopes include flyback plane frames. Add these to `main.ignored_flyback_planes`
   in the pipeline configuration (the flyback planes are still part of the interleave pattern but are discarded during
   processing).
@@ -424,8 +430,7 @@ Binarization fails with `Unable to determine frame dimensions. Every TIFF file i
 the same shape...`, naming the differing files and both shapes.
 
 **Causes and fixes:**
-- **Anatomical z-stack in the data directory:** the usual cause. Add the file's stem to `file_io.ignored_file_names` and
-  re-run binarization. Do not delete the z-stack.
+- **Anatomical z-stack in the data directory:** the usual cause. Exclude its stem as above, then re-run binarization.
 - **Mixed acquisitions in one directory:** two recordings with different fields of view were written to the same folder.
   Separate them into one directory per recording.
 - **Genuinely ragged recording:** re-check the acquisition, because cindra cannot combine differently shaped frames into
@@ -436,6 +441,21 @@ the same shape...`, naming the differing files and both shapes.
 For MROI recordings, `roi_lines` specifies which rows in the raw TIFF frame belong to each ROI. These indices depend on
 the microscope configuration and are typically available from the acquisition software. Each inner list contains the row
 indices (0-based) for one ROI. The pipeline extracts `frame[:, first_line:last_line+1, :]` for each ROI.
+
+The file always stores those rows in full, but authoring them that way is impractical: a three-region recording
+carries over two thousand indices, and one dropped value still parses. Pass `roi_line_spans` instead, naming each
+region by its inclusive first and last row, as in `[[0, 793], [916, 1683], [1806, 2277]]`. The tool expands the pairs
+on write, so both forms produce identical files. Reversed bounds, a negative first row, an entry that is not two
+integers, and a pair count other than `roi_number` are each rejected by name.
+
+`validate_recording_readiness_tool` cross-checks the blocks. One reaching past the last row of the raw frame is an error
+naming both numbers and the highest valid index, reported only when a TIFF was readable, while consecutive blocks are
+compared with no TIFF required. A block starting at or before the previous block's last line warns of an overlap, and
+one starting more than a line past it warns of a gap naming the unassigned row count. Both usually mean a transcription
+slip, so confirm the values against the acquisition software. Both validators return `roi_lines` as one summary per ROI
+and serve the indices through the optional `roi_line_slice` argument, a `[roi_index, start, stop]` triplet naming a
+half-open range. A malformed triplet, an out-of-range ROI index, bounds outside `0 <= start < stop <= line_count`,
+absent `roi_lines`, or a span past 2000 lines is rejected with `success` False.
 
 ---
 
@@ -459,16 +479,17 @@ You MUST verify data preparation against this checklist before proceeding to pip
 ```text
 Acquisition Data Preparation Compliance:
 - [ ] cindra MCP server is connected (if not, invoke `/cindra-mcp-environment-setup`)
-- [ ] TIFF files present in the data directory (.tif or .tiff extension)
+- [ ] TIFF files present directly beside `cindra_parameters.json` in the imaging directory (.tif or .tiff extension)
 - [ ] Total frame count holds at least one whole plane_number * channel_number cycle, with any remainder the run
       discards reported to the user
-- [ ] `cindra_parameters.json` exists in the data directory (or a subdirectory)
+- [ ] `cindra_parameters.json` exists in that imaging directory, named as `raw_data_path` or resolved beneath it
 - [ ] `validate_acquisition_parameters_file_tool` reports no errors
 - [ ] `frame_rate` represents the volume rate (not per-plane rate)
 - [ ] For MROI data: roi_lines, roi_x_coordinates, roi_y_coordinates are set correctly
+- [ ] For MROI data: every `roi_lines` summary reports `contiguous` true, or the block was sliced and confirmed
 - [ ] Review any warnings from validation (unrecognized fields, unused MROI fields)
 - [ ] `validate_recording_readiness_tool` reports no errors (final readiness gate)
-- [ ] Review readiness warnings (interleave remainder, low frame count, dtype cast, differing frame shapes)
+- [ ] Review readiness warnings (interleave remainder, low frame count, dtype cast, frame shapes, MROI gaps)
 - [ ] Any differing-frame-shape warning names a file already listed in `file_io.ignored_file_names`
 ```
 

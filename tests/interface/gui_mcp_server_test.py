@@ -43,23 +43,45 @@ class TestLaunchViewer:
     @pytest.mark.xdist_group(name="viewer_registry")
     def test_file_path_is_rejected(self, tmp_path: Path) -> None:
         """Verifies that a regular file reports a failure rather than a launch the viewer cannot complete."""
-        recording_file = tmp_path / "combined_metadata.npz"
-        recording_file.write_bytes(b"")
+        output_file = tmp_path / "combined_metadata.npz"
+        output_file.write_bytes(b"")
 
-        result = launch_viewer_tool(viewer_type="roi", recording_path=str(recording_file))
+        result = launch_viewer_tool(viewer_type="roi", output_root=str(output_file))
 
         assert result["success"] is False
-        assert "not a cindra output directory" in result["error"]
+        assert "not a pipeline output root directory" in result["error"]
         assert _viewer_registry == {}
 
     @pytest.mark.xdist_group(name="viewer_registry")
     def test_missing_path_is_rejected(self, tmp_path: Path) -> None:
         """Verifies that an absent path reports its own failure message."""
-        result = launch_viewer_tool(viewer_type="roi", recording_path=str(tmp_path / "absent"))
+        result = launch_viewer_tool(viewer_type="roi", output_root=str(tmp_path / "absent"))
 
         assert result["success"] is False
         assert "Path does not exist" in result["error"]
         assert _viewer_registry == {}
+
+
+class TestListViewers:
+    """Tests the per-viewer entries the listing tool builds from the registry."""
+
+    @pytest.mark.xdist_group(name="viewer_registry")
+    def test_listed_viewer_names_its_output_root(self, tmp_path: Path) -> None:
+        """Verifies that a registered viewer is listed with the pipeline output root it was launched against."""
+        _viewer_registry["viewer_0"] = _ViewerProcess(
+            viewer_id="viewer_0",
+            viewer_type="roi",
+            output_root=str(tmp_path),
+            dataset=None,
+            state_path=str(tmp_path / "viewer_0.json"),
+            process=_StubProcess(alive=True),
+        )
+
+        result = list_viewers_tool()
+
+        assert result["count"] == 1
+        assert result["viewers"][0]["output_root"] == str(tmp_path)
+        assert result["viewers"][0]["alive"] is True
 
 
 class TestViewerRegistryConcurrency:
@@ -73,7 +95,7 @@ class TestViewerRegistryConcurrency:
             _viewer_registry[viewer_id] = _ViewerProcess(
                 viewer_id=viewer_id,
                 viewer_type="roi",
-                recording_path=str(tmp_path),
+                output_root=str(tmp_path),
                 dataset=None,
                 state_path=str(tmp_path / f"{viewer_id}.json"),
                 process=_StubProcess(alive=index % 2 == 0),

@@ -75,14 +75,17 @@ class _VerificationState:
     """The number of checks that passed."""
 
     missing: list[str] = field(default_factory=list)
-    """The list of missing file or key names."""
+    """The list of missing required file or key names."""
+
+    optional_absent: list[str] = field(default_factory=list)
+    """The list of optional file or key names the checked output does not hold."""
 
     warnings: list[str] = field(default_factory=list)
     """The list of warning messages for non-critical issues."""
 
 
 @mcp.tool()
-def verify_single_recording_output_tool(recording_path: str) -> dict[str, object]:
+def verify_single_recording_output_tool(output_root: str) -> dict[str, object]:
     """Verifies completeness of single-recording pipeline output by checking for all expected files and data.
 
     Runs a systematic file inventory against the expected output structure documented in the
@@ -91,23 +94,28 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
     confirm all output was produced before moving to multi-recording processing or analysis.
 
     Args:
-        recording_path: Absolute path to the recording output directory, which is the parent of the cindra/ folder
-            and equals the per-recording 'output_path' returned by the prepare tool when the output root differs
-            from the raw-data root. The cindra/ subdirectory is resolved automatically, falling back to a recursive
-            search for configuration.yaml.
+        output_root: Absolute path to the pipeline output root, which is the parent of the cindra/ folder and equals
+            the per-recording 'output_root' entry the prepare tool returns. The cindra/ subdirectory is resolved
+            automatically, falling back to a recursive search for configuration.yaml.
 
     Returns:
         On success, contains 'complete' flag, 'plane_count', 'two_channels' indicator, total check counts
         ('total_checks', 'passed', 'failed'), 'missing' list of absent required files, and optional 'warnings'. On
-        failure, contains an 'error' message. Both cases include a 'success' flag. A 'success' value of True only
-        means the tool ran. Callers MUST gate downstream steps on the 'complete' field, which is False whenever
-        'missing' is non-empty. Each 'missing' entry is a bare filename for an absent file or 'file[key]' for an
-        absent NPZ key. The 'warnings' list holds non-fatal issues such as a registered-binary path that does not
-        resolve on disk. A recording whose configuration names flyback planes also carries 'flyback_planes' with
-        their indices. Those planes are binarized and never processed, so only their binarization output is required
-        and their registration, projection, and extraction files count as optional.
+        failure, contains an 'error' message. Both cases include a 'success' flag. A 'success' value of True only means
+        the tool ran. Callers MUST gate downstream steps on the 'complete' field, which is False whenever 'missing' is
+        non-empty. The 'failed' count covers the required checks that did not pass, so it always equals the length of
+        'missing'. Each 'missing' entry is a path relative to the cindra/ directory, which is a bare filename for a file
+        that directory holds directly, a 'detection_data/<name>' or 'plane_N/...' path for a nested file, or 'file[key]'
+        for an absent NPZ key. An 'optional_absent' list, present only when it holds entries, carries the same label
+        form for the optional outputs the recording does not hold. It is informational, and 'complete' stays gated on
+        'missing' alone. The three principal-component registration arrays land there whenever the recording holds fewer
+        than 1500 frames, which is the threshold below which the registration metrics are skipped. The 'warnings' list
+        holds non-fatal issues such as a registered-binary path that does not resolve on disk. A recording whose
+        configuration names flyback planes also carries 'flyback_planes' with their indices. Those planes are binarized
+        and never processed, so only their binarization output is required and their registration, projection, and
+        extraction files count as optional.
     """
-    cindra_root, error = _find_cindra_root(recording_path=recording_path)
+    cindra_root, error = _find_cindra_root(output_root=output_root)
     if cindra_root is None:
         return {"success": False, "error": f"Unable to verify output. {error}"}
 
@@ -317,17 +325,19 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
     result: dict[str, object] = {
         "success": True,
         "complete": not state.missing,
-        "recording_path": recording_path,
+        "output_root": output_root,
         "cindra_path": str(cindra_root),
         "plane_count": plane_count,
         "two_channels": two_channels,
         "total_checks": state.total_checks,
         "passed": state.passed,
-        "failed": state.total_checks - state.passed,
+        "failed": len(state.missing),
         "missing": state.missing,
         "warnings": state.warnings,
     }
 
+    if state.optional_absent:
+        result["optional_absent"] = state.optional_absent
     if flyback_planes:
         result["flyback_planes"] = sorted(flyback_planes)
 
@@ -335,7 +345,7 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
 
 
 @mcp.tool()
-def verify_multi_recording_output_tool(recording_path: str, dataset: str) -> dict[str, object]:
+def verify_multi_recording_output_tool(output_root: str, dataset: str) -> dict[str, object]:
     """Verifies completeness of multi-recording pipeline output for a specific dataset.
 
     Checks the entry recording's output directory for all expected multi-recording files, then enumerates all
@@ -344,23 +354,28 @@ def verify_multi_recording_output_tool(recording_path: str, dataset: str) -> dic
     multi-recording processing completes to confirm all output was produced.
 
     Args:
-        recording_path: Absolute path to the recording output directory, which is the parent of the cindra/ folder
-            and equals the per-recording 'output_path' returned by the prepare tool when the output root differs
-            from the raw-data root. The cindra/ subdirectory is resolved automatically.
+        output_root: Absolute path to the pipeline output root, which is the parent of the cindra/ folder and equals
+            the per-recording 'output_root' entry the prepare tool returns. The cindra/ subdirectory is resolved
+            automatically.
         dataset: The multi-recording dataset name to verify. Matched case-sensitively against the on-disk dataset
             directory, which is lowercased at preparation time. Pass the value returned by resolve_dataset_name_tool
             or prepare_multi_recording_batch_tool.
 
     Returns:
-        On success, contains 'complete' flag, 'recording_count', per-recording verification summaries, 'missing'
-        files, and optional 'warnings'. On failure, contains an 'error' message. Both cases include a 'success'
-        flag. A 'success' value of True only means the tool ran. Callers MUST gate downstream steps on the
-        'complete' field, which is False whenever 'missing' is non-empty. Each 'missing' entry is a bare filename
-        for an absent file, 'file[key]' for an absent NPZ key, or a 'recording_i/...' prefixed path for a
-        per-recording entry. The 'warnings' list holds non-fatal issues such as a registered-binary path that does
-        not resolve on disk.
+        On success, contains 'complete' flag, 'recording_count', per-recording verification summaries, check counts
+        ('total_checks', 'passed', 'failed'), 'missing' files, and optional 'warnings'. On failure, contains an
+        'error' message. Both cases include a 'success' flag. A 'success' value of True only means the tool ran.
+        Callers MUST gate downstream steps on the 'complete' field, which is False whenever 'missing' is non-empty.
+        The 'failed' count covers the required checks that did not pass, so it always equals the length of 'missing'.
+        Each 'missing' entry is a bare filename for an absent file, 'file[key]' for an absent NPZ key, or a
+        'recording_i/...' prefixed path for a per-recording entry. Each per-recording summary names that recording's
+        directory inside the dataset tree as 'dataset_output_path'. An 'optional_absent' list, present only when it
+        holds entries, carries the same label form for the optional outputs the dataset does not hold, which are the
+        channel-2 arrays and the colocalization array of each recording. It is informational, and 'complete' stays
+        gated on 'missing' alone. The 'warnings' list holds non-fatal issues such as a registered-binary path that
+        does not resolve on disk.
     """
-    cindra_root, error = _find_cindra_root(recording_path=recording_path)
+    cindra_root, error = _find_cindra_root(output_root=output_root)
     if cindra_root is None:
         return {"success": False, "error": f"Unable to verify output. {error}"}
 
@@ -411,7 +426,7 @@ def verify_multi_recording_output_tool(recording_path: str, dataset: str) -> dic
         recording_result: dict[str, Any] = {
             "index": index,
             "recording_id": recording_id,
-            "output_path": str(output_path),
+            "dataset_output_path": str(output_path),
         }
 
         if not output_path.exists():
@@ -509,23 +524,28 @@ def verify_multi_recording_output_tool(recording_path: str, dataset: str) -> dic
         )
         recording_results.append(recording_result)
 
-    return {
+    result: dict[str, object] = {
         "success": True,
         "complete": not state.missing,
-        "recording_path": recording_path,
+        "output_root": output_root,
         "dataset": dataset,
         "recording_count": recording_count,
         "total_checks": state.total_checks,
         "passed": state.passed,
-        "failed": state.total_checks - state.passed,
+        "failed": len(state.missing),
         "recordings": recording_results,
         "missing": state.missing,
         "warnings": state.warnings,
     }
 
+    if state.optional_absent:
+        result["optional_absent"] = state.optional_absent
+
+    return result
+
 
 @mcp.tool()
-def query_single_recording_metadata_tool(recording_path: str) -> dict[str, object]:
+def query_single_recording_metadata_tool(output_root: str) -> dict[str, object]:
     """Queries metadata and summary information for a cindra-processed single recording.
 
     Returns recording dimensions, frame count, sampling rate, plane count, ROI count, cell classification
@@ -533,10 +553,10 @@ def query_single_recording_metadata_tool(recording_path: str) -> dict[str, objec
     reviewing processed results to understand the recording's properties and processing status.
 
     Args:
-        recording_path: Absolute path to a cindra pipeline output directory.
+        output_root: Absolute path to the pipeline output root, which is the parent of the cindra/ folder.
 
     Returns:
-        Always contains 'success', 'recording_path', 'cindra_path', and 'available_datasets'. When combined metadata
+        Always contains 'success', 'output_root', 'cindra_path', and 'available_datasets'. When combined metadata
         loads, also contains 'plane_count', 'combined_height', 'combined_width', 'sampling_rate', 'tau',
         'plane_heights', 'plane_widths', and 'two_channels'. The 'two_channels' flag derives from the registered
         channel-2 binary paths and means channel 2 is present AND functional, not merely that the recording is
@@ -547,13 +567,13 @@ def query_single_recording_metadata_tool(recording_path: str) -> dict[str, objec
         relevant source files exist, also contains 'roi_count', 'cell_count', 'non_cell_count', 'frame_count', and
         per-plane 'plane_timing' entries. On failure to resolve the recording, contains an 'error' message.
     """
-    cindra_root, error = _find_cindra_root(recording_path=recording_path)
+    cindra_root, error = _find_cindra_root(output_root=output_root)
     if cindra_root is None:
         return {"success": False, "error": f"Unable to query metadata. {error}"}
 
     result: dict[str, Any] = {
         "success": True,
-        "recording_path": recording_path,
+        "output_root": output_root,
         "cindra_path": str(cindra_root),
     }
 
@@ -638,7 +658,7 @@ def query_single_recording_metadata_tool(recording_path: str) -> dict[str, objec
 
 @mcp.tool()
 def query_registration_quality_tool(
-    recording_path: str,
+    output_root: str,
     plane_index: int = 0,
 ) -> dict[str, object]:
     """Queries registration (motion correction) quality metrics for a specific imaging plane.
@@ -648,7 +668,7 @@ def query_registration_quality_tool(
     motion correction was effective and whether registration parameters need adjustment.
 
     Args:
-        recording_path: Absolute path to a cindra pipeline output directory.
+        output_root: Absolute path to the pipeline output root, which is the parent of the cindra/ folder.
         plane_index: The imaging plane index to query (0-based). Registration data is always per-plane.
 
     Returns:
@@ -661,7 +681,7 @@ def query_registration_quality_tool(
         to load. Every other metric is silently omitted on failure. On failure, contains an 'error' message. Both
         cases include a 'success' flag.
     """
-    cindra_root, error = _find_cindra_root(recording_path=recording_path)
+    cindra_root, error = _find_cindra_root(output_root=output_root)
     if cindra_root is None:
         return {"success": False, "error": f"Unable to query registration quality. {error}"}
 
@@ -680,7 +700,7 @@ def query_registration_quality_tool(
 
     result: dict[str, Any] = {
         "success": True,
-        "recording_path": recording_path,
+        "output_root": output_root,
         "plane_index": plane_index,
     }
 
@@ -754,7 +774,7 @@ def query_registration_quality_tool(
 
 @mcp.tool()
 def query_detection_summary_tool(
-    recording_path: str,
+    output_root: str,
     plane_index: int = -1,
 ) -> dict[str, object]:
     """Queries detection image statistics and ROI detection parameters for a recording.
@@ -764,7 +784,7 @@ def query_detection_summary_tool(
     image quality and detection parameter suitability before reviewing individual ROI results.
 
     Args:
-        recording_path: Absolute path to a cindra pipeline output directory.
+        output_root: Absolute path to the pipeline output root, which is the parent of the cindra/ folder.
         plane_index: The plane to query, where -1 selects the combined view (default) and 0 or above selects a
             specific imaging plane.
 
@@ -777,7 +797,7 @@ def query_detection_summary_tool(
         no detected-ROI count. Query query_roi_statistics_tool or query_single_recording_metadata_tool for ROI or
         cell counts. On failure, contains an 'error' message. Both cases include a 'success' flag.
     """
-    cindra_root, error = _find_cindra_root(recording_path=recording_path)
+    cindra_root, error = _find_cindra_root(output_root=output_root)
     if cindra_root is None:
         return {"success": False, "error": f"Unable to query detection summary. {error}"}
 
@@ -794,7 +814,7 @@ def query_detection_summary_tool(
 
     result: dict[str, Any] = {
         "success": True,
-        "recording_path": recording_path,
+        "output_root": output_root,
         "plane_index": plane_index,
         "images": {},
     }
@@ -839,7 +859,7 @@ def query_detection_summary_tool(
 
 @mcp.tool()
 def query_roi_statistics_tool(
-    recording_path: str,
+    output_root: str,
     roi_indices: list[int] | None = None,
     sort_by: str | None = None,
     top_n: int | None = None,
@@ -859,7 +879,7 @@ def query_roi_statistics_tool(
     top N results for efficient quality assessment.
 
     Args:
-        recording_path: Absolute path to a cindra pipeline output directory.
+        output_root: Absolute path to the pipeline output root, which is the parent of the cindra/ folder.
         roi_indices: Specific ROI indices to query. Returns all ROIs when not provided (up to 500). These are 0-based
             positional row indices, not tracking cluster IDs. Indices outside [0, total_rois) are silently dropped, so
             'queried_count' may be smaller than the number requested and 'rois' may be empty with success True.
@@ -885,7 +905,7 @@ def query_roi_statistics_tool(
         'recording_index', 'recording_id', 'has_template_metadata', and optional 'cluster_id' / 'recording_count'
         per ROI. On failure, contains an 'error' message. Both cases include a 'success' flag.
     """
-    cindra_root, error = _find_cindra_root(recording_path=recording_path)
+    cindra_root, error = _find_cindra_root(output_root=output_root)
     if cindra_root is None:
         return {"success": False, "error": f"Unable to query ROI statistics. {error}"}
 
@@ -1006,7 +1026,7 @@ def query_roi_statistics_tool(
 
 @mcp.tool()
 def query_traces_tool(
-    recording_path: str,
+    output_root: str,
     roi_indices: list[int],
     trace_type: str = "corrected",
     downsample_factor: int = 1,
@@ -1025,7 +1045,7 @@ def query_traces_tool(
     output directory within the dataset.
 
     Args:
-        recording_path: Absolute path to a cindra pipeline output directory.
+        output_root: Absolute path to the pipeline output root, which is the parent of the cindra/ folder.
         roi_indices: List of ROI indices to retrieve traces for (maximum 50). These are 0-based positional row
             indices into the per-recording trace arrays of shape (num_rois, frames), not tracking cluster IDs. Indices
             outside [0, num_rois) are silently skipped, so compare the returned 'roi_index' values against what you
@@ -1078,7 +1098,7 @@ def query_traces_tool(
             ),
         }
 
-    cindra_root, error = _find_cindra_root(recording_path=recording_path)
+    cindra_root, error = _find_cindra_root(output_root=output_root)
     if cindra_root is None:
         return {"success": False, "error": f"Unable to query traces. {error}"}
 
@@ -1155,7 +1175,7 @@ def query_traces_tool(
 
 @mcp.tool()
 def query_multi_recording_overview_tool(
-    recording_path: str,
+    output_root: str,
     dataset: str,
 ) -> dict[str, object]:
     """Queries overview information for a multi-recording dataset.
@@ -1166,19 +1186,20 @@ def query_multi_recording_overview_tool(
     across recordings.
 
     Args:
-        recording_path: Absolute path to the recording output directory, which is the parent of the cindra/ folder
-            and equals the per-recording 'output_path' returned by the prepare tool when the output root differs
-            from the raw-data root. The cindra/ subdirectory is resolved automatically.
+        output_root: Absolute path to the pipeline output root, which is the parent of the cindra/ folder and equals
+            the per-recording 'output_root' entry the prepare tool returns. The cindra/ subdirectory is resolved
+            automatically.
         dataset: The multi-recording dataset name to query. Matched case-sensitively against the on-disk dataset
             directory, which is lowercased at preparation time. Pass the value returned by resolve_dataset_name_tool
             or prepare_multi_recording_batch_tool.
 
     Returns:
         On success, contains 'recording_count', 'template_roi_count', and per-recording summaries with mask
-        counts, timing, and completion flags. On failure, contains an 'error' message. Both cases include a
-        'success' flag.
+        counts, timing, and completion flags. Each summary names that recording's directory inside the dataset tree
+        as 'dataset_output_path' and its single-recording cindra output directory as 'cindra_path'. On failure,
+        contains an 'error' message. Both cases include a 'success' flag.
     """
-    cindra_root, error = _find_cindra_root(recording_path=recording_path)
+    cindra_root, error = _find_cindra_root(output_root=output_root)
     if cindra_root is None:
         return {"success": False, "error": f"Unable to query multi-recording overview. {error}"}
 
@@ -1196,7 +1217,7 @@ def query_multi_recording_overview_tool(
 
     for index, output_path_string in enumerate(dataset_output_paths):
         output_path = Path(output_path_string)
-        recording_entry: dict[str, Any] = {"index": index, "output_path": str(output_path)}
+        recording_entry: dict[str, Any] = {"index": index, "dataset_output_path": str(output_path)}
 
         if not output_path.exists():
             recording_entry["exists"] = False
@@ -1208,7 +1229,7 @@ def query_multi_recording_overview_tool(
         if recording_runtime is not None:
             recording_io = recording_runtime.get("io", {})
             recording_entry["recording_id"] = recording_io.get("recording_id", f"unknown_{index}")
-            recording_entry["data_path"] = recording_io.get("data_path")
+            recording_entry["cindra_path"] = recording_io.get("data_path")
 
             selected = recording_io.get("selected_roi_indices", [])
             recording_entry["selected_roi_count"] = len(selected) if selected else 0
@@ -1250,7 +1271,7 @@ def query_multi_recording_overview_tool(
 
     return {
         "success": True,
-        "recording_path": recording_path,
+        "output_root": output_root,
         "dataset": dataset,
         "recording_count": len(recordings),
         "template_roi_count": template_roi_count,
@@ -1260,7 +1281,7 @@ def query_multi_recording_overview_tool(
 
 @mcp.tool()
 def query_multi_recording_registration_quality_tool(
-    recording_path: str,
+    output_root: str,
     dataset: str,
 ) -> dict[str, object]:
     """Queries cross-recording deformation field statistics for all recordings in a multi-recording dataset.
@@ -1271,7 +1292,8 @@ def query_multi_recording_registration_quality_tool(
     to assess cross-day registration quality.
 
     Args:
-        recording_path: Absolute path to a recording directory that belongs to the dataset.
+        output_root: Absolute path to the pipeline output root of a recording that belongs to the dataset, which is
+            the parent of that recording's cindra/ folder.
         dataset: The multi-recording dataset name to query. Matched case-sensitively against the on-disk dataset
             directory, which is lowercased at preparation time. Pass the value returned by resolve_dataset_name_tool
             or prepare_multi_recording_batch_tool.
@@ -1282,7 +1304,7 @@ def query_multi_recording_registration_quality_tool(
         pixels, to its {min, max, mean, std, shape} summary. A 'displacement_magnitude' {min, max, mean, std} summary
         combines both fields. On failure, contains an 'error' message. Both cases include a 'success' flag.
     """
-    cindra_root, error = _find_cindra_root(recording_path=recording_path)
+    cindra_root, error = _find_cindra_root(output_root=output_root)
     if cindra_root is None:
         return {"success": False, "error": f"Unable to query registration quality. {error}"}
 
@@ -1364,7 +1386,7 @@ def query_multi_recording_registration_quality_tool(
 
     return {
         "success": True,
-        "recording_path": recording_path,
+        "output_root": output_root,
         "dataset": dataset,
         "recording_count": len(recordings),
         "recordings": recordings,
@@ -1373,7 +1395,7 @@ def query_multi_recording_registration_quality_tool(
 
 @mcp.tool()
 def query_multi_recording_tracking_summary_tool(
-    recording_path: str,
+    output_root: str,
     dataset: str,
 ) -> dict[str, object]:
     """Queries ROI tracking summary statistics for a multi-recording dataset.
@@ -1384,7 +1406,8 @@ def query_multi_recording_tracking_summary_tool(
     others.
 
     Args:
-        recording_path: Absolute path to a recording directory that belongs to the dataset.
+        output_root: Absolute path to the pipeline output root of a recording that belongs to the dataset, which is
+            the parent of that recording's cindra/ folder.
         dataset: The multi-recording dataset name to query. Matched case-sensitively against the on-disk dataset
             directory, which is lowercased at preparation time. Pass the value returned by resolve_dataset_name_tool
             or prepare_multi_recording_batch_tool.
@@ -1398,7 +1421,7 @@ def query_multi_recording_tracking_summary_tool(
         True and 'templates_shown' reports the cap. A 'channel_2_template_count' appears when channel-2 template
         masks exist. On failure, contains an 'error' message. Both cases include a 'success' flag.
     """
-    cindra_root, error = _find_cindra_root(recording_path=recording_path)
+    cindra_root, error = _find_cindra_root(output_root=output_root)
     if cindra_root is None:
         return {"success": False, "error": f"Unable to query tracking summary. {error}"}
 
@@ -1441,7 +1464,7 @@ def query_multi_recording_tracking_summary_tool(
 
     result: dict[str, Any] = {
         "success": True,
-        "recording_path": recording_path,
+        "output_root": output_root,
         "dataset": dataset,
         "template_count": template_count,
         "recording_count_distribution": distribution,
@@ -1469,7 +1492,7 @@ def query_multi_recording_tracking_summary_tool(
 
 @mcp.tool()
 def query_cross_recording_traces_tool(
-    recording_path: str,
+    output_root: str,
     dataset: str,
     roi_indices: list[int],
     trace_type: str = "corrected",
@@ -1484,7 +1507,8 @@ def query_cross_recording_traces_tool(
     Use this to compare longitudinal activity patterns for the same ROIs across sessions.
 
     Args:
-        recording_path: Absolute path to a recording directory that belongs to the dataset.
+        output_root: Absolute path to the pipeline output root of a recording that belongs to the dataset, which is
+            the parent of that recording's cindra/ folder.
         dataset: The multi-recording dataset name to query. Matched case-sensitively against the on-disk dataset
             directory, which is lowercased at preparation time. Pass the value returned by resolve_dataset_name_tool
             or prepare_multi_recording_batch_tool.
@@ -1535,7 +1559,7 @@ def query_cross_recording_traces_tool(
             ),
         }
 
-    cindra_root, error = _find_cindra_root(recording_path=recording_path)
+    cindra_root, error = _find_cindra_root(output_root=output_root)
     if cindra_root is None:
         return {"success": False, "error": f"Unable to query cross-recording traces. {error}"}
 
@@ -1621,7 +1645,7 @@ def query_cross_recording_traces_tool(
 
     result: dict[str, object] = {
         "success": True,
-        "recording_path": recording_path,
+        "output_root": output_root,
         "dataset": dataset,
         "trace_type": trace_type,
         "downsample_factor": downsample_factor,
@@ -1773,8 +1797,8 @@ def _sort_and_cap_entries(
     return entries, None
 
 
-def _find_cindra_root(recording_path: str) -> tuple[Path | None, str | None]:
-    """Resolves the cindra output directory from a recording path.
+def _find_cindra_root(output_root: str) -> tuple[Path | None, str | None]:
+    """Resolves the cindra output directory from a pipeline output root.
 
     Notes:
         The ataraxis marker discoverer refuses a subtree it cannot read rather than narrowing its result to the
@@ -1783,28 +1807,28 @@ def _find_cindra_root(recording_path: str) -> tuple[Path | None, str | None]:
         whole query.
 
     Args:
-        recording_path: Absolute path to the recording data directory.
+        output_root: Absolute path to the pipeline output root that holds the cindra/ folder.
 
     Returns:
         A tuple of (cindra_root, error_message). If cindra_root is None, error_message describes the issue.
     """
-    recording = Path(recording_path)
-    if not recording.exists():
-        return None, f"Recording directory not found: {recording_path}"
+    output_directory = Path(output_root)
+    if not output_directory.exists():
+        return None, f"Output root directory not found: {output_root}"
 
-    cindra_path = recording / OUTPUT_DIRECTORY_NAME
+    cindra_path = output_directory / OUTPUT_DIRECTORY_NAME
     if cindra_path.exists():
         return cindra_path, None
 
     # Falls back to recursive search for configuration.yaml (handles non-standard nesting).
     try:
-        matches = discover_marker_files(directory=recording, marker_name=SINGLE_RECORDING_CONFIGURATION_FILENAME)
+        matches = discover_marker_files(directory=output_directory, marker_name=SINGLE_RECORDING_CONFIGURATION_FILENAME)
     except OSError:
-        matches = natsorted(recording.rglob(SINGLE_RECORDING_CONFIGURATION_FILENAME))
+        matches = natsorted(output_directory.rglob(SINGLE_RECORDING_CONFIGURATION_FILENAME))
     if matches:
         return matches[0].parent, None
 
-    return None, f"No cindra output directory found under: {recording_path}"
+    return None, f"No cindra output directory found under: {output_root}"
 
 
 def _find_multi_recording_root(cindra_root: Path, dataset: str) -> tuple[Path | None, str | None]:
@@ -1977,7 +2001,8 @@ def _check_file_exists(
         label: The descriptive label for the file being checked.
         path: The expected output file whose presence determines the check outcome.
         state: The mutable verification state to update.
-        required: Determines whether a missing file is reported as a failure.
+        required: Determines whether an absent file is recorded as missing. An absent optional file is recorded as
+            optionally absent.
 
     Returns:
         True if the file exists, False otherwise.
@@ -1988,6 +2013,8 @@ def _check_file_exists(
         state.passed += 1
     elif required:
         state.missing.append(label)
+    else:
+        state.optional_absent.append(label)
     return exists
 
 

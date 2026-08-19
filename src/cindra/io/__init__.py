@@ -20,6 +20,7 @@ from .combine import combine_planes
 from .context import (
     PARAMETERS_FILENAME,
     MAXIMUM_CHANNEL_COUNT,
+    find_data_directory,
     find_cindra_directory,
     resolve_recording_roots,
     extract_unique_components,
@@ -56,6 +57,7 @@ __all__ = [
     "create_registration_marker",
     "extract_unique_components",
     "find_cindra_directory",
+    "find_data_directory",
     "is_dataset_discovered",
     "is_plane_converted",
     "is_plane_processed",

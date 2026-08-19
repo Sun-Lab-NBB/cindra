@@ -14,11 +14,17 @@ for some of them.
 | Key                      | Returned by            | Element shape                               |
 |--------------------------|------------------------|---------------------------------------------|
 | `invalid_configurations` | prepare, full-pipeline | string, the reason with the offending entry |
+| `path_conflicts`         | prepare, full-pipeline | object, five string fields (see below)      |
 | `unsizable_datasets`     | full-pipeline          | object, `{"dataset": str, "error": str}`    |
 | `invalid_jobs`           | execute                | object, `{"job_id": str, "reason": str}`    |
 
 `invalid_jobs` uses `{"job": str, "reason": str}` instead, keyed on the stringified descriptor, when the descriptor is
 missing one of the four required keys and therefore carries no usable `job_id`.
+
+A `path_conflicts` element carries `dataset`, `field`, `stored`, `passed`, and `resolution`, where `field` is always
+`recording_io.recording_directories`, `stored` and `passed` join their output roots with commas, and `resolution` names
+the dataset output directory to remove. It names a dataset the batch still runs rather than one it rejects, because
+preparation never reinitializes an existing tracker and the dataset keeps using the stored recording directories.
 
 Each list is included only when non-empty, so their absence is the success signal and `success: true` alone never is.
 
@@ -37,9 +43,10 @@ job entry additionally carries `executor_id` when the dataset's tracker already 
 Returns `jobs` holding the `name`, `specifier`, and `ready` flag of every declared job, plus `total_jobs`, `ready_jobs`,
 `dataset_name`, `recording_ids`, `pipeline_type`, and a `resolved` flag. The recording identifiers derive from the
 configured directory paths rather than from what those directories hold, so a dataset whose recordings are entirely
-unprocessed still returns `resolved: true` with the full universe and `ready: false` on every job. Only a configuration
-naming no recording directory returns `resolved: false` with an empty `jobs` list, and it does so with `success: true`
-because the resolver reports absence rather than failing.
+unprocessed still returns `resolved: true` with the full universe and `ready: false` on every job. Every configuration
+the tool accepts names at least two recording directories, so `resolved` is true whenever the call succeeds and carries
+no information. A configuration naming none returns `success: false` with the loader's message, so gate on `ready`
+alone.
 
 ### size_pipeline_jobs_tool
 
@@ -102,7 +109,7 @@ touched, so selecting from it dispatches jobs that were already succeeded. Selec
 
 ### clean_processing_output_tool
 
-Returns `cleaned`, `recording_path`, `deleted_files`, `deleted_dirs`, `total_deleted`, `requested_phases`, and
+Returns `cleaned`, `output_root`, `deleted_files`, `deleted_dirs`, `total_deleted`, `requested_phases`, and
 `effective_phases`, plus `errors` when a deletion failed. The `cleaned` flag reports that the tool ran rather than that
 every deletion succeeded, so gate on an empty `errors` list.
 
