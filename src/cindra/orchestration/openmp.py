@@ -51,7 +51,7 @@ _VERIFICATION_TIMEOUT: float = 60.0
 """The seconds to wait for the post-link verification before treating the runtime as unloadable."""
 
 
-class OpenMpStatus(StrEnum):
+class OpenMPStatus(StrEnum):
     """Defines the outcome of a request to make the OpenMP runtime loadable."""
 
     AVAILABLE = "available"
@@ -65,10 +65,10 @@ class OpenMpStatus(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class OpenMpSummary:
+class OpenMPSummary:
     """Summarizes a request to make the OpenMP runtime loadable, whether previewed as a dry run or carried out."""
 
-    status: OpenMpStatus
+    status: OpenMPStatus
     """The outcome of the request."""
     unresolved_reason: str
     """The reason no OpenMP runtime was found, empty for every other outcome."""
@@ -87,11 +87,11 @@ class OpenMpSummary:
         Returns:
             A compact description of the outcome.
         """
-        if self.status == OpenMpStatus.AVAILABLE:
+        if self.status == OpenMPStatus.AVAILABLE:
             return "the OpenMP runtime already loads. Pass --force to link a runtime anyway."
-        if self.status == OpenMpStatus.UNRESOLVED:
+        if self.status == OpenMPStatus.UNRESOLVED:
             return f"no OpenMP runtime to link: {self.unresolved_reason}"
-        if self.status == OpenMpStatus.PREVIEWED:
+        if self.status == OpenMPStatus.PREVIEWED:
             return f"dry run: would link {self.link_path} to {self.runtime_path}. Re-run with --yes to apply."
         if self.loadable:
             return f"linked {self.link_path} to {self.runtime_path}, and the runtime now loads."
@@ -133,7 +133,7 @@ def resolve_openmp_runtime(
     link_path: Path | None = None,
     execute: bool = False,
     force: bool = False,
-) -> OpenMpSummary:
+) -> OpenMPSummary:
     """Links a discovered OpenMP runtime into a directory the dynamic loader searches by default.
 
     The link is what makes Numba's OpenMP threading layer resolve on macOS, because the omppool extension shipped in
@@ -165,7 +165,7 @@ def resolve_openmp_runtime(
         console.error(message=message, error=RuntimeError)
 
     if not force and _openmp_runtime_loadable():
-        return _summarize_request(status=OpenMpStatus.AVAILABLE, loadable=True)
+        return _summarize_request(status=OpenMPStatus.AVAILABLE, loadable=True)
 
     candidates = (runtime_path,) if runtime_path is not None else _resolve_candidate_paths()
     resolved_runtime = _discover_openmp_runtime(candidates=candidates)
@@ -174,12 +174,12 @@ def resolve_openmp_runtime(
             f"none of the examined paths holds a {_OPENMP_LIBRARY_NAME} file. Install the runtime with "
             f"'brew install libomp', or name an existing runtime explicitly."
         )
-        return _summarize_request(status=OpenMpStatus.UNRESOLVED, reason=reason, searched=candidates)
+        return _summarize_request(status=OpenMPStatus.UNRESOLVED, reason=reason, searched=candidates)
 
     resolved_link = link_path if link_path is not None else _LINK_DIRECTORY / _OPENMP_LIBRARY_NAME
     if not execute:
         return _summarize_request(
-            status=OpenMpStatus.PREVIEWED,
+            status=OpenMPStatus.PREVIEWED,
             runtime=resolved_runtime,
             link=resolved_link,
             searched=candidates,
@@ -187,7 +187,7 @@ def resolve_openmp_runtime(
 
     _link_openmp_runtime(runtime_path=resolved_runtime, link_path=resolved_link)
     return _summarize_request(
-        status=OpenMpStatus.LINKED,
+        status=OpenMPStatus.LINKED,
         runtime=resolved_runtime,
         link=resolved_link,
         searched=candidates,
@@ -209,14 +209,14 @@ def _openmp_runtime_loadable() -> bool:
 
 
 def _summarize_request(
-    status: OpenMpStatus,
+    status: OpenMPStatus,
     *,
     reason: str = "",
     runtime: Path | None = None,
     link: Path | None = None,
     searched: tuple[Path, ...] = (),
     loadable: bool = False,
-) -> OpenMpSummary:
+) -> OpenMPSummary:
     """Builds the summary reporting one outcome of an OpenMP runtime request.
 
     Args:
@@ -230,7 +230,7 @@ def _summarize_request(
     Returns:
         The assembled summary.
     """
-    return OpenMpSummary(
+    return OpenMPSummary(
         status=status,
         unresolved_reason=reason,
         runtime_path=runtime,

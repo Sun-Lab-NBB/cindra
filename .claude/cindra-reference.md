@@ -6,10 +6,10 @@
   extraction, and requires the plane to be registered (parallelizable across planes). Phase 4 merges plane-specific
   results into a unified `combined_metadata.npz` dataset, trimming the combined traces to the shortest contributing
   plane and recording `frame_count` and `plane_frame_counts` alongside the geometry. That metadata file doubles as the
-  pipeline-completion marker, so it is written after its payload arrays and published through `atomic_write`.
-  Phase 1 rejects a data directory whose TIFF files do not all hold frames of the same shape, naming
+  pipeline-completion marker, so it is written after its payload arrays and published through `atomic_write`. Phase 1
+  rejects a data directory whose TIFF files do not all hold frames of the same shape, naming
   `file_io.ignored_file_names` as the exclusion mechanism. It also consumes whole plane and channel interleave cycles,
-  so every plane and channel of a recording holds the same frame count, the frames of an incomplete final cycle are
+  so every plane and channel of a recording holds the same frame count. The frames of an incomplete final cycle are
   discarded, and a recording short of one whole cycle is rejected. A conversion clears the results of every plane
   directory the output root holds, including one the recording's current plane count no longer covers. Phases 2 and 3
   carry a `plane_{index}` tracker specifier.
@@ -17,30 +17,30 @@
   performs diffeomorphic demons registration to a common space, clusters ROIs across recordings via spatial overlap, and
   projects template masks back to individual recordings. Phase 2 extracts fluorescence traces and applies OASIS
   deconvolution for tracked ROI templates (parallelizable across recordings).
-- **Self-driven orchestration**: `cindra.orchestration` owns the whole scheduling surface across seven modules that form
-  a one-way dependency chain. `jobs.py` is the leaf above `cindra.layout`: it holds the job name enumerations, the phase
-  model (`SINGLE_RECORDING_PHASES`, `MULTI_RECORDING_PHASES`, `PipelinePhase`, `PrerequisiteScope`), the resolvers that
-  expand it into a recording's job universe (`resolve_single_recording_jobs`, `resolve_multi_recording_jobs`,
-  `resolve_pipeline_jobs`), the prerequisite graph (`resolve_single_recording_prerequisites`,
-  `resolve_multi_recording_prerequisites`, `resolve_prerequisite_job_ids`, `validate_job_prerequisites`), the phase
-  expansion (`resolve_downstream_phases`, `order_phases_by_execution`), and the prerequisite messages.
-  `generate_job_ids` derives the identifier each of those jobs is tracked under, which is what the `job_id` parameter of
-  both pipeline entry points names. The plane specifier, the tracker filenames, and every other on-disk name live one
-  layer below in `cindra.layout`, which `jobs.py` reads from. `allocation.py` adds the measured stage worker
-  defaults, the resource-class model, and the host core and memory budgets. `footprints.py` adds the per-stage memory
-  models, the two estimators that report what one job holds, and the two sizers that pair each estimate with its stage's
-  declared cores as a `JobSizing`, which is the one thing it reads `allocation.py` for. A job is sized from the data
-  that exists when the sizing happens, so a single-recording model reads the acquisition alone while a multi-recording
-  model reads the completed single-recording output it runs on. `discovery.py` pairs the job model with the on-disk
-  inventory to report both the jobs a recording declares and the subset whose inputs exist. `worker.py` holds the
-  per-job entry points every scheduler dispatches, along with the two priming entry points that write the shared
-  bootstrap. `execution.py` holds the batch engine: `PendingJob`, `JobExecutionState`, the admission scan, the two-pass
-  dispatcher, and the manager thread. `pipeline.py` holds the two sequential entry points. `openmp.py` carries no
-  module-level side effect and its check runs only inside those two entry points, so importing the package writes
-  nothing and a console message never precedes the stdio MCP server's JSON-RPC stream. Nothing below `orchestration`
-  imports it, and no module inside it imports `interface`, so the MCP layer is a thin argument-validation and
-  JSON-shaping wrapper over calls into the package. This mirrors the orchestration package of `ataraxis-video-system`
-  and `ataraxis-communication-interface`, and its concurrency model follows `sollertia-forgery`.
+- **Self-driven orchestration**: `cindra.orchestration` owns the whole scheduling surface across eight modules that form
+  a one-way dependency chain. `jobs.py` is the leaf above `cindra.layout`. It holds the job name enumerations and the
+  phase model (`SINGLE_RECORDING_PHASES`, `MULTI_RECORDING_PHASES`, `PipelinePhase`, `PrerequisiteScope`). It also holds
+  the resolvers that expand that model into a recording's job universe (`resolve_single_recording_jobs`,
+  `resolve_multi_recording_jobs`, `resolve_pipeline_jobs`), the prerequisite graph
+  (`resolve_single_recording_prerequisites`, `resolve_multi_recording_prerequisites`, `resolve_prerequisite_job_ids`,
+  `validate_job_prerequisites`), the phase expansion (`resolve_downstream_phases`, `order_phases_by_execution`), and the
+  prerequisite messages. `generate_job_ids` derives the identifier each of those jobs is tracked under, which is what
+  the `job_id` parameter of both pipeline entry points names. The plane specifier, the tracker filenames, and every
+  other on-disk name live one layer below in `cindra.layout`, which `jobs.py` reads from. `allocation.py` adds the
+  measured stage worker defaults, the resource-class model, and the host core and memory budgets. `footprints.py` adds
+  the per-stage memory models, the two estimators that report what one job holds, and the two sizers that pair each
+  estimate with its stage's declared cores as a `JobSizing`, which is the one thing it reads `allocation.py` for. A job
+  is sized from the data that exists when the sizing happens, so a single-recording model reads the acquisition alone
+  while a multi-recording model reads the completed single-recording output it runs on. `discovery.py` pairs the job
+  model with the on-disk inventory to report both the jobs a recording declares and the subset whose inputs exist.
+  `worker.py` holds the per-job entry points every scheduler dispatches, along with the two priming entry points that
+  write the shared bootstrap. `execution.py` holds the batch engine: `PendingJob`, `JobExecutionState`, the admission
+  scan, the two-pass dispatcher, and the manager thread. `pipeline.py` holds the two sequential entry points.
+  `openmp.py` carries no module-level side effect and its check runs only inside those two entry points, so importing
+  the package writes nothing and a console message never precedes the stdio MCP server's JSON-RPC stream. Nothing below
+  `orchestration` imports it, and no module inside it imports `interface`, so the MCP layer is a thin
+  argument-validation and JSON-shaping wrapper over calls into the package. This mirrors the orchestration package of
+  `ataraxis-video-system` and `ataraxis-communication-interface`, and its concurrency model follows `sollertia-forgery`.
 - **Tracker-driven job state**: The transitions of a job the pipeline runs belong to the tracker's `run_job()` context
   manager rather than to a hand-rolled `start_job`/`complete_job`/`fail_job` sequence. The engine's
   `_fail_dispatched_job`, `_fail_pending_jobs`, and the `_pipeline_worker` fallback are the exceptions, because each
@@ -74,18 +74,21 @@
   `processing_tools`, `results_tools`) imported at module level to trigger `@mcp.tool()` registration. Processing uses a
   prepare-then-execute model: preparation tools create execution manifests (trackers, per-recording configurations, job
   lists) without starting computation, and execution tools dispatch jobs with prerequisite validation, per-class
-  resource allocation, and automatic phase sequencing. The dispatch half lives in `cindra.orchestration`, so the
-  execute, monitor, and cancel tools hold only argument validation and response shaping. The prepare tools stay in
-  the interface layer, because building a manifest is a user-facing operation over paths and configuration files
-  rather than part of the scheduling model. Every job class carries a measured per-job worker count from
-  `cindra.orchestration`, and the combination class holds the single core its serial merge needs. Concurrency follows
-  three separate terms. The binarization class carries a hard ceiling, because it decodes at the storage's rate rather
-  than the host's core count and a wider batch finishes the same work more slowly while holding cores other work could
-  use, so spare capacity never lifts it. The registration and processing classes carry soft reservations, which hold
-  capacity back for the stages that wait on no other job and are released once nothing else can use the room. Every
-  other class derives its concurrency from the session CPU budget alone. Memory bounds admission rather than
-  concurrency, because the memory one job holds follows the recording it processes rather than the class it belongs
-  to.
+  resource allocation, and automatic phase sequencing. Three planning tools sit ahead of both halves.
+  `get_pipeline_job_universe_tool` reports every job a configuration declares and which of them can run right now, and
+  `size_pipeline_jobs_tool` reports the cores and memory each of those jobs holds. `check_threading_runtime_tool`
+  reports whether the host carries the numeric threading layer the platform selects, so an agent gates a batch on a flag
+  rather than on parsing a per-job tracker failure. The dispatch half lives in `cindra.orchestration`, so the execute,
+  monitor, and cancel tools hold only argument validation and response shaping. The prepare tools stay in the interface
+  layer, because building a manifest is a user-facing operation over paths and configuration files rather than part of
+  the scheduling model. Every job class carries a measured per-job worker count from `cindra.orchestration`, and the
+  combination class holds the single core its serial merge needs. Concurrency follows three separate terms. The
+  binarization class carries a hard ceiling, because it decodes at the storage's rate rather than the host's core count.
+  A wider batch finishes the same work more slowly while holding cores other work could use, so spare capacity never
+  lifts it. The registration and processing classes carry soft reservations, which hold capacity back for the stages
+  that wait on no other job and are released once nothing else can use the room. Every other class derives its
+  concurrency from the session CPU budget alone. Memory bounds admission rather than concurrency, because the memory one
+  job holds follows the recording it processes rather than the class it belongs to.
 - **Process-isolated jobs**: The batch engine dispatches every job into a `ProcessPoolExecutor` sized to the
   concurrency the per-class caps allow, so admission remains the only thing bounding how many jobs run. Isolation buys
   two things a thread pool cannot. A job's BLAS width belongs to its process, so concurrent jobs at different widths no
@@ -128,7 +131,7 @@
   defines a create and clear helper per phase over a private path resolver, and `cindra.io` exports the registration
   pair alongside `resolve_active_binary_marker`, the one question every reader asks, which returns whichever marker sits
   beside a binary or None. The binarization pair stays inside `cindra.io`, whose `tiff.py` is its only caller.
-  `register_plane` refuses to run while either marker exists, and `binarize_recording` refuses a marked binary, a binary
+  `register_plane` refuses to run while either marker exists. `binarize_recording` refuses a marked binary, a binary
   whose size disagrees with its plane's recorded frame geometry, and a two-channel plane holding no second channel
   binary, naming `repeat_binarization` as the remedy in each message. The conversion drops the registration marker of
   the binary it unlinks, because that marker describes a file that no longer exists. `binarize_recording` resolves the
@@ -150,45 +153,45 @@
 
 ### Core components
 
-| Component                         | File                                            | Purpose                                                 |
-|-----------------------------------|-------------------------------------------------|---------------------------------------------------------|
-| `SingleRecordingConfiguration`    | `dataclasses/single_recording_configuration.py` | User-facing config with nested dataclasses              |
-| `MultiRecordingConfiguration`     | `dataclasses/multi_recording_configuration.py`  | Multi-recording pipeline config                         |
-| `AcquisitionParameters`           | `dataclasses/single_recording_configuration.py` | Per-recording acquisition metadata                      |
-| `RuntimeContext`                  | `dataclasses/runtime_contexts.py`               | Single-recording config + acquisition + runtime data    |
-| `MultiRecordingRuntimeContext`    | `dataclasses/runtime_contexts.py`               | Multi-recording config + runtime data                   |
-| `SingleRecordingRuntimeData`      | `dataclasses/single_recording_data.py`          | IO, registration, detection, extraction, timing data    |
-| `MultiRecordingRuntimeData`       | `dataclasses/multi_recording_data.py`           | IO, registration, tracking, extraction, timing data     |
-| `RecordingArrays`                 | `layout.py`                                     | On-disk contract: names, markers, and path resolvers    |
-| `resolve_recording_planes`        | `io/inventory.py`                               | Read-only recording and dataset on-disk inventory       |
-| `resolve_single_recording_job_universe` | `orchestration/discovery.py`              | Declared job set and the subset whose inputs exist      |
-| `estimate_single_recording_job_memory_mb` | `orchestration/footprints.py`           | Per-stage memory models and the two job estimators      |
-| `size_single_recording_job`       | `orchestration/footprints.py`                   | Pairs a job's declared cores with its memory estimate   |
-| `execute_single_recording_job`    | `orchestration/worker.py`                       | Per-job entry point against a caller-owned tracker      |
-| `prime_recording`                 | `orchestration/worker.py`                       | Writes the shared bootstrap and reports the inventory   |
-| `run_single_recording_pipeline`   | `orchestration/pipeline.py`                     | Execute single-recording four-phase workflow            |
-| `run_multi_recording_pipeline`    | `orchestration/pipeline.py`                     | Execute multi-recording two-phase workflow              |
-| `start_execution_session`         | `orchestration/execution.py`                    | Batch engine: admission, process-pool dispatch, budgets |
-| `register_recording_plane`        | `pipelines/single_recording.py`                 | Per-plane registration stage entry point (phase 2)      |
-| `register_plane`                  | `registration/register.py`                      | Per-plane motion correction (rigid + optional nonrigid) |
-| `resolve_stage_workers`           | `orchestration/allocation.py`                   | Measured per-stage worker defaults and worker resolver  |
-| `SINGLE_RECORDING_PHASES`         | `orchestration/jobs.py`                         | Phase model: job universe and prerequisite graph        |
-| `resolve_openmp_runtime`          | `orchestration/openmp.py`                       | macOS OpenMP runtime discovery, linking, verification   |
-| `DiffeomorphicDemonsRegistration` | `registration/diffeomorphic.py`                 | Cross-day diffeomorphic alignment algorithm             |
-| `Deformation`                     | `registration/deformation.py`                   | Deformation field application and inversion             |
-| `detect_plane_rois`               | `detection/detect.py`                           | ROI detection via sparse detection with PCA denoising   |
-| `track_rois_across_recordings`    | `detection/tracking.py`                         | Multi-recording ROI tracking via spatial clustering     |
-| `compute_roi_statistics`          | `detection/roi_statistics.py`                   | ROI property computation (skewness, compactness, etc.)  |
-| `extract_traces`                  | `extraction/extract.py`                         | Fluorescence extraction and neuropil subtraction        |
-| `apply_oasis_deconvolution`       | `extraction/deconvolve.py`                      | OASIS spike deconvolution                               |
-| `create_masks`                    | `extraction/masks.py`                           | ROI mask creation with lambda weight computation        |
-| `Classifier`                      | `classification/classify.py`                    | Cell vs. artifact classification                        |
-| `BinaryFile`                      | `io/binary.py`                                  | Memory-mapped binary file access for imaging data       |
-| `convert_tiffs_to_binary`         | `io/tiff.py`                                    | TIFF to internal binary format conversion               |
-| `combine_planes`                  | `io/combine.py`                                 | Multi-plane result combination                          |
-| `run_roi_viewer`                  | `gui/app.py`                                    | Single-recording ROI inspector GUI                      |
-| `run_tracking_viewer`             | `gui/app.py`                                    | Multi-recording tracking quality GUI                    |
-| `run_registration_viewer`         | `gui/app.py`                                    | Registration quality viewer (binary + PC viewer)        |
+| Component                                 | File                                            | Purpose                                                 |
+|-------------------------------------------|-------------------------------------------------|---------------------------------------------------------|
+| `SingleRecordingConfiguration`            | `dataclasses/single_recording_configuration.py` | User-facing config with nested dataclasses              |
+| `MultiRecordingConfiguration`             | `dataclasses/multi_recording_configuration.py`  | Multi-recording pipeline config                         |
+| `AcquisitionParameters`                   | `dataclasses/single_recording_configuration.py` | Per-recording acquisition metadata                      |
+| `RuntimeContext`                          | `dataclasses/runtime_contexts.py`               | Single-recording config + acquisition + runtime data    |
+| `MultiRecordingRuntimeContext`            | `dataclasses/runtime_contexts.py`               | Multi-recording config + runtime data                   |
+| `SingleRecordingRuntimeData`              | `dataclasses/single_recording_data.py`          | IO, registration, detection, extraction, timing data    |
+| `MultiRecordingRuntimeData`               | `dataclasses/multi_recording_data.py`           | IO, registration, tracking, extraction, timing data     |
+| `RecordingArrays`                         | `layout.py`                                     | On-disk contract: names, markers, and path resolvers    |
+| `resolve_recording_planes`                | `io/inventory.py`                               | Read-only recording and dataset on-disk inventory       |
+| `resolve_single_recording_job_universe`   | `orchestration/discovery.py`                    | Declared job set and the subset whose inputs exist      |
+| `estimate_single_recording_job_memory_mb` | `orchestration/footprints.py`                   | Per-stage memory models and the two job estimators      |
+| `size_single_recording_job`               | `orchestration/footprints.py`                   | Pairs a job's declared cores with its memory estimate   |
+| `execute_single_recording_job`            | `orchestration/worker.py`                       | Per-job entry point against a caller-owned tracker      |
+| `prime_recording`                         | `orchestration/worker.py`                       | Writes the shared bootstrap and reports the inventory   |
+| `run_single_recording_pipeline`           | `orchestration/pipeline.py`                     | Execute single-recording four-phase workflow            |
+| `run_multi_recording_pipeline`            | `orchestration/pipeline.py`                     | Execute multi-recording two-phase workflow              |
+| `start_execution_session`                 | `orchestration/execution.py`                    | Batch engine: admission, process-pool dispatch, budgets |
+| `register_recording_plane`                | `pipelines/single_recording.py`                 | Per-plane registration stage entry point (phase 2)      |
+| `register_plane`                          | `registration/register.py`                      | Per-plane motion correction (rigid + optional nonrigid) |
+| `resolve_stage_workers`                   | `orchestration/allocation.py`                   | Measured per-stage worker defaults and worker resolver  |
+| `SINGLE_RECORDING_PHASES`                 | `orchestration/jobs.py`                         | Phase model: job universe and prerequisite graph        |
+| `resolve_openmp_runtime`                  | `orchestration/openmp.py`                       | macOS OpenMP runtime discovery, linking, verification   |
+| `DiffeomorphicDemonsRegistration`         | `registration/diffeomorphic.py`                 | Cross-day diffeomorphic alignment algorithm             |
+| `Deformation`                             | `registration/deformation.py`                   | Deformation field application and inversion             |
+| `detect_plane_rois`                       | `detection/detect.py`                           | ROI detection via sparse detection with PCA denoising   |
+| `track_rois_across_recordings`            | `detection/tracking.py`                         | Multi-recording ROI tracking via spatial clustering     |
+| `compute_roi_statistics`                  | `detection/roi_statistics.py`                   | ROI property computation (skewness, compactness, etc.)  |
+| `extract_traces`                          | `extraction/extract.py`                         | Fluorescence extraction and neuropil subtraction        |
+| `apply_oasis_deconvolution`               | `extraction/deconvolve.py`                      | OASIS spike deconvolution                               |
+| `create_masks`                            | `extraction/masks.py`                           | ROI mask creation with lambda weight computation        |
+| `Classifier`                              | `classification/classify.py`                    | Cell vs. artifact classification                        |
+| `BinaryFile`                              | `io/binary.py`                                  | Memory-mapped binary file access for imaging data       |
+| `convert_tiffs_to_binary`                 | `io/tiff.py`                                    | TIFF to internal binary format conversion               |
+| `combine_planes`                          | `io/combine.py`                                 | Multi-plane result combination                          |
+| `run_roi_viewer`                          | `gui/app.py`                                    | ROI inspector GUI, single or multi-recording            |
+| `run_tracking_viewer`                     | `gui/app.py`                                    | Multi-recording tracking quality GUI                    |
+| `run_registration_viewer`                 | `gui/app.py`                                    | Registration quality viewer (binary + PC viewer)        |
 
 ### CLI entry points
 
@@ -256,11 +259,10 @@
 6. Maintain the job naming convention (`SingleRecordingJobNames`, `MultiRecordingJobNames`) for tracker consistency
 7. Keep the dependency chain one-way. `jobs.py` imports `cindra.layout` alone, `allocation.py` and `discovery.py` import
    `jobs`, `footprints.py` imports `jobs` and `allocation`, `worker.py` imports `jobs` and `allocation`, `pipeline.py`
-   imports `worker` and `jobs`, `execution.py` imports `pipeline`, `jobs`, and `allocation`, and no orchestration module
-   imports `interface`.
-   `openmp.py` carries no module-level side effect and its check runs only inside the two sequential entry points,
-   so importing the package writes nothing and a console message never precedes the stdio MCP server's JSON-RPC
-   stream
+   imports `worker`, `jobs`, and `openmp`, `execution.py` imports `pipeline`, `jobs`, and `allocation`, and no
+   orchestration module imports `interface`. `openmp.py` carries no module-level side effect and its check runs only
+   inside the two sequential entry points, so importing the package writes nothing and a console message never precedes
+   the stdio MCP server's JSON-RPC stream
 
 **Modifying registration:**
 
@@ -333,13 +335,13 @@
   JSON-RPC stream before any CLI code can silence the console
 - The `# type: ignore[import-untyped]` comments on the scikit-learn, threadpoolctl, and PyQtGraph imports are
   expected (Numba is excluded via the `pyproject.toml` mypy override, and the tifffile and yaml imports carry no such
-  comment, because both ship types)
+  comment, because tifffile ships a py.typed marker and yaml checks against the `types-pyyaml` stub)
 - The `# pragma: no cover` annotations on `@njit` function bodies are intentional
 - The multiscale diffeomorphic registration crosses the boundary between original-image pixels and the working
   resolution of a pyramid level in three places, and it converts units at two of them. `ScaleSpacePyramid` scales
   every smoothing sigma by the level's entry in `_level_downsample_factors`. `_scale_grid_sampling` converts the
   knot spacing into working-resolution pixels, while `_regularize_deformation` keeps the injectivity factor on the
-  original-pixel spacing, because that factor divides by `scale`, which is an original-pixel quantity.
+  original-pixel spacing, because that factor divides `scale` by that spacing and both are original-pixel quantities.
   `Deformation.resize_field` leaves displacement magnitudes unscaled, which discounts each coarse level by its
   resolution ratio and weights it below the finer levels that follow it. That third choice is deliberate, and the
   method's `Notes` block records its reasoning. Do not report it as a unit-conversion defect, as an inconsistency

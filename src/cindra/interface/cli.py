@@ -1,7 +1,8 @@
 """Provides the terminal-based interface for running all processing pipelines supported by the library."""
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 from pathlib import Path
+from functools import wraps
 
 import click
 from natsort import natsorted
@@ -10,14 +11,47 @@ from ataraxis_base_utilities import LogLevel, console
 from .mcp_server import run_server
 from ..dataclasses import PipelineType, MultiRecordingConfiguration, SingleRecordingConfiguration, detect_pipeline_type
 from ..orchestration import (
-    OpenMpStatus,
+    OpenMPStatus,
     resolve_openmp_runtime,
     run_multi_recording_pipeline,
     run_single_recording_pipeline,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
 """The Click context settings that ensure displayed help messages are formatted according to the cindra standard."""
+
+
+# Defined above the commands because a decorator is resolved where it is applied rather than where the module ends.
+def report_command_failure[**P](command: Callable[P, None]) -> Callable[P, None]:
+    """Reports the failure of a command through the console instead of an interpreter traceback.
+
+    Notes:
+        A traceback buries the message under a stack the user of a command line tool cannot act on.
+
+        A Click exception passes through, so the usage errors a command body raises keep the usage banner and the
+        exit status Click gives its own parameter validation. A caller therefore reads one exit status for every
+        malformed invocation, whether Click or a command body detected it.
+
+    Args:
+        command: The command function to wrap.
+
+    Returns:
+        The wrapped command, which reports any other exception its body raises and returns normally.
+    """
+
+    @wraps(command)
+    def report(*args: P.args, **kwargs: P.kwargs) -> None:
+        try:
+            command(*args, **kwargs)
+        except click.ClickException:
+            raise
+        except Exception as error:
+            console.echo(message=str(error), level=LogLevel.ERROR)
+
+    return report
 
 
 @click.group("cindra", context_settings=CONTEXT_SETTINGS)
@@ -34,6 +68,7 @@ def cindra_cli() -> None:
     show_default=True,
     help="The transport protocol to use for MCP communication.",
 )
+@report_command_failure
 def cindra_mcp(transport: Literal["stdio", "sse", "streamable-http"]) -> None:
     """Starts the Model Context Protocol (MCP) server for agentic neural imaging data processing.
 
@@ -84,6 +119,7 @@ def cindra_mcp(transport: Literal["stdio", "sse", "streamable-http"]) -> None:
         "changes nothing."
     ),
 )
+@report_command_failure
 def cindra_omp(source: Path | None, target: Path | None, *, force: bool, yes: bool) -> None:
     """Links the OpenMP runtime that the Numba threading layer loads on macOS into a directory the loader searches.
 
@@ -104,7 +140,7 @@ def cindra_omp(source: Path | None, target: Path | None, *, force: bool, yes: bo
         console.echo(message=f"runtime:  {summary.runtime_path}", raw=True)
         console.echo(message=f"link:     {summary.link_path}", raw=True)
     console.echo(message=summary.describe())
-    if summary.status == OpenMpStatus.UNRESOLVED:
+    if summary.status == OpenMPStatus.UNRESOLVED:
         raise SystemExit(1)
 
 
@@ -131,6 +167,7 @@ def cindra_omp(source: Path | None, target: Path | None, *, force: bool, yes: bo
     default=None,
     help="The name to use for the generated configuration file. Defaults to 'cindra_sd_conf' or 'cindra_md_conf'.",
 )
+@report_command_failure
 def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     """Generates the configuration file for the specified processing pipeline.
 
@@ -145,7 +182,7 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
             f"Unable to generate the pipeline configuration file. The configuration file name must carry at least one "
             f"non-whitespace character, but got {resolved_name!r}."
         )
-        console.error(message=message, error=ValueError)
+        console.error(message=message, error=click.UsageError)
 
     # Appends the extension the pipeline loader requires, keeping every component of the supplied name. Path
     # 'with_suffix' would instead replace the component that follows the name's last dot.
@@ -393,6 +430,7 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
         "file."
     ),
 )
+@report_command_failure
 def cindra_run(
     input_path: Path,
     binarize_workers: int | None,
@@ -436,7 +474,7 @@ def cindra_run(
                 "Unable to run the single-recording pipeline. The output_path must be configured either in the "
                 "configuration file or via the --output-path flag, but it is currently None."
             )
-            console.error(message=message, error=ValueError)
+            console.error(message=message, error=click.UsageError)
         configuration.save(file_path=input_path)
 
         run_single_recording_pipeline(

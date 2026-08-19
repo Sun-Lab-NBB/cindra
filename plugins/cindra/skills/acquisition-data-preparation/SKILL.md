@@ -56,11 +56,12 @@ introspection.
 **Notes:**
 - `generate_acquisition_parameters_file_tool` validates all parameters before writing. MROI fields (`roi_lines`,
   `roi_x_coordinates`, `roi_y_coordinates`) are required when `roi_number > 1`.
-- `validate_recording_readiness_tool` requires `cindra_parameters.json` to be present. It validates the acquisition
-  parameters, discovers and inspects all TIFF files (page count, dimensions, dtype) without loading frame data, and
-  cross-validates TIFF metadata against the acquisition parameters (interleave cycle remainder, frames-per-plane
-  thresholds, MROI roi_lines bounds, dtype compatibility). Use this tool as the final verification step before
-  committing compute resources to pipeline processing.
+- `validate_recording_readiness_tool` requires `cindra_parameters.json` to sit directly inside the directory it is
+  given, because it performs no recursive search of its own. It validates the acquisition parameters, discovers and
+  inspects all TIFF files (page count, dimensions, dtype) without loading frame data, and cross-validates TIFF metadata
+  against the acquisition parameters (interleave cycle remainder, frames-per-plane thresholds, MROI roi_lines bounds,
+  dtype compatibility). Use this tool as the final verification step before committing compute resources to pipeline
+  processing.
 - `generate_acquisition_parameters_file_tool` and `validate_acquisition_parameters_file_tool` do not inspect TIFF files.
   Acquisition metadata must come from the user, experiment logs, microscope software output, or other external sources.
   Use `validate_recording_readiness_tool` for combined parameter + TIFF validation.
@@ -91,10 +92,10 @@ files must be in the same directory as the JSON file (non-recursive TIFF scan).
 
 ### Supported formats
 
-The pipeline reads standard multipage TIFF files (`.tif` or `.tiff` extension). All data is automatically converted to
-int16 for processing. uint16 and int32 data is halved by floor division and then clipped to the int16 range, so int32
-magnitudes that still exceed that range after halving saturate at -32768 or 32767 instead of wrapping. All other data
-types are cast directly to int16 without scaling.
+The pipeline reads standard multipage TIFF files (`.tif`, `.tiff`, `.TIF`, or `.TIFF` extension). All data is
+automatically converted to int16 for processing. uint16 and int32 data is halved by floor division and then clipped to
+the int16 range, so int32 magnitudes that still exceed that range after halving saturate at -32768 or 32767 instead of
+wrapping. All other data types are cast directly to int16 without scaling.
 
 ### Non-TIFF source data
 
@@ -347,7 +348,9 @@ Binarization only skips TIFF conversion when the cindra output bootstrap already
 Configure the pipeline and run `prepare_single_recording_batch_tool` first: it writes
 `recording/cindra/configuration.yaml`, `recording/cindra/acquisition_parameters.yaml`, and each plane's
 `recording/cindra/plane_N/runtime_data.yaml` (whose `registered_binary_path` points at `plane_N/channel_1_data.bin`),
-and creates the `plane_N/` directories. Without this bootstrap, binarization falls through to TIFF conversion, which
+and creates the `plane_N/` directories. Without this bootstrap, binarization aborts before it reaches TIFF conversion,
+naming the missing `runtime_data.yaml` and asking for `prepare_single_recording_batch_tool` to be run first. With the
+bootstrap in place but no binaries at the plane paths, binarization instead falls through to TIFF conversion, which
 fails when no raw TIFFs exist at `data_path`.
 
 **Step 4: Place binary files in the cindra output structure.**
@@ -379,7 +382,7 @@ later stage reads the geometry from this file, so a plane left at 0 fails regist
 **Step 6: Run binarization.**
 
 With the bootstrap (Step 3) and valid binaries (Step 4) in place, run binarization normally. Cindra loads the existing
-plane contexts and skips TIFF conversion when every plane passes three checks: each `registered_binary_path` exists,
+plane contexts and skips TIFF conversion when every plane passes three checks. Each `registered_binary_path` exists,
 neither a `<binary>.binarizing` nor a `<binary>.registering` marker sits beside it, and the binary's size matches the
 frame geometry recorded for its plane in Step 5. A two-channel recording is held to its `channel_2_data.bin` as well. A
 marker, a size mismatch, or an absent second channel binary fails the run with a RuntimeError naming the affected

@@ -23,7 +23,7 @@ demand by `/single-recording-results`.
 | `plane_y_offsets`                   | int32   | (N,)  | Per-plane Y displacement for combined view             |
 | `plane_x_offsets`                   | int32   | (N,)  | Per-plane X displacement for combined view             |
 | `registered_binary_paths`           | str     | (N,)  | Relative paths to channel 1 registered binaries        |
-| `registered_binary_paths_channel_2` | str     | (N,)  | Relative paths to channel 2 registered binaries (2-ch) |
+| `registered_binary_paths_channel_2` | str     | (N,)  | Channel 2 paths, when both channels are functional     |
 
 `frame_count` is the frame count of the shortest plane that contributed traces, which is what the combined traces were
 trimmed to. `plane_frame_counts` holds each plane's own count, which binarization makes identical across the planes of
@@ -42,8 +42,8 @@ float32 dtype, with shape `(height, width)`.
 |---------------------------|-----------------------------------------------------------|
 | `mean_image.npy`          | Mean of the binned frames in the valid range              |
 | `enhanced_mean_image.npy` | High-pass filtered mean for enhanced ROI visibility       |
-| `maximum_projection.npy`  | Maximum intensity projection across all frames            |
-| `correlation_map.npy`     | Pixel-wise correlation map for identifying active regions |
+| `maximum_projection.npy`  | Per-pixel max of the temporally filtered binned movie     |
+| `correlation_map.npy`     | Per-pixel maximum across the detection scale pyramid      |
 
 **Channel 2 (two-channel only, same shape and dtype):**
 
@@ -91,7 +91,7 @@ Saved at both the combined root and per-plane levels. Companion file to `roi_mas
 
 | NPZ key                  | Dtype   | Shape       | Description                                            |
 |--------------------------|---------|-------------|--------------------------------------------------------|
-| `footprints`             | uint16  | (num_rois,) | Spatial scale (hop size) used during detection         |
+| `footprints`             | uint16  | (num_rois,) | Index of the detection scale the ROI was found at      |
 | `compactness`            | float32 | (num_rois,) | Ratio of actual to expected mean radius (1.0=circular) |
 | `solidity`               | float32 | (num_rois,) | Ratio of soma pixels to convex hull area               |
 | `pixel_count`            | uint32  | (num_rois,) | Total pixels in complete ROI                           |
@@ -265,5 +265,5 @@ to None in the YAML.
 
 Extraction trace, classification, and colocalization `.npy` files and all `.npz` archives are saved with
 `allow_pickle=False`. Detection and registration `.npy` files use NumPy save defaults but contain only numeric arrays
-that load safely with `allow_pickle=False`. Arrays support memory-mapped loading via `np.load(path, mmap_mode='r+')` for
+that load safely with `allow_pickle=False`. Arrays support memory-mapped loading via `np.load(path, mmap_mode='r')` for
 efficient access to large datasets.
