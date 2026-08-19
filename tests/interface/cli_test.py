@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import click
 from click.testing import Result, CliRunner
 
-from cindra.interface.cli import RoutedErrorGroup, cindra_cli
+from cindra.interface.cli import cindra_cli, report_command_failure
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -49,59 +49,53 @@ class TestConfigureCommand:
         assert not (tmp_path.parent / f"{tmp_path.name}.yaml").exists()
 
 
-class TestErrorRouting:
-    """Tests the conversion of subcommand errors into single-line terminal messages."""
+class TestErrorReporting:
+    """Tests the reporting of command failures through the console."""
 
-    def test_library_error_becomes_a_single_line_message(self) -> None:
-        """Verifies that an arbitrary library exception is reported as one error line instead of a traceback."""
-        group = RoutedErrorGroup("probe")
+    def test_library_error_is_reported_without_a_traceback(self) -> None:
+        """Verifies that an exception raised by a command body is reported instead of reaching the interpreter."""
 
-        @group.command("fail")
+        @click.command("fail")
+        @report_command_failure
         def _fail() -> None:
             """Raises a library error."""
             message = "The probe failed."
             raise RuntimeError(message)
 
-        result = CliRunner().invoke(cli=group, args=["fail"])
+        result = CliRunner().invoke(cli=_fail, args=[])
 
-        assert result.exit_code == 1
-        assert "Unable to complete the 'fail' command. RuntimeError: The probe failed." in result.output
+        assert result.exit_code == 0
+        assert result.exception is None
         assert "Traceback" not in result.output
 
-    def test_abort_keeps_the_exit_code_click_assigns_it(self) -> None:
-        """Verifies that an abort is re-raised rather than converted, since Click renders it itself."""
-        group = RoutedErrorGroup("probe")
-
-        @group.command("fail")
-        def _fail() -> None:
-            """Raises an abort."""
-            raise click.Abort
-
-        result = CliRunner().invoke(cli=group, args=["fail"])
-
-        assert result.exit_code == 1
-        assert "Aborted!" in result.output
-
-    def test_explicit_exit_code_is_preserved(self) -> None:
-        """Verifies that a subcommand exiting with its own code keeps that code."""
-        group = RoutedErrorGroup("probe")
-
-        @group.command("fail")
-        def _fail() -> None:
-            """Exits with a specific code."""
-            raise SystemExit(3)
-
-        result = CliRunner().invoke(cli=group, args=["fail"])
-
-        assert result.exit_code == 3
-
-    def test_missing_configuration_file_reports_a_message(self, tmp_path: Path) -> None:
+    def test_missing_configuration_file_is_reported(self, tmp_path: Path) -> None:
         """Verifies that a run against an absent configuration file reports a message instead of a traceback."""
         result = CliRunner().invoke(cli=cindra_cli, args=["run", "--input-path", str(tmp_path / "absent.yaml")])
 
-        assert result.exit_code == 1
-        assert "Unable to complete the 'run' command." in result.output
+        assert result.exit_code == 0
+        assert result.exception is None
         assert "Traceback" not in result.output
+
+    def test_usage_error_from_a_body_passes_through(self) -> None:
+        """Verifies that a usage error a command body raises keeps Click's banner and exit status."""
+
+        @click.command("fail")
+        @report_command_failure
+        def _fail() -> None:
+            """Raises a usage error."""
+            message = "The probe rejected its argument."
+            raise click.UsageError(message)
+
+        result = CliRunner().invoke(cli=_fail, args=[])
+
+        assert result.exit_code == 2
+        assert "The probe rejected its argument." in result.output
+
+    def test_malformed_option_still_exits_two(self) -> None:
+        """Verifies that Click parameter validation runs ahead of the wrapped body and keeps its own exit code."""
+        result = CliRunner().invoke(cli=cindra_cli, args=["configure", "--pipeline", "not-a-pipeline"])
+
+        assert result.exit_code == 2
 
 
 def _configure(output_path: Path, name: str | None = None) -> Result:

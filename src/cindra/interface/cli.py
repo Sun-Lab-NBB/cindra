@@ -1,7 +1,8 @@
 """Provides the terminal-based interface for running all processing pipelines supported by the library."""
 
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Literal
 from pathlib import Path
+from functools import wraps
 
 import click
 from natsort import natsorted
@@ -16,41 +17,44 @@ from ..orchestration import (
     run_single_recording_pipeline,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
 """The Click context settings that ensure displayed help messages are formatted according to the cindra standard."""
 
 
-class RoutedErrorGroup(click.Group):
-    """Reports the errors raised by the subcommands of a Click group as single-line terminal messages.
+# Defined above the commands because a decorator is resolved where it is applied rather than where the module ends.
+def report_command_failure[**P](command: Callable[P, None]) -> Callable[P, None]:
+    """Reports the failure of a command through the console instead of an interpreter traceback.
 
-    Click renders a ClickException as one 'Error:' line and suppresses the traceback, while every other exception
-    reaches the interpreter and prints the full stack.
+    Notes:
+        A traceback buries the message under a stack the user of a command line tool cannot act on.
+
+        A Click exception passes through, so the usage errors a command body raises keep the usage banner and the
+        exit status Click gives its own parameter validation. A caller therefore reads one exit status for every
+        malformed invocation, whether Click or a command body detected it.
+
+    Args:
+        command: The command function to wrap.
+
+    Returns:
+        The wrapped command, which reports any other exception its body raises and returns normally.
     """
 
-    def invoke(self, ctx: click.Context) -> Any:
-        """Runs the requested subcommand, converting the errors it raises into Click exceptions.
-
-        Args:
-            ctx: The Click context holding the subcommand to run.
-
-        Returns:
-            The value the invoked subcommand returns.
-        """
+    @wraps(command)
+    def report(*args: P.args, **kwargs: P.kwargs) -> None:
         try:
-            return super().invoke(ctx)
-        except click.ClickException, click.Abort, click.exceptions.Exit:
-            # Click renders each of these itself. Abort and Exit subclass RuntimeError, so they have to be re-raised
-            # ahead of the generic handler below to keep an interrupt and an explicit exit code intact.
+            command(*args, **kwargs)
+        except click.ClickException:
             raise
         except Exception as error:
-            command = ctx.invoked_subcommand if ctx.invoked_subcommand is not None else self.name
-            message = f"Unable to complete the '{command}' command. {type(error).__name__}: {error}"
-            console.error(message=message, error=click.ClickException)
-            # Satisfies ruff RET503. console.error() is NoReturn, so this line never executes.
-            return None
+            console.echo(message=str(error), level=LogLevel.ERROR)
+
+    return report
 
 
-@click.group("cindra", cls=RoutedErrorGroup, context_settings=CONTEXT_SETTINGS)
+@click.group("cindra", context_settings=CONTEXT_SETTINGS)
 def cindra_cli() -> None:
     """Provides the entry-point for all headless command-line interactions with the cindra library."""
 
@@ -64,6 +68,7 @@ def cindra_cli() -> None:
     show_default=True,
     help="The transport protocol to use for MCP communication.",
 )
+@report_command_failure
 def cindra_mcp(transport: Literal["stdio", "sse", "streamable-http"]) -> None:
     """Starts the Model Context Protocol (MCP) server for agentic neural imaging data processing.
 
@@ -114,6 +119,7 @@ def cindra_mcp(transport: Literal["stdio", "sse", "streamable-http"]) -> None:
         "changes nothing."
     ),
 )
+@report_command_failure
 def cindra_omp(source: Path | None, target: Path | None, *, force: bool, yes: bool) -> None:
     """Links the OpenMP runtime that the Numba threading layer loads on macOS into a directory the loader searches.
 
@@ -126,7 +132,7 @@ def cindra_omp(source: Path | None, target: Path | None, *, force: bool, yes: bo
         summary = resolve_openmp_runtime(runtime_path=source, link_path=target, execute=yes, force=force)
     except RuntimeError as error:
         message = f"Unable to resolve the macOS OpenMP runtime. {error}"
-        console.error(message=message, error=click.ClickException)
+        console.error(message=message, error=RuntimeError)
 
     if summary.searched_paths:
         console.echo(message=f"searched: {', '.join(str(path) for path in summary.searched_paths)}", raw=True)
@@ -161,6 +167,7 @@ def cindra_omp(source: Path | None, target: Path | None, *, force: bool, yes: bo
     default=None,
     help="The name to use for the generated configuration file. Defaults to 'cindra_sd_conf' or 'cindra_md_conf'.",
 )
+@report_command_failure
 def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     """Generates the configuration file for the specified processing pipeline.
 
@@ -423,6 +430,7 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
         "file."
     ),
 )
+@report_command_failure
 def cindra_run(
     input_path: Path,
     binarize_workers: int | None,
