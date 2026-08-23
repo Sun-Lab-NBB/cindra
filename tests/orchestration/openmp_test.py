@@ -115,6 +115,47 @@ class TestRuntimeLinking:
         _link_openmp_runtime(runtime_path=runtime_path, link_path=link_path)
         assert link_path.resolve() == runtime_path
 
+    def test_linking_refuses_a_link_path_holding_the_runtime_itself(self, monkeypatch, tmp_path):
+        """Verifies that a runtime already sitting at the link path is left alone rather than replaced by a self-link.
+
+        Unlinking the destination before writing the link would remove the only copy of the runtime and leave a link
+        resolving to nothing, which reports as a successful link while the host loses the runtime entirely.
+        """
+        runtime_path = _make_runtime(directory=tmp_path)
+        monkeypatch.setattr(openmp_module.sys, "platform", "darwin")
+        monkeypatch.setattr(openmp_module, "_openmp_runtime_loadable", lambda: False)
+
+        with pytest.raises(RuntimeError, match="already sits where the link would be written"):
+            resolve_openmp_runtime(runtime_path=runtime_path, link_path=runtime_path, execute=True)
+
+        assert not runtime_path.is_symlink()
+        assert runtime_path.is_file()
+
+    def test_a_refused_link_leaves_the_previous_one_in_place(self, tmp_path, monkeypatch):
+        """Verifies that a link this call cannot write leaves whatever the destination already held.
+
+        The link is published by renaming a temporary onto the destination, so the destination is never empty between
+        the removal of the old link and the arrival of the new one.
+        """
+        runtime_path = _make_runtime(directory=tmp_path)
+        previous_target = tmp_path / "previous.dylib"
+        previous_target.write_bytes(b"the previous runtime")
+        link_path = tmp_path / "lib" / "libomp.dylib"
+        link_path.parent.mkdir()
+        link_path.symlink_to(target=previous_target)
+
+        def _refuse(self, target):
+            raise OSError("the filesystem refused the link")
+
+        monkeypatch.setattr(Path, "symlink_to", _refuse)
+
+        with pytest.raises(RuntimeError, match="Unable to link the OpenMP runtime into"):
+            _link_openmp_runtime(runtime_path=runtime_path, link_path=link_path)
+
+        assert link_path.is_symlink()
+        assert link_path.resolve() == previous_target
+        assert sorted(entry.name for entry in link_path.parent.iterdir()) == ["libomp.dylib"]
+
     def test_linking_errors_when_the_link_cannot_be_written(self, tmp_path, monkeypatch):
         """Verifies that a filesystem refusal is reported as an actionable runtime error."""
         runtime_path = _make_runtime(directory=tmp_path)
@@ -225,12 +266,20 @@ class TestRuntimeResolution:
         assert summary.status == OpenMPStatus.PREVIEWED
 
     def test_resolution_derives_the_link_path_from_the_loader_search_path(self, monkeypatch, tmp_path):
-        """Verifies that an omitted link path resolves to the directory the loader searches by default."""
+        """Verifies that an omitted link path resolves to the directory the loader searches by default.
+
+        The runtime is placed outside that directory, since a runtime already sitting in it needs no link at all and
+        is refused rather than replaced by a link to itself.
+        """
+        link_directory = tmp_path / "loader"
+        link_directory.mkdir()
+        runtime_directory = tmp_path / "keg"
+        runtime_directory.mkdir()
         monkeypatch.setattr("cindra.orchestration.openmp.sys.platform", "darwin")
         monkeypatch.setattr("cindra.orchestration.openmp._openmp_runtime_loadable", lambda: False)
-        monkeypatch.setattr("cindra.orchestration.openmp._LINK_DIRECTORY", tmp_path)
-        summary = resolve_openmp_runtime(runtime_path=_make_runtime(directory=tmp_path))
-        assert summary.link_path == tmp_path / "libomp.dylib"
+        monkeypatch.setattr("cindra.orchestration.openmp._LINK_DIRECTORY", link_directory)
+        summary = resolve_openmp_runtime(runtime_path=_make_runtime(directory=runtime_directory))
+        assert summary.link_path == link_directory / "libomp.dylib"
 
 
 class TestMissingRuntimeVerification:
