@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from functools import lru_cache
 
 import numba
-from numba import prange
 import numpy as np
 
 if TYPE_CHECKING:
@@ -297,8 +297,58 @@ def _compute_basis_coefficients(  # pragma: no cover
     coefficients[3] = factor_cubed / 6.0
 
 
-@numba.njit(cache=True, parallel=True)
-def _sample_grid(  # pragma: no cover
+@lru_cache(maxsize=16)
+def _compute_basis_matrices(
+    extent: int,
+    grid_sampling: float,
+    knot_count: int,
+) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
+    """Builds the B-spline basis matrices that relate one axis of the knot grid to one axis of the image field.
+
+    Notes:
+        Row 'i' of each matrix carries the four basis coefficients of the pixel at index 'i' along the axis, written
+        into the columns of the four knots that pixel reads. The three matrices hold those coefficients raised to the
+        first, second, and third power, which are the three weightings the grid sampling and the least-squares fit
+        consume. The cubic B-spline basis is separable, so a two-dimensional sample or fit factors into one matrix
+        product per axis.
+
+        The matrices depend on the axis geometry alone, so a registration reuses the same few sets across all of its
+        iterations, which is what the cache serves. The returned matrices are read-only, because every caller shares
+        one instance of them.
+
+    Args:
+        extent: The length of the image field axis, in pixels.
+        grid_sampling: The spacing between B-spline control points (knots) in pixels.
+        knot_count: The number of knots spanning the axis.
+
+    Returns:
+        A tuple of three matrices of shape (extent, knot_count), holding the basis coefficients raised to the first,
+        the second, and the third power.
+    """
+    linear: NDArray[np.float32] = np.zeros((extent, knot_count), dtype=np.float32)
+    quadratic: NDArray[np.float32] = np.zeros((extent, knot_count), dtype=np.float32)
+    cubic: NDArray[np.float32] = np.zeros((extent, knot_count), dtype=np.float32)
+
+    coefficients: NDArray[np.float32] = np.zeros((4,), dtype=np.float32)
+    for index in range(extent):
+        # The +1 corrects for boundary padding in the knot grid.
+        grid_position = index / grid_sampling + 1.0
+        knot_index = int(grid_position)
+        _compute_basis_coefficients(interpolation_factor=grid_position - knot_index, coefficients=coefficients)
+
+        for offset in range(4):
+            column = offset + knot_index - 1
+            linear[index, column] += coefficients[offset]
+            quadratic[index, column] += coefficients[offset] ** 2
+            cubic[index, column] += coefficients[offset] ** 3
+
+    for matrix in (linear, quadratic, cubic):
+        matrix.flags.writeable = False
+
+    return linear, quadratic, cubic
+
+
+def _sample_grid(
     result: NDArray[np.float32],
     grid_sampling: float,
     knots: NDArray[np.float32],
@@ -313,47 +363,19 @@ def _sample_grid(  # pragma: no cover
         grid_sampling: The spacing between B-spline control points (knots) in pixels.
         knots: The 2D array of B-spline knot values.
     """
-    # Tabulates the column basis coefficients and knot indices once. They depend on the x coordinate alone, so
-    # recomputing them inside the row loop repeats the same four-term polynomial for every row of the field.
-    width = result.shape[1]
-    column_coefficients = np.empty((width, 4), dtype=np.float32)
-    column_knot_indices = np.empty(width, dtype=np.int32)
-    for x in range(width):
-        # The +1 corrects for boundary padding in the knot grid.
-        grid_position_x = x / grid_sampling + 1
-        knot_index_x = int(grid_position_x)
-        column_knot_indices[x] = knot_index_x
-        _compute_basis_coefficients(
-            interpolation_factor=grid_position_x - knot_index_x, coefficients=column_coefficients[x]
-        )
+    row_basis, _, _ = _compute_basis_matrices(
+        extent=result.shape[0], grid_sampling=grid_sampling, knot_count=knots.shape[0]
+    )
+    column_basis, _, _ = _compute_basis_matrices(
+        extent=result.shape[1], grid_sampling=grid_sampling, knot_count=knots.shape[1]
+    )
 
-    for y in prange(result.shape[0]):
-        # Each thread gets its own coefficient array.
-        coefficients_y = np.empty((4,), dtype=np.float32)
-
-        # The row basis coefficients depend on the y coordinate alone, so they are computed once per row.
-        grid_position_y = y / grid_sampling + 1
-        knot_index_y = int(grid_position_y)
-        _compute_basis_coefficients(interpolation_factor=grid_position_y - knot_index_y, coefficients=coefficients_y)
-
-        for x in range(width):
-            knot_index_x = column_knot_indices[x]
-
-            # Accumulates weighted contributions from the 4x4 knot neighborhood.
-            sampled_value = 0.0
-            knot_y = knot_index_y - 1
-            for offset_y in range(4):
-                knot_x = knot_index_x - 1
-                for offset_x in range(4):
-                    sampled_value += coefficients_y[offset_y] * column_coefficients[x, offset_x] * knots[knot_y, knot_x]
-                    knot_x += 1
-                knot_y += 1
-
-            result[y, x] = sampled_value
+    # Each pixel weights its 4x4 knot neighborhood by the outer product of its two coefficient vectors, and the basis
+    # matrices carry those vectors on their rows, so the whole field resolves as one matrix product per axis.
+    np.matmul(row_basis @ knots, column_basis.T, out=result)
 
 
-@numba.njit(cache=True)
-def _fit_knots_to_field(  # pragma: no cover
+def _fit_knots_to_field(
     grid_sampling: float,
     knots: NDArray[np.float32],
     field: NDArray[np.float32],
@@ -368,45 +390,24 @@ def _fit_knots_to_field(  # pragma: no cover
         knots: The 2D knot array to update in-place.
         field: The 2D deformation field values.
     """
-    coefficients_y = np.empty((4,), dtype=np.float32)
-    coefficients_x = np.empty((4,), dtype=np.float32)
+    _, row_squared, row_cubed = _compute_basis_matrices(
+        extent=field.shape[0], grid_sampling=grid_sampling, knot_count=knots.shape[0]
+    )
+    _, column_squared, column_cubed = _compute_basis_matrices(
+        extent=field.shape[1], grid_sampling=grid_sampling, knot_count=knots.shape[1]
+    )
 
-    numerator = np.zeros_like(knots)
-    denominator = np.zeros_like(knots)
+    # Each pixel is pre-normalized by the sum of the squared basis products over its 4x4 neighborhood. That sum is the
+    # product of the two per-axis sums of squared coefficients, which are the row sums of the squared basis matrices.
+    row_scale = row_squared.sum(axis=1)
+    column_scale = column_squared.sum(axis=1)
+    scaled_field = field / (row_scale[:, np.newaxis] * column_scale[np.newaxis, :])
 
-    for y in range(field.shape[0]):
-        for x in range(field.shape[1]):
-            field_value = field[y, x]
+    # A pixel contributes the cube of its basis product to the numerator and the square of it to the denominator, and
+    # both weights factor across the two axes, so the accumulation over every pixel becomes a pair of matrix products.
+    numerator = row_cubed.T @ scaled_field @ column_cubed
+    denominator = np.outer(row_squared.sum(axis=0), column_squared.sum(axis=0))
 
-            # Computes the reference knot index and interpolation factor for each axis.
-            # The +1 corrects for boundary padding in the knot grid.
-            grid_position_y = y / grid_sampling + 1
-            knot_index_y = int(grid_position_y)
-            interpolation_factor_y = grid_position_y - knot_index_y
-            grid_position_x = x / grid_sampling + 1
-            knot_index_x = int(grid_position_x)
-            interpolation_factor_x = grid_position_x - knot_index_x
-
-            _compute_basis_coefficients(interpolation_factor=interpolation_factor_y, coefficients=coefficients_y)
-            _compute_basis_coefficients(interpolation_factor=interpolation_factor_x, coefficients=coefficients_x)
-
-            coefficient_sum_squared = 0.0
-            for offset_y in range(4):
-                for offset_x in range(4):
-                    coefficient = coefficients_y[offset_y] * coefficients_x[offset_x]
-                    coefficient_sum_squared += coefficient * coefficient
-            normalized_value = field_value / coefficient_sum_squared
-
-            # Accumulates contributions to each knot in the 4x4 neighborhood.
-            for offset_y in range(4):
-                knot_y = offset_y + knot_index_y - 1
-                for offset_x in range(4):
-                    knot_x = offset_x + knot_index_x - 1
-                    basis_coefficient = coefficients_y[offset_y] * coefficients_x[offset_x]
-                    coefficient_squared = basis_coefficient * basis_coefficient
-                    numerator[knot_y, knot_x] += coefficient_squared * (normalized_value * basis_coefficient)
-                    denominator[knot_y, knot_x] += coefficient_squared
-
-    for flat_index in range(knots.size):
-        if denominator.flat[flat_index] > 0.0:
-            knots.flat[flat_index] = numerator.flat[flat_index] / denominator.flat[flat_index]
+    # A knot that no pixel reaches carries a zero denominator and keeps the value it already holds, which is what
+    # leaves the outer padding knots of a grid fitted more than once under the values the previous fit gave them.
+    np.divide(numerator, denominator, out=knots, where=denominator > 0.0)
