@@ -1042,7 +1042,7 @@ class TestExecuteSingleRecordingJob:
         expected_message = (
             f"Unable to resolve the worker count for the '{SingleRecordingJobNames.REGISTER}' processing stage. The "
             f"requested worker count must be a positive integer, -1 to request every available core, or None to "
-            f"accept the measured stage default, but encountered 0."
+            f"accept the stage default, but encountered 0."
         )
         with pytest.raises(ValueError, match=error_format(expected_message)):
             dispatch_single_recording_job(

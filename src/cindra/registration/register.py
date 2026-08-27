@@ -88,9 +88,9 @@ def register_plane(context: RuntimeContext, *, workers: int, device: int | None 
         different worker budgets inside a single process.
 
         The backend configuration selects where both channels are registered. Only the alignment channel resolves
-        offsets against a reference, and the secondary channel receives those same offsets, so the two channels hold
-        the same correction whichever backend applied it. The secondary channel reuses the device state the alignment
-        pass built rather than uploading the reference data a second time.
+        offsets against a reference, and the secondary channel receives those same offsets, so the two channels hold the
+        same correction whichever backend applied it. The secondary channel reuses the device state the alignment pass
+        built.
 
         A '<binary>.registering' marker guards every one of the plane's channel binaries for the whole registration.
         Only the alignment channel is registered against a reference, and the secondary channel receives the offsets
@@ -1001,9 +1001,9 @@ def _register_alignment_channel(
                 start = int(start_index)
                 yield frames_file[start : min(start + batch_size, frame_count)]
 
-        # The two backends differ in where each batch is registered rather than in what the pass does with the
-        # result, so both present the same stream of batch results to the loop below. The GPU backend consumes the
-        # stored width directly and widens it on the device, which halves what each batch moves across the bus.
+        # The two backends differ in where each batch is registered rather than in what the pass does with the result,
+        # so both present the same stream of batch results to the loop below. The GPU backend consumes the stored width
+        # directly and widens it on the device.
         def register_on_host() -> Iterator[BatchRegistrationResult]:
             """Registers every batch of the pass through the host kernels."""
             for batch in read_batches():
@@ -1255,8 +1255,8 @@ def _register_secondary_channel(
                 y_offsets_nonrigid_batch, x_offsets_nonrigid_batch = None, None
 
             if gpu_backend is not None:
-                # The device backend consumes the stored width and narrows the result itself, so it carries the sum
-                # it measured before that narrowing rather than leaving the reduction to this loop.
+                # The backend consumes the stored width and narrows the result itself, so it carries the sum it took
+                # ahead of that narrowing.
                 narrowed_frames, frame_sum = gpu_backend.apply_precomputed_offsets(
                     frames=frames_file[batch_start:batch_end],
                     y_offsets=y_offsets_batch,
@@ -1267,8 +1267,6 @@ def _register_secondary_channel(
                     bidirectional_phase_corrected=bidirectional_phase_corrected,
                     nonrigid_enabled=nonrigid_enabled,
                 )
-                # The batch is read at the binary's storage width, so the backend narrowed the result itself and
-                # carries the sum it measured before that narrowing.
                 mean_image += cast("NDArray[np.float32]", frame_sum)
                 frames_file[batch_start:batch_end] = cast("NDArray[np.int16]", narrowed_frames)
                 continue

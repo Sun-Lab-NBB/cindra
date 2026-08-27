@@ -53,7 +53,13 @@ def resolve_class_allocation(
     max_parallel_jobs: int | None,
 ) -> tuple[int, int]: ...
 def resolve_dispatch_workers(
-    resource_class: ResourceClass, *, free_cores: int, pending_jobs: int, running_jobs: int, concurrency_cap: int
+    resource_class: ResourceClass,
+    *,
+    free_cores: int,
+    pending_jobs: int,
+    running_jobs: int,
+    concurrency_cap: int,
+    competing_classes: int = 1,
 ) -> int: ...
 def resolve_memory_budget_mb() -> int: ...
 def summarize_class_allocation(

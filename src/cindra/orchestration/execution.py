@@ -119,7 +119,7 @@ class PendingJob:
     """The resource class that governs this job's worker count and the concurrency of its queue."""
     resolved_workers: int | None = None
     """The number of parallel workers to allocate to this job, assigned at dispatch time. A value of None makes the
-    pipeline fall back to the measured default for the job's stage."""
+    pipeline fall back to the default for the job's stage."""
     memory_megabytes: int = 0
     """The memory this job holds while it runs, as the caller's sizing pass estimated it.
 
@@ -168,9 +168,9 @@ class JobExecutionState:
     when it is dispatched, rather than the width its class resolved at session start.
 
     Notes:
-        A session accepting the measured class defaults sets this, so a queue that drains gradually widens the jobs it
-        has left to run. A session carrying an explicit worker override leaves it clear, so the width the caller asked
-        for reaches every job of every class unchanged.
+        A session accepting the class defaults sets this, so a queue that drains gradually widens the jobs it has left
+        to run. A session carrying an explicit worker override leaves it clear, so the width the caller asked for
+        reaches every job of every class unchanged.
     """
     cpu_budget: int = 1
     """The total number of CPU cores this session may commit across every resource class at once."""
@@ -232,8 +232,8 @@ def start_execution_session(
 
         Each job takes its worker count when the dispatcher submits it, and that count travels to the pipeline as a
         dispatch argument, so one configuration file serves every job dispatched concurrently against it. A session
-        accepting the measured class defaults widens a job of an elastic class toward that class's ceiling over the
-        cores the host holds free, while a session carrying a worker override gives every job the width it requested.
+        accepting the class defaults widens a job of an elastic class toward that class's ceiling over the cores the
+        host holds free, while a session carrying a worker override gives every job the width it requested.
 
         Each class resolves its own concurrency cap, and the session CPU budget is recorded alongside those caps
         because every class dispatches during the same cycle. The dispatcher holds the sum of the cores committed by
@@ -264,7 +264,7 @@ def start_execution_session(
         if override_value is not None and override_value <= 0 and override_value != ALL_CORES_REQUEST:
             message = (
                 f"Unable to start the execution session. The '{override_name}' override must be a positive integer, "
-                f"-1 to request every available core, or None to accept the measured default, but encountered "
+                f"-1 to request every available core, or None to accept the stage default, but encountered "
                 f"{override_value}."
             )
             console.error(message=message, error=ValueError)
@@ -631,6 +631,7 @@ def _dispatch_pass(state: JobExecutionState, pool: Executor, *, release_reservat
         BrokenProcessPool: If a worker process died outside its job's control, leaving the pool unable to accept work.
     """
     dispatched = False
+    competing_classes = _count_competing_classes(state=state)
 
     for class_name, pending_queue in state.pending_queues.items():
         active_futures = state.active_futures[class_name]
@@ -650,6 +651,7 @@ def _dispatch_pass(state: JobExecutionState, pool: Executor, *, release_reservat
                     pending_jobs=len(pending_queue),
                     running_jobs=len(active_futures),
                     concurrency_cap=capacity,
+                    competing_classes=competing_classes,
                 )
 
             if committed > 0 and committed + workers > state.cpu_budget:
@@ -746,6 +748,30 @@ def _committed_memory(state: JobExecutionState) -> int:
     )
 
 
+def _count_competing_classes(state: JobExecutionState) -> int:
+    """Counts the elastic resource classes that hold queued work.
+
+    Args:
+        state: The current job execution state, accessed under its lock.
+
+    Returns:
+        The number of classes whose jobs widen and whose queue is not empty, with a floor of one.
+    """
+    competing = sum(
+        1
+        for pending_queue in state.pending_queues.values()
+        if pending_queue and _class_is_elastic(resource_class=pending_queue[0].resource_class)
+    )
+    return max(1, competing)
+
+
+def _class_is_elastic(resource_class: ResourceClass) -> bool:
+    """Returns True when the jobs of the target resource class widen over the capacity the host holds free."""
+    return resource_class.maximum_workers_per_job is not None and (
+        resource_class.maximum_workers_per_job > resource_class.workers_per_job
+    )
+
+
 def _committed_cores(state: JobExecutionState) -> int:
     """Sums the CPU cores that the currently running jobs of every resource class hold.
 
@@ -811,7 +837,7 @@ def _pipeline_worker(
         tracker_path: The path to the ProcessingTracker file for this job.
         single_recording: Determines whether to call the single-recording or multi-recording pipeline.
         workers: The number of parallel workers to allocate to this job. A value of None makes the pipeline apply the
-            measured default for the job's stage.
+            default for the job's stage.
     """
     try:
         if single_recording:
