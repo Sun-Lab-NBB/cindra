@@ -1,14 +1,19 @@
 from pathlib import Path
-from dataclasses import dataclass
 
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import NDArray as NDArray
 
 from ..io import (
     BinaryFile as BinaryFile,
     clear_registration_marker as clear_registration_marker,
     create_registration_marker as create_registration_marker,
     resolve_active_binary_marker as resolve_active_binary_marker,
+)
+from .gpu import GpuRegistrationBackend as GpuRegistrationBackend
+from .batch import (
+    ReferenceData as ReferenceData,
+    RegistrationBlocks as RegistrationBlocks,
+    BatchRegistrationResult as BatchRegistrationResult,
 )
 from .rigid import (
     translate_frame as translate_frame,
@@ -34,6 +39,7 @@ from ..detection import compute_registration_blocks as compute_registration_bloc
 from ..dataclasses import (
     IOData as IOData,
     RuntimeContext as RuntimeContext,
+    RegistrationBackend as RegistrationBackend,
 )
 from .bidiphase_correction import (
     compute_bidirectional_phase_offset as compute_bidirectional_phase_offset,
@@ -45,31 +51,8 @@ _BAD_FRAME_FRACTION_THRESHOLD: float
 _MAXIMUM_MEDIAN_FILTER_WINDOW: int
 _OFFSET_MARGIN_FRACTION: float
 _OUTLIER_METRIC_SCALE: int
-type _RegistrationBlocks = tuple[
-    list[NDArray[np.int32]], list[NDArray[np.int32]], tuple[int, int], tuple[int, int], NDArray[np.float32]
-]
 
-@dataclass(frozen=True, slots=True)
-class _BatchRegistrationResult:
-    frames: NDArray[np.float32]
-    y_offsets: NDArray[np.int32]
-    x_offsets: NDArray[np.int32]
-    correlations: NDArray[np.float32]
-    y_offsets_nonrigid: NDArray[np.float32] | None
-    x_offsets_nonrigid: NDArray[np.float32] | None
-    correlations_nonrigid: NDArray[np.float32] | None
-
-@dataclass(frozen=True, slots=True)
-class _ReferenceData:
-    taper_mask: NDArray[np.float32]
-    mean_offset: NDArray[np.float32]
-    reference_kernel: NDArray[np.complex64]
-    taper_mask_nonrigid: NDArray[np.float32] | None
-    mean_offset_nonrigid: NDArray[np.float32] | None
-    reference_kernel_nonrigid: NDArray[np.complex64] | None
-    blocks: _RegistrationBlocks | None
-
-def register_plane(context: RuntimeContext, *, workers: int) -> None: ...
+def register_plane(context: RuntimeContext, *, workers: int, device: int | None = None) -> None: ...
 def _compute_crop(
     x_offsets: NDArray[np.int32],
     y_offsets: NDArray[np.int32],
@@ -94,7 +77,7 @@ def _compute_reference(
     one_photon_enabled: bool,
 ) -> NDArray[np.float32]: ...
 def _register_frames_batch(
-    reference_data: _ReferenceData,
+    reference_data: ReferenceData,
     frames: NDArray[np.float32],
     normalization_minimum: float,
     normalization_maximum: float,
@@ -109,14 +92,14 @@ def _register_frames_batch(
     *,
     one_photon_enabled: bool,
     nonrigid_enabled: bool,
-) -> _BatchRegistrationResult: ...
+) -> BatchRegistrationResult: ...
 def _apply_precomputed_offsets_batch(
     frames: NDArray[np.float32],
     y_offsets: NDArray[np.int32],
     x_offsets: NDArray[np.int32],
     y_offsets_nonrigid: NDArray[np.float32] | None,
     x_offsets_nonrigid: NDArray[np.float32] | None,
-    blocks: _RegistrationBlocks | None,
+    blocks: RegistrationBlocks | None,
     bidirectional_phase_offset: int,
     *,
     bidirectional_phase_corrected: bool,
@@ -124,5 +107,9 @@ def _apply_precomputed_offsets_batch(
 ) -> NDArray[np.float32]: ...
 def _resolve_plane_binary_paths(io_data: IOData) -> tuple[Path, ...]: ...
 def _validate_binaries_are_not_mid_write(io_data: IOData, plane_index: int) -> None: ...
-def _register_alignment_channel(context: RuntimeContext, *, workers: int) -> None: ...
-def _register_secondary_channel(context: RuntimeContext, *, bidirectional_phase_corrected: bool) -> None: ...
+def _register_alignment_channel(
+    context: RuntimeContext, *, workers: int, device: int | None = None
+) -> GpuRegistrationBackend | None: ...
+def _register_secondary_channel(
+    context: RuntimeContext, *, bidirectional_phase_corrected: bool, gpu_backend: GpuRegistrationBackend | None
+) -> None: ...

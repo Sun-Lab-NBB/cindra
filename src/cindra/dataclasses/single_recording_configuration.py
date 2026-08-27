@@ -34,6 +34,16 @@ class BaselineMethod(StrEnum):
     """Uses a low percentile of the trace as a robust constant baseline, ignoring outliers."""
 
 
+class RegistrationBackend(StrEnum):
+    """Defines the supported implementations of the registration algorithm used by the single-recording pipeline."""
+
+    CPU = "cpu"
+    """Runs registration through the Numba-compiled kernels executed on the host processor."""
+
+    GPU = "gpu"
+    """Runs registration through the CuPy kernels executed on a CUDA device."""
+
+
 def detect_pipeline_type(file_path: Path) -> PipelineType:  # noqa: RET503 - console.error is typed NoReturn.
     """Detects the pipeline type stored in the specified configuration YAML file.
 
@@ -255,6 +265,19 @@ class Registration:
     """Determines whether to perform a two-step registration. This process consists of the initial registration (first
     step) followed by refinement (second step) registration. This procedure is helpful when working with low
     signal-to-noise data."""
+
+    backend: RegistrationBackend | str = RegistrationBackend.CPU
+    """The implementation that runs the registration algorithm. See RegistrationBackend enumeration for available
+    options: CPU runs the Numba-compiled kernels on the host processor, and GPU runs the CuPy kernels on a CUDA device,
+    which requires both a CUDA device and the CuPy runtime. The GPU backend is available for the single-recording
+    pipeline only, so the multi-recording pipeline runs on the CPU backend whatever this field holds. Moving a plane
+    that is already registered from one backend to the other requires repeat_registration, because a registered plane
+    is otherwise skipped."""
+
+    gpu_batch_size: int = 0
+    """The number of frames to keep in device memory at the same time when the GPU backend registers them to the
+    reference image. This overrides batch_size for the GPU backend, where the device memory budget bounds the batch
+    instead of the host RAM budget. Setting this to 0 reuses batch_size for the GPU backend as well."""
 
     bad_frame_threshold: float = 1.0
     """The threshold for identifying frames with excessive motion or poor correlation quality. The algorithm computes a

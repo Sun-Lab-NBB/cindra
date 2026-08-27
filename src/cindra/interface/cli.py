@@ -12,6 +12,7 @@ from .mcp_server import run_server
 from ..dataclasses import PipelineType, MultiRecordingConfiguration, SingleRecordingConfiguration, detect_pipeline_type
 from ..orchestration import (
     OpenMPStatus,
+    resolve_gpu_devices,
     resolve_openmp_runtime,
     run_multi_recording_pipeline,
     run_single_recording_pipeline,
@@ -141,6 +142,36 @@ def cindra_omp(source: Path | None, target: Path | None, *, force: bool, yes: bo
         console.echo(message=f"link:     {summary.link_path}", raw=True)
     console.echo(message=summary.describe())
     if summary.status == OpenMPStatus.UNRESOLVED:
+        raise SystemExit(1)
+
+
+@cindra_cli.command("gpu")
+@report_command_failure
+def cindra_gpu() -> None:
+    """Reports the CUDA devices the GPU registration backend runs on, and why it reaches none.
+
+    The GPU backend registers single-recording planes on a CUDA device through the CuPy runtime. This reports every
+    device the host exposes, together with its memory and compute capability, after transforming a small array on the
+    first of them. That transform is what separates a reachable device from an importable module, because CuPy
+    resolves the CUDA math libraries on first use rather than at import. A host that reaches no device reports the
+    reason and the installation that resolves it, and exits with a non-zero status. Running the command on macOS
+    reports that CuPy publishes no wheel for the platform, where registration runs on the CPU backend.
+    """
+    summary = resolve_gpu_devices()
+
+    for device in summary.devices:
+        console.echo(
+            message=(
+                f"device {device.index}: {device.name}, {device.total_memory_mb} MB, "
+                f"compute capability {device.compute_capability}"
+            ),
+            raw=True,
+        )
+
+    console.echo(message=summary.describe())
+    if summary.remedy:
+        console.echo(message=f"remedy:   {summary.remedy}", raw=True)
+    if not summary.available:
         raise SystemExit(1)
 
 
