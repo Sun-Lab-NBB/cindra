@@ -125,7 +125,12 @@ class TestRuntimeLinking:
         monkeypatch.setattr(openmp_module.sys, "platform", "darwin")
         monkeypatch.setattr(openmp_module, "_openmp_runtime_loadable", lambda: False)
 
-        with pytest.raises(RuntimeError, match="already sits where the link would be written"):
+        expected_message = (
+            f"Unable to link the OpenMP runtime at {runtime_path}. The runtime already sits where the link would "
+            f"be written, so linking it would replace the runtime itself with a link pointing at nothing, leaving the "
+            f"host with no runtime at all. The runtime is already on the loader's search path, so no link is needed."
+        )
+        with pytest.raises(RuntimeError, match=error_format(message=expected_message)):
             resolve_openmp_runtime(runtime_path=runtime_path, link_path=runtime_path, execute=True)
 
         assert not runtime_path.is_symlink()
@@ -149,7 +154,12 @@ class TestRuntimeLinking:
 
         monkeypatch.setattr(Path, "symlink_to", _refuse)
 
-        with pytest.raises(RuntimeError, match="Unable to link the OpenMP runtime into"):
+        expected_message = (
+            f"Unable to link the OpenMP runtime into {link_path.parent}. Writing the link requires permission to "
+            f"modify that directory, which usually means running the command through sudo. The loader reported: "
+            f"the filesystem refused the link."
+        )
+        with pytest.raises(RuntimeError, match=error_format(message=expected_message)):
             _link_openmp_runtime(runtime_path=runtime_path, link_path=link_path)
 
         assert link_path.is_symlink()
