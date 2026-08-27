@@ -62,6 +62,7 @@ def dispatch_single_recording_job(
     job_id: str,
     tracker: ProcessingTracker,
     workers: int | None,
+    device: int | None = None,
 ) -> None: ...
 def dispatch_multi_recording_job(
     configuration: MultiRecordingConfiguration,

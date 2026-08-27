@@ -22,6 +22,7 @@ from ataraxis_data_structures import (
     initialize_worker_threads,
 )
 
+from .gpu import resolve_gpu_devices
 from .jobs import (
     PREREQUISITE_FAILURE_MESSAGE,
     UNREACHABLE_PREREQUISITE_MESSAGE,
@@ -32,6 +33,7 @@ from .allocation import (
     ALL_CORES_REQUEST,
     ResourceClass,
     resolve_core_budget,
+    class_requires_device,
     resolve_class_allocation,
     resolve_dispatch_workers,
     resolve_memory_budget_mb,
@@ -120,6 +122,15 @@ class PendingJob:
     resolved_workers: int | None = None
     """The number of parallel workers to allocate to this job, assigned at dispatch time. A value of None makes the
     pipeline fall back to the default for the job's stage."""
+    assigned_device: int | None = None
+    """The zero-based index of the CUDA device this job holds while it runs, taken from the session free list at
+    dispatch time and returned to it when the job leaves the running set.
+
+    Notes:
+        A job of a host-only class carries None for its whole life, and so does a device-backed job of a session that
+        resolved no device. None makes the registration stage select the first device the host exposes, and the
+        pipeline's own device verification refuses that stage when the host exposes none.
+    """
     memory_megabytes: int = 0
     """The memory this job holds while it runs, as the caller's sizing pass estimated it.
 
@@ -176,6 +187,16 @@ class JobExecutionState:
     """The total number of CPU cores this session may commit across every resource class at once."""
     memory_budget_mb: int = 0
     """The total memory this session may commit across every running job at once, in megabytes."""
+    device_budget: int = 0
+    """The number of CUDA devices this session may commit across its device-backed jobs at once."""
+    available_devices: list[int] = field(default_factory=list)
+    """The indices of the CUDA devices no running job holds, from which the dispatcher assigns one to every job of a
+    device-backed class.
+
+    Notes:
+        A session that resolved no device dispatches its device-backed jobs without an assignment, so each one reaches
+        the pipeline's device verification and fails there rather than waiting on a device the host never exposes.
+    """
     lock: Lock = field(default_factory=Lock)
     """The lock guarding every mutation of the job queues."""
     manager_thread: Thread | None = None
@@ -224,6 +245,7 @@ def start_execution_session(
     all_jobs: dict[tuple[str, str], PendingJob],
     workers_per_job: int | None,
     max_parallel_jobs: int | None,
+    gpu_devices: list[int] | None = None,
 ) -> dict[str, object]:
     """Resolves the per-class resource allocation of the queued jobs and starts the execution manager over them.
 
@@ -240,20 +262,27 @@ def start_execution_session(
         the running jobs of every class inside that budget, so the per-class caps cannot oversubscribe the machine
         between them.
 
+        The session also holds the CUDA devices its device-backed jobs run on, one device per running job. A mask
+        narrows that set to the devices the caller names, which leaves the rest of the host's devices to the work
+        running beside this session.
+
     Args:
         all_jobs: All submitted jobs keyed by dispatch key, in the order the manager should consider them.
         workers_per_job: Requested CPU cores per job, -1 for every available core, or None to accept each resource
             class default.
         max_parallel_jobs: Requested maximum concurrent jobs per resource class, -1 to lift the caps, or None to
             accept the derived caps.
+        gpu_devices: The zero-based indices of the CUDA devices the session's device-backed jobs may run on. Use None
+            to accept every device the host exposes.
 
     Returns:
         A dictionary carrying the submitted job total under 'total_jobs', the session core budget under 'cpu_budget',
-        the session memory budget under 'memory_budget_mb', and the per-class worker count, concurrency cap, and job
-        count under 'resource_classes'.
+        the session memory budget under 'memory_budget_mb', the device indices the session holds under 'gpu_devices',
+        and the per-class worker count, concurrency cap, and job count under 'resource_classes'.
 
     Raises:
-        ValueError: If either override is zero or is a negative value other than -1.
+        ValueError: If either override is zero or is a negative value other than -1, or if gpu_devices is empty or
+            names a device the host does not expose.
     """
     # Rejects a non-positive override rather than letting it fall through as a negative core count. None is the only
     # way to ask for a default, so a caller passing 0 or a negative value has confused the two.
@@ -269,6 +298,7 @@ def start_execution_session(
             )
             console.error(message=message, error=ValueError)
 
+    session_devices = _resolve_session_devices(gpu_devices=gpu_devices)
     budget = resolve_core_budget()
     memory_budget = resolve_memory_budget_mb()
 
@@ -308,6 +338,8 @@ def start_execution_session(
         elastic_workers=workers_per_job is None,
         cpu_budget=budget,
         memory_budget_mb=memory_budget,
+        device_budget=len(session_devices),
+        available_devices=list(session_devices),
         lock=Lock(),
     )
 
@@ -322,6 +354,7 @@ def start_execution_session(
         "total_jobs": len(all_jobs),
         "cpu_budget": budget,
         "memory_budget_mb": memory_budget,
+        "gpu_devices": session_devices,
         "resource_classes": summarize_class_allocation(
             class_workers=class_workers,
             class_capacities=class_capacities,
@@ -335,8 +368,9 @@ def cancel_execution_session() -> tuple[int, int]:
 
     Notes:
         Cancellation empties the admission pool and every resource class queue, so the manager terminates once the
-        running set drains. A job already dispatched keeps its worker process, since interrupting it partway would
-        leave its output directory holding a partial result the tracker reports as running.
+        running set drains. A job already dispatched keeps its worker process and the CUDA device it holds, since
+        interrupting it partway would leave its output directory holding a partial result the tracker reports as
+        running.
 
     Returns:
         The number of jobs cleared from the queues and the number of jobs left running, in that order.
@@ -421,6 +455,34 @@ def _job_execution_manager(state: JobExecutionState) -> None:
             timer.delay(delay=_DISPATCH_POLL_MILLISECONDS, allow_sleep=True)
 
 
+def _resolve_session_devices(gpu_devices: list[int] | None) -> list[int]:
+    """Resolves the CUDA devices one execution session runs its device-backed jobs on.
+
+    Args:
+        gpu_devices: The zero-based device indices the caller asks for, or None to accept every device the host
+            exposes.
+
+    Returns:
+        The device indices the session holds, in ascending order, which is empty when the host exposes no device.
+
+    Raises:
+        ValueError: If gpu_devices is empty or names a device the host does not expose.
+    """
+    host_devices = [device.index for device in resolve_gpu_devices().devices]
+    if gpu_devices is None:
+        return host_devices
+
+    unknown = sorted(set(gpu_devices) - set(host_devices))
+    if not gpu_devices or unknown:
+        message = (
+            f"Unable to start the execution session. The 'gpu_devices' mask must name at least one of the CUDA "
+            f"devices the host exposes, but encountered {gpu_devices}. Available device indices: {host_devices}."
+        )
+        console.error(message=message, error=ValueError)
+
+    return sorted(set(gpu_devices))
+
+
 def _clear_owned_session(state: JobExecutionState) -> None:
     """Clears the module-level session reference while it still names the target state.
 
@@ -440,6 +502,9 @@ def _reap_completed_jobs(state: JobExecutionState) -> None:
         host killed and a job the pool never started. The reaper records a failure for such a job only when its tracker
         holds no terminal state, so a worker that raised after succeeding keeps its success.
 
+        The CUDA device a job held returns to the session free list here, whatever outcome that job reached, because
+        this is where a device-backed job leaves the running set that holds its device.
+
     Args:
         state: The current job execution state, accessed under its lock.
     """
@@ -450,6 +515,7 @@ def _reap_completed_jobs(state: JobExecutionState) -> None:
                 continue
 
             reaped_job = state.all_jobs.get(key)
+            _release_device(state=state, job=reaped_job)
             if outcome == _JobOutcomes.ABANDONED and reaped_job is not None:
                 _fail_dispatched_job(job=reaped_job, message=outcome_message)
             active_futures.pop(key, None)
@@ -618,6 +684,9 @@ def _dispatch_pass(state: JobExecutionState, pool: Executor, *, release_reservat
         the whole class capacity, because the second pass hands the same queue the room a reservation held back and
         every job that room admits competes for the same free cores.
 
+        A job of a device-backed class additionally holds one CUDA device for its whole duration, so the pass stops
+        dispatching that class once the session free list empties.
+
     Args:
         state: The current job execution state, accessed under its lock.
         pool: The worker pool the session dispatches its jobs into.
@@ -665,6 +734,13 @@ def _dispatch_pass(state: JobExecutionState, pool: Executor, *, release_reservat
             ):
                 break
 
+            # Takes the device after the budgets have admitted the job, so a job the budgets turn away leaves the
+            # device it would have held to the job dispatched behind it.
+            if class_requires_device(resource_class=pending_job.resource_class) and state.device_budget > 0:
+                if not state.available_devices:
+                    break
+                pending_job.assigned_device = state.available_devices.pop(0)
+
             pending_job.resolved_workers = workers
             future: Future[None] = pool.submit(
                 _pipeline_worker,
@@ -673,12 +749,31 @@ def _dispatch_pass(state: JobExecutionState, pool: Executor, *, release_reservat
                 tracker_path=pending_job.tracker_path,
                 single_recording=pending_job.single_recording,
                 workers=pending_job.resolved_workers,
+                device=pending_job.assigned_device,
             )
             pending_queue.pop(0)
             active_futures[pending_job.dispatch_key] = future
             dispatched = True
 
     return dispatched
+
+
+def _release_device(state: JobExecutionState, job: PendingJob | None) -> None:
+    """Returns the CUDA device one job held to the session free list.
+
+    Notes:
+        The job's own assignment is cleared as the device returns, so a second call for the same job leaves the free
+        list holding one entry for that device rather than two.
+
+    Args:
+        state: The current job execution state, accessed under its lock.
+        job: The job leaving the running set, or None when the session no longer owns the reaped entry.
+    """
+    if job is None or job.assigned_device is None:
+        return
+
+    state.available_devices.append(job.assigned_device)
+    job.assigned_device = None
 
 
 def _create_job_pool(max_workers: int) -> Executor:
@@ -818,6 +913,7 @@ def _pipeline_worker(
     *,
     single_recording: bool = True,
     workers: int | None = None,
+    device: int | None = None,
 ) -> None:
     """Executes a single pipeline job identified by its job ID.
 
@@ -838,6 +934,8 @@ def _pipeline_worker(
         single_recording: Determines whether to call the single-recording or multi-recording pipeline.
         workers: The number of parallel workers to allocate to this job. A value of None makes the pipeline apply the
             default for the job's stage.
+        device: The zero-based index of the CUDA device a registration job runs on. A value of None makes the
+            registration stage select the first device the host exposes. Every other stage ignores it.
     """
     try:
         if single_recording:
@@ -847,6 +945,7 @@ def _pipeline_worker(
                 binarization_workers=workers,
                 registration_workers=workers,
                 processing_workers=workers,
+                registration_device=device,
             )
         else:
             run_multi_recording_pipeline(
@@ -878,6 +977,9 @@ def _fail_broken_session(state: JobExecutionState) -> None:
         A dispatched job that already recorded a terminal state of its own keeps that state, so a stage that succeeded
         before the pool broke stays a satisfied prerequisite instead of being failed and re-run.
 
+        Every running job returns the CUDA device it held, because a broken pool leaves those jobs unable to reach
+        the reaper that would otherwise free it.
+
     Args:
         state: The execution state whose pool broke, accessed under its lock.
     """
@@ -889,6 +991,7 @@ def _fail_broken_session(state: JobExecutionState) -> None:
 
     for active_futures in state.active_futures.values():
         for key, future in active_futures.items():
+            _release_device(state=state, job=state.all_jobs.get(key))
             outcome, outcome_message = _resolve_job_outcome(future=future)
             if outcome == _JobOutcomes.COMPLETED or key not in state.all_jobs:
                 continue

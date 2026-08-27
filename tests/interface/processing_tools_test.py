@@ -31,9 +31,13 @@ from cindra.layout import (
     resolve_plane_specifier,
 )
 from cindra.interface import processing_tools
-from cindra.dataclasses import AcquisitionParameters, SingleRecordingConfiguration
+from cindra.dataclasses import RegistrationBackend, AcquisitionParameters, SingleRecordingConfiguration
 from cindra.orchestration import (
+    GPU_REMEDY,
     RESOURCE_CLASS_BY_JOB_NAME,
+    GpuDevice,
+    GpuStatus,
+    GpuSummary,
     PendingJob,
     SingleRecordingJobNames,
     get_execution_state,
@@ -41,6 +45,7 @@ from cindra.orchestration import (
 )
 from cindra.orchestration.execution import JobExecutionState
 from cindra.interface.processing_tools import (
+    check_gpu_runtime_tool,
     get_recording_status_tool,
     execute_full_pipeline_tool,
     clean_processing_output_tool,
@@ -63,6 +68,9 @@ _MINIMUM_THROUGHPUT: float = 1000.0
 
 _SOURCE_FRAME_SHAPE: tuple[int, int, int] = (2, 16, 16)
 """The frame count, height, and width of the TIFF file the raw data gate accepts as a readable source file."""
+
+_ABSENT_DEVICE_INDEX: int = 4096
+"""The CUDA device index no host exposes, which the device mask rejection test asks a session to run on."""
 
 
 @pytest.fixture(autouse=True)
@@ -123,6 +131,90 @@ class TestExecuteProcessingJobs:
         assert result["invalid_jobs"][0]["job_id"] == job_id
         assert "Unable to size the job from its configuration" in result["invalid_jobs"][0]["reason"]
         assert get_execution_state() is None
+
+
+class TestRegistrationResourceClass:
+    """Tests the resource class a registration job receives from the backend its configuration names."""
+
+    @pytest.mark.parametrize(
+        ("backend", "expected_name"),
+        [(RegistrationBackend.GPU, "registration_gpu"), (RegistrationBackend.CPU, "registration")],
+    )
+    def test_configured_backend_selects_the_class_of_every_register_job(
+        self, tmp_path: Path, backend: RegistrationBackend, expected_name: str
+    ) -> None:
+        """Verifies that the backend a recording configures reaches the jobs the full-pipeline tool builds."""
+        manifest_dict, cindra_root = _prepare_recording_with_backend(tmp_path=tmp_path, backend=backend)
+
+        _, register_jobs, _, _ = processing_tools._resolve_recording_phase_jobs(
+            manifest_dict=manifest_dict,
+            configuration_path=cindra_root / SINGLE_RECORDING_CONFIGURATION_FILENAME,
+            tracker_path=cindra_root / SINGLE_RECORDING_TRACKER_FILENAME,
+        )
+
+        assert register_jobs
+        assert {job.resource_class.name for job in register_jobs} == {expected_name}
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_mask_naming_an_absent_device_is_reported_rather_than_raised(self, tmp_path: Path) -> None:
+        """Verifies that a device mask the host cannot satisfy leaves the session unstarted and names the mask."""
+        manifest_dict, cindra_root = _prepare_recording_with_backend(tmp_path=tmp_path, backend=RegistrationBackend.GPU)
+
+        result = execute_processing_jobs_tool(
+            jobs=[
+                {
+                    "configuration_path": str(cindra_root / SINGLE_RECORDING_CONFIGURATION_FILENAME),
+                    "tracker_path": str(cindra_root / SINGLE_RECORDING_TRACKER_FILENAME),
+                    "job_id": manifest_dict["binarize_job"]["job_id"],
+                    "pipeline_type": "single-recording",
+                }
+            ],
+            gpu_devices=[_ABSENT_DEVICE_INDEX],
+        )
+
+        assert result["success"] is False
+        assert result["started"] is False
+        assert "'gpu_devices' mask must name at least one of the CUDA devices the host exposes" in result["error"]
+        assert get_execution_state() is None
+
+
+class TestCheckGpuRuntime:
+    """Tests the flat report the GPU runtime tool shapes from the device resolution."""
+
+    def test_usable_device_is_reported_without_a_remedy(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verifies that a host carrying a usable device reports it as ready alongside the device's properties."""
+        summary = GpuSummary(
+            status=GpuStatus.AVAILABLE,
+            devices=(GpuDevice(index=0, name="test device", total_memory_mb=1024, compute_capability="8.6"),),
+            detail="",
+        )
+        monkeypatch.setattr(processing_tools, "resolve_gpu_devices", lambda: summary)
+
+        result = check_gpu_runtime_tool()
+
+        assert result["success"] is True
+        assert result["ready"] is True
+        assert result["status"] == GpuStatus.AVAILABLE.value
+        assert result["device_count"] == 1
+        assert result["devices"] == [
+            {"index": 0, "name": "test device", "total_memory_mb": 1024, "compute_capability": "8.6"}
+        ]
+        assert "remedy" not in result
+
+    def test_missing_runtime_carries_the_installation_remedy(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verifies that a host carrying no usable device reports the command that resolves the runtime."""
+        summary = GpuSummary(
+            status=GpuStatus.RUNTIME_MISSING, devices=(), detail="the CuPy distribution is not installed"
+        )
+        monkeypatch.setattr(processing_tools, "resolve_gpu_devices", lambda: summary)
+
+        result = check_gpu_runtime_tool()
+
+        assert result["ready"] is False
+        assert result["status"] == GpuStatus.RUNTIME_MISSING.value
+        assert result["devices"] == []
+        assert result["device_count"] == 0
+        assert result["remedy"] == GPU_REMEDY
 
 
 class TestProcessingJobsStatus:
@@ -422,6 +514,30 @@ def _build_execution_state(tmp_path: Path, tracker_path: Path, job_id: str) -> J
         resource_class=RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.BINARIZE],
     )
     return JobExecutionState(all_jobs={pending_job.dispatch_key: pending_job})
+
+
+def _prepare_recording_with_backend(tmp_path: Path, backend: RegistrationBackend) -> tuple[dict[str, object], Path]:
+    """Prepares one recording whose configuration names the given backend, returning its manifest and output root."""
+    configuration_path = tmp_path / "template.yaml"
+    template = SingleRecordingConfiguration()
+    template.registration.backend = backend
+    template.save(file_path=configuration_path)
+
+    imaging_directory = tmp_path / "session" / "mesoscope_data"
+    imaging_directory.mkdir(parents=True)
+    _write_source_file(directory=imaging_directory)
+    (imaging_directory / PARAMETERS_FILENAME).write_text(
+        json.dumps(obj={"frame_rate": 30.0, "plane_number": 1, "channel_number": 1})
+    )
+    output_root = tmp_path / "output"
+
+    result = prepare_single_recording_batch_tool(
+        raw_data_paths=[str(imaging_directory)],
+        configuration_path=str(configuration_path),
+        output_roots=[str(output_root)],
+    )
+
+    return result["recordings"][str(imaging_directory)], output_root / OUTPUT_DIRECTORY_NAME
 
 
 def _write_source_file(directory: Path) -> None:

@@ -13,6 +13,9 @@ from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 
 from cindra.orchestration import (
     RESOURCE_CLASS_BY_JOB_NAME,
+    GpuDevice,
+    GpuStatus,
+    GpuSummary,
     PendingJob,
     MultiRecordingJobNames,
     SingleRecordingJobNames,
@@ -24,6 +27,7 @@ from cindra.orchestration import (
     cancel_execution_session,
     resolve_multi_recording_jobs,
     resolve_single_recording_jobs,
+    resolve_registration_resource_class,
 )
 from cindra.orchestration.jobs import (
     PREREQUISITE_FAILURE_MESSAGE,
@@ -36,6 +40,7 @@ from cindra.orchestration.execution import (
     _admit_ready_jobs,
     _fail_pending_jobs,
     _AdmissionDecisions,
+    _fail_broken_session,
     _reap_completed_jobs,
     _resolve_job_admission,
     _dispatch_admitted_jobs,
@@ -61,6 +66,12 @@ _DRAIN_POLL_MILLISECONDS: int = 50
 
 _TERMINAL_STATE_MESSAGE: str = "Unable to complete job. Worker terminated without reaching a terminal state."
 """The tracker error message the pipeline worker records when the pipeline returns without a terminal tracker state."""
+
+_DEVICE_INDICES: tuple[int, ...] = (0, 1)
+"""The CUDA device indices the device-assignment tests stock their session free list with."""
+
+_DEVICE_COUNT: int = len(_DEVICE_INDICES)
+"""The number of devices the device-assignment tests hand their session."""
 
 
 @pytest.fixture(autouse=True)
@@ -551,6 +562,7 @@ class TestDispatchAdmittedJobs:
                 "tracker_path": tracker_path,
                 "single_recording": True,
                 "workers": 8,
+                "device": None,
             }
         ]
 
@@ -808,6 +820,174 @@ class TestDispatchAdmittedJobs:
         assert observed == []
 
 
+class TestDeviceAssignment:
+    """Tests the CUDA device free list the dispatcher assigns from and every site that returns a device to it."""
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_every_dispatched_job_takes_its_own_device(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verifies that concurrent device-backed jobs hold one device each and reach the worker carrying its index."""
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        jobs = [
+            _make_device_job(tracker_path=tracker_path, specifier=f"plane_{index}") for index in range(_DEVICE_COUNT)
+        ]
+        state = _make_state(jobs=jobs, admitted=True, capacity=_DEVICE_COUNT, devices=list(_DEVICE_INDICES))
+        observed: list[dict[str, Any]] = []
+        monkeypatch.setattr(execution, "_pipeline_worker", _make_recording_worker(observed=observed))
+
+        with ThreadPoolExecutor(max_workers=_DEVICE_COUNT) as pool:
+            _dispatch_admitted_jobs(state=state, pool=pool)
+
+        _drain_active_futures(state=state)
+
+        assert sorted(job.assigned_device for job in jobs) == list(_DEVICE_INDICES)
+        assert not state.available_devices
+        assert sorted(entry["device"] for entry in observed) == list(_DEVICE_INDICES)
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_dispatch_stops_once_every_device_is_held(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verifies that a queue deeper than the free list leaves its remaining jobs waiting for a device."""
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        first = _make_device_job(tracker_path=tracker_path, specifier="plane_0")
+        second = _make_device_job(tracker_path=tracker_path, specifier="plane_1")
+        state = _make_state(jobs=[first, second], admitted=True, capacity=4, devices=[3])
+        monkeypatch.setattr(execution, "_pipeline_worker", _make_recording_worker(observed=[]))
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            _dispatch_admitted_jobs(state=state, pool=pool)
+
+        _drain_active_futures(state=state)
+
+        assert first.assigned_device == 3
+        assert second.assigned_device is None
+        assert state.pending_queues[second.resource_class.name] == [second]
+        assert not state.available_devices
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_reaped_job_returns_its_device_to_the_free_list(self, tmp_path: Path) -> None:
+        """Verifies that the device a finished job held is available to the job dispatched behind it."""
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        job = _make_device_job(tracker_path=tracker_path, specifier="plane_0")
+        job.assigned_device = 5
+        state = _make_state(jobs=[job], capacity=1, devices=[])
+        state.active_futures[job.resource_class.name][job.dispatch_key] = _make_finished_future()
+
+        _reap_completed_jobs(state=state)
+
+        assert state.available_devices == [5]
+        assert job.assigned_device is None
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_broken_session_returns_every_held_device(self, tmp_path: Path) -> None:
+        """Verifies that a pool that lost a worker leaves no device held by a job it can no longer complete."""
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        _build_single_recording_tracker(tracker_path=tracker_path, plane_count=2)
+        succeeded = _make_device_job(tracker_path=tracker_path, specifier="plane_0")
+        stranded = _make_device_job(tracker_path=tracker_path, specifier="plane_1")
+        succeeded.assigned_device = 0
+        stranded.assigned_device = 1
+        state = _make_state(jobs=[succeeded, stranded], capacity=2, devices=[])
+        running = state.active_futures[succeeded.resource_class.name]
+        running[succeeded.dispatch_key] = _make_finished_future()
+        running[stranded.dispatch_key] = _make_failed_future(error=BrokenProcessPool())
+
+        _fail_broken_session(state=state)
+
+        assert sorted(state.available_devices) == [0, 1]
+        assert succeeded.assigned_device is None
+        assert stranded.assigned_device is None
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_cancellation_leaves_a_running_job_holding_its_device(self, tmp_path: Path) -> None:
+        """Verifies that draining the queues never reclaims the device a job is still registering on."""
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        running = _make_device_job(tracker_path=tracker_path, specifier="plane_0")
+        queued = _make_device_job(tracker_path=tracker_path, specifier="plane_1")
+        running.assigned_device = 1
+        state = _make_state(jobs=[running, queued], admitted=True, capacity=2, devices=[])
+        state.pending_queues[running.resource_class.name].remove(running)
+        state.active_futures[running.resource_class.name][running.dispatch_key] = Future()
+        set_execution_state(state=state)
+
+        canceled_count, active_count = cancel_execution_session()
+
+        assert (canceled_count, active_count) == (1, 1)
+        assert running.assigned_device == 1
+        assert not state.available_devices
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_session_without_a_device_dispatches_without_an_assignment(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verifies that a host exposing no device runs its device-backed job into the pipeline's own verification."""
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        job = _make_device_job(tracker_path=tracker_path, specifier="plane_0")
+        state = _make_state(jobs=[job], admitted=True, capacity=1, devices=[])
+        observed: list[dict[str, Any]] = []
+        monkeypatch.setattr(execution, "_pipeline_worker", _make_recording_worker(observed=observed))
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            dispatched = _dispatch_admitted_jobs(state=state, pool=pool)
+
+        _drain_active_futures(state=state)
+
+        assert dispatched
+        assert job.assigned_device is None
+        assert [entry["device"] for entry in observed] == [None]
+
+
+class TestSessionDeviceMask:
+    """Tests the session-level mask that narrows the CUDA devices a batch runs its device-backed jobs on."""
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_absent_mask_holds_every_device_the_host_exposes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verifies that a session naming no mask runs its device-backed jobs on every device the host reports."""
+        _patch_host_devices(monkeypatch=monkeypatch, indices=[0, 1, 2])
+
+        summary, state = _start_drained_session(tmp_path=tmp_path, monkeypatch=monkeypatch, gpu_devices=None)
+
+        assert summary["gpu_devices"] == [0, 1, 2]
+        assert state.device_budget == 3
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_mask_narrows_the_session_to_the_named_devices(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verifies that a masked session leaves the devices it does not name to the work running beside it."""
+        _patch_host_devices(monkeypatch=monkeypatch, indices=[0, 1, 2])
+
+        summary, state = _start_drained_session(tmp_path=tmp_path, monkeypatch=monkeypatch, gpu_devices=[2, 0])
+
+        assert summary["gpu_devices"] == [0, 2]
+        assert state.device_budget == 2
+
+    @pytest.mark.xdist_group(name="execution_state")
+    @pytest.mark.parametrize("gpu_devices", [[], [3], [0, 4]])
+    def test_mask_naming_an_absent_device_is_rejected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, gpu_devices: list[int]
+    ) -> None:
+        """Verifies that an empty mask and a mask naming an unexposed device both raise before any dispatch."""
+        _patch_host_devices(monkeypatch=monkeypatch, indices=[0, 1])
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        job = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.BINARIZE)
+
+        message = (
+            f"Unable to start the execution session. The 'gpu_devices' mask must name at least one of the CUDA "
+            f"devices the host exposes, but encountered {gpu_devices}. Available device indices: {[0, 1]}."
+        )
+
+        with pytest.raises(ValueError, match=error_format(message=message)):
+            start_execution_session(
+                all_jobs={job.dispatch_key: job},
+                workers_per_job=None,
+                max_parallel_jobs=None,
+                gpu_devices=gpu_devices,
+            )
+
+        assert get_execution_state() is None
+
+
 class TestCommittedCores:
     """Tests the running core total the dispatcher holds inside the session budget."""
 
@@ -886,6 +1066,7 @@ class TestPipelineWorker:
                 "binarization_workers": 4,
                 "registration_workers": 4,
                 "processing_workers": 4,
+                "registration_device": None,
             }
         ]
         assert tracker.get_job_status(job_id=job_id) == ProcessingStatus.SUCCEEDED
@@ -1209,6 +1390,17 @@ def _make_job(tracker_path: Path, job_name: str, specifier: str = "", *, single_
     )
 
 
+def _make_device_job(tracker_path: Path, specifier: str) -> PendingJob:
+    """Builds a queued registration job that runs under the device-backed resource class."""
+    return PendingJob(
+        configuration_path=tracker_path.parent / "configuration.yaml",
+        tracker_path=tracker_path,
+        job_id=ProcessingTracker.generate_job_id(job_name=SingleRecordingJobNames.REGISTER, specifier=specifier),
+        single_recording=True,
+        resource_class=resolve_registration_resource_class(gpu_backend=True),
+    )
+
+
 def _make_state(
     jobs: Sequence[PendingJob],
     *,
@@ -1216,6 +1408,7 @@ def _make_state(
     capacity: int = 4,
     workers: int = 1,
     cpu_budget: int = 64,
+    devices: Sequence[int] | None = None,
 ) -> JobExecutionState:
     """Builds an execution state holding the given jobs in the admission pool or in their resource class queues."""
     class_names = {job.resource_class.name for job in jobs}
@@ -1223,6 +1416,8 @@ def _make_state(
     if admitted:
         for job in jobs:
             queues[job.resource_class.name].append(job)
+
+    session_devices = list(devices) if devices is not None else []
 
     return JobExecutionState(
         all_jobs={job.dispatch_key: job for job in jobs},
@@ -1232,7 +1427,46 @@ def _make_state(
         class_capacities=dict.fromkeys(class_names, capacity),
         class_workers=dict.fromkeys(class_names, workers),
         cpu_budget=cpu_budget,
+        device_budget=len(session_devices),
+        available_devices=session_devices,
     )
+
+
+def _patch_host_devices(monkeypatch: pytest.MonkeyPatch, indices: Sequence[int]) -> None:
+    """Replaces the CUDA device resolution with a fixed set, so a test never depends on the host's own devices."""
+    summary = GpuSummary(
+        status=GpuStatus.AVAILABLE,
+        devices=tuple(
+            GpuDevice(index=index, name="test device", total_memory_mb=1024, compute_capability="8.6")
+            for index in indices
+        ),
+        detail="",
+    )
+    monkeypatch.setattr(execution, "resolve_gpu_devices", lambda: summary)
+
+
+def _start_drained_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, gpu_devices: list[int] | None
+) -> tuple[dict[str, object], JobExecutionState]:
+    """Starts a one-job session against a stubbed worker and returns its report and its state once it has drained."""
+    tracker_path = tmp_path / "single_recording_tracker.yaml"
+    _build_single_recording_tracker(tracker_path=tracker_path)
+    job = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.BINARIZE)
+    monkeypatch.setattr(execution, "_pipeline_worker", _make_completing_worker(observed=[]))
+    _use_same_process_pool(monkeypatch=monkeypatch)
+
+    summary = start_execution_session(
+        all_jobs={job.dispatch_key: job},
+        workers_per_job=None,
+        max_parallel_jobs=None,
+        gpu_devices=gpu_devices,
+    )
+    state = get_execution_state()
+    assert state is not None
+
+    _wait_for_session_end()
+
+    return summary, state
 
 
 def _use_same_process_pool(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1250,6 +1484,7 @@ def _make_completing_worker(observed: list[str]) -> Callable[..., None]:
         *,
         single_recording: bool = True,
         workers: int | None = None,
+        device: int | None = None,
     ) -> None:
         observed.append(job_id)
         ProcessingTracker(file_path=tracker_path).complete_job(job_id=job_id)

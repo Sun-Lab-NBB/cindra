@@ -64,7 +64,7 @@ from ..layout import (
     resolve_channel_2_name,
     resolve_plane_specifier,
 )
-from ..dataclasses import MultiRecordingConfiguration, SingleRecordingConfiguration
+from ..dataclasses import RegistrationBackend, MultiRecordingConfiguration, SingleRecordingConfiguration
 from .mcp_instance import mcp
 from ..orchestration import (
     SINGLE_RECORDING_PHASES,
@@ -75,6 +75,7 @@ from ..orchestration import (
     SingleRecordingJobNames,
     prime_recording,
     get_execution_state,
+    resolve_gpu_devices,
     set_execution_state,
     resolve_session_load,
     resolve_pipeline_jobs,
@@ -91,6 +92,7 @@ from ..orchestration import (
     resolve_single_recording_jobs,
     load_multi_recording_configuration,
     load_single_recording_configuration,
+    resolve_registration_resource_class,
     resolve_multi_recording_job_universe,
     resolve_single_recording_job_universe,
     estimate_multi_recording_job_memory_mb,
@@ -1224,6 +1226,7 @@ def execute_processing_jobs_tool(
     *,
     workers_per_job: int | None = None,
     max_parallel_jobs: int | None = None,
+    gpu_devices: list[int] | None = None,
 ) -> dict[str, object]:
     """Dispatches pipeline jobs for background execution with prerequisite validation and resource allocation.
 
@@ -1243,7 +1246,12 @@ def execute_processing_jobs_tool(
         of 4. Combination holds 1 core per job, because it merges result files serially, and its concurrency is bounded
         by the CPU budget alone. Registration holds 4 cores per job and processing holds 10, each with a concurrency
         bounded by the CPU budget. The session memory budget bounds dispatch for every class alike rather than the
-        concurrency cap of any one of them. The binarization class alone ignores both parameters below.
+        concurrency cap of any one of them. The binarization class alone ignores both worker parameters below.
+
+        A registration job whose configuration names the GPU backend runs under a separate class instead, holding 2
+        cores and one CUDA device for its whole duration. The devices the session holds are what bound that class, so
+        it ignores both worker parameters as well. Call check_gpu_runtime_tool before dispatching such a batch, because
+        a host exposing no usable device fails every one of those jobs.
 
         Every class dispatches during the same cycle, so the dispatcher additionally holds the sum of the cores
         committed by the running jobs of every class inside the session CPU budget reported as 'cpu_budget'. That
@@ -1262,13 +1270,16 @@ def execute_processing_jobs_tool(
         max_parallel_jobs: Maximum concurrent jobs per resource class, overriding the derived concurrency cap of every
             non-fixed resource class. Leave as None to accept the derived caps, or set to -1 to lift them so that only
             the job count bounds concurrency.
+        gpu_devices: The zero-based indices of the CUDA devices the session's device-backed registration jobs may run
+            on. Leave as None to accept every device the host exposes, which check_gpu_runtime_tool reports.
 
     Returns:
         Always contains a 'success' flag indicating the tool ran. On a started session, also contains a 'started' flag,
-        'total_jobs' dispatched, and the session 'cpu_budget' and 'memory_budget_mb' that bound the classes in
-        aggregate. A started session further reports a 'resource_classes' mapping with the resolved workers_per_job,
-        max_parallel_jobs, and job_count of every class present in the session, and 'invalid_jobs' listing any jobs that
-        failed validation with reasons. On failure, contains success:False and an 'error' describing the issue.
+        'total_jobs' dispatched, the session 'cpu_budget' and 'memory_budget_mb' that bound the classes in aggregate,
+        and 'gpu_devices' listing the device indices the session holds. A started session further reports a
+        'resource_classes' mapping with the resolved workers_per_job, max_parallel_jobs, and job_count of every class
+        present in the session, and 'invalid_jobs' listing any jobs that failed validation with reasons. On failure,
+        contains success:False and an 'error' describing the issue.
     """
     if not jobs:
         return {"success": False, "error": "Unable to execute jobs. At least one job descriptor is required."}
@@ -1329,6 +1340,13 @@ def execute_processing_jobs_tool(
                 specifier=job_info.specifier,
                 single=single_recording,
             )
+
+            # The backend a registration job runs on lives in its configuration, so the class it belongs to is
+            # resolved from the same file the estimate above reads.
+            if job_info.job_name == SingleRecordingJobNames.REGISTER:
+                resource_class = resolve_registration_resource_class(
+                    gpu_backend=_names_gpu_registration(configuration_path=configuration_file)
+                )
         except Exception as error:
             invalid_jobs.append(
                 {
@@ -1376,6 +1394,7 @@ def execute_processing_jobs_tool(
         all_jobs=all_jobs_map,
         workers_per_job=workers_per_job,
         max_parallel_jobs=max_parallel_jobs,
+        gpu_devices=gpu_devices,
         extra_result_fields={"invalid_jobs": invalid_jobs} if invalid_jobs else {},
     )
 
@@ -1695,6 +1714,7 @@ def execute_full_pipeline_tool(
     dataset_configurations: list[dict[str, object]] | None = None,
     workers_per_job: int | None = None,
     max_parallel_jobs: int | None = None,
+    gpu_devices: list[int] | None = None,
 ) -> dict[str, object]:
     """Executes a complete pipeline from preparation through all phases with automatic dependency sequencing.
 
@@ -1727,13 +1747,16 @@ def execute_full_pipeline_tool(
         max_parallel_jobs: Maximum concurrent jobs per resource class, overriding the derived concurrency cap of every
             non-fixed resource class. Leave as None to accept the derived caps, or set to -1 to lift them so that only
             the job count bounds concurrency.
+        gpu_devices: The zero-based indices of the CUDA devices the session's device-backed registration jobs may run
+            on. Leave as None to accept every device the host exposes, which check_gpu_runtime_tool reports.
 
     Returns:
         Always contains a 'success' flag indicating the tool ran, and callers MUST also check the 'started' flag rather
         than 'success' alone. When jobs are dispatched, contains started:True, 'total_jobs', 'phase_count', per-phase
         'phases' with job counts and IDs, the session 'cpu_budget' and 'memory_budget_mb' that bound the classes in
-        aggregate, and a 'resource_classes' mapping with the resolved allocation of every class in the session. When all
-        phases are already complete, returns {success:True, started:False, message:"All pipeline phases are already
+        aggregate, 'gpu_devices' listing the device indices the session holds, and a 'resource_classes' mapping with
+        the resolved allocation of every class in the session. When all phases are already complete, returns
+        {success:True, started:False, message:"All pipeline phases are already
         completed.", pipeline_type:<the requested type>, total_jobs:0, phase_count:0, phases:[]} plus a 'next_step'
         string. Every outcome carries 'pipeline_type'. The preparation step produces the rejection lists
         'invalid_paths', 'invalid_recordings', 'invalid_configurations', and 'path_conflicts', and this step's own
@@ -1960,6 +1983,7 @@ def execute_full_pipeline_tool(
         all_jobs=all_jobs_map,
         workers_per_job=workers_per_job,
         max_parallel_jobs=max_parallel_jobs,
+        gpu_devices=gpu_devices,
         extra_result_fields=extra_fields,
     )
 
@@ -2104,6 +2128,47 @@ def check_threading_runtime_tool() -> dict[str, object]:
         result["remedy"] = (
             "brew install libomp" if summary.status == OpenMPStatus.UNRESOLVED else "sudo cindra omp --yes"
         )
+
+    return result
+
+
+@mcp.tool()
+def check_gpu_runtime_tool() -> dict[str, object]:
+    """Reports whether the CUDA runtime the GPU registration backend needs is usable on this host.
+
+    A registration job whose configuration sets 'registration.backend' to 'gpu' aborts at the pipeline entry point when
+    the host exposes no usable device, which surfaces as a per-job tracker failure rather than as a tool error. Call
+    this before dispatching such a batch to gate on 'ready', and read 'devices' to choose the 'gpu_devices' mask the
+    execute tools accept.
+
+    Returns:
+        Always contains a 'success' flag indicating the tool ran, a 'ready' flag reporting whether a device is usable,
+        the 'status' naming the outcome the resolution reached, a 'detail' sentence describing it, a 'device_count',
+        and a 'devices' list holding the 'index', 'name', 'total_memory_mb', and 'compute_capability' of every usable
+        device. A host that is not ready carries an empty 'devices' list and a 'remedy' naming the installation that
+        resolves it, which is absent on macOS because the CuPy distribution publishes no wheel for it.
+    """
+    summary = resolve_gpu_devices()
+
+    result: dict[str, object] = {
+        "success": True,
+        "ready": summary.available,
+        "status": summary.status.value,
+        "detail": summary.describe(),
+        "device_count": len(summary.devices),
+        "devices": [
+            {
+                "index": device.index,
+                "name": device.name,
+                "total_memory_mb": device.total_memory_mb,
+                "compute_capability": device.compute_capability,
+            }
+            for device in summary.devices
+        ],
+    }
+
+    if summary.remedy:
+        result["remedy"] = summary.remedy
 
     return result
 
@@ -2486,6 +2551,7 @@ def _start_session(
     all_jobs: dict[tuple[str, str], PendingJob],
     workers_per_job: int | None,
     max_parallel_jobs: int | None,
+    gpu_devices: list[int] | None,
     extra_result_fields: dict[str, object],
 ) -> dict[str, object]:
     """Starts a batch execution session and shapes its allocation report into an MCP tool response.
@@ -2496,16 +2562,20 @@ def _start_session(
             class default.
         max_parallel_jobs: Requested maximum concurrent jobs per resource class, -1 to lift the caps, or None to
             accept the derived caps.
+        gpu_devices: The requested CUDA device indices, or None to accept every device the host exposes.
         extra_result_fields: Additional key-value pairs to include in the result dictionary.
 
     Returns:
-        A result dictionary containing 'success', 'started', the session 'cpu_budget' and 'memory_budget_mb', per-class
-        resource allocation details, and any extra fields. A rejected override yields success:False and an 'error'
-        instead.
+        A result dictionary containing 'success', 'started', the session 'cpu_budget', 'memory_budget_mb', and
+        'gpu_devices', per-class resource allocation details, and any extra fields. A rejected override yields
+        success:False and an 'error' instead.
     """
     try:
         session = start_execution_session(
-            all_jobs=all_jobs, workers_per_job=workers_per_job, max_parallel_jobs=max_parallel_jobs
+            all_jobs=all_jobs,
+            workers_per_job=workers_per_job,
+            max_parallel_jobs=max_parallel_jobs,
+            gpu_devices=gpu_devices,
         )
     except ValueError as error:
         return {"success": False, "started": False, "error": _collapse_whitespace(text=str(error))}
@@ -2825,6 +2895,12 @@ def _resolve_recording_phase_jobs(
     process_jobs: list[PendingJob] = []
     combine_jobs: list[PendingJob] = []
 
+    # The backend a registration job runs on is a property of the recording's configuration, so every plane of the
+    # recording resolves to the same class from one read of that file.
+    registration_class = resolve_registration_resource_class(
+        gpu_backend=_names_gpu_registration(configuration_path=configuration_path)
+    )
+
     binarize = manifest_dict.get("binarize_job", {})
     if binarize and binarize.get("status") != "succeeded":
         binarize_jobs.append(
@@ -2849,7 +2925,7 @@ def _resolve_recording_phase_jobs(
             tracker_path=tracker_path,
             job_id=register["job_id"],
             single_recording=True,
-            resource_class=RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.REGISTER],
+            resource_class=registration_class,
             memory_megabytes=_estimate_pending_job_memory(
                 configuration_path=configuration_path,
                 job_name=str(register["name"]),
@@ -2933,6 +3009,24 @@ def _estimate_pending_job_memory(configuration_path: Path, job_name: str, specif
         recording_directories=dataset_configuration.recording_io.recording_directories,
         configuration=dataset_configuration,
     )
+
+
+def _names_gpu_registration(configuration_path: Path) -> bool:
+    """Reads whether a single-recording configuration registers its planes on the GPU backend.
+
+    Args:
+        configuration_path: The path to the recording's pipeline configuration file.
+
+    Returns:
+        True when the configuration's registration section names the GPU backend.
+
+    Raises:
+        FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid
+            single-recording configuration.
+        ValueError: If the configuration does not configure an output path.
+    """
+    configuration, _ = load_single_recording_configuration(configuration_path=configuration_path)
+    return configuration.registration.backend == RegistrationBackend.GPU
 
 
 def _manifest_entry(identifiers: dict[tuple[str, str], str], job_name: str, specifier: str) -> dict[str, object]:

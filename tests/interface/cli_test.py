@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 from click.testing import Result, CliRunner
 
+from cindra.interface import cli
+from cindra.dataclasses import SingleRecordingConfiguration
 from cindra.interface.cli import cindra_cli, report_command_failure
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    import pytest
 
 
 class TestConfigureCommand:
@@ -47,6 +51,40 @@ class TestConfigureCommand:
         assert "Traceback" not in result.output
         assert list(tmp_path.iterdir()) == []
         assert not (tmp_path.parent / f"{tmp_path.name}.yaml").exists()
+
+
+class TestRegisterDeviceOption:
+    """Tests the CUDA device index the run command hands the plane-registration stage."""
+
+    def test_negative_index_is_rejected(self, tmp_path: Path) -> None:
+        """Verifies that a negative index errors instead of reaching the registration stage as a device selector."""
+        configuration_path = tmp_path / "configuration.yaml"
+        SingleRecordingConfiguration().save(file_path=configuration_path)
+
+        result = CliRunner().invoke(
+            cli=cindra_cli,
+            args=["run", "--input-path", str(configuration_path), "--register-device", "-1"],
+        )
+
+        assert result.exit_code == 2
+        assert "must name a zero-based CUDA device index" in result.output
+
+    def test_index_reaches_the_pipeline(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verifies that the named device travels to the pipeline entry point as its registration device."""
+        configuration_path = tmp_path / "configuration.yaml"
+        configuration = SingleRecordingConfiguration()
+        configuration.file_io.output_path = tmp_path / "output"
+        configuration.save(file_path=configuration_path)
+        observed: list[dict[str, Any]] = []
+        monkeypatch.setattr(cli, "run_single_recording_pipeline", lambda **kwargs: observed.append(kwargs))
+
+        result = CliRunner().invoke(
+            cli=cindra_cli,
+            args=["run", "--input-path", str(configuration_path), "--register-device", "1"],
+        )
+
+        assert result.exit_code == 0
+        assert observed[0]["registration_device"] == 1
 
 
 class TestErrorReporting:

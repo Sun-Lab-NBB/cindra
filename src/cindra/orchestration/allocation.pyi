@@ -1,6 +1,8 @@
+from functools import cache
 from dataclasses import dataclass
 from collections.abc import Mapping
 
+from .gpu import resolve_device_budget as resolve_device_budget
 from .jobs import (
     MultiRecordingJobNames as MultiRecordingJobNames,
     SingleRecordingJobNames as SingleRecordingJobNames,
@@ -8,6 +10,7 @@ from .jobs import (
 
 BINARIZATION_WORKERS: int
 REGISTRATION_WORKERS: int
+REGISTRATION_GPU_WORKERS: int
 PROCESSING_WORKERS: int
 DISCOVERY_WORKERS: int
 EXTRACTION_WORKERS: int
@@ -18,6 +21,7 @@ DISCOVERY_MAXIMUM_WORKERS: int
 EXTRACTION_MAXIMUM_WORKERS: int
 ALL_CORES_REQUEST: int
 _RESERVED_CORES: int
+_REGISTRATION_GPU_CLASS_NAME: str
 _BINARIZATION_CONCURRENCY_LIMIT: int
 _REGISTRATION_CONCURRENCY_RESERVATION: int
 _PROCESSING_CONCURRENCY_RESERVATION: int
@@ -43,6 +47,8 @@ RESOURCE_CLASS_BY_JOB_NAME: dict[str, ResourceClass]
 def resolve_stage_workers(
     job_name: SingleRecordingJobNames | MultiRecordingJobNames, requested_workers: int | None = None
 ) -> int: ...
+def resolve_registration_resource_class(*, gpu_backend: bool) -> ResourceClass: ...
+def class_requires_device(resource_class: ResourceClass) -> bool: ...
 def resolve_core_budget() -> int: ...
 def resolve_class_allocation(
     resource_class: ResourceClass,
@@ -65,3 +71,5 @@ def resolve_memory_budget_mb() -> int: ...
 def summarize_class_allocation(
     class_workers: Mapping[str, int], class_capacities: Mapping[str, int], class_job_counts: Mapping[str, int]
 ) -> dict[str, dict[str, int]]: ...
+@cache
+def _resolve_registration_gpu_resources() -> ResourceClass: ...

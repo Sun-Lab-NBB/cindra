@@ -9,11 +9,14 @@ from cindra.orchestration import (
     PROCESSING_WORKERS,
     BINARIZATION_WORKERS,
     REGISTRATION_WORKERS,
+    REGISTRATION_GPU_WORKERS,
     RESOURCE_CLASS_BY_JOB_NAME,
     ResourceClass,
     MultiRecordingJobNames,
     SingleRecordingJobNames,
+    resolve_device_budget,
     resolve_stage_workers,
+    resolve_registration_resource_class,
 )
 from cindra.orchestration.allocation import (
     _RESERVED_CORES,
@@ -34,10 +37,12 @@ from cindra.orchestration.allocation import (
     _PROCESSING_CONCURRENCY_RESERVATION,
     _REGISTRATION_CONCURRENCY_RESERVATION,
     resolve_core_budget,
+    class_requires_device,
     resolve_class_allocation,
     resolve_dispatch_workers,
     resolve_memory_budget_mb,
     summarize_class_allocation,
+    _resolve_registration_gpu_resources,
 )
 
 
@@ -257,6 +262,67 @@ class TestResourceClasses:
             hasattr(resource_class, "memory_gigabytes_per_job")
             for resource_class in RESOURCE_CLASS_BY_JOB_NAME.values()
         )
+
+
+class TestDeviceResourceClass:
+    """Tests the resource class of the registration jobs that run on a CUDA device."""
+
+    def test_class_carries_the_device_budget_as_its_concurrency_limit(self) -> None:
+        """Verifies that the devices the host exposes are what bound how many device-backed jobs run at once."""
+        assert _resolve_registration_gpu_resources().concurrency_limit == resolve_device_budget()
+
+    def test_class_declares_its_host_side_worker_count(self) -> None:
+        """Verifies that a device-backed job still holds the cores its host-side work occupies."""
+        assert _resolve_registration_gpu_resources().name == "registration_gpu"
+        assert _resolve_registration_gpu_resources().workers_per_job == REGISTRATION_GPU_WORKERS
+        assert _resolve_registration_gpu_resources().maximum_workers_per_job is None
+        assert _resolve_registration_gpu_resources().concurrency_reservation is None
+
+    @pytest.mark.parametrize(("gpu_backend", "expected_name"), [(True, "registration_gpu"), (False, "registration")])
+    def test_backend_selects_the_registration_class(self, gpu_backend: bool, expected_name: str) -> None:
+        """Verifies that the backend a configuration names selects the class its registration jobs run under."""
+        assert resolve_registration_resource_class(gpu_backend=gpu_backend).name == expected_name
+
+    def test_only_the_device_class_holds_a_device(self) -> None:
+        """Verifies that the device predicate separates the device-backed class from every host-only class."""
+        assert class_requires_device(resource_class=_resolve_registration_gpu_resources())
+        assert not any(
+            class_requires_device(resource_class=resource_class)
+            for resource_class in RESOURCE_CLASS_BY_JOB_NAME.values()
+        )
+
+    def test_job_name_map_holds_the_host_class(self) -> None:
+        """Verifies that the name map reports the host class, leaving the device class to the backend resolver."""
+        assert RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.REGISTER] is _REGISTRATION_RESOURCES
+
+    @pytest.mark.parametrize("job_count", [1, 4])
+    def test_device_class_caps_its_concurrency_at_the_device_count(self, job_count: int) -> None:
+        """Verifies that a queue deeper than the device count dispatches no more jobs than there are devices."""
+        _, capacity = resolve_class_allocation(
+            resource_class=_resolve_registration_gpu_resources(),
+            budget=64,
+            job_count=job_count,
+            workers_per_job=None,
+            max_parallel_jobs=None,
+        )
+
+        assert capacity == max(1, min(resolve_device_budget(), job_count))
+
+    def test_absent_resource_still_resolves_one_dispatch_slot(self) -> None:
+        """Verifies that a class whose counted resource is absent dispatches one job rather than holding its queue."""
+        absent = ResourceClass(
+            name="absent",
+            workers_per_job=2,
+            maximum_workers_per_job=None,
+            concurrency_limit=0,
+            concurrency_reservation=None,
+        )
+
+        allocation = resolve_class_allocation(
+            resource_class=absent, budget=64, job_count=4, workers_per_job=None, max_parallel_jobs=None
+        )
+
+        assert allocation == (2, 1)
 
 
 class TestFixedCapacityAllocation:

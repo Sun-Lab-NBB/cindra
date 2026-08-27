@@ -69,6 +69,7 @@ from .allocation import (
     COMBINATION_WORKERS as COMBINATION_WORKERS,
     BINARIZATION_WORKERS as BINARIZATION_WORKERS,
     REGISTRATION_WORKERS as REGISTRATION_WORKERS,
+    REGISTRATION_GPU_WORKERS as REGISTRATION_GPU_WORKERS,
     DISCOVERY_MAXIMUM_WORKERS as DISCOVERY_MAXIMUM_WORKERS,
     EXTRACTION_MAXIMUM_WORKERS as EXTRACTION_MAXIMUM_WORKERS,
     PROCESSING_MAXIMUM_WORKERS as PROCESSING_MAXIMUM_WORKERS,
@@ -76,6 +77,7 @@ from .allocation import (
     REGISTRATION_MAXIMUM_WORKERS as REGISTRATION_MAXIMUM_WORKERS,
     ResourceClass as ResourceClass,
     resolve_stage_workers as resolve_stage_workers,
+    resolve_registration_resource_class as resolve_registration_resource_class,
 )
 from .footprints import (
     WORKER_MEMORY_MB as WORKER_MEMORY_MB,
@@ -106,6 +108,7 @@ __all__ = [
     "PLANE_SPECIFIER_PREFIX",
     "PROCESSING_MAXIMUM_WORKERS",
     "PROCESSING_WORKERS",
+    "REGISTRATION_GPU_WORKERS",
     "REGISTRATION_MAXIMUM_WORKERS",
     "REGISTRATION_WORKERS",
     "RESOURCE_CLASS_BY_JOB_NAME",
@@ -153,6 +156,7 @@ __all__ = [
     "resolve_pipeline_jobs",
     "resolve_plane_specifier",
     "resolve_recording_geometry",
+    "resolve_registration_resource_class",
     "resolve_session_load",
     "resolve_single_recording_job_universe",
     "resolve_single_recording_jobs",
