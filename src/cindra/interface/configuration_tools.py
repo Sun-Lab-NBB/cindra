@@ -8,6 +8,7 @@ given root directory, and construct qualified dataset names for multi-recording 
 
 from __future__ import annotations
 
+import sys
 from enum import Enum
 from types import NoneType, UnionType
 from typing import Literal, get_args, get_origin, get_type_hints
@@ -31,6 +32,7 @@ from ..layout import (
 from ..dataclasses import (
     BaselineMethod,
     ReferenceImageType,
+    RegistrationBackend,
     MultiRecordingConfiguration,
     SingleRecordingConfiguration,
 )
@@ -768,6 +770,23 @@ def _validate_single_recording(
             f"registration.registration_metric_principal_components must be non-negative "
             f"(current: {config.registration.registration_metric_principal_components})."
         )
+    valid_registration_backends = {member.value for member in RegistrationBackend}
+    if str(config.registration.backend) not in valid_registration_backends:
+        errors.append(
+            f"registration.backend must be one of {sorted(valid_registration_backends)} "
+            f"(current: {config.registration.backend})."
+        )
+    elif config.registration.backend == RegistrationBackend.GPU:
+        if sys.platform == "darwin":
+            errors.append(
+                f"registration.backend must be '{RegistrationBackend.CPU.value}' on macOS, for which the CuPy "
+                f"distribution publishes no wheel (current: {config.registration.backend})."
+            )
+        if config.registration.gpu_batch_size < 0:
+            errors.append(
+                f"registration.gpu_batch_size must be non-negative when the GPU backend is selected "
+                f"(current: {config.registration.gpu_batch_size})."
+            )
 
     if config.one_photon_registration.enabled:
         if config.one_photon_registration.spatial_highpass_window <= 0:

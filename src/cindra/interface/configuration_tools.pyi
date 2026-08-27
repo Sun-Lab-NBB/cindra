@@ -10,6 +10,7 @@ from ..layout import (
 from ..dataclasses import (
     BaselineMethod as BaselineMethod,
     ReferenceImageType as ReferenceImageType,
+    RegistrationBackend as RegistrationBackend,
     MultiRecordingConfiguration as MultiRecordingConfiguration,
     SingleRecordingConfiguration as SingleRecordingConfiguration,
 )

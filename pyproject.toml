@@ -90,6 +90,12 @@ dependencies = [
     # Supplies the SVML runtime Numba's vectorization path loads. The path stays inert while llvmlite reports no SVML
     # support, and the pin is held so that a Numba release restoring it needs no packaging change here.
     "intel-cmplr-lib-rt>=2026,<2027; sys_platform != 'darwin'",
+    # Supplies the CUDA array and FFT runtime the GPU registration backend uses. The CuPy distribution publishes no
+    # macOS wheel, which is what the marker expresses. It imports on a host holding no CUDA device and raises only at
+    # the first device use, which is what keeps the stub and documentation builds working. The 'ctk' extra carries the
+    # CUDA math libraries CuPy loads at that first use, without which every transform raises. A host whose driver runs
+    # CUDA 12 installs 'cupy-cuda12x[ctk]' over this pin instead, since a CuPy build targets one CUDA major version.
+    "cupy-cuda13x[ctk]>=14,<15; sys_platform != 'darwin'",
 ]
 
 # Project repository and hosted documentation URLs.
@@ -238,6 +244,12 @@ exclude = [
 module = ["numba", "numba.*"]
 follow_imports = "skip"        # Treats all symbols imported from numba as untyped (Any)
 ignore_missing_imports = true  # Suppresses missing-stub errors for the skipped package
+
+# CuPy ships no py.typed marker and no stub package, and the dependency marker holds it off macOS entirely. Suppresses
+# the missing-import errors so that the GPU modules type-check on a host carrying no CuPy installation.
+[[tool.mypy.overrides]]
+module = ["cupy", "cupy.*", "cupyx", "cupyx.*"]
+ignore_missing_imports = true
 
 # Pytest configuration. The import mode is declared here so that a bare 'pytest' invocation resolves test modules the
 # same way the '{py314}-test' tox task does.

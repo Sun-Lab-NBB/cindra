@@ -56,8 +56,8 @@ class TestApplyPhaseCorrelation:
         assert result[0, 0, 0] == result[0].max()
 
     @pytest.mark.parametrize("zero_frame", [False, True])
-    def test_normalization_split_is_bit_identical(self, *, zero_frame: bool) -> None:
-        """Verifies the magnitude normalization matches the fused reference expression bit-for-bit."""
+    def test_normalization_matches_the_fused_reference_expression(self, *, zero_frame: bool) -> None:
+        """Verifies the magnitude normalization matches the fused reference expression to float32 rounding."""
         generator = np.random.default_rng(seed=42)
         frames = generator.standard_normal((5, 32, 32)).astype(np.float32)
         if zero_frame:
@@ -72,8 +72,32 @@ class TestApplyPhaseCorrelation:
 
         result = apply_phase_correlation(frames=frames, kernel=kernel, workers=1)
 
+        # The normalization runs as a compiled parallel kernel, whose complex magnitude and complex division round
+        # differently from the NumPy expression above. The surface therefore agrees to float32 rounding rather than
+        # bit-for-bit, and the offsets read off it are pinned separately by the test below.
         assert result.dtype == np.float32
-        np.testing.assert_array_equal(result, expected)
+        np.testing.assert_allclose(result, expected, rtol=1e-5, atol=1e-4)
+
+    def test_normalization_leaves_every_correlation_peak_in_place(self) -> None:
+        """Verifies the normalization resolves the same peak the fused reference expression resolves."""
+        generator = np.random.default_rng(seed=11)
+        reference = generator.standard_normal((64, 64)).astype(np.float32)
+        shifts = [(0, 0), (1, -2), (-3, 4), (5, 5), (-6, -1)]
+        frames = np.stack([np.roll(reference, shift=shift, axis=(0, 1)) for shift in shifts]).astype(np.float32)
+        kernel = compute_reference_fft(reference_image=reference)
+
+        expected_fft = rfft2(frames, axes=(-2, -1))
+        expected_fft /= NORMALIZATION_EPSILON + np.abs(expected_fft)
+        expected_fft *= kernel
+        expected = irfft2(expected_fft, s=(64, 64), axes=(-2, -1)).astype(np.float32, copy=False)
+
+        result = apply_phase_correlation(frames=frames, kernel=kernel, workers=1)
+
+        # The correlation surface reaches the pipeline through an argmax alone, so the peak index is the output the
+        # registration stage depends on and the one this pins.
+        expected_peaks = np.argmax(expected.reshape(len(shifts), -1), axis=1)
+        result_peaks = np.argmax(result.reshape(len(shifts), -1), axis=1)
+        np.testing.assert_array_equal(result_peaks, expected_peaks)
 
 
 class TestApplyMask:

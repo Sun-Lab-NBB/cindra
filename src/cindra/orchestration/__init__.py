@@ -1,5 +1,14 @@
 """Provides the pipeline job model, the worker allocation, the batch execution engine, and the pipeline entry points."""
 
+from .gpu import (
+    GPU_REMEDY,
+    GpuDevice,
+    GpuStatus,
+    GpuSummary,
+    verify_gpu_runtime,
+    resolve_gpu_devices,
+    resolve_device_budget,
+)
 from .jobs import (
     MULTI_RECORDING_PHASES,
     SINGLE_RECORDING_PHASES,
@@ -79,6 +88,7 @@ __all__ = [
     "COMBINATION_WORKERS",
     "DISCOVERY_WORKERS",
     "EXTRACTION_WORKERS",
+    "GPU_REMEDY",
     "MEMORY_ESTIMATE_TOLERANCE",
     "MULTI_RECORDING_PHASES",
     "MULTI_RECORDING_TRACKER_FILENAME",
@@ -90,6 +100,9 @@ __all__ = [
     "SINGLE_RECORDING_TRACKER_FILENAME",
     "SPAWNED_CHILD_MEMORY_MB",
     "WORKER_MEMORY_MB",
+    "GpuDevice",
+    "GpuStatus",
+    "GpuSummary",
     "JobSizing",
     "MultiRecordingJobNames",
     "MultiRecordingJobs",
@@ -116,7 +129,9 @@ __all__ = [
     "parse_plane_specifier",
     "prime_dataset",
     "prime_recording",
+    "resolve_device_budget",
     "resolve_downstream_phases",
+    "resolve_gpu_devices",
     "resolve_maximum_roi_count",
     "resolve_multi_recording_job_universe",
     "resolve_multi_recording_jobs",
@@ -137,4 +152,5 @@ __all__ = [
     "size_single_recording_job",
     "start_execution_session",
     "validate_job_prerequisites",
+    "verify_gpu_runtime",
 ]
