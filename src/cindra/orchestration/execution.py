@@ -33,6 +33,7 @@ from .allocation import (
     ResourceClass,
     resolve_core_budget,
     resolve_class_allocation,
+    resolve_dispatch_workers,
     resolve_memory_budget_mb,
     summarize_class_allocation,
 )
@@ -139,7 +140,7 @@ class JobExecutionState:
     """Tracks the runtime state for one batch execution session across both pipeline types.
 
     Notes:
-        Each admitted job runs in its own worker process at the width its resource class was allocated, so a
+        Each admitted job runs in its own worker process at the width the dispatcher resolved for it, so a
         registration job and a processing job run side by side, each holding its own numeric-backend budget. Running
         them as threads of one process instead would let the later of the two overwrite the BLAS width the earlier one
         set. That width is a property of the process rather than of the thread that asked for it.
@@ -156,10 +157,21 @@ class JobExecutionState:
     class_capacities: dict[str, int] = field(default_factory=dict)
     """The resolved maximum number of concurrent jobs for each resource class name."""
     class_workers: dict[str, int] = field(default_factory=dict)
-    """The resolved number of CPU cores allocated to each job of each resource class name."""
+    """The per-job CPU core count each resource class resolved at session start, keyed by class name. A job of an
+    elastic class raises that count at dispatch, so this is the floor the class runs at rather than the width every
+    one of its jobs holds."""
     class_reservations: dict[str, int] = field(default_factory=dict)
     """The jobs of each resource class that run before the dispatcher releases that class's reservation, keyed by
     class name. A class absent from this map competes at its full derived width in both passes."""
+    elastic_workers: bool = False
+    """Determines whether a job of a class carrying a worker ceiling takes a share of the cores the session holds free
+    when it is dispatched, rather than the width its class resolved at session start.
+
+    Notes:
+        A session accepting the measured class defaults sets this, so a queue that drains gradually widens the jobs it
+        has left to run. A session carrying an explicit worker override leaves it clear, so the width the caller asked
+        for reaches every job of every class unchanged.
+    """
     cpu_budget: int = 1
     """The total number of CPU cores this session may commit across every resource class at once."""
     memory_budget_mb: int = 0
@@ -213,13 +225,15 @@ def start_execution_session(
     workers_per_job: int | None,
     max_parallel_jobs: int | None,
 ) -> dict[str, object]:
-    """Resolves per-class resource allocation, stamps it onto the queued jobs, and starts the execution manager.
+    """Resolves the per-class resource allocation of the queued jobs and starts the execution manager over them.
 
     Notes:
         Every job enters the admission pool, and the manager decides admission from the tracked prerequisites.
 
-        The resolved allocation is stamped onto each job and travels to the pipeline as a dispatch argument, so one
-        configuration file serves every job dispatched concurrently against it.
+        Each job takes its worker count when the dispatcher submits it, and that count travels to the pipeline as a
+        dispatch argument, so one configuration file serves every job dispatched concurrently against it. A session
+        accepting the measured class defaults widens a job of an elastic class toward that class's ceiling over the
+        cores the host holds free, while a session carrying a worker override gives every job the width it requested.
 
         Each class resolves its own concurrency cap, and the session CPU budget is recorded alongside those caps
         because every class dispatches during the same cycle. The dispatcher holds the sum of the cores committed by
@@ -279,9 +293,6 @@ def start_execution_session(
         class_workers[class_name] = workers
         class_capacities[class_name] = capacity
 
-    for pending_job in all_jobs.values():
-        pending_job.resolved_workers = class_workers[pending_job.resource_class.name]
-
     execution_state = JobExecutionState(
         all_jobs=all_jobs,
         admission_pool=list(all_jobs.values()),
@@ -294,6 +305,7 @@ def start_execution_session(
             for class_name, resource_class in classes_by_name.items()
             if resource_class.concurrency_reservation is not None
         },
+        elastic_workers=workers_per_job is None,
         cpu_budget=budget,
         memory_budget_mb=memory_budget,
         lock=Lock(),
@@ -601,11 +613,16 @@ def _dispatch_pass(state: JobExecutionState, pool: Executor, *, release_reservat
         class queue. That keeps it inside a collection the broken-pool handler scans, which is what lets the one job
         the pool refused reach a terminal state alongside its peers.
 
+        A job of an elastic class takes its width from the cores the session holds free at the moment it is submitted,
+        so the same queue hands its last jobs more cores than its first. The peer count that divides those cores is
+        the whole class capacity, because the second pass hands the same queue the room a reservation held back and
+        every job that room admits competes for the same free cores.
+
     Args:
         state: The current job execution state, accessed under its lock.
         pool: The worker pool the session dispatches its jobs into.
-        release_reservations: Determines whether a class holding a reservation dispatches at its full derived width
-            rather than at the width its reservation leaves free.
+        release_reservations: Determines whether a class holding a reservation dispatches at its full derived
+            concurrency rather than at the concurrency its reservation leaves free.
 
     Returns:
         True if at least one job was submitted during this pass, False otherwise.
@@ -619,15 +636,25 @@ def _dispatch_pass(state: JobExecutionState, pool: Executor, *, release_reservat
         active_futures = state.active_futures[class_name]
         capacity = state.class_capacities[class_name]
         reservation = state.class_reservations.get(class_name)
+        pass_capacity = capacity
         if not release_reservations and reservation is not None:
-            capacity = min(capacity, reservation)
-        workers = state.class_workers[class_name]
-        while len(active_futures) < capacity and pending_queue:
+            pass_capacity = min(capacity, reservation)
+        while len(active_futures) < pass_capacity and pending_queue:
+            pending_job = pending_queue[0]
             committed = _committed_cores(state=state)
+            workers = state.class_workers[class_name]
+            if state.elastic_workers:
+                workers = resolve_dispatch_workers(
+                    resource_class=pending_job.resource_class,
+                    free_cores=max(0, state.cpu_budget - committed),
+                    pending_jobs=len(pending_queue),
+                    running_jobs=len(active_futures),
+                    concurrency_cap=capacity,
+                )
+
             if committed > 0 and committed + workers > state.cpu_budget:
                 break
 
-            pending_job = pending_queue[0]
             committed_memory = _committed_memory(state=state)
             if (
                 committed_memory > 0
@@ -636,6 +663,7 @@ def _dispatch_pass(state: JobExecutionState, pool: Executor, *, release_reservat
             ):
                 break
 
+            pending_job.resolved_workers = workers
             future: Future[None] = pool.submit(
                 _pipeline_worker,
                 configuration_path=pending_job.configuration_path,
@@ -721,13 +749,40 @@ def _committed_memory(state: JobExecutionState) -> int:
 def _committed_cores(state: JobExecutionState) -> int:
     """Sums the CPU cores that the currently running jobs of every resource class hold.
 
+    Notes:
+        Each running job contributes the width it was dispatched at rather than the width its class declares, because
+        the dispatcher widens a job of an elastic class over the capacity the host holds free at that moment. Two jobs
+        of one class therefore hold different numbers of cores when the queue drained between their dispatches.
+
     Args:
         state: The current job execution state, accessed under its lock.
 
     Returns:
         The number of cores the session has committed to running jobs.
     """
-    return sum(len(futures) * state.class_workers[class_name] for class_name, futures in state.active_futures.items())
+    return sum(
+        _resolve_committed_width(state=state, class_name=class_name, dispatch_key=dispatch_key)
+        for class_name, futures in state.active_futures.items()
+        for dispatch_key in futures
+    )
+
+
+def _resolve_committed_width(state: JobExecutionState, class_name: str, dispatch_key: tuple[str, str]) -> int:
+    """Resolves the CPU cores one running job holds, falling back to its class width when the job carries none.
+
+    Args:
+        state: The current job execution state, accessed under its lock.
+        class_name: The name of the resource class the running job belongs to.
+        dispatch_key: The tracker path and job identifier pair that addresses the running job.
+
+    Returns:
+        The number of cores the running job holds.
+    """
+    running_job = state.all_jobs.get(dispatch_key)
+    if running_job is None or running_job.resolved_workers is None:
+        return state.class_workers.get(class_name, 0)
+
+    return running_job.resolved_workers
 
 
 def _pipeline_worker(

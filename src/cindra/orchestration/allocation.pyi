@@ -12,6 +12,10 @@ PROCESSING_WORKERS: int
 DISCOVERY_WORKERS: int
 EXTRACTION_WORKERS: int
 COMBINATION_WORKERS: int
+REGISTRATION_MAXIMUM_WORKERS: int
+PROCESSING_MAXIMUM_WORKERS: int
+DISCOVERY_MAXIMUM_WORKERS: int
+EXTRACTION_MAXIMUM_WORKERS: int
 ALL_CORES_REQUEST: int
 _RESERVED_CORES: int
 _BINARIZATION_CONCURRENCY_LIMIT: int
@@ -24,6 +28,7 @@ _STAGE_WORKER_DEFAULTS: dict[SingleRecordingJobNames | MultiRecordingJobNames, i
 class ResourceClass:
     name: str
     workers_per_job: int
+    maximum_workers_per_job: int | None
     concurrency_limit: int | None
     concurrency_reservation: int | None
 
@@ -47,6 +52,9 @@ def resolve_class_allocation(
     workers_per_job: int | None,
     max_parallel_jobs: int | None,
 ) -> tuple[int, int]: ...
+def resolve_dispatch_workers(
+    resource_class: ResourceClass, *, free_cores: int, pending_jobs: int, running_jobs: int, concurrency_cap: int
+) -> int: ...
 def resolve_memory_budget_mb() -> int: ...
 def summarize_class_allocation(
     class_workers: Mapping[str, int], class_capacities: Mapping[str, int], class_job_counts: Mapping[str, int]
