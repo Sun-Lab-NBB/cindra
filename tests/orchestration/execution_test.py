@@ -40,7 +40,11 @@ from cindra.orchestration.execution import (
     _resolve_job_admission,
     _dispatch_admitted_jobs,
 )
-from cindra.orchestration.allocation import BINARIZATION_WORKERS, resolve_core_budget
+from cindra.orchestration.allocation import (
+    BINARIZATION_WORKERS,
+    REGISTRATION_MAXIMUM_WORKERS,
+    resolve_core_budget,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -219,9 +223,6 @@ class TestStartExecutionSession:
             "binarization": {"workers_per_job": BINARIZATION_WORKERS, "max_parallel_jobs": 1, "job_count": 1},
             "registration": {"workers_per_job": 2, "max_parallel_jobs": 1, "job_count": 1},
         }
-        assert binarize_job.resolved_workers == BINARIZATION_WORKERS
-        assert register_job.resolved_workers == 2
-
         state = get_execution_state()
         assert state is not None
         manager = state.manager_thread
@@ -232,6 +233,8 @@ class TestStartExecutionSession:
 
         assert get_execution_state() is None
         assert observed == [binarize_job.job_id, register_job.job_id]
+        assert binarize_job.resolved_workers == BINARIZATION_WORKERS
+        assert register_job.resolved_workers == 2
         assert tracker.get_job_status(job_id=binarize_job.job_id) == ProcessingStatus.SUCCEEDED
         assert tracker.get_job_status(job_id=register_job.job_id) == ProcessingStatus.SUCCEEDED
 
@@ -646,6 +649,46 @@ class TestDispatchAdmittedJobs:
         assert len(state.active_futures[jobs[0].resource_class.name]) == 7
 
     @pytest.mark.xdist_group(name="execution_state")
+    def test_elastic_session_widens_the_job_it_dispatches(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verifies that a session accepting the class defaults widens a lone queued job up to its class ceiling."""
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        job = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.REGISTER, specifier="plane_0")
+        state = _make_state(jobs=[job], admitted=True, capacity=4, workers=1, cpu_budget=64)
+        state.elastic_workers = True
+        observed: list[dict[str, Any]] = []
+        monkeypatch.setattr(execution, "_pipeline_worker", _make_recording_worker(observed=observed))
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            dispatched = _dispatch_admitted_jobs(state=state, pool=pool)
+
+        _drain_active_futures(state=state)
+
+        assert dispatched
+        assert job.resolved_workers == REGISTRATION_MAXIMUM_WORKERS
+        assert [entry["workers"] for entry in observed] == [REGISTRATION_MAXIMUM_WORKERS]
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_requested_width_reaches_the_job_unwidened(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verifies that a session carrying a worker override dispatches at that width on an otherwise idle host."""
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        job = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.REGISTER, specifier="plane_0")
+        state = _make_state(jobs=[job], admitted=True, capacity=4, workers=2, cpu_budget=64)
+        observed: list[dict[str, Any]] = []
+        monkeypatch.setattr(execution, "_pipeline_worker", _make_recording_worker(observed=observed))
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            dispatched = _dispatch_admitted_jobs(state=state, pool=pool)
+
+        _drain_active_futures(state=state)
+
+        assert dispatched
+        assert not state.elastic_workers
+        assert job.resolved_workers == 2
+        assert [entry["workers"] for entry in observed] == [2]
+
+    @pytest.mark.xdist_group(name="execution_state")
     def test_memory_budget_stops_the_next_dispatch(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Verifies that a job whose estimate would exceed the session memory budget waits for a running job."""
         tracker_path = tmp_path / "single_recording_tracker.yaml"
@@ -791,6 +834,22 @@ class TestCommittedCores:
         state.active_futures[process.resource_class.name] = {("third", "job"): _make_finished_future()}
 
         assert _committed_cores(state=state) == 26
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_committed_cores_follow_the_width_each_running_job_was_dispatched_at(self, tmp_path: Path) -> None:
+        """Verifies that the total sums the per-job widths rather than weighting a job count by one class width."""
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        widened = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.REGISTER, specifier="plane_0")
+        narrow = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.REGISTER, specifier="plane_1")
+        widened.resolved_workers = 32
+        narrow.resolved_workers = 4
+        state = _make_state(jobs=[widened, narrow], workers=4)
+        state.active_futures[widened.resource_class.name] = {
+            widened.dispatch_key: _make_finished_future(),
+            narrow.dispatch_key: _make_finished_future(),
+        }
+
+        assert _committed_cores(state=state) == 36
 
 
 class TestPipelineWorker:

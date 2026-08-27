@@ -39,6 +39,10 @@ Orchestration
 .. autodata:: cindra.orchestration.allocation.COMBINATION_WORKERS
 .. autodata:: cindra.orchestration.allocation.DISCOVERY_WORKERS
 .. autodata:: cindra.orchestration.allocation.EXTRACTION_WORKERS
+.. autodata:: cindra.orchestration.allocation.REGISTRATION_MAXIMUM_WORKERS
+.. autodata:: cindra.orchestration.allocation.PROCESSING_MAXIMUM_WORKERS
+.. autodata:: cindra.orchestration.allocation.DISCOVERY_MAXIMUM_WORKERS
+.. autodata:: cindra.orchestration.allocation.EXTRACTION_MAXIMUM_WORKERS
 .. autodata:: cindra.orchestration.allocation.RESOURCE_CLASS_BY_JOB_NAME
 .. autodata:: cindra.orchestration.footprints.WORKER_MEMORY_MB
 .. autodata:: cindra.orchestration.footprints.SPAWNED_CHILD_MEMORY_MB

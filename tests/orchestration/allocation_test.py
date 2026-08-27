@@ -26,11 +26,16 @@ from cindra.orchestration.allocation import (
     _COMBINATION_RESOURCES,
     _BINARIZATION_RESOURCES,
     _REGISTRATION_RESOURCES,
+    DISCOVERY_MAXIMUM_WORKERS,
+    EXTRACTION_MAXIMUM_WORKERS,
+    PROCESSING_MAXIMUM_WORKERS,
+    REGISTRATION_MAXIMUM_WORKERS,
     _BINARIZATION_CONCURRENCY_LIMIT,
     _PROCESSING_CONCURRENCY_RESERVATION,
     _REGISTRATION_CONCURRENCY_RESERVATION,
     resolve_core_budget,
     resolve_class_allocation,
+    resolve_dispatch_workers,
     resolve_memory_budget_mb,
     summarize_class_allocation,
 )
@@ -188,6 +193,44 @@ class TestResourceClasses:
         assert reserved == {"registration", "processing"}
 
     @pytest.mark.parametrize(
+        ("resource_class", "maximum_workers_per_job"),
+        [
+            (_BINARIZATION_RESOURCES, None),
+            (_REGISTRATION_RESOURCES, REGISTRATION_MAXIMUM_WORKERS),
+            (_PROCESSING_RESOURCES, PROCESSING_MAXIMUM_WORKERS),
+            (_COMBINATION_RESOURCES, None),
+            (_DISCOVERY_RESOURCES, DISCOVERY_MAXIMUM_WORKERS),
+            (_EXTRACTION_RESOURCES, EXTRACTION_MAXIMUM_WORKERS),
+        ],
+    )
+    def test_class_carries_the_ceiling_its_stage_stops_gaining_at(
+        self, resource_class: ResourceClass, maximum_workers_per_job: int | None
+    ) -> None:
+        """Verifies that every resource class declares the widest allocation its stage converts into wall clock."""
+        assert resource_class.maximum_workers_per_job == maximum_workers_per_job
+
+    def test_only_the_storage_bound_and_serial_stages_are_inelastic(self) -> None:
+        """Verifies that the conversion and the merge are the classes a host with spare cores cannot widen."""
+        inelastic = {
+            resource_class.name
+            for resource_class in RESOURCE_CLASS_BY_JOB_NAME.values()
+            if resource_class.maximum_workers_per_job is None
+        }
+
+        assert inelastic == {"binarization", "combination"}
+
+    def test_every_ceiling_holds_at_or_above_the_class_default(self) -> None:
+        """Verifies that widening a job never narrows it below the allocation its class declares."""
+        ceilings = [
+            (resource_class.maximum_workers_per_job, resource_class.workers_per_job)
+            for resource_class in RESOURCE_CLASS_BY_JOB_NAME.values()
+            if resource_class.maximum_workers_per_job is not None
+        ]
+
+        assert ceilings
+        assert all(ceiling >= default for ceiling, default in ceilings)
+
+    @pytest.mark.parametrize(
         ("job_name", "expected_class"),
         [
             (SingleRecordingJobNames.BINARIZE, _BINARIZATION_RESOURCES),
@@ -324,6 +367,94 @@ class TestDerivedCapacityAllocation:
         assert allocation == (EXTRACTION_WORKERS, 2)
 
 
+class TestDispatchWorkers:
+    """Tests the width one job takes when the dispatcher submits it against the capacity the host holds free."""
+
+    @pytest.mark.parametrize("resource_class", [_BINARIZATION_RESOURCES, _COMBINATION_RESOURCES])
+    def test_class_without_a_ceiling_keeps_its_measured_width(self, resource_class: ResourceClass) -> None:
+        """Verifies that a class the host cores cannot widen holds its measured allocation however much sits free."""
+        resolved = resolve_dispatch_workers(
+            resource_class=resource_class, free_cores=126, pending_jobs=1, running_jobs=0, concurrency_cap=8
+        )
+
+        assert resolved == resource_class.workers_per_job
+
+    @pytest.mark.parametrize("free_cores", [16, 32, 64])
+    def test_saturated_queue_resolves_to_the_class_default(self, free_cores: int) -> None:
+        """Verifies that a queue holding a job for every free core reproduces the allocation the class declares."""
+        resolved = resolve_dispatch_workers(
+            resource_class=_REGISTRATION_RESOURCES,
+            free_cores=free_cores,
+            pending_jobs=16,
+            running_jobs=0,
+            concurrency_cap=16,
+        )
+
+        assert resolved == REGISTRATION_WORKERS
+
+    def test_nearly_empty_queue_resolves_to_the_class_ceiling(self) -> None:
+        """Verifies that the last job of a class takes the free budget up to the width its stage still spends."""
+        resolved = resolve_dispatch_workers(
+            resource_class=_REGISTRATION_RESOURCES, free_cores=126, pending_jobs=1, running_jobs=0, concurrency_cap=16
+        )
+
+        assert resolved == REGISTRATION_MAXIMUM_WORKERS
+
+    def test_discovery_queue_resolves_to_its_own_narrower_ceiling(self) -> None:
+        """Verifies that each class stops at the ceiling its own measurement reports rather than a shared one."""
+        resolved = resolve_dispatch_workers(
+            resource_class=_DISCOVERY_RESOURCES, free_cores=126, pending_jobs=1, running_jobs=0, concurrency_cap=8
+        )
+
+        assert resolved == DISCOVERY_MAXIMUM_WORKERS
+
+    def test_draining_queue_widens_the_jobs_it_has_left(self) -> None:
+        """Verifies that the width climbs from the class default to the class ceiling as the queue empties."""
+        widths = [
+            resolve_dispatch_workers(
+                resource_class=_REGISTRATION_RESOURCES,
+                free_cores=64,
+                pending_jobs=pending_jobs,
+                running_jobs=0,
+                concurrency_cap=16,
+            )
+            for pending_jobs in (16, 8, 4, 2, 1)
+        ]
+
+        assert widths == [REGISTRATION_WORKERS, 8, 16, REGISTRATION_MAXIMUM_WORKERS, REGISTRATION_MAXIMUM_WORKERS]
+
+    def test_running_peers_bound_the_jobs_that_still_start_alongside_the_dispatched_one(self) -> None:
+        """Verifies that the share divides the free cores by the concurrency the class has left rather than its cap."""
+        idle_class = resolve_dispatch_workers(
+            resource_class=_REGISTRATION_RESOURCES, free_cores=32, pending_jobs=8, running_jobs=0, concurrency_cap=8
+        )
+        loaded_class = resolve_dispatch_workers(
+            resource_class=_REGISTRATION_RESOURCES, free_cores=32, pending_jobs=8, running_jobs=6, concurrency_cap=8
+        )
+
+        assert idle_class == REGISTRATION_WORKERS
+        assert loaded_class == 16
+
+    def test_saturated_class_still_resolves_a_usable_width(self) -> None:
+        """Verifies that a class already holding its whole cap divides the free cores by one job rather than by zero."""
+        resolved = resolve_dispatch_workers(
+            resource_class=_REGISTRATION_RESOURCES, free_cores=2, pending_jobs=4, running_jobs=8, concurrency_cap=8
+        )
+
+        assert resolved == REGISTRATION_WORKERS
+
+    @pytest.mark.parametrize(("resource_class", "expected_workers"), [(_PROCESSING_RESOURCES, PROCESSING_WORKERS)])
+    def test_class_whose_ceiling_meets_its_default_never_widens(
+        self, resource_class: ResourceClass, expected_workers: int
+    ) -> None:
+        """Verifies that a class measured to plateau at its default holds that width on an idle host."""
+        resolved = resolve_dispatch_workers(
+            resource_class=resource_class, free_cores=126, pending_jobs=1, running_jobs=0, concurrency_cap=12
+        )
+
+        assert resolved == expected_workers
+
+
 @pytest.mark.xdist_group(name="allocation_system_probes")
 class TestResolveMemoryBudget:
     """Tests the memory probe that bounds how much a session may commit to running jobs."""
@@ -379,3 +510,31 @@ class _VirtualMemory:
 
     def __init__(self, available: int) -> None:
         self.available = available
+
+
+class TestExtractionCeiling:
+    """Tests the widening the multi-recording extraction class performs."""
+
+    def test_extraction_widens_toward_its_measured_ceiling(self) -> None:
+        """Verifies that an extraction job with the host to itself widens past the stage default."""
+        resolved = resolve_dispatch_workers(
+            resource_class=_EXTRACTION_RESOURCES,
+            free_cores=126,
+            pending_jobs=1,
+            running_jobs=0,
+            concurrency_cap=8,
+        )
+
+        assert resolved == EXTRACTION_MAXIMUM_WORKERS
+
+    def test_extraction_holds_its_default_while_the_queue_is_full(self) -> None:
+        """Verifies that a saturated extraction queue resolves the width the stage default names."""
+        resolved = resolve_dispatch_workers(
+            resource_class=_EXTRACTION_RESOURCES,
+            free_cores=126,
+            pending_jobs=32,
+            running_jobs=0,
+            concurrency_cap=32,
+        )
+
+        assert resolved == EXTRACTION_WORKERS
