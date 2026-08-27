@@ -33,9 +33,10 @@ loop. Extraction scaled from 61.8 to 44.1 to 38.6 seconds over the same sweep, b
 outweighs that gain, which places the default at 10."""
 
 DISCOVERY_WORKERS: int = 2
-"""The number of workers allocated to the multi-recording discovery stage by default. The stage has no parallel
-critical path, so quadrupling the allocation shortens a twenty-recording dataset by two percent, and the figure covers
-the deformation pool alone."""
+"""The number of workers allocated to the multi-recording discovery stage by default. Sixteen workers shorten a
+ten-recording dataset from 28.9 to 19.1 seconds while spending twelve times the processor time, and the wall time
+turns back upward past that width. Two is the smallest allocation that engages the deformation pool, which the stage
+builds only while the budget exceeds one."""
 
 EXTRACTION_WORKERS: int = 16
 """The number of workers allocated to the multi-recording extraction stage by default. The stage keeps shortening well
