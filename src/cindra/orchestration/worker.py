@@ -67,8 +67,8 @@ def execute_single_recording_job(
         job_id: The unique hexadecimal identifier under which the job's state is recorded on the provided tracker. It
             must already be present in the tracker's aligned job set.
         tracker: The caller-owned ProcessingTracker onto which this job's start, completion, or failure is recorded.
-        workers: The number of parallel workers to allocate to this job. Use None to accept the measured default for
-            the job's stage and -1 to request every available core. The combination job ignores this parameter.
+        workers: The number of parallel workers to allocate to this job. Use None to accept the stage default and -1
+            to request every available core. The combination job ignores this parameter.
 
     Raises:
         FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid single-recording
@@ -116,8 +116,8 @@ def execute_multi_recording_job(
         job_id: The unique hexadecimal identifier under which the job's state is recorded on the provided tracker. It
             must already be present in the tracker's aligned job set.
         tracker: The caller-owned ProcessingTracker onto which this job's start, completion, or failure is recorded.
-        workers: The number of parallel workers to allocate to this job. Use None to accept the measured default for the
-            job's stage and -1 to request every available core.
+        workers: The number of parallel workers to allocate to this job. Use None to accept the stage default and -1
+            to request every available core.
 
     Raises:
         FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid multi-recording
@@ -256,6 +256,7 @@ def dispatch_single_recording_job(
     job_id: str,
     tracker: ProcessingTracker,
     workers: int | None,
+    device: int | None = None,
 ) -> None:
     """Executes a single processing job of the single-recording pipeline.
 
@@ -266,8 +267,10 @@ def dispatch_single_recording_job(
             'plane_{index}'. For BINARIZE and COMBINE jobs, this is an empty string.
         job_id: The unique hexadecimal identifier for this processing job.
         tracker: The tracker that records this job's state transitions.
-        workers: The number of parallel workers to allocate to this job. Use None to accept the measured default for
-            the job's stage and -1 to request every available core. The combination job ignores this parameter.
+        workers: The number of parallel workers to allocate to this job. Use None to accept the stage default and -1
+            to request every available core. The combination job ignores this parameter.
+        device: The zero-based index of the CUDA device a registration job runs on while the configuration names the
+            GPU backend. Use None to select the first device the host exposes. Every other job ignores it.
 
     Raises:
         ValueError: If the job_name is not recognized or the requested worker count is invalid.
@@ -291,6 +294,7 @@ def dispatch_single_recording_job(
                 configuration=configuration,
                 plane_index=_resolve_job_plane_index(job_name=job_name, specifier=specifier),
                 workers=resolve_stage_workers(job_name=job_name, requested_workers=workers),
+                device=device,
             )
 
         elif job_name == SingleRecordingJobNames.PROCESS:
@@ -349,8 +353,8 @@ def dispatch_multi_recording_job(
             empty string.
         job_id: The unique hexadecimal identifier for this processing job.
         tracker: The tracker that records this job's state transitions.
-        workers: The number of parallel workers to allocate to this job. Use None to accept the measured default for the
-            job's stage and -1 to request every available core.
+        workers: The number of parallel workers to allocate to this job. Use None to accept the stage default and -1
+            to request every available core.
 
     Raises:
         ValueError: If the job_name is not recognized or the requested worker count is invalid.

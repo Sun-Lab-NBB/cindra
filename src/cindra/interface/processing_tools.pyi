@@ -39,6 +39,7 @@ from ..layout import (
     resolve_plane_specifier as resolve_plane_specifier,
 )
 from ..dataclasses import (
+    RegistrationBackend as RegistrationBackend,
     MultiRecordingConfiguration as MultiRecordingConfiguration,
     SingleRecordingConfiguration as SingleRecordingConfiguration,
 )
@@ -52,6 +53,7 @@ from ..orchestration import (
     SingleRecordingJobNames as SingleRecordingJobNames,
     prime_recording as prime_recording,
     get_execution_state as get_execution_state,
+    resolve_gpu_devices as resolve_gpu_devices,
     set_execution_state as set_execution_state,
     resolve_session_load as resolve_session_load,
     resolve_pipeline_jobs as resolve_pipeline_jobs,
@@ -68,6 +70,7 @@ from ..orchestration import (
     resolve_single_recording_jobs as resolve_single_recording_jobs,
     load_multi_recording_configuration as load_multi_recording_configuration,
     load_single_recording_configuration as load_single_recording_configuration,
+    resolve_registration_resource_class as resolve_registration_resource_class,
     resolve_multi_recording_job_universe as resolve_multi_recording_job_universe,
     resolve_single_recording_job_universe as resolve_single_recording_job_universe,
     estimate_multi_recording_job_memory_mb as estimate_multi_recording_job_memory_mb,
@@ -89,7 +92,11 @@ def clean_processing_output_tool(
     output_root: str, phases: list[str], pipeline_type: str, dataset: str = ""
 ) -> dict[str, object]: ...
 def execute_processing_jobs_tool(
-    jobs: list[dict[str, str]], *, workers_per_job: int | None = None, max_parallel_jobs: int | None = None
+    jobs: list[dict[str, str]],
+    *,
+    workers_per_job: int | None = None,
+    max_parallel_jobs: int | None = None,
+    gpu_devices: list[int] | None = None,
 ) -> dict[str, object]: ...
 def get_processing_jobs_status_tool(*, summary_only: bool = False) -> dict[str, object]: ...
 def get_active_execution_timing_tool() -> dict[str, object]: ...
@@ -103,11 +110,13 @@ def execute_full_pipeline_tool(
     dataset_configurations: list[dict[str, object]] | None = None,
     workers_per_job: int | None = None,
     max_parallel_jobs: int | None = None,
+    gpu_devices: list[int] | None = None,
 ) -> dict[str, object]: ...
 def size_pipeline_jobs_tool(
     configuration_path: str, pipeline_type: str, planned_roi_count: int | None = None
 ) -> dict[str, object]: ...
 def check_threading_runtime_tool() -> dict[str, object]: ...
+def check_gpu_runtime_tool() -> dict[str, object]: ...
 def get_pipeline_job_universe_tool(configuration_path: str, pipeline_type: str) -> dict[str, object]: ...
 def _collapse_whitespace(text: str) -> str: ...
 def _resolve_raw_data_failure(raw_data_path: Path, ignored_file_names: tuple[str, ...]) -> str | None: ...
@@ -126,6 +135,7 @@ def _start_session(
     all_jobs: dict[tuple[str, str], PendingJob],
     workers_per_job: int | None,
     max_parallel_jobs: int | None,
+    gpu_devices: list[int] | None,
     extra_result_fields: dict[str, object],
 ) -> dict[str, object]: ...
 def _group_jobs_by_name(registry: dict[str, JobState], job_name: str) -> dict[str, JobState]: ...
@@ -141,6 +151,7 @@ def _resolve_recording_phase_jobs(
     manifest_dict: dict[str, Any], configuration_path: Path, tracker_path: Path
 ) -> tuple[list[PendingJob], list[PendingJob], list[PendingJob], list[PendingJob]]: ...
 def _estimate_pending_job_memory(configuration_path: Path, job_name: str, specifier: str, *, single: bool) -> int: ...
+def _names_gpu_registration(configuration_path: Path) -> bool: ...
 def _manifest_entry(identifiers: dict[tuple[str, str], str], job_name: str, specifier: str) -> dict[str, object]: ...
 def _resolve_job_identifiers(tracker: ProcessingTracker, jobs: list[tuple[str, str]]) -> dict[tuple[str, str], str]: ...
 def _size_single_recording_universe(

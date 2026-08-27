@@ -275,6 +275,18 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     ),
 )
 @click.option(
+    "-rd",
+    "--register-device",
+    type=int,
+    required=False,
+    default=None,
+    help=(
+        "[Single-recording] The zero-based index of the CUDA device that registers every plane of this run, used "
+        "while the configuration's 'registration.backend' names the GPU backend. When this option is omitted, the "
+        "registration runs on the first device the host exposes."
+    ),
+)
+@click.option(
     "-pw",
     "--process-workers",
     type=int,
@@ -466,6 +478,7 @@ def cindra_run(
     input_path: Path,
     binarize_workers: int | None,
     register_workers: int | None,
+    register_device: int | None,
     process_workers: int | None,
     discover_workers: int | None,
     extract_workers: int | None,
@@ -494,6 +507,13 @@ def cindra_run(
     pipeline_type = detect_pipeline_type(file_path=input_path)
 
     if pipeline_type == PipelineType.SINGLE_RECORDING:
+        if register_device is not None and register_device < 0:
+            message = (
+                f"Unable to run the single-recording pipeline. The --register-device option must name a zero-based "
+                f"CUDA device index, but encountered {register_device}."
+            )
+            console.error(message=message, error=click.UsageError)
+
         configuration = SingleRecordingConfiguration.from_yaml(file_path=input_path)
         configuration.runtime.display_progress_bars = not no_progress
         if data_path is not None:
@@ -519,6 +539,7 @@ def cindra_run(
             binarization_workers=binarize_workers,
             registration_workers=register_workers,
             processing_workers=process_workers,
+            registration_device=register_device,
         )
     else:
         multi_recording_configuration = MultiRecordingConfiguration.from_yaml(file_path=input_path)

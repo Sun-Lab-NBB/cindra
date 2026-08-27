@@ -7,11 +7,13 @@ time of a single job.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from functools import cache
 from dataclasses import dataclass
 
 import psutil
 from ataraxis_base_utilities import console, resolve_worker_count
 
+from .gpu import resolve_device_budget
 from .jobs import MultiRecordingJobNames, SingleRecordingJobNames
 
 if TYPE_CHECKING:
@@ -22,6 +24,10 @@ BINARIZATION_WORKERS: int = 3
 
 REGISTRATION_WORKERS: int = 4
 """The number of CPU cores one registration job holds while the session dispatches at its full concurrency."""
+
+REGISTRATION_GPU_WORKERS: int = 2
+"""The number of CPU cores one device-backed registration job holds. The job builds its reference image, computes its
+crop, and runs its median filters on the host, so it occupies cores alongside the device it registers on."""
 
 PROCESSING_WORKERS: int = 10
 """The number of CPU cores one processing job holds while the session dispatches at its full concurrency."""
@@ -56,6 +62,9 @@ ALL_CORES_REQUEST: int = -1
 
 _RESERVED_CORES: int = 2
 """The number of CPU cores held back for host-system operations when a core budget auto-resolves."""
+
+_REGISTRATION_GPU_CLASS_NAME: str = "registration_gpu"
+"""The name of the resource class whose jobs each hold one CUDA device while they run."""
 
 _BINARIZATION_CONCURRENCY_LIMIT: int = 4
 """The binarization jobs that may run at once regardless of the cores the budget could still supply.
@@ -112,8 +121,8 @@ class ResourceClass:
     when the class is bounded by the budgets alone.
 
     Notes:
-        This is a hard ceiling. It exists for a class whose own throughput stops climbing before its cores run out, so
-        spare capacity never lifts it.
+        This is a hard ceiling. It counts a resource the CPU budget does not supply, which is the storage a conversion
+        decodes from and the devices a registration runs on, so spare capacity never lifts it.
     """
     concurrency_reservation: int | None
     """The jobs of this class that run at once while other work can still use the capacity the class gives up, or None
@@ -252,6 +261,23 @@ def resolve_stage_workers(
     return requested_workers
 
 
+def resolve_registration_resource_class(*, gpu_backend: bool) -> ResourceClass:
+    """Resolves the resource class that governs a registration job running on the target backend.
+
+    Args:
+        gpu_backend: Determines whether the job's configuration names the GPU registration backend.
+
+    Returns:
+        The resource class that governs the job's worker count and the concurrency of its queue.
+    """
+    return _resolve_registration_gpu_resources() if gpu_backend else _REGISTRATION_RESOURCES
+
+
+def class_requires_device(resource_class: ResourceClass) -> bool:
+    """Returns True when each job of the target resource class holds one CUDA device while it runs."""
+    return resource_class.name == _REGISTRATION_GPU_CLASS_NAME
+
+
 def resolve_core_budget() -> int:
     """Resolves the cores one execution session may commit across all of its concurrently running jobs.
 
@@ -272,10 +298,10 @@ def resolve_class_allocation(
     """Resolves the per-job worker count and the concurrency cap of one resource class.
 
     Notes:
-        A class carrying a hard concurrency ceiling describes work whose throughput stops climbing before its cores
-        run out, so it keeps its class default and ignores both overrides. Every other class takes its default
-        worker count and bounds its concurrency by the CPU budget. Memory bounds admission rather than concurrency,
-        because the memory one job holds follows the recording it processes rather than the class it belongs to.
+        A class carrying a hard concurrency ceiling is bounded by a resource the CPU budget does not supply, so it keeps
+        its class default and ignores both overrides. Every other class takes its default worker count and bounds its
+        concurrency by the CPU budget. Memory bounds admission rather than concurrency, because the memory one job holds
+        follows the recording it processes rather than the class it belongs to.
 
         Every cap resolved here bounds one class in isolation, because a class cannot know which other classes will be
         dispatching alongside it. The dispatcher therefore holds the sum of the cores committed by every class inside
@@ -293,7 +319,9 @@ def resolve_class_allocation(
         A (workers_per_job, max_parallel_jobs) tuple for this resource class.
     """
     if resource_class.concurrency_limit is not None:
-        return resource_class.workers_per_job, min(resource_class.concurrency_limit, max(1, job_count))
+        # Floors the cap at one job. A class resolving a cap of zero holds its queue forever, rather than
+        # dispatching the job that reports the absent resource its ceiling counts.
+        return resource_class.workers_per_job, max(1, min(resource_class.concurrency_limit, max(1, job_count)))
 
     if workers_per_job is None:
         workers = resource_class.workers_per_job
@@ -393,3 +421,29 @@ def summarize_class_allocation(
         }
         for class_name in class_job_counts
     }
+
+
+@cache
+def _resolve_registration_gpu_resources() -> ResourceClass:
+    """Builds the resource class of the plane-registration jobs that run on a CUDA device.
+
+    Notes:
+        Each job holds one device for its whole duration, so the count of the devices the host exposes is the hard
+        ceiling on the concurrency of the class. Without that ceiling the derived cap would divide the CPU budget by
+        the two cores a job holds and admit dozens of jobs onto the devices the host actually carries.
+
+        The device count comes from a runtime probe that leaves a CUDA context in the process that runs it, and every
+        worker process imports this module. The class is therefore built when a device-backed job is first queued,
+        which confines that context to the process doing the queueing, and the result is held for the lifetime of
+        that process.
+
+    Returns:
+        The resource class that governs the worker count and the concurrency of the device-backed registration jobs.
+    """
+    return ResourceClass(
+        name=_REGISTRATION_GPU_CLASS_NAME,
+        workers_per_job=REGISTRATION_GPU_WORKERS,
+        maximum_workers_per_job=None,
+        concurrency_limit=resolve_device_budget(),
+        concurrency_reservation=None,
+    )

@@ -185,7 +185,9 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
     console.echo(message=message, level=LogLevel.SUCCESS)
 
 
-def register_recording_plane(configuration: SingleRecordingConfiguration, plane_index: int, *, workers: int) -> None:
+def register_recording_plane(
+    configuration: SingleRecordingConfiguration, plane_index: int, *, workers: int, device: int | None = None
+) -> None:
     """Removes motion from the target imaging plane and computes its registration quality metrics.
 
     Notes:
@@ -201,6 +203,8 @@ def register_recording_plane(configuration: SingleRecordingConfiguration, plane_
         plane_index: The index of the imaging plane to register.
         workers: The number of parallel workers allocated to this registration job. Must be a positive integer, which
             the caller resolves before invoking this function.
+        device: The zero-based index of the CUDA device this job registers the plane on while the configuration names
+            the GPU backend. Use None to select the first device the host exposes.
 
     Raises:
         ValueError: If output_path is not configured, or if the plane contains fewer frames than the processing
@@ -230,7 +234,7 @@ def register_recording_plane(configuration: SingleRecordingConfiguration, plane_
     timer.reset()
 
     # Runs registration (motion correction) and the registration quality metrics computation.
-    register_plane(context=context, workers=workers)
+    register_plane(context=context, workers=workers, device=device)
 
     if registration_skipped:
         message = (

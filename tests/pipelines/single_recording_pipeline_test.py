@@ -9,7 +9,7 @@ import yaml
 import numpy as np
 import pytest
 from tifffile import TiffWriter
-from ataraxis_base_utilities import error_format, ensure_directory_exists
+from ataraxis_base_utilities import console, error_format, ensure_directory_exists
 from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 
 from cindra.io import (
@@ -19,8 +19,13 @@ from cindra.io import (
 )
 from cindra.io.binary import create_binarization_marker
 from cindra.io.context import PARAMETERS_FILENAME
-from cindra.dataclasses import RuntimeContext, AcquisitionParameters, SingleRecordingConfiguration
-from cindra.orchestration import SingleRecordingJobNames
+from cindra.dataclasses import (
+    RuntimeContext,
+    RegistrationBackend,
+    AcquisitionParameters,
+    SingleRecordingConfiguration,
+)
+from cindra.orchestration import SingleRecordingJobNames, pipeline
 from cindra.orchestration.worker import (
     prime_recording,
     execute_single_recording_job,
@@ -75,6 +80,21 @@ _SENTINEL_REGISTRATION_SECONDS: int = 4242
 
 _BINARY_ITEM_SIZE: int = 2
 """The number of bytes one pixel occupies inside a cindra binary, which stores int16 samples."""
+
+_NO_DEVICE_MESSAGE: str = "Unable to run the registration stage on the GPU backend."
+"""The message the stubbed device verification raises for a host exposing no usable CUDA device."""
+
+
+def _refuse_device() -> None:
+    """Refuses the run the way the device verification refuses a host exposing no usable CUDA device."""
+    console.error(message=_NO_DEVICE_MESSAGE, error=RuntimeError)
+
+
+def _set_registration_backend(configuration_path: Path, backend: RegistrationBackend) -> None:
+    """Rewrites a saved configuration file so that its registration section names the given backend."""
+    configuration = SingleRecordingConfiguration.from_yaml(file_path=configuration_path)
+    configuration.registration.backend = backend
+    configuration.save(file_path=configuration_path)
 
 
 class TestRunSingleRecordingPipeline:
@@ -266,6 +286,56 @@ class TestRunSingleRecordingPipeline:
         )
         with pytest.raises(ValueError, match=error_format(expected_message)):
             run_single_recording_pipeline(configuration_path=configuration_path, binarize=True)
+
+
+class TestRegistrationDeviceVerification:
+    """Tests the CUDA device verification that precedes a registration stage running on the GPU backend."""
+
+    def test_gpu_registration_aborts_before_any_stage_runs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verifies that a host exposing no usable device fails the run before a registration job is dispatched."""
+        configuration_path, output_directory = _prepare_pipeline_inputs(root=tmp_path)
+        _set_registration_backend(configuration_path=configuration_path, backend=RegistrationBackend.GPU)
+        monkeypatch.setattr(pipeline, "verify_gpu_runtime", _refuse_device)
+
+        with pytest.raises(RuntimeError, match=error_format(message=_NO_DEVICE_MESSAGE)):
+            run_single_recording_pipeline(configuration_path=configuration_path, binarize=True, register=True)
+
+        # The conversion is requested alongside the registration, so an untouched binary states that the check
+        # aborted the invocation before its first stage rather than between the two.
+        assert not (output_directory / "cindra" / "plane_0" / "channel_1_data.bin").exists()
+
+    @pytest.mark.parametrize(
+        ("backend", "register"),
+        [(RegistrationBackend.CPU, True), (RegistrationBackend.GPU, False)],
+    )
+    def test_verification_is_skipped_when_no_device_backed_registration_runs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: RegistrationBackend, register: bool
+    ) -> None:
+        """Verifies that a host-backend registration and a run without a registration job never reach the check."""
+        configuration_path, _ = _prepare_pipeline_inputs(root=tmp_path)
+        _set_registration_backend(configuration_path=configuration_path, backend=backend)
+        monkeypatch.setattr(pipeline, "verify_gpu_runtime", _refuse_device)
+
+        run_single_recording_pipeline(configuration_path=configuration_path, binarize=True, register=register)
+
+    def test_remote_gpu_registration_job_reaches_the_check(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verifies that a job dispatched by identifier is verified against the backend its configuration names."""
+        configuration_path, output_directory = _prepare_pipeline_inputs(root=tmp_path)
+        run_single_recording_pipeline(configuration_path=configuration_path, binarize=True)
+        _set_registration_backend(configuration_path=configuration_path, backend=RegistrationBackend.GPU)
+        monkeypatch.setattr(pipeline, "verify_gpu_runtime", _refuse_device)
+        register_id = ProcessingTracker.generate_job_id(job_name=SingleRecordingJobNames.REGISTER, specifier="plane_0")
+
+        with pytest.raises(RuntimeError, match=error_format(message=_NO_DEVICE_MESSAGE)):
+            run_single_recording_pipeline(configuration_path=configuration_path, job_id=register_id)
+
+        # The check precedes the tracker alignment, so the registration job never joins the tracked job set.
+        tracker_path = output_directory / "cindra" / "single_recording_tracker.yaml"
+        assert register_id not in ProcessingTracker(file_path=tracker_path).snapshot()
 
 
 class TestBinarizeRecording:

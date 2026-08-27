@@ -34,6 +34,7 @@ def cindra_run(
     input_path: Path,
     binarize_workers: int | None,
     register_workers: int | None,
+    register_device: int | None,
     process_workers: int | None,
     discover_workers: int | None,
     extract_workers: int | None,

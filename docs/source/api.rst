@@ -35,6 +35,7 @@ Orchestration
 .. autodata:: cindra.orchestration.jobs.MULTI_RECORDING_PHASES
 .. autodata:: cindra.orchestration.allocation.BINARIZATION_WORKERS
 .. autodata:: cindra.orchestration.allocation.REGISTRATION_WORKERS
+.. autodata:: cindra.orchestration.allocation.REGISTRATION_GPU_WORKERS
 .. autodata:: cindra.orchestration.allocation.PROCESSING_WORKERS
 .. autodata:: cindra.orchestration.allocation.COMBINATION_WORKERS
 .. autodata:: cindra.orchestration.allocation.DISCOVERY_WORKERS
