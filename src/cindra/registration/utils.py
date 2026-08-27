@@ -49,10 +49,8 @@ def apply_phase_correlation(
     # spectrum, which computes the cross-correlation in the frequency domain. This makes the correlation robust to
     # intensity variations between frames. Epsilon prevents division by zero at DC component. Folding the epsilon, the
     # division, and the kernel multiplication into one Numba pass over the leading axis keeps the normalization free of
-    # any full spectra temporary. That pass spreads the arithmetic over every worker thread, which is what lets the
-    # whole call scale with the transforms around it. The spectrum carries a per-block kernel axis whenever the caller
-    # correlates extracted blocks, so the dispatch below selects the kernel broadcasting the reference over the axes the
-    # spectrum holds.
+    # any full spectra temporary. The spectrum carries a per-block kernel axis whenever the caller correlates extracted
+    # blocks, so the dispatch below selects the kernel broadcasting the reference over the axes the spectrum holds.
     if frames_fft.ndim == 4:  # noqa: PLR2004
         _normalize_block_spectra(spectra=frames_fft, kernel=kernel)
     else:

@@ -538,3 +538,46 @@ class TestExtractionCeiling:
         )
 
         assert resolved == EXTRACTION_WORKERS
+
+
+class TestCompetingClasses:
+    """Tests the division of the free cores among the elastic classes holding queued work."""
+
+    def test_one_competing_class_takes_the_whole_budget(self) -> None:
+        """Verifies that a lone elastic class divides the free cores among its own jobs alone."""
+        resolved = resolve_dispatch_workers(
+            resource_class=_REGISTRATION_RESOURCES,
+            free_cores=126,
+            pending_jobs=3,
+            running_jobs=0,
+            concurrency_cap=8,
+            competing_classes=1,
+        )
+
+        assert resolved == REGISTRATION_MAXIMUM_WORKERS
+
+    def test_two_competing_classes_split_the_budget(self) -> None:
+        """Verifies that a second elastic class holding work halves the share the first one divides."""
+        resolved = resolve_dispatch_workers(
+            resource_class=_REGISTRATION_RESOURCES,
+            free_cores=126,
+            pending_jobs=4,
+            running_jobs=0,
+            concurrency_cap=8,
+            competing_classes=2,
+        )
+
+        assert resolved == 15
+
+    def test_competition_never_pushes_a_job_below_its_class_default(self) -> None:
+        """Verifies that dividing the budget among many classes still leaves each job its class default."""
+        resolved = resolve_dispatch_workers(
+            resource_class=_REGISTRATION_RESOURCES,
+            free_cores=16,
+            pending_jobs=8,
+            running_jobs=0,
+            concurrency_cap=8,
+            competing_classes=4,
+        )
+
+        assert resolved == REGISTRATION_WORKERS

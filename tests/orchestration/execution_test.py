@@ -183,7 +183,7 @@ class TestStartExecutionSession:
 
         message = (
             f"Unable to start the execution session. The '{override_name}' override must be a positive integer, "
-            f"-1 to request every available core, or None to accept the measured default, but encountered "
+            f"-1 to request every available core, or None to accept the stage default, but encountered "
             f"{workers_per_job if override_name == 'workers_per_job' else max_parallel_jobs}."
         )
 

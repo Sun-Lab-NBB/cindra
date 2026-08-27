@@ -148,16 +148,14 @@ class GpuRegistrationBackend:
 
     Notes:
         The frames the nonrigid warp writes agree to single-precision rounding rather than exactly. The host bilinear
-        kernel subtracts an integer neighbour index from a float32 coordinate, which Numba promotes to double
-        precision, so the host accumulates its four-term weighted sum in double precision while the device accumulates
-        in single precision. Measured over block offsets quantized to a tenth of a pixel, that leaves roughly one
-        sample in seven hundred one storage unit away from the value the host writes, and never further. The rigid
-        path carries no interpolation, so its frames match the host exactly.
+        kernel subtracts an integer neighbour index from a float32 coordinate, which Numba promotes to double precision,
+        so the host accumulates its four-term weighted sum in double precision while the device accumulates in single
+        precision. A sample the two backends disagree on sits one storage unit from the value the host writes, and never
+        further. The rigid path carries no interpolation, so its frames match the host exactly.
 
         A batch crosses the bus in the dtype the caller supplies it in. An int16 batch is widened to float32 on the
-        device and narrowed back to int16 there, so the plane binary's storage dtype moves half the bytes a float32
-        batch moves in each direction. Both directions stage through page-locked host buffers the backend allocates on
-        first use and reuses for every batch of the same geometry that follows.
+        device and narrowed back to int16 there. Both directions stage through page-locked host buffers the backend
+        allocates on first use and reuses for every batch of the same geometry that follows.
 
     Args:
         reference_data: The precomputed reference data holding the rigid taper mask, mean offset, and FFT kernel,
@@ -564,8 +562,7 @@ class GpuRegistrationBackend:
         Raises:
             ValueError: If nonrigid registration is enabled and the backend holds no block reference data.
         """
-        # Widens the storage dtype on the device, which is where the arithmetic runs, so an int16 batch moves half the
-        # bytes a float32 batch moves across the bus.
+        # Widens the storage dtype on the device, which is where the arithmetic runs.
         device_frames = staged_frames.astype(cupy.float32) if staged_frames.dtype == cupy.int16 else staged_frames
 
         if bidirectional_phase_offset != 0:
@@ -893,7 +890,7 @@ class GpuRegistrationBackend:
         y_peaks = (flat_indices // central_size).reshape(block_count, frame_count).astype(cupy.int32)
         x_peaks = (flat_indices % central_size).reshape(block_count, frame_count).astype(cupy.int32)
 
-        # Gathers the region around every peak as one strided read rather than as a copy loop over (block, frame).
+        # Gathers the region around every peak as one strided read over the block and frame axes.
         region_indices = cupy.arange(region_size, dtype=cupy.int32)
         block_indices = cupy.arange(block_count, dtype=cupy.int32)[:, None, None, None]
         frame_indices = cupy.arange(frame_count, dtype=cupy.int32)[None, :, None, None]
@@ -1126,10 +1123,6 @@ class GpuRegistrationBackend:
     def _translate_frames(frames: cupy.ndarray, y_offsets: cupy.ndarray, x_offsets: cupy.ndarray) -> cupy.ndarray:
         """Applies a per-frame rigid translation to a batch of frames using circular shifting.
 
-        Notes:
-            The wrapped row and column indices resolve to one gather over the whole batch, so a batch of any size
-            costs a single kernel launch instead of one launch per frame.
-
         Args:
             frames: The frames with shape (frame_count, height, width) to translate.
             y_offsets: The vertical offsets with shape (frame_count,). Positive values shift content upward.
@@ -1210,12 +1203,10 @@ class GpuRegistrationBackend:
         """Samples every source image of a batch at the requested coordinates using bilinear interpolation.
 
         Notes:
-            The coordinate is truncated toward zero and its fractional part is taken before the four neighbour
-            indices are clamped into range. A coordinate above the last row or column therefore resolves to the edge
-            pixel, while a coordinate below zero keeps a negative fraction and is linearly extrapolated from the
-            first two edge pixels. Neither the map_coordinates routine nor a normalized grid sampler reproduces that
-            extrapolation, because both clamp or pad the coordinate before the weights are formed, so the four
-            neighbours are gathered and weighted explicitly here.
+            The coordinate is truncated toward zero and its fractional part is taken before the four neighbour indices
+            are clamped into range. A coordinate above the last row or column therefore resolves to the edge pixel,
+            while a coordinate below zero keeps a negative fraction and is linearly extrapolated from the first two edge
+            pixels. Neither the map_coordinates routine nor a normalized grid sampler reproduces that extrapolation.
 
         Args:
             source: The source images with shape (frame_count, source_height, source_width).
@@ -1419,9 +1410,8 @@ def _resolve_pinned_buffer(
     """Returns the slot's page-locked host buffer for one batch geometry, allocating it on the first request.
 
     Notes:
-        A page-locked buffer is what makes a device copy asynchronous, and page-locking a fresh allocation costs more
-        than the copy it enables. The buffer is therefore held for the lifetime of the backend and reused by every
-        batch of the same geometry the slot stages afterwards.
+        A page-locked buffer is what makes a device copy asynchronous, so the buffer is held for the lifetime of the
+        backend and reused by every batch of the same geometry the slot stages afterwards.
 
     Args:
         slot: The staging slot the buffer belongs to.

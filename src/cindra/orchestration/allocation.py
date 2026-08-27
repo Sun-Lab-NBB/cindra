@@ -1,7 +1,7 @@
-"""Provides the measured CPU worker defaults of the single and multi-recording pipeline stages, the resource-class model
-that sizes a batch of jobs, and the resolvers that turn a caller's request into a concrete allocation. The defaults
-encode the knee of each stage's measured scaling curve, so a caller expressing no preference receives the allocation
-that maximizes batch throughput rather than the one that minimizes the wall time of a single job.
+"""Provides the CPU worker defaults of the single and multi-recording pipeline stages, the resource-class model that
+sizes a batch of jobs, and the resolvers that turn a caller's request into a concrete allocation. A caller expressing
+no preference receives the allocation that maximizes batch throughput rather than the one that minimizes the wall
+time of a single job.
 """
 
 from __future__ import annotations
@@ -18,64 +18,38 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 BINARIZATION_WORKERS: int = 3
-"""The number of workers allocated to the binarization stage by default, measured as the processors the stage occupies
-while many recordings convert at once. The conversion waits on each batch reaching it rather than on the threads that
-consume the batch, so the stage settles below the decode ceiling it is permitted."""
+"""The number of CPU cores one binarization job holds."""
 
 REGISTRATION_WORKERS: int = 4
-"""The number of workers allocated to the registration stage by default, which is the knee of its measured scaling
-curve. The stage is largely serial, so wall time flattens close to this allocation."""
+"""The number of CPU cores one registration job holds while the session dispatches at its full concurrency."""
 
 PROCESSING_WORKERS: int = 10
-"""The number of workers allocated to the processing stage by default, measured on a one-plane worker sweep. Detection
-held at 114.0, 113.9, and 113.8 seconds for 10, 20, and 30 workers, bound by movie binning IO and a serial detection
-loop. Extraction scaled from 61.8 to 44.1 to 38.6 seconds over the same sweep, but running more planes concurrently
-outweighs that gain, which places the default at 10."""
+"""The number of CPU cores one processing job holds while the session dispatches at its full concurrency."""
 
 DISCOVERY_WORKERS: int = 2
-"""The number of workers allocated to the multi-recording discovery stage by default. Sixteen workers shorten a
-ten-recording dataset from 28.9 to 19.1 seconds while spending twelve times the processor time, and the wall time
-turns back upward past that width. Two is the smallest allocation that engages the deformation pool, which the stage
-builds only while the budget exceeds one."""
+"""The number of CPU cores one multi-recording discovery job holds while the session dispatches at its full
+concurrency. The stage builds its deformation pool only while the allocation exceeds one core."""
 
 EXTRACTION_WORKERS: int = 16
-"""The number of workers allocated to the multi-recording extraction stage by default. The stage keeps shortening well
-past this width, so the figure follows the concurrency a host sustains rather than a plateau. Sixteen leaves room for
-the six to eight datasets a compute node extracts at once while still reaching a sevenfold single-job speedup."""
+"""The number of CPU cores one multi-recording extraction job holds while the session dispatches at its full
+concurrency."""
 
 COMBINATION_WORKERS: int = 1
-"""The number of CPU cores one combination job holds. The combination stage merges the per-plane result files with
-serial input and output and takes no worker argument, so each of its jobs occupies exactly one core."""
+"""The number of CPU cores one combination job holds. The stage takes no worker argument, so its jobs occupy one core
+whatever the budget supplies."""
 
 REGISTRATION_MAXIMUM_WORKERS: int = 32
-"""The widest allocation one registration job converts into wall clock. A 6000-frame recording of 794 by 376 pixel
-frames, registered with the quality metrics enabled, took 61.0, 42.2, 33.5, and 30.5 seconds at 4, 8, 16, and 32
-workers, and held at 31.2 and 31.0 seconds at 64 and 126. Only 43 cores are ever busy at the widest allocation, so the
-stage cannot saturate a wider budget."""
+"""The most CPU cores one registration job holds when the host has capacity to spare."""
 
 PROCESSING_MAXIMUM_WORKERS: int = 10
-"""The widest allocation one processing job converts into wall clock, which is the measured stage default. A
-6000-frame recording of 794 by 376 pixel frames holding 2190 regions took 31.9, 30.9, 29.2, 29.0, and 28.4 seconds at
-10, 16, 32, 64, and 126 workers. Detection holds at 22 seconds across that whole sweep, because it waits on the
-movie binning it reads and on a serial detection loop, and it spends three quarters of the job."""
+"""The most CPU cores one processing job holds when the host has capacity to spare. The figure meets the stage
+default, so a processing job holds one width whatever the host holds free."""
 
 DISCOVERY_MAXIMUM_WORKERS: int = 8
-"""The widest allocation one multi-recording discovery job converts into wall clock. A ten-recording dataset took 28.9,
-26.4, 22.9, and 20.4 seconds at 1, 2, 4, and 8 workers, while 16 workers bought 6.4 percent over 8 and 32 workers turned
-the wall time back upward to 19.7 seconds."""
+"""The most CPU cores one multi-recording discovery job holds when the host has capacity to spare."""
 
 EXTRACTION_MAXIMUM_WORKERS: int = 32
-"""The widest allocation one multi-recording extraction job converts into wall clock. The extraction the
-multi-recording stage runs is the extraction a processing job runs, so the figure follows that sub-stage, which took
-6, 4, 3, 3, and 3 seconds at 10, 16, 32, 64, and 126 workers over 2190 regions and 6000 frames. The plateau sits at
-32, and a processing job stops short of it because detection spends three quarters of that job at a width no wider
-allocation shortens.
-
-Notes:
-    The sweep behind this figure measured the sub-stage inside a processing job rather than a multi-recording
-    extraction job over a whole dataset, so the plateau is established on the kernels the two stages share rather
-    than on the dataset scale the multi-recording stage reaches.
-"""
+"""The most CPU cores one multi-recording extraction job holds when the host has capacity to spare."""
 
 ALL_CORES_REQUEST: int = -1
 """The requested worker count that asks for every available CPU core."""
@@ -87,27 +61,14 @@ _BINARIZATION_CONCURRENCY_LIMIT: int = 4
 """The binarization jobs that may run at once regardless of the cores the budget could still supply.
 
 Notes:
-    The stage sits at the root of the single-recording chain, so each job that finishes releases that recording's
-    plane jobs. Four run at their full decode rate, which is what returns those plane jobs to the queue soonest,
-    while spreading the same capacity over more recordings would delay all of them equally. Spare cores never lift
-    this ceiling, because a job held by it waits on something spare cores do not supply.
+    Spare cores never lift this ceiling, because a job held by it waits on something spare cores do not supply.
 """
 
 _REGISTRATION_CONCURRENCY_RESERVATION: int = 4
-"""The registration jobs that run at once while other work can still use the capacity the stage gives up.
-
-Notes:
-    Registration gates the processing job that waits on it, so holding a share back keeps the stages that wait on no
-    other job running while a recording's planes are still being registered.
-"""
+"""The registration jobs that run at once while other work can still use the capacity the stage gives up."""
 
 _PROCESSING_CONCURRENCY_RESERVATION: int = 5
-"""The processing jobs that run at once while other work can still use the capacity the stage gives up.
-
-Notes:
-    Processing cores are the batch's scarcest resource once the single-recording chain opens, so holding a share back
-    keeps the conversion jobs at the root of that chain running rather than starving behind a full budget.
-"""
+"""The processing jobs that run at once while other work can still use the capacity the stage gives up."""
 
 _BYTES_PER_MEGABYTE: int = 1024**2
 """The number of bytes in one megabyte, used to convert the host memory counter into a memory budget."""
@@ -120,7 +81,7 @@ _STAGE_WORKER_DEFAULTS: dict[SingleRecordingJobNames | MultiRecordingJobNames, i
     MultiRecordingJobNames.DISCOVER: DISCOVERY_WORKERS,
     MultiRecordingJobNames.EXTRACT: EXTRACTION_WORKERS,
 }
-"""Maps every single and multi-recording pipeline stage to its measured default worker count.
+"""Maps every single and multi-recording pipeline stage to its default worker count.
 
 Notes:
     The combination stage carries the single core its serial merge occupies rather than being absent, so a caller
@@ -135,7 +96,7 @@ class ResourceClass:
     name: str
     """The name of the resource class, used as the key of the per-class queues and of the reported allocation."""
     workers_per_job: int
-    """The number of CPU cores each job of this class holds, taken from the measured stage defaults."""
+    """The number of CPU cores each job of this class holds while the session dispatches at its full concurrency."""
     maximum_workers_per_job: int | None
     """The most CPU cores one job of this class holds when the host has capacity to spare, or None when the class is
     not elastic and every one of its jobs runs at workers_per_job.
@@ -215,8 +176,7 @@ _DISCOVERY_RESOURCES: ResourceClass = ResourceClass(
     concurrency_reservation=None,
 )
 """The resource class of the multi-recording discovery jobs. Discovery registers every recording of one animal against
-the others, so each job holds the stage's saturating allocation and its concurrency is bounded by the shared CPU budget
-alone."""
+the others, and its concurrency is bounded by the shared CPU budget alone."""
 
 _EXTRACTION_RESOURCES: ResourceClass = ResourceClass(
     name="extraction",
@@ -225,9 +185,8 @@ _EXTRACTION_RESOURCES: ResourceClass = ResourceClass(
     concurrency_limit=None,
     concurrency_reservation=None,
 )
-"""The resource class of the multi-recording extraction jobs. The stage keeps shortening well past its measured worker
-count, so that count follows the concurrency a compute node sustains and the remaining budget is better spent on
-running more recordings concurrently."""
+"""The resource class of the multi-recording extraction jobs. Its concurrency is bounded by the shared CPU budget
+alone."""
 
 RESOURCE_CLASS_BY_JOB_NAME: dict[str, ResourceClass] = {
     SingleRecordingJobNames.BINARIZE: _BINARIZATION_RESOURCES,
@@ -247,7 +206,7 @@ def resolve_stage_workers(
     """Resolves the number of workers to allocate to the target pipeline stage.
 
     Notes:
-        A requested count of None resolves to the measured default for the stage, which is the knee of that stage's
+        A requested count of None resolves to the default for the stage, which is the allocation that stage's
         scaling curve. A requested count of -1 resolves to every available CPU core, minus the cores the ataraxis
         worker resolver holds back for system use. A positive requested count is honored exactly. A requested count of
         zero, or any negative count other than -1, is rejected.
@@ -257,7 +216,7 @@ def resolve_stage_workers(
 
     Args:
         job_name: The single or multi-recording pipeline stage to allocate workers for.
-        requested_workers: The number of workers the caller asks for. Use None to accept the measured default for the
+        requested_workers: The number of workers the caller asks for. Use None to accept the default for the
             stage and -1 to request every available core.
 
     Returns:
@@ -285,7 +244,7 @@ def resolve_stage_workers(
     if requested_workers <= 0:
         message = (
             f"Unable to resolve the worker count for the '{job_name}' processing stage. The requested worker count "
-            f"must be a positive integer, -1 to request every available core, or None to accept the measured stage "
+            f"must be a positive integer, -1 to request every available core, or None to accept the stage "
             f"default, but encountered {requested_workers}."
         )
         console.error(message=message, error=ValueError)
@@ -314,7 +273,7 @@ def resolve_class_allocation(
 
     Notes:
         A class carrying a hard concurrency ceiling describes work whose throughput stops climbing before its cores
-        run out, so it keeps its measured allocation and ignores both overrides. Every other class takes its measured
+        run out, so it keeps its class default and ignores both overrides. Every other class takes its default
         worker count and bounds its concurrency by the CPU budget. Memory bounds admission rather than concurrency,
         because the memory one job holds follows the recording it processes rather than the class it belongs to.
 
@@ -359,6 +318,7 @@ def resolve_dispatch_workers(
     pending_jobs: int,
     running_jobs: int,
     concurrency_cap: int,
+    competing_classes: int = 1,
 ) -> int:
     """Resolves the number of workers one job of the target resource class takes when it is dispatched.
 
@@ -369,7 +329,10 @@ def resolve_dispatch_workers(
         job resolves toward the ceiling, because that job is the only claim on the free capacity. A draining queue sits
         between the two, so the jobs a batch has left to run widen as their peers finish.
 
-        A class carrying no ceiling is not elastic and takes its measured allocation whatever the host holds free.
+        A class carrying no ceiling is not elastic and takes its class default whatever the host holds free.
+
+        The free cores divide among the elastic classes holding queued work before the share divides among the jobs,
+        so one class widening cannot leave another waiting on capacity the budget still holds.
 
     Args:
         resource_class: The resource class of the job being dispatched.
@@ -377,6 +340,7 @@ def resolve_dispatch_workers(
         pending_jobs: The jobs of this class awaiting dispatch, counting the one being dispatched.
         running_jobs: The jobs of this class already running.
         concurrency_cap: The jobs of this class that may run at once.
+        competing_classes: The elastic classes holding queued work, counting this one.
 
     Returns:
         The number of workers to allocate to the dispatched job.
@@ -386,7 +350,7 @@ def resolve_dispatch_workers(
 
     # Holds the divisor at one, so a class dispatching the last job of a drained queue gives that job the whole share.
     competitors = max(1, min(pending_jobs, max(1, concurrency_cap - running_jobs)))
-    share = free_cores // competitors
+    share = (free_cores // max(1, competing_classes)) // competitors
 
     return min(max(share, resource_class.workers_per_job), resource_class.maximum_workers_per_job)
 
