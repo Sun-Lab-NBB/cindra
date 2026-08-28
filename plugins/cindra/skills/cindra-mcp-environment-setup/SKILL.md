@@ -22,6 +22,7 @@ Diagnoses and resolves cindra and cindra-gui MCP server connectivity and environ
 - Checking Python version compatibility
 - Validating cindra package installation and dependencies
 - Verifying the numeric threading runtime each platform needs (OpenMP on macOS, TBB elsewhere)
+- Verifying the CUDA runtime a device-backed registration needs, and resolving an unusable one
 - Environment-specific guidance for conda, pip, and uv workflows
 
 **Does not cover:**
@@ -240,13 +241,16 @@ remedy. The supported resolution is the LLVM OpenMP runtime (`libomp.dylib`) lin
 **Check this before dispatching, on every platform.** `check_threading_runtime_tool` reports the host's readiness
 directly. Call it and gate on its `ready` flag, then follow its `remedy` command when the host is not ready. It reports
 `required_layer` as `omp` on macOS and `tbb` elsewhere, so it diagnoses a missing TBB runtime on Linux and Windows the
-same way it diagnoses a missing `libomp.dylib` here.
+same way it diagnoses a missing `libomp.dylib` here. The TBB case carries a `pip install tbb4py` remedy.
 
 Skipping that check leaves a signature worth recognizing. Neither the OpenMP nor the TBB failure reaches an MCP tool
-response, so `execute_processing_jobs_tool` returns `started: true` and then every job fails with the runtime error
-recorded as its tracker error message. A batch where every job fails immediately, with no partial progress, is a
-missing threading runtime rather than a data problem. Resolve it here rather than routing to a processing or
-acquisition skill.
+response, so `execute_processing_jobs_tool` returns `started: true` and every job then fails. The two failures record
+different tracker messages. A missing TBB runtime raises at the job's first parallelized call, inside the tracker's job
+block, so the job records that runtime error text as its failure reason. The macOS OpenMP check runs ahead of that
+block, as the first statement of both pipeline entry points. Its refusal therefore never reaches the block, and each job
+records the generic `Unable to complete job. Worker terminated without reaching a terminal state.` instead. A batch
+where every job fails immediately, with no partial progress, is a missing threading runtime rather than a data problem.
+Resolve it here rather than routing to a processing or acquisition skill.
 
 Report what the host carries with:
 
@@ -290,16 +294,40 @@ mamba install -c conda-forge llvm-openmp
 
 The `cindra omp` half of this step is macOS-only. Linux and Windows select Numba's TBB threading layer instead
 (`tbb4py` and `intel-cmplr-lib-rt` are declared as `sys_platform != 'darwin'` dependencies), so Numba never loads
-`omppool` and `cindra omp` errors when run there. Run `check_threading_runtime_tool` on every platform regardless,
-because a Linux or Windows host missing the TBB runtime fails every parallelized stage exactly as a macOS host missing
-`libomp.dylib` does. The tool reports that case with `required_layer: "tbb"` and a `pip install tbb4py` remedy.
+`omppool` and `cindra omp` errors when run there.
 
-### Step 7: Restart the MCP server
+### Step 7: Verify the CUDA runtime for a device-backed batch
+
+This step applies only where a batch will name a CUDA device, through the `gpu_devices` argument of the execute tools
+or through `cindra run --register-device`. Every other batch registers on the host CPU and needs no CUDA runtime.
+
+Call `check_gpu_runtime_tool` and gate on its `ready` flag. It reports `device_count` and a `devices` list carrying the
+`index`, `name`, `total_memory_mb`, and `compute_capability` of each usable device, and those `index` values are what
+`gpu_devices` takes. A host that is not ready carries a `detail` sentence naming the reason and a `remedy` naming the
+installation that resolves it. The equivalent command, for a session whose MCP tools are down, is `cindra gpu`.
+
+The remedy is the CuPy build matching the CUDA version the local driver runs:
+
+```bash
+pip install cupy-cuda13x[ctk]
+```
+
+A driver running CUDA 12 installs `cupy-cuda12x[ctk]` instead, because one CuPy build targets one CUDA major version.
+The `ctk` extra carries the CUDA math libraries CuPy resolves on first use, and a bare CuPy installation imports and
+lists its devices while raising at the first transform. The report separates the two, because it transforms a small
+array on a device before calling the runtime usable. macOS carries no remedy, since the CuPy project publishes no
+wheel for it, and registration there runs on the host CPU.
+
+Skipping this check costs a round trip rather than a batch. An execute tool whose `gpu_devices` names an index the host
+does not expose returns `success: false` and `started: false`, carrying a message that lists the indices the host does
+expose, so no job runs. `cindra run --register-device` aborts the same way, before dispatching any stage.
+
+### Step 8: Restart the MCP server
 
 After the user resolves the environment issue, they must restart Claude Code for the MCP servers to pick up the changes.
 The plugin's server registrations will automatically configure the servers on the next session.
 
-### Step 8: Resume the intended work
+### Step 9: Resume the intended work
 
 After connectivity is restored, return to the work that required the MCP tools. If no restart was needed (the
 environment was already healthy), return control to the invoking skill, or proceed to `/acquisition-data-preparation` to
@@ -324,6 +352,7 @@ the MCP tools on the next session, since the current session's MCP subprocesses 
 | cindra-gui tools unavailable                                 | Plugin not installed or outdated                  | Reinstall the cindra Claude Code plugin                                                   |
 | Skills available but MCP tools missing                       | Plugin installed without pip package              | `pip install --pre cindra` in the active environment                                      |
 | `RuntimeError: Unable to locate the OpenMP runtime` on macOS | `libomp.dylib` is not on the loader's search path | `sudo cindra omp --yes`, after `brew install libomp` when `cindra omp` reports no runtime |
+| Every registration job fails naming a CUDA device            | The host reaches no usable CUDA device            | `pip install cupy-cuda13x[ctk]`, or `cupy-cuda12x[ctk]` for a CUDA 12 driver              |
 
 ---
 
@@ -365,6 +394,7 @@ MCP Environment Setup:
 - [ ] Identified environment type (conda, venv, system)
 - [ ] Provided environment-specific resolution steps (install commands carry the --pre flag)
 - [ ] On macOS, reported the OpenMP runtime state with 'cindra omp' and linked one with 'sudo cindra omp --yes'
+- [ ] For a batch naming a CUDA device, gated on check_gpu_runtime_tool 'ready' and surfaced its remedy
 - [ ] Verified cindra plugin is installed (provides both server registrations)
 - [ ] Informed user that Claude Code must be restarted after environment changes
 ```

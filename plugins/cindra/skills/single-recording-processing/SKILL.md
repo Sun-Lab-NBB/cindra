@@ -53,8 +53,9 @@ diagnose and resolve connectivity issues.
 | Tool                                  | Purpose                                                                 |
 |---------------------------------------|-------------------------------------------------------------------------|
 | `get_pipeline_job_universe_tool`      | Reports every job a recording declares and which can run right now      |
-| `size_pipeline_jobs_tool`             | Reports the cores and memory every job holds, before preparing anything |
+| `size_pipeline_jobs_tool`             | Reports the cores, memory, and device memory every job holds            |
 | `check_threading_runtime_tool`        | Reports whether the numeric threading layer this host needs is loadable |
+| `check_gpu_runtime_tool`              | Reports the CUDA devices this host exposes for registration             |
 | `prepare_single_recording_batch_tool` | Prepares execution manifest without starting execution (idempotent)     |
 | `execute_full_pipeline_tool`          | Convenience: prepares and executes all phases with automatic sequencing |
 
@@ -168,7 +169,8 @@ against the verification checklist at the end of this skill, before calling any 
 
    **Simple (recommended for straightforward runs):**
    Call `execute_full_pipeline_tool` with `pipeline_type="single-recording"`, the confirmed `raw_data_paths`,
-   `configuration_path`, `output_roots`, and worker settings. This prepares and executes all phases automatically.
+   `configuration_path`, `output_roots`, worker settings, and `gpu_devices` when registration runs on a CUDA device.
+   This prepares and executes all phases automatically.
 
    **Fine-grained (for selective execution or re-runs):**
    a. Call `prepare_single_recording_batch_tool` with `raw_data_paths`, `configuration_path`, and `output_roots`. This
@@ -207,8 +209,8 @@ against the verification checklist at the end of this skill, before calling any 
 
 `get_recording_status_tool`, `verify_single_recording_output_tool`, and `clean_processing_output_tool` all name their
 argument `output_root` and take the parent of the `cindra/` folder. That path equals the `output_roots` entries passed
-to the prepare tool and the per-entry `output_root` it returns, never the `raw_data_paths` entry the same recording is
-keyed by. This matters on a separate-output layout where the two roots differ. `get_recording_status_tool` and
+to the prepare tool and the per-entry `output_root` it returns, never the `raw_data_paths` entry that keys the same
+recording. This matters on a separate-output layout where the two roots differ. `get_recording_status_tool` and
 `clean_processing_output_tool` resolve `cindra/` directly under the given path with NO fallback, so feeding the raw-data
 path makes them report `not_started` or "Output root not found", a silent false negative.
 `verify_single_recording_output_tool` also searches recursively for `configuration.yaml`, so it may still pass through
@@ -271,30 +273,33 @@ which the later phases recompute, so warn the user and budget a full reprocessin
 
 ## Resource management
 
-Each single-recording phase runs under its own resource class with a measured per-job worker count. Both
-`workers_per_job` and `max_parallel_jobs` are single scalars applied to every resource class separately, so neither one
-is a session-wide total. Leaving either as None accepts that class's measured default, and a positive value replaces
-that class's figure outright, in every class at once. Setting `workers_per_job` to -1 gives every job the whole session
-core budget, while setting `max_parallel_jobs` to -1 lifts the derived cap so that only the job count bounds
-concurrency. The session CPU budget is `cpu_count - 2`, with 2 cores reserved for system operations, and the dispatcher
-holds the sum of the cores committed by every class inside that budget. While nothing is running it admits a single job
-regardless, so a job whose worker count exceeds the whole budget still runs rather than stalling the session.
+Each single-recording phase runs under its own resource class with a per-job worker count. Both `workers_per_job` and
+`max_parallel_jobs` are single scalars applied to every resource class separately, so neither one is a session-wide
+total. Leaving either as None accepts that class's default, and a positive value replaces that class's figure outright,
+in every class at once. Setting `workers_per_job` to -1 gives every job the whole session core budget, while setting
+`max_parallel_jobs` to -1 lifts the derived cap so that only the job count bounds concurrency. The session CPU budget is
+`cpu_count - 2`, with 2 cores reserved for system operations, and the dispatcher holds the sum of the cores committed by
+every class inside that budget. While nothing is running it admits a single job regardless, so a job whose worker count
+exceeds the whole budget still runs rather than stalling the session.
 
-| Phase    | Resource class | Cores per job | Concurrency                         |
-|----------|----------------|---------------|-------------------------------------|
-| BINARIZE | `binarization` | 3             | Hard ceiling of 4                   |
-| REGISTER | `registration` | 4             | Session CPU budget, 4 jobs reserved |
-| PROCESS  | `processing`   | 10            | Session CPU budget, 5 jobs reserved |
-| COMBINE  | `combination`  | 1             | Session CPU budget                  |
+| Phase    | Resource class     | Cores per job | Dispatch ceiling | Concurrency                         |
+|----------|--------------------|---------------|------------------|-------------------------------------|
+| BINARIZE | `binarization`     | 3             | None             | Hard ceiling of 4                   |
+| REGISTER | `registration`     | 4             | 32               | Session CPU budget, 4 jobs reserved |
+| REGISTER | `registration_gpu` | 2             | None             | One job per session CUDA device     |
+| PROCESS  | `processing`       | 10            | 10               | Session CPU budget, 5 jobs reserved |
+| COMBINE  | `combination`      | 1             | None             | Session CPU budget                  |
 
-Every cap but binarization's derives from the host as `min(max(1, budget // cores_per_job), max(1, job_count))`, so a
-wider machine raises it without being asked, and the dispatcher then admits against the live core and memory budgets
+Every cap but the two hard ceilings derives from the host as `min(max(1, budget // cores_per_job), max(1, job_count))`,
+so a wider machine raises it without being asked. The dispatcher then admits against the live core and memory budgets
 rather than against the cap alone. The engine saturates the host it is given, so leave both parameters as None unless
 the user asks for an override. Binarization's ceiling of 4 never lifts, because the stage decodes at the storage's rate
-rather than the host's core count, and that class alone ignores both `workers_per_job` and `max_parallel_jobs`.
-
-A reservation binds only in the dispatcher's first pass. The second pass releases it over whatever capacity the first
-left unused, so a reserved class runs at its full derived width whenever no other queue can use the room.
+rather than the host's core count. A registration job takes `registration_gpu` when the session passed `gpu_devices`.
+`Cores per job` is the smallest width a class gives a job and `Dispatch ceiling` is the largest, so a class whose
+ceiling stands higher widens each job it dispatches over the cores no running job holds. That widening applies only
+where the session left `workers_per_job` as None, and `resource_classes` reports the smallest width. A reservation binds
+only in the dispatcher's first pass, and the second pass releases it over whatever capacity the first left unused, so a
+reserved class runs at its full derived width whenever no other queue can use the room.
 
 Memory bounds dispatch separately from every class cap. Each job is estimated from the recording it will process, and
 the dispatcher holds the sum of the running jobs' estimates inside the session memory budget, reported as
@@ -302,47 +307,22 @@ the dispatcher holds the sum of the running jobs' estimates inside the session m
 so memory another process frees or claims mid-batch changes nothing. A batch that dispatches fewer jobs than the caps
 allow, on a host with idle cores, is memory-bound rather than stalled.
 
-The multi-recording `discovery` and `extraction` classes carry measured defaults of 2 and 16 cores per job and take
-the same two overrides. See `/multi-recording-processing` for their concurrency caps.
+See `/multi-recording-processing` for the `discovery` and `extraction` classes the multi-recording pipeline runs.
 
 Report the resolved allocation after dispatch, from the `resource_classes` mapping the execute tool returns, rather
 than predicting it beforehand. When the user does ask for an override, state its full reach first. A `workers_per_job`
 of 30 gives 30 cores to every registration, processing, and combination job alike rather than raising processing alone,
 and it lowers each of those classes' derived concurrency to at most the CPU budget divided by 30. A `max_parallel_jobs`
 of 4 likewise permits 4 registration jobs AND 4 processing jobs AND 4 combination jobs at the same time, held together
-only by the session core and memory budgets. Binarization ignores both overrides, because its hard ceiling fixes its
-allocation.
+only by the session core and memory budgets. Binarization and device-backed registration ignore both overrides, because
+a hard ceiling fixes each one's allocation.
 
 ### Planning before dispatch
 
-Both planning tools load their configuration through the same loader the pipeline uses, which rejects a configuration
-whose `file_io.output_path` is None with "The output_path must be configured in the FileIO section of the
-configuration, but it is currently None." A freshly generated template carries None there, so neither tool accepts one.
-Plan against the per-recording configuration the prepare tool writes at `<output_root>/cindra/configuration.yaml`, or
-set `file_io.data_path` and `file_io.output_path` on a copy of the template with `set_config_values_tool` first. Beyond
-those two fields, neither tool needs a tracker or any pipeline output.
-
-`get_pipeline_job_universe_tool` answers which jobs can run right now. It reads the inventory the output directories
-already hold, returning `resolved: false` with an empty universe for a recording carrying nothing rather than failing.
-Each entry carries a `ready` flag reporting that the job's own input exists. The conversion job is ready once the
-acquisition parameters resolve, and a registration job once its plane carries the channel binary. A processing job is
-ready once its plane carries the reference image, and the combination job once every plane carries its traces. Use it to
-plan a selective re-run, and `get_recording_status_tool` to read recorded outcomes once a batch has been prepared,
-because a job whose input exists may still have a prerequisite that has not succeeded on the tracker.
-
-`size_pipeline_jobs_tool` reports the cores and memory every job of a recording holds, reading its acquisition metadata
-and one source file header. Pass the recording's configuration path and `pipeline_type="single-recording"`. The
-response lists each job's `name`, `specifier`, `cores`, and `memory_mb`, plus `peak_memory_mb` for the single largest
-job and `total_memory_mb` for every job at once. Compare `peak_memory_mb` against the host's free memory to learn
-whether the largest job fits at all, and `total_memory_mb` to learn whether the whole batch could ever run
-concurrently. These are the figures the execute tools charge against the session memory budget, so a batch whose peak
-exceeds free memory admits its jobs serially rather than failing.
-
-`check_threading_runtime_tool` reports whether the numeric threading layer this host needs is loadable, which is OpenMP
-on macOS and TBB elsewhere. Gate a batch on its `ready` flag. A macOS host that is not ready aborts every job at the
-pipeline entry point before any stage runs, while a non-macOS host missing TBB fails at the job's first parallelized
-call. Either outcome surfaces as a per-job tracker failure rather than as a tool error, so checking first replaces
-parsing those failures. The response carries a `remedy` command when the host is not ready.
+`get_pipeline_job_universe_tool`, `size_pipeline_jobs_tool`, `check_threading_runtime_tool`, and
+`check_gpu_runtime_tool` plan a batch before it is dispatched. Gate every batch on the threading tool's `ready` flag,
+and a device-backed batch on the GPU tool's `ready` flag as well. See [tool-responses.md](references/tool-responses.md)
+for the configuration the two configuration-reading tools need, what each tool reports, and how to read those figures.
 
 ---
 
@@ -373,11 +353,11 @@ lowercased status string. You MUST give the table a column for each of the four 
 
 ### Preparation errors
 
-| Error Message                             | Resolution                               |
-|-------------------------------------------|------------------------------------------|
-| "At least one raw data path is required"  | Provide raw data paths                   |
-| "Configuration file not found"            | Invoke `/single-recording-configuration` |
-| "No valid raw data paths provided"        | Inspect `invalid_paths` in the response  |
+| Error Message                            | Resolution                               |
+|------------------------------------------|------------------------------------------|
+| "At least one raw data path is required" | Provide raw data paths                   |
+| "Configuration file not found"           | Invoke `/single-recording-configuration` |
+| "No valid raw data paths provided"       | Inspect `invalid_paths` in the response  |
 
 ### Partially accepted batches
 
@@ -407,9 +387,8 @@ directory before preparing it again.
 
 A recording the sizing pass cannot measure is excluded from the batch rather than aborting it, so a run that reports
 `started: true` may still cover fewer recordings than you submitted. Only the prepare tools return `total_recordings`,
-so name every entry of `invalid_paths`, `invalid_recordings`, `path_conflicts`, `migrated_recordings`, and
-`unsizable_recordings` rather than looking for a total to compare. A migrated recording is not rejected, but its
-dispatched job set differs from the one it last carried, so report it alongside the rejections.
+so the rejection lists above are the whole record of what a batch dropped. A migrated recording is not rejected, but
+its dispatched job set differs from the one it last carried, so report it alongside the rejections.
 
 These lists do not share one element shape. Every job is sized from the recording's raw acquisition geometry rather
 than from a per-stage allowance, so a recording with unreadable raw data loses every one of its jobs rather than the
@@ -433,16 +412,16 @@ part of this submission.", where `{phase}` is the tracker phase name, for exampl
 
 When processing fails for some recordings, read the error messages and route to the appropriate skill:
 
-| Error pattern                                     | Skill to invoke                                                 |
-|---------------------------------------------------|-----------------------------------------------------------------|
-| Missing `cindra_parameters.json`, TIFF read error | `/acquisition-data-preparation`                                 |
-| Invalid parameter values, wrong plane/channel     | `/acquisition-data-preparation`                                 |
-| TIFF files hold frames of differing shapes        | `/acquisition-data-preparation`                                 |
-| TIFF frames fall short of one interleave cycle    | `/acquisition-data-preparation`                                 |
-| Directory holds no TIFF the conversion accepts    | Re-prepare with the subdirectory the reason names               |
-| Previous write of the binary file was interrupted | Set `repeat_binarization`, reset `binarization`, re-dispatch    |
-| Configuration parameter issues                    | `/single-recording-configuration`                               |
-| MCP tools unavailable, server connection errors   | `/cindra-mcp-environment-setup`                                 |
+| Error pattern                                     | Skill to invoke                                              |
+|---------------------------------------------------|--------------------------------------------------------------|
+| Missing `cindra_parameters.json`, TIFF read error | `/acquisition-data-preparation`                              |
+| Invalid parameter values, wrong plane/channel     | `/acquisition-data-preparation`                              |
+| TIFF files hold frames of differing shapes        | `/acquisition-data-preparation`                              |
+| TIFF frames fall short of one interleave cycle    | `/acquisition-data-preparation`                              |
+| Directory holds no TIFF the conversion accepts    | Re-prepare with the subdirectory the reason names            |
+| Previous write of the binary file was interrupted | Set `repeat_binarization`, reset `binarization`, re-dispatch |
+| Configuration parameter issues                    | `/single-recording-configuration`                            |
+| MCP tools unavailable, server connection errors   | `/cindra-mcp-environment-setup`                              |
 
 Wait for the current execution session to complete before starting retries. `cancel_processing_jobs_tool` clears the
 admission pool and every resource class queue, leaves already-dispatched worker processes running, and clears the
@@ -478,6 +457,7 @@ Single-Recording Processing Workflow:
 - [ ] Configuration file confirmed or created via `/single-recording-configuration`
 - [ ] Output root confirmed with user (required, no default)
 - [ ] Share of the machine to dedicate to processing confirmed with user
+- [ ] For a device-backed batch, `check_gpu_runtime_tool` gated on `ready` and its `devices` passed as `gpu_devices`
 - [ ] For a phase re-run, reset `warnings` acted on and every governing repeat flag set via `set_config_values_tool`
 - [ ] Batch prepared or full pipeline executed
 - [ ] Every entry of `invalid_paths`, `invalid_recordings`, `path_conflicts`, `migrated_recordings`, and

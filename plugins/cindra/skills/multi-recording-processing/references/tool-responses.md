@@ -50,10 +50,13 @@ alone.
 
 ### size_pipeline_jobs_tool
 
-Returns `jobs` holding the `name`, `specifier`, `cores`, and `memory_mb` of every declared job, plus `total_jobs`,
-`peak_memory_mb` for the single largest job, `total_memory_mb` for every job at once, and `pipeline_type`. Unlike the
-universe tool, this one fails when the dataset names no recording directory, when any recording carries no combined
-metadata archive, or when any recording reports no regions in its combined trace array.
+Returns `jobs` holding the `name`, `specifier`, `cores`, `memory_mb`, and `device_memory_mb` of every declared job,
+plus `total_jobs`, `peak_memory_mb` and `peak_device_memory_mb` for the single largest job, `total_memory_mb` for every
+job at once, and `pipeline_type`. Every device figure is zero here, because no multi-recording stage runs on a CUDA
+device, and the `gpu_registration` argument leaves them at zero as well. Like the universe tool, it fails when the
+dataset names fewer than two recording directories, because both load through the same loader. Unlike the universe tool,
+it also fails when any recording carries no combined metadata archive, or when any recording reports no regions in its
+combined trace array, both of which the universe tool reports as `ready: false` instead.
 
 ### check_threading_runtime_tool
 
@@ -76,8 +79,14 @@ loads one runs no discovery.
 | `memory_budget_mb` | Session memory budget, sampled once at session start                   |
 | `resource_classes` | Per class, its `workers_per_job`, `max_parallel_jobs`, and `job_count` |
 
-`execute_full_pipeline_tool` additionally returns `phase_count` and a per-phase `phases` list, and returns
-`started: false` with a `message` and a `next_step` when every phase is already complete.
+`execute_full_pipeline_tool` returns `pipeline_type` on every outcome, including every argument rejection and every
+failure, so a caller can attribute a response to the pipeline it asked for without tracking the request itself. It
+additionally returns `phase_count` and a per-phase `phases` list on every outcome reached after the arguments validate,
+and returns `started: false` with a `message` and a `next_step` when every phase is already complete.
+
+`execute_processing_jobs_tool` forwards `invalid_jobs` whenever validation rejected a submitted job, which covers the
+response for a session whose `workers_per_job` or `max_parallel_jobs` override was itself rejected. Read that list on a
+failure rather than assuming an override rejection means every submitted job was valid.
 
 ### get_processing_jobs_status_tool
 
@@ -103,9 +112,12 @@ a `note`.
 
 ### reset_processing_phases_tool
 
-Returns `reset`, `requested_phases`, `effective_phases` after downstream expansion in pipeline execution order, and a
-`jobs` list. That list is a post-reset snapshot of **every** job of every valid phase, not only the jobs the reset
-touched, so selecting from it dispatches jobs that were already succeeded. Select from the prepare manifest instead.
+Returns `reset`, the echoed `tracker_path`, `requested_phases`, `effective_phases` after downstream expansion in
+pipeline execution order, and a `jobs` list. That list is a post-reset snapshot of **every** job of every valid phase,
+not only the jobs the reset touched, so selecting from it dispatches jobs that were already succeeded. Select from the
+prepare manifest instead. A `warnings` list joins them when a reset phase is governed by a repeat flag that is false
+while that phase's output already exists. Each entry names the dotted configuration flag to set, and a caller must act
+on every entry before dispatching the reset phase.
 
 ### clean_processing_output_tool
 

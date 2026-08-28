@@ -250,7 +250,7 @@ class TestBinaryFileSetItem:
         ) as binary_file:
             frame_data = np.ones((_FRAME_HEIGHT, _FRAME_WIDTH), dtype=np.int16) * 42
             binary_file[0] = frame_data
-            np.testing.assert_array_equal(binary_file[0], frame_data)
+            np.testing.assert_array_equal(actual=binary_file[0], desired=frame_data)
 
     def test_writes_slice_of_frames(self, tmp_path: Path) -> None:
         """Verifies that multiple frames can be written using slice indexing."""
@@ -261,7 +261,7 @@ class TestBinaryFileSetItem:
         ) as binary_file:
             frame_data = np.full((3, _FRAME_HEIGHT, _FRAME_WIDTH), fill_value=100, dtype=np.int16)
             binary_file[2:5] = frame_data
-            np.testing.assert_array_equal(binary_file[2:5], frame_data)
+            np.testing.assert_array_equal(actual=binary_file[2:5], desired=frame_data)
 
     def test_converts_non_int16_data_and_clips_values(self, tmp_path: Path) -> None:
         """Verifies that non-int16 data is clipped to the maximum int16 value and cast to int16 before writing."""
@@ -299,7 +299,7 @@ class TestBinaryFileGetItemAndData:
         original_data = _create_test_binary(file_path=file_path)
 
         with BinaryFile(height=_FRAME_HEIGHT, width=_FRAME_WIDTH, file_path=file_path) as binary_file:
-            np.testing.assert_array_equal(binary_file[0], original_data[0])
+            np.testing.assert_array_equal(actual=binary_file[0], desired=original_data[0])
 
     def test_getitem_returns_frame_slice(self, tmp_path: Path) -> None:
         """Verifies that slice indexing returns the correct subset of frames."""
@@ -307,7 +307,7 @@ class TestBinaryFileGetItemAndData:
         original_data = _create_test_binary(file_path=file_path)
 
         with BinaryFile(height=_FRAME_HEIGHT, width=_FRAME_WIDTH, file_path=file_path) as binary_file:
-            np.testing.assert_array_equal(binary_file[2:5], original_data[2:5])
+            np.testing.assert_array_equal(actual=binary_file[2:5], desired=original_data[2:5])
 
     def test_data_property_returns_all_frames(self, tmp_path: Path) -> None:
         """Verifies that the data property returns the complete contents of the binary file."""
@@ -315,7 +315,7 @@ class TestBinaryFileGetItemAndData:
         original_data = _create_test_binary(file_path=file_path)
 
         with BinaryFile(height=_FRAME_HEIGHT, width=_FRAME_WIDTH, file_path=file_path) as binary_file:
-            np.testing.assert_array_equal(binary_file.data, original_data)
+            np.testing.assert_array_equal(actual=binary_file.data, desired=original_data)
 
 
 class TestSubsampleMovie:
@@ -380,8 +380,8 @@ class TestBinMovie:
             assert result.dtype == np.float32
             assert result.shape == (2, _FRAME_HEIGHT, _FRAME_WIDTH)
             # The arange input is deterministic, so each bin equals the exact mean of its five source frames.
-            np.testing.assert_allclose(result[0], data[0:5].mean(axis=0))
-            np.testing.assert_allclose(result[1], data[5:10].mean(axis=0))
+            np.testing.assert_allclose(actual=result[0], desired=data[0:5].mean(axis=0))
+            np.testing.assert_allclose(actual=result[1], desired=data[5:10].mean(axis=0))
 
     def test_bins_with_cropping(self, tmp_path: Path) -> None:
         """Verifies that bin_movie applies x_range and y_range cropping to binned frames."""
@@ -395,8 +395,8 @@ class TestBinMovie:
                 y_range=(0, 4),
             )
             assert result.shape == (2, 4, 4)
-            np.testing.assert_allclose(result[0], data[0:5, 0:4, 0:4].mean(axis=0))
-            np.testing.assert_allclose(result[1], data[5:10, 0:4, 0:4].mean(axis=0))
+            np.testing.assert_allclose(actual=result[0], desired=data[0:5, 0:4, 0:4].mean(axis=0))
+            np.testing.assert_allclose(actual=result[1], desired=data[5:10, 0:4, 0:4].mean(axis=0))
 
     def test_bins_with_bad_frames_rejected(self, tmp_path: Path) -> None:
         """Verifies that bin_movie excludes bad frames when the good frame fraction exceeds the threshold."""
@@ -414,8 +414,8 @@ class TestBinMovie:
             assert result.dtype == np.float32
             assert result.shape[0] == 4
             # Bad frames 0 and 1 are dropped, leaving good frames 2..9 binned into pairs (2,3), (4,5), (6,7), (8,9).
-            np.testing.assert_allclose(result[0], data[2:4].mean(axis=0))
-            np.testing.assert_allclose(result[3], data[8:10].mean(axis=0))
+            np.testing.assert_allclose(actual=result[0], desired=data[2:4].mean(axis=0))
+            np.testing.assert_allclose(actual=result[3], desired=data[8:10].mean(axis=0))
 
     def test_bins_without_bad_frames(self, tmp_path: Path) -> None:
         """Verifies that bin_movie treats all frames as good when bad_frames is not provided."""
@@ -465,8 +465,8 @@ class TestBinMovie:
         assert result.dtype == np.float32
         # Each single-frame batch becomes its own bin, so every frame of the movie survives the binning.
         assert result.shape == (_FRAME_COUNT, _FRAME_HEIGHT, _FRAME_WIDTH)
-        np.testing.assert_allclose(result[0], data[0])
-        np.testing.assert_allclose(result[-1], data[-1])
+        np.testing.assert_allclose(actual=result[0], desired=data[0])
+        np.testing.assert_allclose(actual=result[-1], desired=data[-1])
 
     def test_bins_small_batch_averaged_into_single_bin(self, tmp_path: Path) -> None:
         """Verifies that a batch smaller than bin_size is averaged into a single bin to preserve data."""
@@ -482,7 +482,7 @@ class TestBinMovie:
             assert result.dtype == np.float32
             assert result.shape == (1, _FRAME_HEIGHT, _FRAME_WIDTH)
             # All frames have value 10, so the averaged bin should also be 10.
-            np.testing.assert_allclose(result[0], 10.0)
+            np.testing.assert_allclose(actual=result[0], desired=10.0)
 
     def test_bin_movie_averages_correctly(self, tmp_path: Path) -> None:
         """Verifies that the binned output contains the correct mean of each bin's frames."""
@@ -501,8 +501,8 @@ class TestBinMovie:
 
             # Bin 0: mean(10, 20) = 15.0, Bin 1: mean(30, 40) = 35.0.
             assert result.shape[0] == 2
-            np.testing.assert_allclose(result[0], 15.0)
-            np.testing.assert_allclose(result[1], 35.0)
+            np.testing.assert_allclose(actual=result[0], desired=15.0)
+            np.testing.assert_allclose(actual=result[1], desired=35.0)
 
 
 class TestWriteTiff:
@@ -519,7 +519,7 @@ class TestWriteTiff:
 
         tiff_data = tifffile.imread(tiff_path)
         assert tiff_data.shape == (5, 2, 2)
-        np.testing.assert_array_equal(tiff_data, data[:, 1:3, 2:4])
+        np.testing.assert_array_equal(actual=tiff_data, desired=data[:, 1:3, 2:4])
 
     def test_writes_tiff_with_default_ranges(self, tmp_path: Path) -> None:
         """Verifies that write_tiff exports a frame subset at full frame size when y_range and x_range are omitted."""
@@ -532,7 +532,7 @@ class TestWriteTiff:
 
         tiff_data = tifffile.imread(tiff_path)
         assert tiff_data.shape == (3, _FRAME_HEIGHT, _FRAME_WIDTH)
-        np.testing.assert_array_equal(tiff_data, data[0:3])
+        np.testing.assert_array_equal(actual=tiff_data, desired=data[0:3])
 
 
 def _create_test_binary(file_path: Path, frame_count: int = _FRAME_COUNT) -> NDArray[np.int16]:

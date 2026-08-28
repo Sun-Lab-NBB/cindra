@@ -285,10 +285,10 @@ class TestComputeNonrigidOffsets:
         block_count = len(y_blocks)
         assert y_offsets.shape == (2, block_count)
         assert x_offsets.shape == (2, block_count)
-        # Expects identical frames to produce consistent offsets across frames.
+        # Expects the two copies of the same reference to differ only by the subpixel interpolation residual.
         np.testing.assert_allclose(y_offsets[0], y_offsets[1], atol=1e-4)
         np.testing.assert_allclose(x_offsets[0], x_offsets[1], atol=1e-4)
-        # Expects offsets within one pixel for identical frames.
+        # Expects a frame matching the reference to peak at zero shift, leaving under a pixel of subpixel residual.
         assert np.max(np.abs(y_offsets)) < 1.0
         assert np.max(np.abs(x_offsets)) < 1.0
 

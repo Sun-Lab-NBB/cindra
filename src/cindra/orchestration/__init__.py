@@ -1,5 +1,13 @@
 """Provides the pipeline job model, the worker allocation, the batch execution engine, and the pipeline entry points."""
 
+from .gpu import (
+    GPU_REMEDY,
+    ALL_DEVICES_REQUEST,
+    GpuDevice,
+    GpuStatus,
+    GpuSummary,
+    resolve_gpu_devices,
+)
 from .jobs import (
     MULTI_RECORDING_PHASES,
     SINGLE_RECORDING_PHASES,
@@ -55,9 +63,15 @@ from .allocation import (
     COMBINATION_WORKERS,
     BINARIZATION_WORKERS,
     REGISTRATION_WORKERS,
+    REGISTRATION_GPU_WORKERS,
+    DISCOVERY_MAXIMUM_WORKERS,
+    EXTRACTION_MAXIMUM_WORKERS,
+    PROCESSING_MAXIMUM_WORKERS,
     RESOURCE_CLASS_BY_JOB_NAME,
+    REGISTRATION_MAXIMUM_WORKERS,
     ResourceClass,
     resolve_stage_workers,
+    resolve_registration_resource_class,
 )
 from .footprints import (
     WORKER_MEMORY_MB,
@@ -75,21 +89,31 @@ from .footprints import (
 )
 
 __all__ = [
+    "ALL_DEVICES_REQUEST",
     "BINARIZATION_WORKERS",
     "COMBINATION_WORKERS",
+    "DISCOVERY_MAXIMUM_WORKERS",
     "DISCOVERY_WORKERS",
+    "EXTRACTION_MAXIMUM_WORKERS",
     "EXTRACTION_WORKERS",
+    "GPU_REMEDY",
     "MEMORY_ESTIMATE_TOLERANCE",
     "MULTI_RECORDING_PHASES",
     "MULTI_RECORDING_TRACKER_FILENAME",
     "PLANE_SPECIFIER_PREFIX",
+    "PROCESSING_MAXIMUM_WORKERS",
     "PROCESSING_WORKERS",
+    "REGISTRATION_GPU_WORKERS",
+    "REGISTRATION_MAXIMUM_WORKERS",
     "REGISTRATION_WORKERS",
     "RESOURCE_CLASS_BY_JOB_NAME",
     "SINGLE_RECORDING_PHASES",
     "SINGLE_RECORDING_TRACKER_FILENAME",
     "SPAWNED_CHILD_MEMORY_MB",
     "WORKER_MEMORY_MB",
+    "GpuDevice",
+    "GpuStatus",
+    "GpuSummary",
     "JobSizing",
     "MultiRecordingJobNames",
     "MultiRecordingJobs",
@@ -117,6 +141,7 @@ __all__ = [
     "prime_dataset",
     "prime_recording",
     "resolve_downstream_phases",
+    "resolve_gpu_devices",
     "resolve_maximum_roi_count",
     "resolve_multi_recording_job_universe",
     "resolve_multi_recording_jobs",
@@ -125,6 +150,7 @@ __all__ = [
     "resolve_pipeline_jobs",
     "resolve_plane_specifier",
     "resolve_recording_geometry",
+    "resolve_registration_resource_class",
     "resolve_session_load",
     "resolve_single_recording_job_universe",
     "resolve_single_recording_jobs",

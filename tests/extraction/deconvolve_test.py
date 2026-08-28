@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import pytest
 from sklearn.isotonic import IsotonicRegression
 from ataraxis_base_utilities import error_format
 
 from cindra.extraction.deconvolve import apply_oasis_deconvolution, compute_delta_fluorescence
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
 
 class TestComputeDeltaFluorescence:
@@ -408,10 +413,10 @@ class TestApplyOasisDeconvolution:
 
 
 def _isotonic_oasis_oracle(
-    trace: np.ndarray,
+    trace: NDArray[np.float32],
     time_constant: float,
     sampling_rate: float,
-) -> np.ndarray:
+) -> NDArray[np.float64]:
     """Solves the unconstrained non-negative AR(1) deconvolution problem with a weighted isotonic regression."""
     # The OASIS problem is min ||trace - calcium||^2 subject to calcium[t] >= gamma * calcium[t - 1]. Substituting
     # calcium[t] = gamma**t * z[t] turns the constraint into z[t] >= z[t - 1], which makes the problem a weighted

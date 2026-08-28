@@ -31,14 +31,13 @@ single-recording and multi-recording pipelines, their stage ordering, handoff co
 - MCP server connectivity (see `/cindra-mcp-environment-setup`)
 
 **Handoff rules:** This skill dispatches to a stage-specific skill at each stage. You MUST invoke the relevant skill for
-detailed tool usage, parameter reference, and troubleshooting. This skill owns the cross-stage map and the
-single-vs-multi decision. The work performed within a single stage belongs to that stage's skill.
+detailed tool usage, parameter reference, and troubleshooting.
 
 ---
 
 ## Single-vs-multi-recording decision
 
-Cindra provides two pipelines. Determine which the user needs before planning any work.
+Determine which pipeline the user needs before planning any work.
 
 ```text
 Does the goal require tracking the SAME ROIs across multiple recordings (e.g. cross-day longitudinal analysis)?
@@ -80,10 +79,7 @@ Setup       →  Data Prep   →               →             →            �
 - **Skip condition:** Recording already binarized or beyond (confirm via `get_recording_status_tool`)
 
 The `raw_data_path` these tools take is the recording's imaging directory or any parent of it, which
-`/acquisition-data-preparation` defines in full. It is the value `prepare_single_recording_batch_tool` takes as its
-`raw_data_paths`, and it is a different concept from the `output_root` every status, results, and viewer tool takes,
-which is the parent of the recording's `cindra` directory. `get_recording_status_tool` therefore takes the output root
-rather than the raw data path.
+`/acquisition-data-preparation` defines in full.
 
 ### Stage 3: Configuration
 
@@ -133,10 +129,7 @@ Complete (all)   →                →               →               →  Ins
 - **Actions:** Generate a multi-recording template configuration, set `recording_io.dataset_name` to a non-empty name
   with `set_config_values_tool` (`resolve_dataset_name_tool` builds a qualified one from the group's `output_roots`),
   set ROI selection and registration/tracking parameters, validate it
-- **Handoff condition:** A validated multi-recording template configuration file exists. A freshly generated
-  multi-recording template leaves `recording_io.dataset_name` empty, which `validate_config_file_tool` reports as an
-  error, so set it before validating. `prepare_multi_recording_batch_tool` later writes the lowercased dataset name into
-  the per-dataset configuration copy it saves beside the tracker, leaving the template untouched
+- **Handoff condition:** A validated multi-recording template configuration file exists
 
 ### Stage 2: Processing
 

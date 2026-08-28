@@ -19,7 +19,7 @@ from .nonrigid import (
 )
 from ..detection import compute_registration_blocks as compute_registration_blocks
 from ..dataclasses import RuntimeContext as RuntimeContext
-from .bidiphase_correction import apply_bidirectional_phase_correction as apply_bidirectional_phase_correction
+from .bidirectional_phase_correction import apply_bidirectional_phase_correction as apply_bidirectional_phase_correction
 
 _MINIMUM_SAMPLE_COUNT: int
 _MAXIMUM_SAMPLE_COUNT: int

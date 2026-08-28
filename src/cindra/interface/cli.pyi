@@ -11,6 +11,7 @@ from ..dataclasses import (
 )
 from ..orchestration import (
     OpenMPStatus as OpenMPStatus,
+    resolve_gpu_devices as resolve_gpu_devices,
     resolve_openmp_runtime as resolve_openmp_runtime,
     run_multi_recording_pipeline as run_multi_recording_pipeline,
     run_single_recording_pipeline as run_single_recording_pipeline,
@@ -25,12 +26,15 @@ def cindra_mcp(transport: Literal["stdio", "sse", "streamable-http"]) -> None: .
 @report_command_failure
 def cindra_omp(source: Path | None, target: Path | None, *, force: bool, yes: bool) -> None: ...
 @report_command_failure
+def cindra_gpu() -> None: ...
+@report_command_failure
 def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None: ...
 @report_command_failure
 def cindra_run(
     input_path: Path,
     binarize_workers: int | None,
     register_workers: int | None,
+    register_device: int | None,
     process_workers: int | None,
     discover_workers: int | None,
     extract_workers: int | None,

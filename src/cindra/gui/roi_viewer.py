@@ -210,7 +210,6 @@ class ROIViewer(QMainWindow):
         self._fluorescence_standard_deviation: NDArray[np.float32] | None = None
         self._frame_indices: NDArray[np.int32] | None = None
 
-        # Sets the window geometry and title.
         self.setGeometry(*ROI_STYLE.window_geometry)
         self.setWindowTitle("ROI Viewer")
 
@@ -246,7 +245,6 @@ class ROIViewer(QMainWindow):
         # Adds the selected ROI info bar between the main content and the status bar.
         self._build_roi_info_bar(parent_layout=outer_layout)
 
-        # Adds the status bar.
         self._status_bar = QStatusBar(self)
         self.setStatusBar(self._status_bar)
 
@@ -441,7 +439,6 @@ class ROIViewer(QMainWindow):
         self._roi_source_group.setVisible(False)
         layout.addWidget(self._roi_source_group)
 
-        # Adds the ROI selection controls.
         self._roi_selection_group = QGroupBox("ROI Selection")
         roi_group = self._roi_selection_group
         roi_group.setStyleSheet(STYLE.group_box)
@@ -496,7 +493,6 @@ class ROIViewer(QMainWindow):
 
         layout.addWidget(roi_group)
 
-        # Adds the background image controls.
         background_box, self._background_combo = self._create_view_controls()
         layout.addWidget(background_box)
 
@@ -524,7 +520,6 @@ class ROIViewer(QMainWindow):
         colors_box.layout().addWidget(self._colorbar_widgets.widget)  # type: ignore[union-attr]
         layout.addWidget(colors_box)
 
-        # Adds the trace display controls.
         self._trace_group, self._trace_controls = self._create_trace_controls()
         layout.addWidget(self._trace_group)
 
@@ -744,7 +739,8 @@ class ROIViewer(QMainWindow):
         add_button = QPushButton("Add to Existing", self)
         add_button.setFont(FONTS.small_bold)
         add_button.setToolTip(
-            "Append this recording's cell/non-cell labels to an existing classifier training dataset and retrain."
+            "Append this recording's cell/non-cell labels to an existing classifier training dataset and save the "
+            "merged dataset."
         )
         add_button.clicked.connect(self._on_classifier_add_to_existing)
         layout.addWidget(add_button, 2, 1, 1, 1)
@@ -852,7 +848,7 @@ class ROIViewer(QMainWindow):
         # native proportions regardless of panel size.
         self._view_box = ViewBox(name="plot1", border=list(COLORS.gray), invert_y=True)
         self._view_box.setAspectLocked(lock=True)
-        self._image_widget.addItem(self._view_box, 0, 0)
+        self._image_widget.addItem(self._view_box, row=0, col=0)
         self._view_box.setMenuEnabled(False)
         self._view_box.scene().contextMenuItem = self._view_box
         self._background = pg.ImageItem(viewbox=self._view_box, parent=self)
@@ -1709,7 +1705,7 @@ class ROIViewer(QMainWindow):
         if not self._selected_roi_indices:
             return
 
-        self._trace_box.setLabel("left", "Recording", **{"font-size": FONTS.label_size})
+        self._trace_box.setLabel("left", text="Recording", **{"font-size": FONTS.label_size})
         add_plot_legend(plot=self._trace_box, column_count=1)
 
         roi_index = self._selected_roi_indices[0]
@@ -1797,8 +1793,9 @@ class ROIViewer(QMainWindow):
                     ary=np.arange(maximum_frames, dtype=np.int32),
                     indices_or_sections=np.where(~valid_mask)[0],
                 )
+                minimum_segment_length = 2
                 for segment in segments:
-                    if len(segment) < 2:  # noqa: PLR2004
+                    if len(segment) < minimum_segment_length:
                         continue
                     segment_frames = average_frames[segment]
                     segment_values = -1 * average_scale + average[segment] * average_scale

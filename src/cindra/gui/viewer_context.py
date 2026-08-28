@@ -422,8 +422,9 @@ class SingleRecordingData:
 
     @property
     def principal_component_projections(self) -> NDArray[np.float32] | None:
-        """Returns the projection of each frame onto the principal components of the registered movie as an array
-        with shape (num_frames, num_components).
+        """Returns the projection of each sampled frame onto the principal components of the registered movie as an
+        array with shape (sampled_frames, num_components), holding one row per evenly-spaced sampled frame rather than
+        per recording frame.
         """
         return self._current_registration.principal_component_projections
 

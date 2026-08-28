@@ -1,9 +1,4 @@
-"""Provides MCP tools for verifying and querying cindra pipeline results.
-
-These tools enable AI agents to verify output completeness, assess processing quality, and inspect specific
-results from both single-recording and multi-recording pipelines. All tools load data directly from disk using
-lightweight numpy and YAML operations for efficient targeted queries.
-"""
+"""Provides MCP tools for verifying and querying the results of the single-recording and multi-recording pipelines."""
 
 from __future__ import annotations
 
@@ -78,7 +73,7 @@ class _VerificationState:
     """The list of missing required file or key names."""
 
     optional_absent: list[str] = field(default_factory=list)
-    """The list of optional file or key names the checked output does not hold."""
+    """The list of optional file names the checked output does not hold."""
 
     warnings: list[str] = field(default_factory=list)
     """The list of warning messages for non-critical issues."""
@@ -372,8 +367,8 @@ def verify_multi_recording_output_tool(output_root: str, dataset: str) -> dict[s
         directory inside the dataset tree as 'dataset_output_path'. An 'optional_absent' list, present only when it
         holds entries, carries the same label form for the optional outputs the dataset does not hold, which are the
         channel-2 arrays and the colocalization array of each recording. It is informational, and 'complete' stays
-        gated on 'missing' alone. The 'warnings' list holds non-fatal issues such as a registered-binary path that
-        does not resolve on disk.
+        gated on 'missing' alone. The 'warnings' list holds non-fatal issues such as an NPZ file whose keys could not be
+        read.
     """
     cindra_root, error = _find_cindra_root(output_root=output_root)
     if cindra_root is None:
@@ -1472,7 +1467,7 @@ def query_multi_recording_tracking_summary_tool(
         "median_recording_count": int(np.median(recording_counts)),
         "min_recording_count": int(np.min(recording_counts)),
         "max_recording_count": int(np.max(recording_counts)),
-        "pixel_count_summary": _array_summary(array=pixel_counts.astype(np.float32)),
+        "pixel_count_summary": _array_summary(array=pixel_counts.astype(dtype=np.float32)),
         "cluster_id_range": [int(np.min(cluster_ids)), int(np.max(cluster_ids))],
         "templates": templates,
     }

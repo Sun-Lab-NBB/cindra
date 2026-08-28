@@ -1,9 +1,4 @@
-"""Provides MCP tools for creating and validating acquisition parameter files and inspecting raw TIFF data.
-
-These tools enable AI agents to prepare raw imaging data for cindra processing by generating cindra_parameters.json
-files, validating existing acquisition parameter files, and verifying that raw TIFF files are readable and consistent
-with the recording's acquisition parameters.
-"""
+"""Provides MCP tools for creating and validating acquisition parameter files and inspecting raw TIFF data."""
 
 from __future__ import annotations
 
@@ -623,7 +618,7 @@ def _compact_acquisition_parameters(data: dict[str, object]) -> dict[str, object
 
     Notes:
         A three-region mesoscope recording carries thousands of line indices, whose transport costs far more than the
-        summary an agent reads them for. The values themselves are served through the 'roi_line_slice' request.
+        summary for which an agent reads them. The values themselves are served through the 'roi_line_slice' request.
 
     Args:
         data: The acquisition parameters to compact.

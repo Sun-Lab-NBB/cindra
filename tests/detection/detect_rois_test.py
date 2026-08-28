@@ -48,8 +48,8 @@ class TestExtendRoi:
         y_pixels = np.array([5, 6], dtype=np.int32)
         x_pixels = np.array([5, 6], dtype=np.int32)
         y_out, x_out = extend_roi(y_pixels=y_pixels, x_pixels=x_pixels, height=10, width=10, iterations=0)
-        np.testing.assert_array_equal(y_out, y_pixels)
-        np.testing.assert_array_equal(x_out, x_pixels)
+        np.testing.assert_array_equal(actual=y_out, desired=y_pixels)
+        np.testing.assert_array_equal(actual=x_out, desired=x_pixels)
 
     def test_no_duplicates(self) -> None:
         """Verifies that the output contains no duplicate coordinates."""
@@ -69,13 +69,13 @@ class TestSubtractNeuropil:
         frames = generator.standard_normal((5, 32, 32)).astype(np.float32) + 10.0
         original = frames.copy()
         _subtract_neuropil(frames=frames, filter_size=5)
-        assert not np.array_equal(frames, original)
+        assert not np.array_equal(a1=frames, a2=original)
 
     def test_uniform_frames_become_near_zero(self) -> None:
         """Verifies that uniform frames produce near-zero output after high-pass filtering."""
         frames = np.ones((5, 32, 32), dtype=np.float32) * 100.0
         _subtract_neuropil(frames=frames, filter_size=5)
-        np.testing.assert_allclose(frames, 0.0, atol=1e-3)
+        np.testing.assert_allclose(actual=frames, desired=0.0, atol=1e-3)
 
     def test_output_finite(self) -> None:
         """Verifies that the filtered frames contain only finite values."""
@@ -101,7 +101,7 @@ class TestConvolveSquare2d:
         # Interior pixels of uniform input: uniform_filter gives 1.0, scaled by 3 = 3.0.
         # Edge pixels will have smaller values due to zero padding.
         center = result[:, 10:22, 10:22]
-        np.testing.assert_allclose(center, 3.0, atol=0.1)
+        np.testing.assert_allclose(actual=center, desired=3.0, atol=0.1)
 
     def test_output_finite(self) -> None:
         """Verifies that the output is finite."""
@@ -137,7 +137,7 @@ class TestCreateInitialSquare:
     def test_weights_unit_normalized(self) -> None:
         """Verifies that the output weights have unit norm."""
         _, _, weights = _create_initial_square(center_y=10, center_x=10, square_size=5, height=30, width=30)
-        np.testing.assert_allclose(np.linalg.norm(weights), 1.0, atol=1e-5)
+        np.testing.assert_allclose(actual=np.linalg.norm(weights), desired=1.0, atol=1e-5)
 
     def test_output_dtypes(self) -> None:
         """Verifies the output dtypes."""
@@ -190,7 +190,8 @@ class TestEstimateSpatialScale:
 
     def test_returns_dominant_scale(self) -> None:
         """Verifies that the dominant scale is returned for a clear scale pattern."""
-        # Creates scale images where scale 2 has the highest values.
+        # A single non-zero scale makes every pixel of the maximum projection a local maximum, so the scale vote is
+        # unanimous and its mode settles on index 2.
         scale_images = np.zeros((5, 32, 32), dtype=np.float32)
         scale_images[2, :, :] = 10.0
         result = _estimate_spatial_scale(scale_images=scale_images)

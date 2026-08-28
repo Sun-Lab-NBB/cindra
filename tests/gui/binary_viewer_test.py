@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from PySide6.QtWidgets import QApplication
 
 
-@pytest.mark.xdist_group("gui_viewers")
+@pytest.mark.xdist_group(name="gui_viewers")
 class TestAverageOffsetCurves:
     """Tests the average rigid offset curves the viewer plots under the frame display."""
 

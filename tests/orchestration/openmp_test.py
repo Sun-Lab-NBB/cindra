@@ -10,10 +10,12 @@ from ataraxis_base_utilities import error_format
 
 from cindra.orchestration import (
     OpenMPStatus,
-    openmp as openmp_module,
     resolve_openmp_runtime,
 )
 from cindra.orchestration.openmp import (
+    _LINK_DIRECTORY,
+    _OPENMP_LIBRARY_NAME,
+    _PACKAGE_MANAGER_DIRECTORIES,
     OpenMPSummary,
     _link_openmp_runtime,
     verify_openmp_runtime,
@@ -75,9 +77,7 @@ class TestCandidateResolution:
         monkeypatch.delenv("CONDA_PREFIX", raising=False)
         monkeypatch.setattr("cindra.orchestration.openmp.sysconfig.get_path", lambda name: "")
         candidates = _resolve_candidate_paths()
-        assert candidates == tuple(
-            directory / "libomp.dylib" for directory in openmp_module._PACKAGE_MANAGER_DIRECTORIES
-        )
+        assert candidates == tuple(directory / "libomp.dylib" for directory in _PACKAGE_MANAGER_DIRECTORIES)
 
     def test_candidates_include_the_active_conda_environment(self, monkeypatch, tmp_path):
         """Verifies that an active conda environment contributes its lib directory as a candidate."""
@@ -122,10 +122,15 @@ class TestRuntimeLinking:
         resolving to nothing, which reports as a successful link while the host loses the runtime entirely.
         """
         runtime_path = _make_runtime(directory=tmp_path)
-        monkeypatch.setattr(openmp_module.sys, "platform", "darwin")
-        monkeypatch.setattr(openmp_module, "_openmp_runtime_loadable", lambda: False)
+        monkeypatch.setattr("cindra.orchestration.openmp.sys.platform", "darwin")
+        monkeypatch.setattr("cindra.orchestration.openmp._openmp_runtime_loadable", lambda: False)
 
-        with pytest.raises(RuntimeError, match="already sits where the link would be written"):
+        expected_message = (
+            f"Unable to link the OpenMP runtime at {runtime_path}. The runtime already sits where the link would "
+            f"be written, so linking it would replace the runtime itself with a link pointing at nothing, leaving the "
+            f"host with no runtime at all. The runtime is already on the loader's search path, so no link is needed."
+        )
+        with pytest.raises(RuntimeError, match=error_format(message=expected_message)):
             resolve_openmp_runtime(runtime_path=runtime_path, link_path=runtime_path, execute=True)
 
         assert not runtime_path.is_symlink()
@@ -149,7 +154,12 @@ class TestRuntimeLinking:
 
         monkeypatch.setattr(Path, "symlink_to", _refuse)
 
-        with pytest.raises(RuntimeError, match="Unable to link the OpenMP runtime into"):
+        expected_message = (
+            f"Unable to link the OpenMP runtime into {link_path.parent}. Writing the link requires permission to "
+            f"modify that directory, which usually means running the command through sudo. The loader reported: "
+            f"the filesystem refused the link."
+        )
+        with pytest.raises(RuntimeError, match=error_format(message=expected_message)):
             _link_openmp_runtime(runtime_path=runtime_path, link_path=link_path)
 
         assert link_path.is_symlink()
@@ -302,10 +312,10 @@ class TestMissingRuntimeVerification:
         monkeypatch.setattr("cindra.orchestration.openmp._openmp_runtime_loadable", lambda: False)
 
         expected_message = (
-            f"Unable to locate the OpenMP runtime ({openmp_module._OPENMP_LIBRARY_NAME}) that the Numba threading "
+            f"Unable to locate the OpenMP runtime ({_OPENMP_LIBRARY_NAME}) that the Numba threading "
             f"layer loads on macOS. Processing fails once it reaches a parallelized stage until the runtime is "
             f"loadable. Run 'cindra omp' to report the runtimes found on this host, and 'cindra omp --yes' to link "
-            f"one into {openmp_module._LINK_DIRECTORY}. Install one with 'brew install libomp' when the report finds "
+            f"one into {_LINK_DIRECTORY}. Install one with 'brew install libomp' when the report finds "
             f"none."
         )
         with pytest.raises(RuntimeError, match=error_format(message=expected_message)):

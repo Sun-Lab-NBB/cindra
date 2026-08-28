@@ -10,37 +10,41 @@
   rejects a data directory whose TIFF files do not all hold frames of the same shape, naming
   `file_io.ignored_file_names` as the exclusion mechanism. It also consumes whole plane and channel interleave cycles,
   so every plane and channel of a recording holds the same frame count. The frames of an incomplete final cycle are
-  discarded, and a recording short of one whole cycle is rejected. A conversion clears the results of every plane
-  directory the output root holds, including one the recording's current plane count no longer covers. Phases 2 and 3
-  carry a `plane_{index}` tracker specifier.
+  discarded, and a recording short of one whole cycle is rejected. Keep both in `resolve_tiff_conversion_plan`, because
+  the plan resolves before the conversion touches any binary or deletes any result the recording already holds. Phases 2
+  and 3 carry a `plane_{index}` tracker specifier.
 - **Multi-recording pipeline**: Two-phase workflow (discover, extract). Phase 1 selects ROIs from each recording,
   performs diffeomorphic demons registration to a common space, clusters ROIs across recordings via spatial overlap, and
   projects template masks back to individual recordings. Phase 2 extracts fluorescence traces and applies OASIS
   deconvolution for tracked ROI templates (parallelizable across recordings).
-- **Self-driven orchestration**: `cindra.orchestration` owns the whole scheduling surface across eight modules that form
-  a one-way dependency chain. `jobs.py` is the leaf above `cindra.layout`. It holds the job name enumerations and the
-  phase model (`SINGLE_RECORDING_PHASES`, `MULTI_RECORDING_PHASES`, `PipelinePhase`, `PrerequisiteScope`). It also holds
-  the resolvers that expand that model into a recording's job universe (`resolve_single_recording_jobs`,
-  `resolve_multi_recording_jobs`, `resolve_pipeline_jobs`), the prerequisite graph
-  (`resolve_single_recording_prerequisites`, `resolve_multi_recording_prerequisites`, `resolve_prerequisite_job_ids`,
-  `validate_job_prerequisites`), the phase expansion (`resolve_downstream_phases`, `order_phases_by_execution`), and the
-  prerequisite messages. `generate_job_ids` derives the identifier each of those jobs is tracked under, which is what
-  the `job_id` parameter of both pipeline entry points names. The plane specifier, the tracker filenames, and every
-  other on-disk name live one layer below in `cindra.layout`, which `jobs.py` reads from. `allocation.py` adds the
-  measured stage worker defaults, the resource-class model, and the host core and memory budgets. `footprints.py` adds
-  the per-stage memory models, the two estimators that report what one job holds, and the two sizers that pair each
-  estimate with its stage's declared cores as a `JobSizing`, which is the one thing it reads `allocation.py` for. A job
-  is sized from the data that exists when the sizing happens, so a single-recording model reads the acquisition alone
-  while a multi-recording model reads the completed single-recording output it runs on. `discovery.py` pairs the job
-  model with the on-disk inventory to report both the jobs a recording declares and the subset whose inputs exist.
-  `worker.py` holds the per-job entry points every scheduler dispatches, along with the two priming entry points that
-  write the shared bootstrap. `execution.py` holds the batch engine: `PendingJob`, `JobExecutionState`, the admission
-  scan, the two-pass dispatcher, and the manager thread. `pipeline.py` holds the two sequential entry points.
-  `openmp.py` carries no module-level side effect and its check runs only inside those two entry points, so importing
-  the package writes nothing and a console message never precedes the stdio MCP server's JSON-RPC stream. Nothing below
-  `orchestration` imports it, and no module inside it imports `interface`, so the MCP layer is a thin
-  argument-validation and JSON-shaping wrapper over calls into the package. This mirrors the orchestration package of
-  `ataraxis-video-system` and `ataraxis-communication-interface`, and its concurrency model follows `sollertia-forgery`.
+- **Self-driven orchestration**: `cindra.orchestration` owns the whole scheduling surface across nine modules that
+  form a one-way dependency chain. `gpu.py` and `openmp.py` import nothing from the package, and `jobs.py` is the leaf
+  above `cindra.layout`. It holds the job name enumerations and the phase model (`SINGLE_RECORDING_PHASES`,
+  `MULTI_RECORDING_PHASES`, `PipelinePhase`, `PrerequisiteScope`). It also holds the resolvers that expand that model
+  into a recording's job universe (`resolve_single_recording_jobs`, `resolve_multi_recording_jobs`,
+  `resolve_pipeline_jobs`), the prerequisite graph (`resolve_single_recording_prerequisites`,
+  `resolve_multi_recording_prerequisites`, `resolve_prerequisite_job_ids`, `validate_job_prerequisites`), the phase
+  expansion (`resolve_downstream_phases`, `order_phases_by_execution`), and the prerequisite messages.
+  `generate_job_ids` derives the identifier that tracks each of those jobs, which is what the `job_id` parameter of both
+  pipeline entry points names. The plane specifier, the tracker filenames, and every other on-disk name live one layer
+  below in `cindra.layout`, which `jobs.py` reads. `allocation.py` adds the stage worker defaults, the
+  resource-class model, and the host core and memory budgets. `footprints.py` adds the per-stage memory models, the two
+  estimators that report what one job holds, and the two sizers that pair each estimate with its stage's declared cores
+  and its device memory as a `JobSizing`. It reads `allocation.py` for those cores alone. A job is sized from the data
+  that exists when the sizing happens, so a single-recording model reads the acquisition alone while a multi-recording
+  model reads the completed single-recording output that it processes. `discovery.py` pairs the job model with the
+  on-disk inventory to report both the jobs a recording declares and the subset whose inputs exist. `worker.py` holds
+  the per-job entry points every scheduler dispatches, along with the two priming entry points that write the shared
+  bootstrap. `execution.py` holds the batch engine: `PendingJob`, `JobExecutionState`, the admission scan, the two-pass
+  dispatcher, and the manager thread. `pipeline.py` holds the two sequential entry points. `gpu.py` holds the CUDA
+  device discovery, the runtime verification, and `ALL_DEVICES_REQUEST`, the sentinel naming every device the host
+  exposes. `allocation.py` reads its device count, `pipeline.py` reads its verification, and `execution.py` reads both
+  the sentinel and the discovery. `openmp.py` carries no module-level side effect and its check runs only inside those
+  two entry points, so importing the package writes nothing and a console message never precedes the stdio MCP server's
+  JSON-RPC stream. Nothing below `orchestration` imports it, and no module inside it imports `interface`, so the MCP
+  layer is a thin argument-validation and JSON-shaping wrapper over calls into the package. This mirrors the
+  orchestration package of `ataraxis-video-system` and `ataraxis-communication-interface`, and its concurrency model
+  follows `sollertia-forgery`.
 - **Tracker-driven job state**: The transitions of a job the pipeline runs belong to the tracker's `run_job()` context
   manager rather than to a hand-rolled `start_job`/`complete_job`/`fail_job` sequence. The engine's
   `_fail_dispatched_job`, `_fail_pending_jobs`, and the `_pipeline_worker` fallback are the exceptions, because each
@@ -55,7 +59,11 @@
 - **Configuration-driven execution**: Pipelines read all processing parameters from YAML files (YamlConfig subclasses).
   The CLI writes overrides to the config file before execution rather than passing arguments. Worker counts are the
   exception: they are explicit API parameters resolved through `cindra.orchestration`, which keeps the configuration
-  file immutable and safe to share between concurrently dispatched jobs.
+  file immutable and safe to share between concurrently dispatched jobs. The CUDA device that a registration job uses is
+  the same kind of exception. It is an argument threaded through the library, never a configuration field, and `None`
+  means the host CPU. A job takes `device: int | None`, a session takes `gpu_devices: list[int] | None`, and the
+  planner substitutes the device models under the `gpu_registration` flag. `registration.gpu_batch_size` stays in the
+  configuration, because it shapes the data a device-backed pass stages rather than selecting where the pass runs.
 - **Worker sentinel contract**: One convention governs every argument that resolves a worker or concurrency
   allocation. `None` accepts the measured default for that stage or resource class, `-1` (`ALL_CORES_REQUEST`)
   requests every available core, and a positive integer is used exactly. Any other non-positive value is rejected.
@@ -90,21 +98,30 @@
   because the pipeline reads its configuration from disk at dispatch. Processing uses a prepare-then-execute model:
   preparation tools create execution manifests (trackers, per-recording configurations, job lists) without starting
   computation, and execution tools dispatch jobs with prerequisite validation, per-class resource allocation, and
-  automatic phase sequencing. Three planning tools sit ahead of both halves. `get_pipeline_job_universe_tool` reports
-  every job a configuration declares and which of them can run right now, and `size_pipeline_jobs_tool` reports the
-  cores and memory each of those jobs holds. `check_threading_runtime_tool` reports whether the host carries the numeric
-  threading layer the platform selects, so an agent gates a batch on a flag rather than on parsing a per-job tracker
-  failure. The dispatch half lives in `cindra.orchestration`, so the execute, monitor, and cancel tools hold only
-  argument validation and response shaping. The prepare tools stay in the interface layer, because building a manifest
-  is a user-facing operation over paths and configuration files rather than part of the scheduling model. Every job
-  class carries a measured per-job worker count from `cindra.orchestration`, and the combination class holds the single
-  core its serial merge needs. Concurrency follows three separate terms. The binarization class carries a hard ceiling,
-  because it decodes at the storage's rate rather than the host's core count. A wider batch finishes the same work more
-  slowly while holding cores other work could use, so spare capacity never lifts it. The registration and processing
+  automatic phase sequencing. Four planning tools sit ahead of both halves. `get_pipeline_job_universe_tool` reports
+  every job a configuration declares and which of them can run right now. `size_pipeline_jobs_tool` reports the cores,
+  memory, and device memory each of those jobs holds, substituting the device models for the registration jobs when
+  `gpu_registration` is set. `check_threading_runtime_tool` reports whether the host carries the numeric threading layer
+  the platform selects, and `check_gpu_runtime_tool` reports the CUDA devices the host exposes, so an agent gates
+  a batch on a flag rather than on parsing a per-job tracker failure. The dispatch half lives in `cindra.orchestration`,
+  so the execute, monitor, and cancel tools hold only argument validation and response shaping. The prepare tools stay
+  in the interface layer, because building a manifest is a user-facing operation over paths and configuration files
+  rather than part of the scheduling model. Every job class carries a per-job worker count from `cindra.orchestration`,
+  and the combination class holds the single core its serial merge needs. Concurrency follows three separate terms. The
+  binarization class carries a hard ceiling, because it decodes at the storage's rate rather than the host's core count.
+  A wider batch finishes the same work more slowly while holding cores other work could use, so spare capacity never
+  lifts it. The device-backed registration class carries a hard ceiling of its own, which is the count of the devices
+  the host exposes, and a session reports that ceiling clamped to the devices it holds. The registration and processing
   classes carry soft reservations, which hold capacity back for the stages that wait on no other job and are released
   once nothing else can use the room. Every other class derives its concurrency from the session CPU budget alone.
   Memory bounds admission rather than concurrency, because the memory one job holds follows the recording it processes
-  rather than the class it belongs to.
+  rather than the class that owns it. A class is elastic where its `maximum_workers_per_job` ceiling stands strictly
+  above its `workers_per_job` default, which covers registration, discovery, and extraction and leaves processing at one
+  width. An elastic class widens its jobs at dispatch as the queue drains, and only in a session that accepted the class
+  defaults, because an explicit `workers_per_job` reaches every job unchanged. The free cores divide among the elastic
+  classes holding queued work before the share divides among the jobs, so a full queue resolves to the class default
+  while a queue holding one job resolves toward the ceiling. A class carrying no ceiling takes its default whatever the
+  host holds free.
 - **Process-isolated jobs**: The batch engine dispatches every job into a `ProcessPoolExecutor` sized to the
   concurrency the per-class caps allow, so admission remains the only thing bounding how many jobs run. Isolation buys
   two things a thread pool cannot. A job's BLAS width belongs to its process, so concurrent jobs at different widths no
@@ -119,15 +136,11 @@
 
 ### Key patterns
 
-- **Numba parallelization**: The Numba threading layer is configured in `__init__.py` (TBB on non-Mac, OpenMP on macOS)
-  immediately after importing `numba.config` and before importing any modules that compile `@njit` functions. Functions
-  use `@njit(cache=True, parallel=True)` with `prange` over each kernel's outermost independent axis, which is frames in
-  registration and ROIs in extraction. A parallel kernel carries no eager signature. A signature compiles the kernel
-  when its module is imported, which starts the threading layer before `verify_openmp_runtime()` runs and fails a host
-  with no runtime at `import cindra` rather than at the stage that needs it. Numba is excluded from type checking via a
-  `pyproject.toml` mypy override. The `# type: ignore[import-untyped]` comments apply to the scikit-learn,
-  threadpoolctl, and PyQtGraph imports, and `# pragma: no cover` on JIT-compiled function bodies is expected. None of
-  these should be removed.
+- **Numba parallelization**: Functions use `@njit(cache=True, parallel=True)` with `prange` over each kernel's outermost
+  independent axis, which is frames in registration and ROIs in extraction. A parallel kernel carries no eager
+  signature. A signature compiles the kernel when its module is imported, which starts the threading layer before
+  `verify_openmp_runtime()` runs and fails a host with no runtime at `import cindra` rather than at the stage that needs
+  it.
 - **Thread budget confinement**: Two ataraxis assets and one third-party context manager divide the work, and each
   covers a moment the others cannot. `limit_worker_threads` from `ataraxis-data-structures` encloses the batch
   engine's worker pool for the session's whole lifetime, so every worker process imports its numeric backends at a
@@ -152,12 +165,14 @@
   binary, naming `repeat_binarization` as the remedy in each message. The conversion drops the registration marker of
   the binary it unlinks, because that marker describes a file that no longer exists. `binarize_recording` resolves the
   conversion plan (`resolve_tiff_conversion_plan`) before it clears the outputs derived from the previous binaries, so a
-  conversion that fails its input validation leaves the recording's results in place.
+  conversion that fails its input validation leaves the recording's results in place. Preserve this protocol when
+  modifying either stage, and keep `repeat_binarization` named as the remedy every refusal states, because a
+  caller-requested rebuild is the recovery path.
 - **Memory efficiency**: Pre-allocates arrays with `np.empty` when overwritten immediately. Uses flattened mask arrays
   with offset indices to reduce per-ROI allocations. Memory maps registration arrays on demand via
   `memory_map_arrays()`. Results tools use lightweight NumPy/YAML reads for targeted queries without full data loading.
   Groupwise diffeomorphic registration visits each unordered image pair once and caches each image's gradient with the
-  deformed image it derives from, keeping the working set linear rather than quadratic in group size.
+  deformed image that produced it, keeping the working set linear rather than quadratic in group size.
 - **Polymorphic dispatch**: `extract_traces()` checks `isinstance(context, RuntimeContext)` to route between
   single-recording and multi-recording extraction paths.
 - **Channel 2 behavior**: Channel 2 data returns empty arrays (`[]`) instead of None when absent. Channel 1 data raises
@@ -190,9 +205,11 @@
 | `start_execution_session`                 | `orchestration/execution.py`                    | Batch engine: admission, process-pool dispatch, budgets |
 | `register_recording_plane`                | `pipelines/single_recording.py`                 | Per-plane registration stage entry point (phase 2)      |
 | `register_plane`                          | `registration/register.py`                      | Per-plane motion correction (rigid + optional nonrigid) |
+| `GpuRegistrationBackend`                  | `registration/gpu.py`                           | Per-plane motion correction on a CUDA device            |
 | `resolve_stage_workers`                   | `orchestration/allocation.py`                   | Measured per-stage worker defaults and worker resolver  |
 | `SINGLE_RECORDING_PHASES`                 | `orchestration/jobs.py`                         | Phase model: job universe and prerequisite graph        |
 | `resolve_openmp_runtime`                  | `orchestration/openmp.py`                       | macOS OpenMP runtime discovery, linking, verification   |
+| `resolve_gpu_devices`                     | `orchestration/gpu.py`                          | CUDA device discovery and runtime probing               |
 | `DiffeomorphicDemonsRegistration`         | `registration/diffeomorphic.py`                 | Cross-day diffeomorphic alignment algorithm             |
 | `Deformation`                             | `registration/deformation.py`                   | Deformation field application and inversion             |
 | `detect_plane_rois`                       | `detection/detect.py`                           | ROI detection via sparse detection with PCA denoising   |
@@ -224,6 +241,7 @@
 | `cindra run`       | Execute pipeline with CLI overrides for config parameters            |
 | `cindra mcp`       | Start MCP server (stdio, sse, or streamable-http transport)          |
 | `cindra omp`       | Link the macOS OpenMP runtime Numba loads, erroring on other systems |
+| `cindra gpu`       | Report the CUDA devices registration uses and why it reaches none    |
 
 **`cindra-gui` commands:**
 
@@ -258,6 +276,7 @@
 | `pyyaml`                   | YAML serialization for configuration and tracker files        |
 | `tbb4py`                   | Intel TBB threading layer for Numba parallelization (non-Mac) |
 | `intel-cmplr-lib-rt`       | SVML runtime held for Numba's vectorization path (non-Mac)    |
+| `cupy-cuda13x`             | CUDA array and FFT runtime for device registration (non-Mac)  |
 
 ### Workflow guidance
 
@@ -273,12 +292,12 @@
    (`SINGLE_RECORDING_PHASES`, `MULTI_RECORDING_PHASES`). Add, remove, or reorder a phase there rather than at each call
    site, and the pipelines, the execution engine, and the MCP layer follow automatically
 6. Maintain the job naming convention (`SingleRecordingJobNames`, `MultiRecordingJobNames`) for tracker consistency
-7. Keep the dependency chain one-way. `jobs.py` imports `cindra.layout` alone, `allocation.py` and `discovery.py` import
-   `jobs`, `footprints.py` imports `jobs` and `allocation`, `worker.py` imports `jobs` and `allocation`, `pipeline.py`
-   imports `worker`, `jobs`, and `openmp`, `execution.py` imports `pipeline`, `jobs`, and `allocation`, and no
-   orchestration module imports `interface`. `openmp.py` carries no module-level side effect and its check runs only
-   inside the two sequential entry points, so importing the package writes nothing and a console message never precedes
-   the stdio MCP server's JSON-RPC stream
+7. Keep the dependency chain one-way. `gpu.py` and `openmp.py` import nothing from the package, and `jobs.py` imports
+   `cindra.layout` alone. `discovery.py` imports `jobs`, `allocation.py` imports `jobs` and `gpu`, and `footprints.py`
+   imports `jobs` and `allocation`. `worker.py` imports `jobs`, `allocation`, and `gpu`, and `pipeline.py` imports
+   `worker`, `jobs`, `gpu`, and `openmp`. `execution.py` imports `pipeline`, `jobs`, `allocation`, and `gpu`, and no
+   orchestration module imports `interface`. `gpu.py` writes nothing at import, and `verify_gpu_runtime()` runs only
+   where the caller named a registration device
 
 **Modifying registration:**
 
@@ -289,6 +308,11 @@
 5. Registration rewrites its input binary in place under a `<binary>.registering` marker, the parallel of the
    `<binary>.binarizing` marker binarization writes while it fills that binary. Keep the create and clear pair around
    any new write loop, and confine BLAS fits with `threadpool_limits` as `register.py` does
+6. `register_plane` takes `device: int | None`. None registers the plane on the host CPU, and an index builds
+   `GpuRegistrationBackend` against that CUDA device (`registration/gpu.py`). The alignment pass reads
+   `registration.gpu_batch_size` for its device batch while that field is above zero and `registration.batch_size`
+   otherwise, and the secondary channel pass reads the shared size. Keep the device out of the configuration, because
+   the batch engine assigns one device per running job
 
 **Modifying detection:**
 
@@ -342,7 +366,7 @@
 **Important considerations:**
 
 - The `console` is enabled in `src/cindra/__init__.py`. Do not re-enable it elsewhere
-- The Numba threading layer is configured in `__init__.py` (TBB on non-Mac, OpenMP on macOS) after importing
+- The Numba threading layer is configured in `__init__.py` (TBB on non-Mac, OpenMP on macOS) immediately after importing
   `numba.config` and before importing modules that compile `@njit` functions. Do not move this. macOS runs OpenMP
   because the Numba macOS wheel ships no tbbpool extension, so the TBB layer is unavailable there whatever runtime is
   installed
@@ -353,10 +377,20 @@
   raises its threading-layer error at the first parallelized call rather than at import, which is what the check
   replaces. Keep the check off the import path, because a message written there reaches the stdio MCP server's
   JSON-RPC stream before any CLI code can silence the console
-- The `# type: ignore[import-untyped]` comments on the scikit-learn, threadpoolctl, and PyQtGraph imports are
-  expected (Numba is excluded via the `pyproject.toml` mypy override, and the tifffile and yaml imports carry no such
-  comment, because tifffile ships a py.typed marker and yaml checks against the `types-pyyaml` stub)
-- The `# pragma: no cover` annotations on `@njit` function bodies are intentional
+- A registration job runs on a CUDA device only where the caller named one, so `verify_gpu_runtime(device=...)` runs in
+  two places. `run_single_recording_pipeline` calls it before its first dispatch, so a host exposing no usable device
+  aborts having done no work. `dispatch_single_recording_job` calls it inside the REGISTER branch of the tracker's
+  `run_job()` block, so a refusal is recorded as that job's failure. `run_multi_recording_pipeline` calls it nowhere,
+  because no multi-recording stage runs on a device. `cindra gpu` and `check_gpu_runtime_tool` report what the host
+  exposes, and both name `GPU_REMEDY`, which is the `cupy-cuda13x[ctk]` or `cupy-cuda12x[ctk]` installation the driver's
+  CUDA major version selects. The CuPy pin carries a `sys_platform != 'darwin'` marker, so `orchestration/gpu.py` guards
+  its import, holds `cupy` at None on a host without it, and reports `RUNTIME_MISSING`. Keep that guard, because the
+  stub and documentation builds run on hosts carrying no CUDA device
+- The `# type: ignore[import-untyped]` comments on the scikit-learn, threadpoolctl, and PyQtGraph imports are expected.
+  Numba and CuPy are excluded via `pyproject.toml` mypy overrides, and the tifffile and yaml imports carry no such
+  comment, because tifffile ships a py.typed marker and yaml checks against the `types-pyyaml` stub. Do not remove these
+  comments
+- The `# pragma: no cover` annotations on `@njit` function bodies are intentional. Do not remove them
 - The multiscale diffeomorphic registration crosses the boundary between original-image pixels and the working
   resolution of a pyramid level in three places, and it converts units at two of them. `ScaleSpacePyramid` scales
   every smoothing sigma by the level's entry in `_level_downsample_factors`. `_scale_grid_sampling` converts the
@@ -367,16 +401,6 @@
   method's `Notes` block records its reasoning. Do not report it as a unit-conversion defect, as an inconsistency
   with the other two conversions, or as a regression, and do not add a scaling variant of `resize_field` unless the
   user asks for one
-- Binarization and registration both write frames into a plane binary, each guarding its own write with its own marker,
-  `<binary>.binarizing` and `<binary>.registering`. `io/binary.py` defines a create and clear helper per phase, and
-  `cindra.io` exports the registration pair plus `resolve_active_binary_marker`, which every reader calls.
-  `register_plane` refuses to run while either marker exists, and `binarize_recording` refuses a marked binary, a
-  binary whose size disagrees with its plane's recorded frame geometry, and a two-channel plane holding no second
-  channel binary. Preserve this protocol when modifying either stage, and keep `repeat_binarization` named as the
-  remedy every refusal states, because a caller-requested rebuild is the recovery path
-- Binarization consumes whole plane and channel interleave cycles, discarding the frames of an incomplete final cycle
-  and rejecting a recording that holds fewer frames than one whole cycle. Keep both in `resolve_tiff_conversion_plan`,
-  because the plan resolves before the conversion touches any binary or deletes any result the recording already holds
 - `_clear_downstream_data` sweeps every plane directory the output root holds rather than the contiguous range the
   declared plane count spans. A directory that count no longer covers therefore loses the results measured from the
   frames the conversion replaces, while keeping the binary the conversion does not rewrite. Keep the sweep reading the

@@ -172,10 +172,10 @@ def resolve_tiff_conversion_plan(contexts: list[RuntimeContext], *, workers: int
         The resolved conversion plan.
 
     Raises:
-        ValueError: If contexts is empty, if data_path is not configured, if data_path is not a directory, or if a
-            plane carries no destination binary path. Also raised if the first discovered TIFF file holds no pages, if
-            the discovered TIFF files do not all hold frames of the same shape, or if the frames those files hold do
-            not fill one complete plane and channel interleave cycle.
+        ValueError: If contexts is empty, if data_path is not configured, if data_path is not a directory, or if a plane
+            carries no destination binary path. Also raised if the first discovered TIFF file holds no pages, or if the
+            discovered TIFF files do not all hold frames of the same shape. Raised as well if those frames do not fill
+            one complete plane and channel interleave cycle.
         FileNotFoundError: If no acquisition parameters file is found under data_path, or if no TIFF files are found
             in the data directory.
     """
@@ -207,7 +207,6 @@ def resolve_tiff_conversion_plan(contexts: list[RuntimeContext], *, workers: int
     plane_number = acquisition.plane_number
     channel_number = acquisition.channel_number
 
-    # Computes batch size adjusted for planes and channels.
     batch_size = configuration.registration.batch_size
     batch_size = plane_number * channel_number * math.ceil(batch_size / (plane_number * channel_number))
 
@@ -535,10 +534,10 @@ def _collect_tiff_files(data_directory: Path, ignored_file_names: tuple[str, ...
 
 
 def _read_tiff(tiff: TiffFile, start_index: int, batch_size: int, decode_workers: int) -> NDArray[np.int16] | None:
-    """Reads a batch (subset) of frames stored inside the TIFF file wrapped by the input TiffFile instance.
+    """Reads a batch of frames from the open TIFF file.
 
     Args:
-        tiff: The TiffFile instance that wraps the .tiff file from which to read the data.
+        tiff: The open TIFF file that holds the frames to read.
         start_index: Index of the first frame to read.
         batch_size: Maximum number of frames to read in this batch.
         decode_workers: The number of threads tifffile uses to decode the requested frames.
@@ -710,7 +709,6 @@ def _resolve_plane_dimensions(
     for context in contexts:
         io_data = context.runtime.io
 
-        # For MROI data, the height is determined by the ROI line range.
         if acquisition.is_mroi and io_data.mroi_lines:
             plane_height = io_data.mroi_lines[-1] - io_data.mroi_lines[0] + 1
             plane_width = base_width

@@ -4,6 +4,7 @@ from ..io import (
     resolve_multi_recording_contexts as resolve_multi_recording_contexts,
     resolve_single_recording_contexts as resolve_single_recording_contexts,
 )
+from .gpu import verify_gpu_runtime as verify_gpu_runtime
 from .jobs import (
     PER_PLANE_JOB_NAMES as PER_PLANE_JOB_NAMES,
     MultiRecordingJobNames as MultiRecordingJobNames,
@@ -37,6 +38,7 @@ def run_single_recording_pipeline(
     binarization_workers: int | None = None,
     registration_workers: int | None = None,
     processing_workers: int | None = None,
+    registration_device: int | None = None,
 ) -> None: ...
 def run_multi_recording_pipeline(
     configuration_path: Path,
@@ -48,3 +50,4 @@ def run_multi_recording_pipeline(
     discovery_workers: int | None = None,
     extraction_workers: int | None = None,
 ) -> None: ...
+def _verify_registration_device(device: int | None, job_names: list[str]) -> None: ...

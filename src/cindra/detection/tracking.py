@@ -252,8 +252,8 @@ def _cluster_rois_in_bin(
     condensed_size = int(((roi_count * roi_count) / 2) - (roi_count / 2))
     jaccard_matrix = np.full(shape=condensed_size, fill_value=_DEFAULT_JACCARD_DISTANCE, dtype=np.float32)
 
-    # Sorts each ROI's pixel list once, rather than once per pair the ROI participates in. The intersection below
-    # walks two ascending lists in one pass, which needs the ordering but not a fresh sort per pair.
+    # Sorts each ROI's pixel list once, rather than once for every pair in which the ROI participates. The intersection
+    # below walks two ascending lists in one pass, which needs the ordering but not a fresh sort per pair.
     sorted_pixels = [np.sort(roi.raveled_pixels) for roi in rois]
 
     # Computes Jaccard distance for each valid pair based on pixel overlap.
@@ -419,17 +419,17 @@ def _collect_bin_rois(
         A tuple containing the list of ROIs within the bin and their recording indices.
     """
     # Computes the pixel boundaries of the extended search region (core bin + overlap margins on all sides).
-    search_y_min = bin_origin_y - overlap_margin
-    search_y_max = bin_origin_y + bin_height + overlap_margin
-    search_x_min = bin_origin_x - overlap_margin
-    search_x_max = bin_origin_x + bin_width + overlap_margin
+    search_y_minimum = bin_origin_y - overlap_margin
+    search_y_maximum = bin_origin_y + bin_height + overlap_margin
+    search_x_minimum = bin_origin_x - overlap_margin
+    search_x_maximum = bin_origin_x + bin_width + overlap_margin
 
     # Converts pixel boundaries to grid cell indices. The +1 ensures the range includes the cell containing the
     # maximum boundary coordinate.
-    grid_row_start = search_y_min // grid_roi_size
-    grid_row_end = search_y_max // grid_roi_size + 1
-    grid_column_start = search_x_min // grid_roi_size
-    grid_column_end = search_x_max // grid_roi_size + 1
+    grid_row_start = search_y_minimum // grid_roi_size
+    grid_row_end = search_y_maximum // grid_roi_size + 1
+    grid_column_start = search_x_minimum // grid_roi_size
+    grid_column_end = search_x_maximum // grid_roi_size + 1
 
     collected_rois: list[ROIMask] = []
     collected_recordings: list[int] = []
@@ -449,7 +449,10 @@ def _collect_bin_rois(
                 # Performs precise boundary check using the ROI centroid. The grid cell lookup is a coarse filter,
                 # but ROIs near cell edges may fall outside the actual search region.
                 centroid_y, centroid_x = roi.centroid
-                if search_y_min < centroid_y < search_y_max and search_x_min < centroid_x < search_x_max:
+                if (
+                    search_y_minimum < centroid_y < search_y_maximum
+                    and search_x_minimum < centroid_x < search_x_maximum
+                ):
                     collected_rois.append(roi)
                     collected_recordings.append(recording_index)
 

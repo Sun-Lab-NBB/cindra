@@ -45,15 +45,16 @@ def apply_phase_correlation(
 
     frames_fft = scipy_rfft2(x=frames, axes=(-2, -1), workers=workers)
 
-    # Normalizes by magnitude to extract phase-only information. This makes the correlation robust to
-    # intensity variations between frames. Epsilon prevents division by zero at DC component. Folding the epsilon
-    # into the magnitude buffer keeps the normalization down to a single full spectra temporary.
-    magnitude = np.abs(frames_fft)
-    magnitude += NORMALIZATION_EPSILON
-    frames_fft /= magnitude
-
-    # Multiplies by conjugate of reference spectrum. In frequency domain, this computes cross-correlation.
-    frames_fft *= kernel
+    # Normalizes by magnitude to extract phase-only information, then multiplies by the conjugate of the reference
+    # spectrum, which computes the cross-correlation in the frequency domain. This makes the correlation robust to
+    # intensity variations between frames. Epsilon prevents division by zero at DC component. Folding the epsilon, the
+    # division, and the kernel multiplication into one Numba pass over the leading axis keeps the normalization free of
+    # any full spectra temporary. The spectrum carries a per-block kernel axis whenever the caller correlates extracted
+    # blocks, so the dispatch below selects the kernel broadcasting the reference over the axes the spectrum holds.
+    if frames_fft.ndim == 4:  # noqa: PLR2004 - the extracted-block spectrum rank, so a constant adds indirection.
+        _normalize_block_spectra(spectra=frames_fft, kernel=kernel)
+    else:
+        _normalize_frame_spectra(spectra=frames_fft, kernel=kernel)
 
     # Transforms back to spatial domain to get correlation surface. The peak location indicates the offset.
     return scipy_irfft2(x=frames_fft, s=(frames.shape[-2], width), axes=(-2, -1), workers=workers).astype(
@@ -195,7 +196,7 @@ def apply_spatial_smoothing(data: NDArray[np.float32], window: int) -> NDArray[n
 
     # Promotes 2D input to 3D for uniform processing. The flag records the promotion so that the output drops only an
     # axis this function added, leaving a genuine single-frame stack three-dimensional.
-    promoted = data.ndim == 2  # noqa: PLR2004
+    promoted = data.ndim == 2  # noqa: PLR2004 - the single-image input rank, so a constant adds indirection.
     if promoted:
         data = data[np.newaxis, :, :]
 
@@ -237,7 +238,7 @@ def apply_spatial_high_pass(data: NDArray[np.float32], window: int) -> NDArray[n
     """
     # Promotes 2D input to 3D for uniform processing. The flag records the promotion so that the output drops only an
     # axis this function added, leaving a genuine single-frame stack three-dimensional.
-    promoted = data.ndim == 2  # noqa: PLR2004
+    promoted = data.ndim == 2  # noqa: PLR2004 - the single-image input rank, so a constant adds indirection.
     if promoted:
         data = data[np.newaxis, :, :]
 
@@ -304,6 +305,56 @@ def compute_upsampling_kernel(padding: int, subpixel: int = 10) -> tuple[NDArray
 
     # Casts to float32 since precision is no longer critical after inversion.
     return kernel_matrix.astype(np.float32), upsampled_point_count
+
+
+@njit(parallel=True, cache=True)
+def _normalize_frame_spectra(  # pragma: no cover
+    spectra: NDArray[np.complex64],
+    kernel: NDArray[np.complex64],
+) -> None:
+    """Phase-normalizes a stack of frame spectra in place and multiplies the result by the reference kernel.
+
+    Computes spectra / (abs(spectra) + NORMALIZATION_EPSILON) * kernel, broadcasting the single-frame kernel over the
+    leading frame axis and parallelizing over that axis.
+
+    Args:
+        spectra: The real FFT spectra with shape (frame_count, height, real_fft_width), overwritten in place with the
+            phase-normalized and kernel-multiplied spectra.
+        kernel: The conjugated reference spectrum with shape (height, real_fft_width).
+    """
+    epsilon = np.float32(NORMALIZATION_EPSILON)
+    for frame_index in prange(spectra.shape[0]):
+        for row in range(spectra.shape[1]):
+            for column in range(spectra.shape[2]):
+                value = spectra[frame_index, row, column]
+                spectra[frame_index, row, column] = value / (abs(value) + epsilon) * kernel[row, column]
+
+
+@njit(parallel=True, cache=True)
+def _normalize_block_spectra(  # pragma: no cover
+    spectra: NDArray[np.complex64],
+    kernel: NDArray[np.complex64],
+) -> None:
+    """Phase-normalizes a stack of per-block frame spectra in place and multiplies the result by the reference kernel.
+
+    Computes spectra / (abs(spectra) + NORMALIZATION_EPSILON) * kernel, broadcasting the per-block kernel over the
+    leading frame axis and parallelizing over that axis. Each block carries its own reference spectrum, so the kernel
+    holds a block axis that indexes alongside the two spatial axes.
+
+    Args:
+        spectra: The real FFT spectra with shape (frame_count, block_count, block_height, real_fft_width), overwritten
+            in place with the phase-normalized and kernel-multiplied spectra.
+        kernel: The conjugated per-block reference spectra with shape (block_count, block_height, real_fft_width).
+    """
+    epsilon = np.float32(NORMALIZATION_EPSILON)
+    for frame_index in prange(spectra.shape[0]):
+        for block_index in range(spectra.shape[1]):
+            for row in range(spectra.shape[2]):
+                for column in range(spectra.shape[3]):
+                    value = spectra[frame_index, block_index, row, column]
+                    spectra[frame_index, block_index, row, column] = (
+                        value / (abs(value) + epsilon) * kernel[block_index, row, column]
+                    )
 
 
 def _compute_gaussian_rbf_weights(

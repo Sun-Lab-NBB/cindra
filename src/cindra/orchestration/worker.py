@@ -14,6 +14,7 @@ from ..io import (
     resolve_multi_recording_contexts,
     resolve_single_recording_contexts,
 )
+from .gpu import verify_gpu_runtime
 from .jobs import (
     MultiRecordingJobNames,
     SingleRecordingJobNames,
@@ -47,6 +48,7 @@ def execute_single_recording_job(
     tracker: ProcessingTracker,
     *,
     workers: int | None = None,
+    device: int | None = None,
 ) -> None:
     """Executes one single-recording job and records its state on a caller-provided tracker.
 
@@ -67,14 +69,18 @@ def execute_single_recording_job(
         job_id: The unique hexadecimal identifier under which the job's state is recorded on the provided tracker. It
             must already be present in the tracker's aligned job set.
         tracker: The caller-owned ProcessingTracker onto which this job's start, completion, or failure is recorded.
-        workers: The number of parallel workers to allocate to this job. Use None to accept the measured default for
-            the job's stage and -1 to request every available core. The combination job ignores this parameter.
+        workers: The number of parallel workers to allocate to this job. Use None to accept the stage default and -1
+            to request every available core. The combination job ignores this parameter.
+        device: The zero-based index of the CUDA device on which a registration job runs. Use None to run the
+            registration on the host CPU. Every other job ignores this parameter.
 
     Raises:
         FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid single-recording
             configuration.
+        RuntimeError: If device names a CUDA device on a host that exposes no usable one.
         ValueError: If the configuration does not configure an output path, if job_name is not a recognized
-            single-recording job, or if workers is zero or a negative value other than -1.
+            single-recording job, if workers is zero or a negative value other than -1, or if device names an index
+            the host does not expose.
     """
     configuration, _ = load_single_recording_configuration(configuration_path=configuration_path)
 
@@ -85,6 +91,7 @@ def execute_single_recording_job(
         job_id=job_id,
         tracker=tracker,
         workers=workers,
+        device=device,
     )
 
 
@@ -116,8 +123,8 @@ def execute_multi_recording_job(
         job_id: The unique hexadecimal identifier under which the job's state is recorded on the provided tracker. It
             must already be present in the tracker's aligned job set.
         tracker: The caller-owned ProcessingTracker onto which this job's start, completion, or failure is recorded.
-        workers: The number of parallel workers to allocate to this job. Use None to accept the measured default for the
-            job's stage and -1 to request every available core.
+        workers: The number of parallel workers to allocate to this job. Use None to accept the stage default and -1
+            to request every available core.
 
     Raises:
         FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid multi-recording
@@ -256,6 +263,7 @@ def dispatch_single_recording_job(
     job_id: str,
     tracker: ProcessingTracker,
     workers: int | None,
+    device: int | None = None,
 ) -> None:
     """Executes a single processing job of the single-recording pipeline.
 
@@ -266,11 +274,15 @@ def dispatch_single_recording_job(
             'plane_{index}'. For BINARIZE and COMBINE jobs, this is an empty string.
         job_id: The unique hexadecimal identifier for this processing job.
         tracker: The tracker that records this job's state transitions.
-        workers: The number of parallel workers to allocate to this job. Use None to accept the measured default for
-            the job's stage and -1 to request every available core. The combination job ignores this parameter.
+        workers: The number of parallel workers to allocate to this job. Use None to accept the stage default and -1
+            to request every available core. The combination job ignores this parameter.
+        device: The zero-based index of the CUDA device on which a registration job runs. Use None to run the
+            registration on the host CPU. Every other job ignores it.
 
     Raises:
-        ValueError: If the job_name is not recognized or the requested worker count is invalid.
+        RuntimeError: If a registration job names a CUDA device on a host that exposes no usable one.
+        ValueError: If the job_name is not recognized, if the requested worker count is invalid, or if a registration
+            job names a device index the host does not expose.
     """
     console.echo(message=f"Running '{job_name}' job (specifier='{specifier}') with ID {job_id}...")
 
@@ -287,10 +299,22 @@ def dispatch_single_recording_job(
             )
 
         elif job_name == SingleRecordingJobNames.REGISTER:
+            # Gates the device before the stage writes its registration marker. A request naming an index the host
+            # does not expose, or a host carrying no usable runtime, then reports the argument it failed on rather
+            # than the CUDA runtime error the backend constructor raises. The check sits inside the tracker's block,
+            # so the refusal is recorded as this job's failure rather than escaping untracked. A caller reaching this
+            # through run_single_recording_pipeline is verified there as well, which costs one repeat probe against
+            # a context that entry point has already opened.
+            if device is not None:
+                verify_gpu_runtime(device=device)
+
             register_recording_plane(
                 configuration=configuration,
                 plane_index=_resolve_job_plane_index(job_name=job_name, specifier=specifier),
-                workers=resolve_stage_workers(job_name=job_name, requested_workers=workers),
+                workers=resolve_stage_workers(
+                    job_name=job_name, requested_workers=workers, gpu_registration=device is not None
+                ),
+                device=device,
             )
 
         elif job_name == SingleRecordingJobNames.PROCESS:
@@ -349,8 +373,8 @@ def dispatch_multi_recording_job(
             empty string.
         job_id: The unique hexadecimal identifier for this processing job.
         tracker: The tracker that records this job's state transitions.
-        workers: The number of parallel workers to allocate to this job. Use None to accept the measured default for the
-            job's stage and -1 to request every available core.
+        workers: The number of parallel workers to allocate to this job. Use None to accept the stage default and -1
+            to request every available core.
 
     Raises:
         ValueError: If the job_name is not recognized or the requested worker count is invalid.

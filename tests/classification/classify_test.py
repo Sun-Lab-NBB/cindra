@@ -217,9 +217,8 @@ class TestClassifier:
         rois = [_make_roi()]
         result_low = classifier.classify(roi_statistics=rois, probability_threshold=0.0)
         result_high = classifier.classify(roi_statistics=rois, probability_threshold=1.0)
-        # With threshold=0, all ROIs should be classified as cells.
+        # Column 0 of the classification array holds the binary is-cell flag.
         assert result_low[0, 0] == 1.0
-        # With threshold=1, no ROIs should be classified as cells.
         assert result_high[0, 0] == 0.0
 
     def test_classify_empty_raises(self, tmp_path: Path) -> None:

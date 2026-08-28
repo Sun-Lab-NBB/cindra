@@ -68,7 +68,7 @@ dependencies = [
 
     # GUI
     "pyside6>=6,<7",
-    "pyqtgraph>=0.14,<1",  # 0.14 is the release whose PySide6 binding the viewers are built on
+    "pyqtgraph>=0.14,<1",  # 0.14 is the release that supplies the PySide6 binding the viewers use
 
     # CLI and MCP Server
     "click>=8,<9",
@@ -90,6 +90,12 @@ dependencies = [
     # Supplies the SVML runtime Numba's vectorization path loads. The path stays inert while llvmlite reports no SVML
     # support, and the pin is held so that a Numba release restoring it needs no packaging change here.
     "intel-cmplr-lib-rt>=2026,<2027; sys_platform != 'darwin'",
+    # Supplies the CUDA array and FFT runtime the GPU registration backend uses. The CuPy distribution publishes no
+    # macOS wheel, which is what the marker expresses. It imports on a host holding no CUDA device and raises only at
+    # the first device use, which is what keeps the stub and documentation builds working. The 'ctk' extra carries the
+    # CUDA math libraries CuPy loads at that first use, without which every transform raises. A host whose driver runs
+    # CUDA 12 installs 'cupy-cuda12x[ctk]' over this pin instead, since a CuPy build targets one CUDA major version.
+    "cupy-cuda13x[ctk]>=14,<15; sys_platform != 'darwin'",
 ]
 
 # Project repository and hosted documentation URLs.
@@ -129,7 +135,7 @@ packages = ["src/cindra"]
 
 # Ruff Configuration.
 [tool.ruff]
-line-length = 120         # Deviates from the commonly used '80' standard.
+line-length = 120
 indent-width = 4
 target-version = "py314"  # Targets the lowest supported version of python
 src = ["src"]
@@ -165,7 +171,7 @@ lint.ignore = [
     # Project-specific
     "FBT001",  # Qt toggle slots and mouse handlers receive their boolean state as a positional argument
     "FBT003",  # Qt and PyQtGraph setters take their boolean state as a positional argument
-    "SLF001",  # Alternative constructors and the memory map teardown read private attributes of another object
+    "SLF001",  # Alternative constructors, memory map teardown, and estimator error messages read private attributes
 ]
 
 # Additional formatting configurations
@@ -239,6 +245,12 @@ module = ["numba", "numba.*"]
 follow_imports = "skip"        # Treats all symbols imported from numba as untyped (Any)
 ignore_missing_imports = true  # Suppresses missing-stub errors for the skipped package
 
+# CuPy ships no py.typed marker and no stub package, and the dependency marker holds it off macOS entirely. Suppresses
+# the missing-import errors so that the GPU modules type-check on a host carrying no CuPy installation.
+[[tool.mypy.overrides]]
+module = ["cupy", "cupy.*", "cupyx", "cupyx.*"]
+ignore_missing_imports = true
+
 # Pytest configuration. The import mode is declared here so that a bare 'pytest' invocation resolves test modules the
 # same way the '{py314}-test' tox task does.
 [tool.pytest.ini_options]
@@ -257,6 +269,12 @@ filterwarnings = [
 # Measures branch coverage in addition to statement coverage, so that partial branches (one side of a conditional or
 # loop that no test exercises) are reported as gaps rather than hidden behind full line coverage.
 branch = true
+
+# Measures the worker processes and threads that carry the work of the suite and of the library. The test task runs
+# pytest under xdist, and the batch engine dispatches every job into a process pool, so a run that measured the primary
+# process alone would miss the statements those workers execute. The 'coverage' task merges the resulting data files.
+parallel = true
+concurrency = ["multiprocessing", "thread"]
 
 # The GUI modules need a PySide6 and PyQtGraph runtime to execute, and the interface modules (the two CLIs, the MCP
 # servers, and the MCP tool modules) wrap library functions the suite already covers. Each pattern opens with a wildcard
@@ -289,13 +307,17 @@ directory = "reports/coverage_html"
 fail_under = 100     # Requires the test suite to cover every measured statement and branch
 show_missing = true  # Lists the statements missed by the test suite, so a failed check names the lines to cover
 
-# Every entry is an unanchored regular expression matched against each source line, and a match on a 'def' or on any
-# other clause header excludes the whole block beneath it. An entry naming a common word therefore reaches far past
-# the statement it was written for, so each one below is a construct no line can carry incidentally. The key is
-# 'exclude_also' rather than 'exclude_lines', which adds to the coverage defaults instead of replacing them. The
-# default already matches the '# pragma: no cover' comment, which is the per-site opt-out every exclusion below the
-# module level uses, so only the two whole-block constructs are named here.
-exclude_also = [
+# Every entry is a regular expression matched against each source line, and a match on a 'def' or on any other clause
+# header excludes the whole block beneath it. An entry naming a common word therefore reaches far past the statement
+# that prompted it, so each one below is a construct no line can carry incidentally. The 'pragma: no cover' entry is
+# the per-site opt-out every exclusion below the module level uses, and the anchored '^\s*pass$' entry matches a bare
+# 'pass' statement alone.
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "def __del__",
     "if TYPE_CHECKING:",          # Import blocks that only a type checker executes
+    "raise NotImplementedError",
     "if __name__ == .__main__.:", # Script entry points that an import never reaches
+    '^\s*pass$',
 ]

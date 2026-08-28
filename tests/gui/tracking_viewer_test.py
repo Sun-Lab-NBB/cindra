@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from PySide6.QtWidgets import QApplication
 
 
-@pytest.mark.xdist_group("gui_viewers")
+@pytest.mark.xdist_group(name="gui_viewers")
 class TestTrackingViewerLoad:
     """Tests the data population step of the tracking viewer."""
 
@@ -26,8 +26,8 @@ class TestTrackingViewerLoad:
         monkeypatch: pytest.MonkeyPatch,
         tracked_viewer_data: Callable[..., ViewerData],
     ) -> None:
-        """Verifies that the dropdown and the published state name the recording the viewer was launched from."""
-        monkeypatch.setattr(TrackingViewer, "_refresh_display", lambda self: None)
+        """Verifies that the dropdown and the published state name the recording that launched the viewer."""
+        monkeypatch.setattr(target=TrackingViewer, name="_refresh_display", value=lambda self: None)
         data = tracked_viewer_data()
 
         viewer = TrackingViewer(data=data)

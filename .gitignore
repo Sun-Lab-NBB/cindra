@@ -211,6 +211,7 @@ cython_debug/
 /stubs/
 /.pypirc
 /.netlifyrc
+/.claude/settings.local.json
 
 # Project: Add any project-specific exclusions here
 /temp
