@@ -78,8 +78,14 @@ loads one runs no discovery.
 | `memory_budget_mb` | Session memory budget, sampled once at session start                   |
 | `resource_classes` | Per class, its `workers_per_job`, `max_parallel_jobs`, and `job_count` |
 
-`execute_full_pipeline_tool` additionally returns `phase_count` and a per-phase `phases` list, and returns
-`started: false` with a `message` and a `next_step` when every phase is already complete.
+`execute_full_pipeline_tool` returns `pipeline_type` on every outcome, including every argument rejection and every
+failure, so a caller can attribute a response to the pipeline it asked for without tracking the request itself. It
+additionally returns `phase_count` and a per-phase `phases` list on every outcome reached after the arguments validate,
+and returns `started: false` with a `message` and a `next_step` when every phase is already complete.
+
+`execute_processing_jobs_tool` forwards `invalid_jobs` whenever validation rejected a submitted job, which covers the
+response for a session whose `workers_per_job` or `max_parallel_jobs` override was itself rejected. Read that list on a
+failure rather than assuming an override rejection means every submitted job was valid.
 
 ### get_processing_jobs_status_tool
 

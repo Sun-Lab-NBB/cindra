@@ -84,9 +84,15 @@ The `gpu_devices` argument both tools take carries three cases. None registers o
 device the host exposes, and an explicit list names those devices. An empty list is rejected, `-1` cannot be paired
 with an index, and an index the host does not expose is rejected against the indices it does.
 
-`execute_full_pipeline_tool` additionally returns `pipeline_type`, `phase_count`, a per-phase `phases` list, and the
-preparation lists it forwards, including `migrated_recordings` and `path_conflicts`. It returns `started: false` with a
-`message` and a `next_step` when every phase is already complete.
+`execute_full_pipeline_tool` returns `pipeline_type` on every outcome, including every argument rejection and every
+failure, so a caller can attribute a response to the pipeline it asked for without tracking the request itself. It
+additionally returns `phase_count`, a per-phase `phases` list, and the preparation lists it forwards, including
+`migrated_recordings` and `path_conflicts`, on every outcome reached after the arguments validate. It returns
+`started: false` with a `message` and a `next_step` when every phase is already complete.
+
+`execute_processing_jobs_tool` forwards `invalid_jobs` whenever validation rejected a submitted job, which covers the
+response for a session whose `workers_per_job` or `max_parallel_jobs` override was itself rejected. Read that list on a
+failure rather than assuming an override rejection means every submitted job was valid.
 
 ### get_processing_jobs_status_tool
 
