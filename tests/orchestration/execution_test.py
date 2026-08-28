@@ -43,6 +43,7 @@ from cindra.orchestration.execution import (
     _AdmissionDecisions,
     _fail_broken_session,
     _reap_completed_jobs,
+    _device_memory_admits,
     _resolve_job_admission,
     _dispatch_admitted_jobs,
     _resolve_session_devices,
@@ -927,6 +928,55 @@ class TestDeviceAssignment:
         assert [entry["device"] for entry in observed] == [None]
 
 
+class TestDeviceMemoryAdmission:
+    """Tests the free device memory the dispatcher holds a device-backed job against."""
+
+    def test_job_without_an_estimate_is_admitted(self) -> None:
+        """Verifies that a job carrying no device estimate takes its device without reading the runtime."""
+        assert _device_memory_admits(device=0, required_megabytes=0)
+
+    def test_job_is_admitted_when_the_device_holds_enough(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verifies that a device reporting more free memory than the estimate admits the job."""
+        monkeypatch.setattr(execution, "resolve_free_device_memory_mb", lambda device: 8192)
+
+        assert _device_memory_admits(device=0, required_megabytes=4096)
+
+    def test_job_is_refused_when_the_device_holds_too_little(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verifies that a device reporting less free memory than the estimate refuses the job."""
+        monkeypatch.setattr(execution, "resolve_free_device_memory_mb", lambda device: 1024)
+
+        assert not _device_memory_admits(device=0, required_megabytes=4096)
+
+    def test_unreadable_device_admits_the_job(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verifies that a device whose runtime reports no figure admits rather than stalls the job."""
+        monkeypatch.setattr(execution, "resolve_free_device_memory_mb", lambda device: None)
+
+        assert _device_memory_admits(device=0, required_megabytes=4096)
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_running_class_holds_a_job_the_device_cannot_hold(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verifies that a queued job whose estimate exceeds the free device memory waits while one job runs."""
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        first = _make_device_job(tracker_path=tracker_path, specifier="plane_0", device_memory_megabytes=4096)
+        second = _make_device_job(tracker_path=tracker_path, specifier="plane_1", device_memory_megabytes=4096)
+        state = _make_state(jobs=[first, second], admitted=True, capacity=4, devices=[0, 1])
+        monkeypatch.setattr(execution, "_pipeline_worker", _make_recording_worker(observed=[]))
+        monkeypatch.setattr(execution, "resolve_free_device_memory_mb", lambda device: 512)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            _dispatch_admitted_jobs(state=state, pool=pool)
+
+        _drain_active_futures(state=state)
+
+        # The first job takes its device regardless, mirroring how the host memory budget admits the first job of an
+        # idle session, and the second waits because the device cannot hold it alongside the one already running.
+        assert first.assigned_device == 0
+        assert second.assigned_device is None
+        assert state.pending_queues[second.resource_class.name] == [second]
+
+
 class TestSessionDeviceResolution:
     """Tests the session device list to which the caller's request resolves."""
 
@@ -1556,7 +1606,7 @@ def _make_job(tracker_path: Path, job_name: str, specifier: str = "", *, single_
     )
 
 
-def _make_device_job(tracker_path: Path, specifier: str) -> PendingJob:
+def _make_device_job(tracker_path: Path, specifier: str, device_memory_megabytes: int = 0) -> PendingJob:
     """Builds a queued registration job that runs under the device-backed resource class."""
     return PendingJob(
         configuration_path=tracker_path.parent / "configuration.yaml",
@@ -1564,6 +1614,7 @@ def _make_device_job(tracker_path: Path, specifier: str) -> PendingJob:
         job_id=ProcessingTracker.generate_job_id(job_name=SingleRecordingJobNames.REGISTER, specifier=specifier),
         single_recording=True,
         resource_class=resolve_registration_resource_class(gpu_registration=True),
+        device_memory_megabytes=device_memory_megabytes,
     )
 
 

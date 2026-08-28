@@ -149,6 +149,8 @@ def validate_acquisition_parameters_file_tool(
     Args:
         file_path: The absolute path to the cindra_parameters.json file to validate.
         roi_line_slice: The optional [roi_index, start, stop] triplet naming a half-open slice of one ROI's line list.
+            The bounds are positions in that list, counted from zero, rather than the raw frame rows the 'span' field
+            of the same response reports.
             When it is provided, the requested line indices are returned alongside the summaries, capped at 2000 lines
             per request.
 
@@ -231,6 +233,8 @@ def validate_recording_readiness_tool(raw_data_path: str, roi_line_slice: list[i
             directory holding the cindra_parameters.json file beneath it is the one validated, and the recording's
             TIFF files must sit directly beside that file.
         roi_line_slice: The optional [roi_index, start, stop] triplet naming a half-open slice of one ROI's line list.
+            The bounds are positions in that list, counted from zero, rather than the raw frame rows the 'span' field
+            of the same response reports.
             When it is provided, the requested line indices are returned alongside the summaries, capped at 2000 lines
             per request.
 
@@ -742,10 +746,21 @@ def _resolve_roi_line_slice(roi_lines: object, request: list[int]) -> tuple[dict
         return None, f"ROI {roi_index} does not hold a list of integer line indices, so it cannot be sliced."
 
     if start < 0 or stop <= start or stop > len(lines):
-        return None, (
+        message = (
             f"The 'roi_line_slice' bounds must satisfy 0 <= start < stop <= {len(lines)}, which is the number of lines "
             f"ROI {roi_index} holds, but got start {start} and stop {stop}."
         )
+
+        # The 'span' this tool reports beside the slice is measured in raw frame rows, so a caller that reads a bound
+        # from there and passes it back here lands outside the list-index range the check above covers.
+        if lines[0] <= start <= lines[-1]:
+            message += (
+                f" These bounds index the line list of ROI {roi_index}, counted from zero, rather than the raw frame "
+                f"rows its 'span' reports, and that ROI spans rows {lines[0]} to {lines[-1]}."
+            )
+            if start in lines:
+                message += f" Raw row {start} is list index {lines.index(start)}."
+        return None, message
 
     if stop - start > _MAXIMUM_ROI_LINE_SLICE:
         return None, (

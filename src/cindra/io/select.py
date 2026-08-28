@@ -6,13 +6,17 @@ from typing import TYPE_CHECKING
 
 from ataraxis_base_utilities import LogLevel, console
 
+from ..layout import MULTI_RECORDING_DIRECTORY_NAME, MULTI_RECORDING_RUNTIME_DATA_FILENAME
+from ..dataclasses import MultiRecordingRuntimeData
+
 if TYPE_CHECKING:
+    from pathlib import Path
+
     import numpy as np
     from numpy.typing import NDArray
 
     from ..dataclasses import (
         ROIStatistics,
-        MultiRecordingRuntimeData,
         MultiRecordingConfiguration,
         MultiRecordingRuntimeContext,
     )
@@ -100,6 +104,50 @@ def select_recording_rois(contexts: list[MultiRecordingRuntimeContext]) -> None:
         # Releases combined extraction arrays to free memory.
         if context.runtime.combined_data is not None:  # pragma: no branch - _filter_rois rejects None combined_data.
             context.runtime.combined_data.extraction.release_arrays()
+
+
+def clear_dataset_selection(dataset_path: Path) -> bool:
+    """Clears the region selection one multi-recording dataset holds for one recording.
+
+    Notes:
+        A selection names regions by their position in the recording's own region list, so a detection run that
+        rebuilds that list invalidates it. Clearing the selection makes the discovery stage select again for this
+        recording, while the recording identity and dataset membership the same file carries stay in place.
+
+    Args:
+        dataset_path: The recording's directory inside one dataset tree, which holds that dataset's runtime data file.
+
+    Returns:
+        True when a selection was cleared, and False when the directory holds no runtime data file or no selection.
+    """
+    runtime_path = dataset_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME
+    if not runtime_path.is_file():
+        return False
+
+    runtime_data = MultiRecordingRuntimeData.from_yaml(file_path=runtime_path)
+    if not runtime_data.io.selected_roi_indices and not runtime_data.io.selected_roi_indices_channel_2:
+        return False
+
+    runtime_data.io.selected_roi_indices = ()
+    runtime_data.io.selected_roi_indices_channel_2 = ()
+    runtime_data.to_yaml(file_path=runtime_path)
+    return True
+
+
+def clear_recording_selections(cindra_root: Path) -> int:
+    """Clears the region selections every multi-recording dataset holds for one recording.
+
+    Args:
+        cindra_root: The recording's cindra output directory, which parents its multi_recording directory.
+
+    Returns:
+        The number of dataset selections cleared, which is zero when the recording belongs to no dataset.
+    """
+    datasets_path = cindra_root / MULTI_RECORDING_DIRECTORY_NAME
+    if not datasets_path.is_dir():
+        return 0
+
+    return sum(clear_dataset_selection(dataset_path=dataset_path) for dataset_path in sorted(datasets_path.iterdir()))
 
 
 def _filter_channel_rois(
