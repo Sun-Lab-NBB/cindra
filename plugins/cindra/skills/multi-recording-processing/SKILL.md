@@ -280,10 +280,10 @@ each substage re-reads the output the previous run left and returns early.
 | Tracking            | `tracking_template_masks.npz` exists in the first output path | `repeat_registration` |
 | Template projection | Every recording carries `roi_statistics.npz`                  | `repeat_registration` |
 
-Such a re-run reports SUCCEEDED while writing byte-identical output, so the new parameter never takes effect. Clean
-the `discovery` phase, which deletes the template masks, or set `repeat_selection` in `recording_io` and
-`repeat_registration` in `diffeomorphic_registration` with `set_config_values_tool`, all owned by
-`/multi-recording-configuration`.
+Such a re-run reports SUCCEEDED while writing byte-identical output, so the new parameter never takes effect. Clean the
+`discovery` phase, which deletes the template masks and clears the region selection each dataset holds, or set
+`repeat_selection` in `recording_io` and `repeat_registration` in `diffeomorphic_registration` with
+`set_config_values_tool`, all owned by `/multi-recording-configuration`.
 
 `reset_processing_phases_tool` detects the ROI-selection case itself. It returns a `warnings` list naming
 `recording_io.repeat_selection` whenever it resets `discovery` while that flag is false and the dataset already carries

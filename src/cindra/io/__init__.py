@@ -15,7 +15,7 @@ from .binary import (
     create_registration_marker,
     resolve_active_binary_marker,
 )
-from .select import select_recording_rois
+from .select import select_recording_rois, clear_dataset_selection, clear_recording_selections
 from .combine import combine_planes
 from .context import (
     PARAMETERS_FILENAME,
@@ -51,6 +51,8 @@ __all__ = [
     "DatasetRecordings",
     "RecordingPlanes",
     "SourceFrameGeometry",
+    "clear_dataset_selection",
+    "clear_recording_selections",
     "clear_registration_marker",
     "combine_planes",
     "convert_tiffs_to_binary",

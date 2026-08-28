@@ -235,9 +235,11 @@ To re-run specific phases (e.g., after changing ROI detection parameters):
    automatically reset. Resetting `binarization` also resets `registration`, `processing`, and `combination`. Resetting
    `registration` also resets `processing` and `combination`. Resetting `processing` also resets `combination`. The
    returned `effective_phases` list is ordered by pipeline execution order.
-2. Read the `warnings` list the reset returns. It appears when a reset phase is governed by a repeat flag that is false
-   while that phase's output already exists, and each entry names the dotted flag to set. Act on every warning before
-   dispatching, and consult the table above too, because the list is empty when the configuration is unreadable.
+2. Read the `warnings` list the reset returns. One kind appears when a reset phase is governed by a repeat flag that is
+   false while that phase's output already exists, and names the dotted flag to set. The other appears when a
+   registration reset would run against a binary an earlier pass already corrected, and names the binarization rebuild
+   that avoids it. Act on every warning before dispatching, and consult the table above too, because the list is empty
+   when the configuration is unreadable.
 3. Set each named flag with `set_config_values_tool`, passing `<output_root>/cindra/configuration.yaml` as `file_path`
    and the flag as a dotted `section.parameter` key, for example `{"registration.repeat_registration": true}`. Write
    every other parameter this re-run changes, such as `roi_detection.threshold_scaling`, in the same call, because a
@@ -253,6 +255,12 @@ Both `reset_processing_phases_tool` and `clean_processing_output_tool` require `
 Cleaning `registration` deletes the plane's `registration_data` directory, which carries the `bad_frames.npy` array
 that detection reads. It does not undo registration, because the stage rewrote the plane binary in place and that
 binary stays registered. Clean `binarization` to rebuild the binary from the raw TIFFs.
+
+**Re-registering a plane requires the conversion.** Registration rewrites `channel_1_data.bin` in place, so resetting
+the `registration` phase and lifting `registration.repeat_registration` corrects frames the previous pass already
+corrected. That run succeeds and writes results a single pass does not produce, which makes it the more damaging of the
+two reset hazards. Set `file_io.repeat_binarization`, reset `binarization`, and re-dispatch, so every binary is rebuilt
+from its source TIFF files before the planes are registered.
 
 **Recovering an interrupted write.** Binarization fills the plane binary under a `<binary>.binarizing` marker and
 registration rewrites it in place under a `<binary>.registering` marker, each held for that phase's write. The suffix

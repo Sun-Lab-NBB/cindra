@@ -202,6 +202,34 @@ def resolve_device_budget() -> int:
     return len(resolve_gpu_devices().devices)
 
 
+def resolve_free_device_memory_mb(device: int) -> int | None:
+    """Resolves the memory one CUDA device currently reports as free.
+
+    Notes:
+        The figure covers the whole device rather than this process alone, so it accounts for every other consumer the
+        host runs, including a desktop compositor sharing the card the registration jobs use.
+
+    Args:
+        device: The zero-based index of the CUDA device to read.
+
+    Returns:
+        The free device memory in megabytes, or None when the runtime cannot report it, which leaves a caller gating
+        on this figure to admit the job rather than stall behind an answer it cannot get.
+    """
+    if cupy is None:
+        return None
+
+    try:
+        with cupy.cuda.Device(device):
+            free_bytes, _ = cupy.cuda.runtime.memGetInfo()
+    except Exception:
+        # A driver that refuses the query leaves the caller no figure to gate on, which is reported as None rather
+        # than as a zero that would stall every device-backed job of the session.
+        return None
+
+    return int(free_bytes // _BYTES_PER_MEGABYTE)
+
+
 def _describe_devices(device_count: int) -> tuple[GpuDevice, ...]:
     """Reads the properties of every CUDA device the runtime reports.
 

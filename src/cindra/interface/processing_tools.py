@@ -34,6 +34,7 @@ from ..io import (
     is_plane_converted,
     find_data_directory,
     is_dataset_discovered,
+    clear_dataset_selection,
     resolve_recording_planes,
     resolve_dataset_recordings,
     resolve_source_frame_geometry,
@@ -864,11 +865,13 @@ def reset_processing_phases_tool(
     Returns:
         On success, contains a 'reset' flag, the 'tracker_path' the reset was applied to, the 'requested_phases' as
         provided, the 'effective_phases' after dependency expansion, and per-job status showing updated states. A
-        'warnings' list is present when a reset phase is governed by a repeat flag that is false while that phase's
-        output already exists on disk, because the stage then returns immediately and records success without redoing
-        its work. Each warning names the dotted configuration flag to set and set_config_values_tool as the way to set
-        it, and a caller MUST act on it before dispatching the reset phase. On failure, contains an 'error' describing
-        the issue.
+        'warnings' list is present when a reset would not do what the caller intends. One case is a phase governed by
+        a repeat flag that is false while that phase's output already exists on disk, because the stage then returns
+        immediately and records success without redoing its work. The other is a registration reset that would run
+        against a binary an earlier pass already corrected, because that stage rewrites the binary in place and a
+        second pass therefore writes results a single pass does not produce. Each warning names the configuration flag
+        or the phase that resolves it, and a caller MUST act on it before dispatching the reset phase. On failure,
+        contains an 'error' describing the issue.
     """
     path = Path(tracker_path)
     if not path.exists():
@@ -963,6 +966,11 @@ def clean_processing_output_tool(
     deleted. Use this to reclaim disk space or force a full rerun from specific phases.
 
     Important:
+        Cleaning multi-recording 'discovery' also clears the region selection each dataset directory holds, which lives
+        in the preserved runtime data file rather than in a deleted array. That selection names regions by their
+        position in a recording's own region list, so a discovery run that reused it after the recording was detected
+        again would address regions the recording no longer holds.
+
         Each phase deletes only the files it owns. The per-plane detection_data directory is shared: binarize creates
         mean_image.npy and mean_image_channel_2.npy, and both register and process rewrite them while process also
         writes the remaining detection arrays. Cleaning 'binarization' therefore removes the two mean images, cleaning
@@ -990,7 +998,9 @@ def clean_processing_output_tool(
 
     Returns:
         On success, contains a 'cleaned' flag, the 'output_root', 'deleted_files', 'deleted_dirs', 'total_deleted',
-        and the 'requested_phases' and 'effective_phases' after dependency expansion, plus 'errors' when a deletion
+        and the 'requested_phases' and 'effective_phases' after dependency expansion. A 'cleared_selections' count
+        appears when cleaning multi-recording 'discovery' cleared a dataset region selection, and 'errors' when a
+        deletion
         failed. On failure, contains an 'error' describing the issue. Both cases include a 'success' flag.
     """
     recording = Path(output_root)
@@ -1035,6 +1045,7 @@ def clean_processing_output_tool(
     deleted_files: list[str] = []
     deleted_dirs: list[str] = []
     errors: list[str] = []
+    cleared_selections = 0
 
     if pipeline_type == "single-recording":
         cindra_root = recording / OUTPUT_DIRECTORY_NAME
@@ -1186,6 +1197,11 @@ def clean_processing_output_tool(
                 ):
                     _delete_file(path=output_path / name, deleted=deleted_files, errors=errors)
 
+                # The selection lives in the runtime data file this tool preserves, so it is cleared in place. Leaving
+                # it would let the discovery stage reuse a selection made against a different detection run.
+                if clear_dataset_selection(dataset_path=output_path):
+                    cleared_selections += 1
+
             if MultiRecordingJobNames.EXTRACT in effective_set:
                 for name in (
                     RecordingArrays.CELL_FLUORESCENCE,
@@ -1210,6 +1226,9 @@ def clean_processing_output_tool(
         "deleted_dirs": deleted_dirs,
         "total_deleted": len(deleted_files) + len(deleted_dirs),
     }
+
+    if cleared_selections:
+        result["cleared_selections"] = cleared_selections
 
     if errors:
         result["errors"] = errors
@@ -1351,6 +1370,16 @@ def execute_processing_jobs_tool(
                 single=single_recording,
                 gpu_registration=gpu_registration,
             )
+            device_memory_megabytes = (
+                _estimate_pending_job_device_memory(
+                    configuration_path=configuration_file,
+                    job_name=job_info.job_name,
+                    specifier=job_info.specifier,
+                    gpu_registration=gpu_registration,
+                )
+                if single_recording
+                else 0
+            )
 
             if job_info.job_name == SingleRecordingJobNames.REGISTER:
                 resource_class = resolve_registration_resource_class(gpu_registration=gpu_registration)
@@ -1371,6 +1400,7 @@ def execute_processing_jobs_tool(
                 single_recording=single_recording,
                 resource_class=resource_class,
                 memory_megabytes=memory_megabytes,
+                device_memory_megabytes=device_memory_megabytes,
             )
         )
         submitted_by_tracker.setdefault(str(tracker_file), set()).add(job_id)
@@ -1524,7 +1554,9 @@ def get_active_execution_timing_tool() -> dict[str, object]:
     Returns:
         Always contains a 'success' flag indicating the tool ran. Also contains an 'active' flag, per-job timing in
         'jobs', and a 'session' summary with total_elapsed_seconds, completed_count, failed_count, running_count, and
-        pending_count, plus throughput_jobs_per_hour when applicable.
+        pending_count, plus throughput_jobs_per_hour when applicable. A job_id identifies a job only within its own
+        tracker, because it is derived from the job name and specifier alone. Each 'jobs' entry therefore carries the
+        'tracker_path' its 'job_id' belongs to, and only that pair identifies a job across recordings.
     """
     # Binds the session to a local name, because the execution manager clears the module-level reference the moment
     # the session drains and this tool must keep reporting on the session it started with.
@@ -1563,6 +1595,7 @@ def get_active_execution_timing_tool() -> dict[str, object]:
             "name": job_info.job_name,
             "specifier": job_info.specifier,
             "status": job_info.status.name.lower(),
+            "tracker_path": str(pending_job.tracker_path),
         }
 
         if job_info.started_at is not None:
@@ -2475,12 +2508,18 @@ def _resolve_multi_recording_path_conflicts(
 
 
 def _resolve_repeat_flag_warnings(tracker_path: Path, phase_names: list[str], *, single_recording: bool) -> list[str]:
-    """Reports every reset phase whose stage would skip its work because its repeat flag is disabled.
+    """Reports every reset phase whose stage would skip its work, or would apply itself to its own output twice.
 
     Notes:
         Binarization, registration, and multi-recording discovery each read their own output before running and return
         immediately when it exists and their repeat flag is false. Resetting the tracker entry of such a phase
         therefore produces a job that records success in seconds without redoing the work.
+
+        Registration carries the opposite hazard as well, because it rewrites the plane binary in place rather than
+        writing a separate output. A reset that lifts its repeat flag without rebuilding that binary therefore
+        registers frames an earlier pass already corrected, which succeeds and writes results that differ from a
+        single pass. The two registration warnings are mutually exclusive, since one covers the flag being false and
+        the other covers it being true.
 
     Args:
         tracker_path: The path to the tracker the reset was applied to, whose directory holds the configuration file.
@@ -2532,6 +2571,25 @@ def _resolve_repeat_flag_warnings(tracker_path: Path, phase_names: list[str], *,
                 "plane already carries registration output, so the job returns immediately and records success "
                 "without re-registering. Set registration.repeat_registration to true with set_config_values_tool "
                 "before dispatching the phase."
+            )
+
+        # The conversion is what returns a registered plane to raw frames, so a reset that does not rebuild the binary
+        # hands the stage the frames the previous pass already corrected.
+        rebuilds_binaries = (
+            SingleRecordingJobNames.BINARIZE in phase_names and configuration.file_io.repeat_binarization
+        )
+
+        if (
+            SingleRecordingJobNames.REGISTER in phase_names
+            and configuration.registration.repeat_registration
+            and planes.registered_planes
+            and not rebuilds_binaries
+        ):
+            warnings.append(
+                "The registration phase was reset while at least one plane already carries registration output, and "
+                "the stage rewrites the plane binary in place, so dispatching it corrects frames the previous pass "
+                "already corrected. Reset the binarization phase with file_io.repeat_binarization set to true "
+                "instead, which rebuilds every binary from the source TIFF files before the planes are registered."
             )
 
         return warnings
@@ -3059,6 +3117,39 @@ def _estimate_pending_job_memory(
         recording_directories=dataset_configuration.recording_io.recording_directories,
         configuration=dataset_configuration,
     )
+
+
+def _estimate_pending_job_device_memory(
+    configuration_path: Path, job_name: str, specifier: str, *, gpu_registration: bool
+) -> int:
+    """Estimates the device memory one queued job holds, from the recording it will process.
+
+    Args:
+        configuration_path: The path to the job's pipeline configuration file.
+        job_name: The name of the pipeline stage the job runs.
+        specifier: The job's tracker specifier.
+        gpu_registration: Determines whether the registration jobs are planned for a CUDA device rather than the host
+            CPU.
+
+    Returns:
+        The device memory the job holds in megabytes, which is zero for every job other than a device-backed
+        registration job.
+
+    Raises:
+        FileNotFoundError: If the recording the job runs on carries nothing its stage can be sized against.
+    """
+    if not gpu_registration or job_name != SingleRecordingJobNames.REGISTER:
+        return 0
+
+    configuration, output_path = load_single_recording_configuration(configuration_path=configuration_path)
+    return size_single_recording_job(
+        job_name=SingleRecordingJobNames(job_name),
+        specifier=specifier,
+        output_root=output_path,
+        configuration=configuration,
+        data_path=configuration.file_io.data_path,
+        gpu_registration=True,
+    ).device_memory_mb
 
 
 def _manifest_entry(identifiers: dict[tuple[str, str], str], job_name: str, specifier: str) -> dict[str, object]:

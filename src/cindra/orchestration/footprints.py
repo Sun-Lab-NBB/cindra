@@ -179,12 +179,14 @@ _DEVICE_CONTEXT_BYTES: int = 536870912
 the registration allocates."""
 
 _DEVICE_LIVE_BACKENDS: int = 2
-"""The device backends one plane registration holds at once while two-step registration refinement runs.
+"""The multiple of one backend's resident state that a plane registration is planned against.
 
 Notes:
-    The refinement pass builds its own backend while the local that names the first pass's backend still binds it. The
-    resident state of both backends, and the working set the pool holds for each, therefore stay on the device for that
-    whole pass.
+    One backend is live at a time, because each pass releases its device and page-locked host allocations before the
+    next pass builds its own. The figure stays at twice that state as a margin, since the pool sorts its free blocks by
+    size and a pass whose plane geometry differs from the one before it allocates fresh blocks rather than reusing the
+    cached ones. Admission holds a device-backed job against this estimate, so the margin is the room a job is given
+    beyond the arrays it names.
 """
 
 _COMBINATION_TRACE_KINDS: int = 4

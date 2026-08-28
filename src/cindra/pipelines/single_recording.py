@@ -11,6 +11,7 @@ from ataraxis_base_utilities import LogLevel, console
 from ..io import (
     combine_planes,
     convert_tiffs_to_binary,
+    clear_recording_selections,
     resolve_active_binary_marker,
     resolve_tiff_conversion_plan,
     resolve_single_recording_contexts,
@@ -546,6 +547,11 @@ def _clear_downstream_data(output_root: Path) -> None:
         other recordings. Every multi-recording stage resolves its contexts through the combined metadata removed
         above, so they stay unreachable until this recording is processed and combined again.
 
+        The selections those datasets hold for this recording are cleared, because they are the one piece of
+        multi-recording state the conversion invalidates. A selection names regions by their position in this
+        recording's own region list, and the detection that rebuilds that list produces a different one, so a
+        selection carried across the conversion addresses regions the recording no longer holds.
+
     Args:
         output_root: The output root the caller configured for the recording.
     """
@@ -565,6 +571,8 @@ def _clear_downstream_data(output_root: Path) -> None:
     # directory under the names each plane writes into its own directory, so one sweep covers both scopes.
     for directory in (root_path, *plane_paths):
         _clear_result_arrays(directory=directory)
+
+    clear_recording_selections(cindra_root=root_path)
 
 
 def _clear_result_arrays(directory: Path) -> None:
