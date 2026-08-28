@@ -1280,7 +1280,9 @@ def execute_processing_jobs_tool(
         and 'gpu_devices' listing the device indices the session holds. A started session further reports a
         'resource_classes' mapping with the resolved workers_per_job, max_parallel_jobs, and job_count of every class
         present in the session, and 'invalid_jobs' listing any jobs that failed validation with reasons. On failure,
-        contains success:False and an 'error' describing the issue.
+        contains success:False and an 'error' describing the issue. A session rejected for an invalid workers_per_job
+        or max_parallel_jobs override carries 'invalid_jobs' alongside that error whenever validation rejected a
+        submitted job, because the override rejection happens after every job is validated.
     """
     if not jobs:
         return {"success": False, "error": "Unable to execute jobs. At least one job descriptor is required."}
@@ -1781,11 +1783,14 @@ def execute_full_pipeline_tool(
                 f"Unable to execute full pipeline. Invalid pipeline_type '{pipeline_type}'. "
                 f"Must be 'single-recording' or 'multi-recording'."
             ),
+            "pipeline_type": pipeline_type,
         }
 
+    # Every outcome of this tool names the pipeline the caller requested, and the shared session guard shapes its own
+    # error, so the requested type is added to that result here.
     active_session_error = _check_active_session(action="execute full pipeline")
     if active_session_error is not None:
-        return active_session_error
+        return {**active_session_error, "pipeline_type": pipeline_type}
 
     manifest: dict[str, object]
     if pipeline_type == "single-recording":
@@ -1793,16 +1798,19 @@ def execute_full_pipeline_tool(
             return {
                 "success": False,
                 "error": "Unable to execute full pipeline. 'raw_data_paths' is required for single-recording.",
+                "pipeline_type": pipeline_type,
             }
         if not configuration_path:
             return {
                 "success": False,
                 "error": "Unable to execute full pipeline. 'configuration_path' is required for single-recording.",
+                "pipeline_type": pipeline_type,
             }
         if not output_roots:
             return {
                 "success": False,
                 "error": "Unable to execute full pipeline. 'output_roots' is required for single-recording.",
+                "pipeline_type": pipeline_type,
             }
 
         manifest = prepare_single_recording_batch_tool(
@@ -1815,12 +1823,13 @@ def execute_full_pipeline_tool(
             return {
                 "success": False,
                 "error": "Unable to execute full pipeline. 'dataset_configurations' is required for multi-recording.",
+                "pipeline_type": pipeline_type,
             }
 
         manifest = prepare_multi_recording_batch_tool(dataset_configurations=dataset_configurations)
 
     if not manifest.get("success"):
-        return manifest
+        return {**manifest, "pipeline_type": pipeline_type}
 
     # Carries the lists the preparation step produces into every outcome below, so that no response accounts for the
     # batch without naming the recordings or datasets it leaves out, or the trackers it migrated.
@@ -2590,7 +2599,7 @@ def _start_session(
     Returns:
         A result dictionary containing 'success', 'started', the session 'cpu_budget', 'memory_budget_mb', and
         'gpu_devices', per-class resource allocation details, and any extra fields. A rejected override yields
-        success:False and an 'error' instead.
+        success:False, an 'error', and the same extra fields instead.
     """
     try:
         session = start_execution_session(
@@ -2600,7 +2609,13 @@ def _start_session(
             gpu_devices=gpu_devices,
         )
     except ValueError as error:
-        return {"success": False, "started": False, "error": _collapse_whitespace(text=str(error))}
+        rejection: dict[str, object] = {
+            "success": False,
+            "started": False,
+            "error": _collapse_whitespace(text=str(error)),
+        }
+        rejection.update(extra_result_fields)
+        return rejection
 
     result: dict[str, object] = {"success": True, "started": True, **session}
     result.update(extra_result_fields)

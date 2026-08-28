@@ -139,6 +139,26 @@ class TestExecuteProcessingJobs:
         assert "Unable to size the job from its configuration" in result["invalid_jobs"][0]["reason"]
         assert get_execution_state() is None
 
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_rejected_override_still_names_the_jobs_validation_refused(self, tmp_path: Path) -> None:
+        """Verifies that a session refused for a bad override reports the invalid jobs it validated beforehand."""
+        manifest_dict, cindra_root = _prepare_recording(tmp_path=tmp_path)
+        tracker_path = cindra_root / SINGLE_RECORDING_TRACKER_FILENAME
+        valid_job = {
+            "configuration_path": str(cindra_root / SINGLE_RECORDING_CONFIGURATION_FILENAME),
+            "tracker_path": str(tracker_path),
+            "job_id": manifest_dict["binarize_job"]["job_id"],
+            "pipeline_type": "single-recording",
+        }
+
+        result = execute_processing_jobs_tool(jobs=[valid_job, {**valid_job, "job_id": "absent"}], workers_per_job=0)
+
+        assert result["success"] is False
+        assert result["started"] is False
+        assert "'workers_per_job' override must be a positive integer" in result["error"]
+        assert result["invalid_jobs"][0]["job_id"] == "absent"
+        assert get_execution_state() is None
+
 
 class TestRegistrationResourceClass:
     """Tests the resource class a registration job receives from the devices the session names."""
@@ -456,6 +476,28 @@ class TestExecuteFullPipeline:
         assert "accepted none of the provided inputs" in result["error"]
         assert len(result["invalid_recordings"]) == 2
         assert all(any(path in entry for entry in result["invalid_recordings"]) for path in raw_data_paths)
+        assert result["pipeline_type"] == "single-recording"
+        assert get_execution_state() is None
+
+    @pytest.mark.parametrize(
+        ("pipeline_type", "arguments"),
+        [
+            ("neither-pipeline", {}),
+            ("single-recording", {}),
+            ("single-recording", {"raw_data_paths": ["/absent"]}),
+            ("single-recording", {"raw_data_paths": ["/absent"], "configuration_path": "/absent.yaml"}),
+            ("multi-recording", {}),
+        ],
+    )
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_every_argument_rejection_names_the_requested_pipeline(
+        self, pipeline_type: str, arguments: dict[str, object]
+    ) -> None:
+        """Verifies that each argument guard names the pipeline the caller requested, as the Returns block promises."""
+        result = execute_full_pipeline_tool(pipeline_type=pipeline_type, **arguments)
+
+        assert result["success"] is False
+        assert result["pipeline_type"] == pipeline_type
         assert get_execution_state() is None
 
 
