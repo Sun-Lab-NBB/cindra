@@ -27,7 +27,7 @@ _ITERATION_LIMIT_CENTERS: tuple[tuple[int, int], ...] = ((12, 12), (30, 18), (20
 """The planted blob centroids of the iteration-limit movie, spaced far enough apart to yield distinct ROIs."""
 
 _ITERATION_LIMIT_TOLERANCE: float = 8.0
-"""The maximum distance in pixels between a detected centroid and the planted blob center it must land on."""
+"""The maximum distance in pixels between a detected centroid and the planted blob center on which it lands."""
 
 _SPLIT_SOURCE_CENTERS: tuple[tuple[int, int], ...] = ((32, 31), (32, 34))
 """The planted centers of the two overlapping sources the split movie holds, three pixels apart on the same row."""
@@ -42,7 +42,7 @@ _SPLIT_SOURCE_PERIODS: tuple[int, int] = (4, 8)
 """The firing periods of the two split-movie sources, which give the first source twice the energy of the second."""
 
 _SPLIT_SOURCE_AMPLITUDE: float = 600.0
-"""The peak intensity each split-movie source adds to the frames it fires on."""
+"""The peak intensity each split-movie source adds to the frames on which it fires."""
 
 _SPLIT_TAIL_ROW: int = 35
 """The first row of the optional process trailing the split movie's first source, three pixels below its center."""
@@ -166,7 +166,7 @@ class TestExtendIteratively:
         assert len(extended_x) > 1
         assert len(extended_weights) == len(extended_y)
 
-        assert np.isclose(norm(extended_weights), 1.0, atol=1e-5)
+        assert np.isclose(a=norm(extended_weights), b=1.0, atol=1e-5)
 
         assert np.all(np.abs(extended_y - center_y) <= 5)
         assert np.all(np.abs(extended_x - center_x) <= 5)
@@ -214,7 +214,7 @@ class TestExtendIteratively:
         # The brightest retained pixel is the seed center, and the weights stay unit-normalized after the trim.
         peak_index = int(extended_weights.argmax())
         assert (int(extended_y[peak_index]), int(extended_x[peak_index])) == (center_y, center_x)
-        assert np.isclose(norm(extended_weights), 1.0, atol=1e-5)
+        assert np.isclose(a=norm(extended_weights), b=1.0, atol=1e-5)
 
     def test_all_negative_residual_returns_the_untrimmed_dilation(self) -> None:
         """Verifies that a residual holding no positive pixel returns the raw 5-pixel dilation of the seed."""
@@ -247,7 +247,7 @@ class TestExtendIteratively:
 
         # The five untrimmed weights are the untouched -1 means, unit-normalized to -1 / sqrt(5) each.
         expected_weights = np.full(5, fill_value=-1.0) / np.linalg.norm(np.full(5, fill_value=-1.0))
-        np.testing.assert_allclose(extended_weights, expected_weights, rtol=1e-6)
+        np.testing.assert_allclose(actual=extended_weights, desired=expected_weights, rtol=1e-6)
 
     def test_returns_normalized_weights(self) -> None:
         """Verifies that the returned weights are unit-normalized."""
@@ -274,7 +274,7 @@ class TestExtendIteratively:
             active_frame_indices=active_frame_indices,
         )
 
-        assert np.isclose(norm(extended_weights), 1.0, atol=1e-5)
+        assert np.isclose(a=norm(extended_weights), b=1.0, atol=1e-5)
 
         assert len(extended_y) > 1
         assert np.all((extended_y >= 3) & (extended_y <= 8))
@@ -306,7 +306,7 @@ class TestExtendIteratively:
         # The ROI grows past the 10000-pixel cap, so the while condition (not the break) terminates the loop.
         assert len(extended_y) > 10000
         assert len(extended_x) == len(extended_y)
-        assert np.isclose(norm(extended_weights), 1.0, atol=1e-5)
+        assert np.isclose(a=norm(extended_weights), b=1.0, atol=1e-5)
 
     def test_zero_residual_returns_finite_weights(self) -> None:
         """Verifies that a uniformly zero residual yields finite zero weights rather than a zero-norm division."""
@@ -326,7 +326,7 @@ class TestExtendIteratively:
         with warnings.catch_warnings():
             # A zero-norm division raises this as a RuntimeWarning, so promoting it to an error fails the test on
             # the exact operation the guard exists to avoid.
-            warnings.simplefilter("error", RuntimeWarning)
+            warnings.simplefilter(action="error", category=RuntimeWarning)
             extended_y, extended_x, extended_weights = _extend_iteratively(
                 y_pixels=y_pixels,
                 x_pixels=x_pixels,
@@ -339,7 +339,9 @@ class TestExtendIteratively:
         # Every weight stays exactly zero, which keeps the caller's projection finite so that it rejects the ROI on
         # its activity threshold instead of on a NaN comparison that is False for every frame.
         assert np.isfinite(extended_weights).all()
-        np.testing.assert_array_equal(extended_weights, np.zeros(extended_weights.size, dtype=np.float32))
+        np.testing.assert_array_equal(
+            actual=extended_weights, desired=np.zeros(extended_weights.size, dtype=np.float32)
+        )
         assert extended_weights.size == extended_y.size == extended_x.size
 
     def test_negative_residual_normalizes_weights(self) -> None:
@@ -363,8 +365,10 @@ class TestExtendIteratively:
 
         # Twelve pixels each holding -1 normalize to -1/sqrt(12), so the norm is unity and every weight is negative.
         assert extended_y.size == 12
-        assert np.isclose(norm(extended_weights), 1.0, atol=1e-6)
-        np.testing.assert_allclose(extended_weights, np.full(12, -1.0 / np.sqrt(12.0)), rtol=1e-6)
+        assert np.isclose(a=norm(extended_weights), b=1.0, atol=1e-6)
+        np.testing.assert_allclose(
+            actual=extended_weights, desired=np.full(12, fill_value=-1.0 / np.sqrt(12.0)), rtol=1e-6
+        )
 
 
 class TestFindBestScale:
@@ -454,10 +458,12 @@ class TestDetectRoisInFramesDeadPeak:
         observed_seeds: list[tuple[int, int]] = []
 
         # Every extension now returns a mask the caller cannot use, so each iteration abandons its peak. This is the
-        # state the suppression exists for, and it cannot be produced by any movie, because a peak only clears the
-        # detection threshold when the residual under it still holds activity for the extension to find.
+        # state for which the suppression exists, and no movie produces it, because a peak only clears the detection
+        # threshold when the residual under it still holds activity for the extension to find.
         monkeypatch.setattr(
-            detect_rois_module, "_extend_iteratively", self._stub_extension(observed_seeds=observed_seeds)
+            target=detect_rois_module,
+            name="_extend_iteratively",
+            value=self._stub_extension(observed_seeds=observed_seeds),
         )
 
         roi_statistics = _detect(frames=movie, maximum_iterations=iteration_limit)
@@ -505,7 +511,7 @@ class TestDetectRoisInFramesSplit:
         # never overlap in time, so a mask spanning the pair follows both equally.
         split_roi = roi_statistics[0]
         trace = self._project(movie=movie, roi=split_roi)
-        correlations = [float(np.corrcoef(trace, activity)[0, 1]) for activity in activities]
+        correlations = [float(np.corrcoef(x=trace, y=activity)[0, 1]) for activity in activities]
         dominant_index = int(np.argmax(correlations))
 
         # The retained component tracks one source and only weakly follows the other. A mask that kept both sources
@@ -539,8 +545,8 @@ class TestDetectRoisInFramesSplit:
             assert int(split_roi.mask.x_pixels.min()) >= discarded_center[1]
 
         # The split re-centers the ROI onto the mask pixel nearest the retained component's spatial median, replacing
-        # the coarse-scale peak the iteration started from. That peak is not a minimizer of this distance, so the
-        # reported centroid pins the recentring step rather than the seed it was drawn from.
+        # the coarse-scale peak from which the iteration started. That peak is not a minimizer of this distance, so the
+        # reported centroid pins the recentring step rather than the seed from which it was drawn.
         y_pixels = split_roi.mask.y_pixels.astype(np.float64)
         x_pixels = split_roi.mask.x_pixels.astype(np.float64)
         distances, centroid_distance = self._squared_distances(
@@ -550,7 +556,7 @@ class TestDetectRoisInFramesSplit:
 
         # The second iteration recovers the source the split discarded, so the pair ends up as two distinct ROIs.
         second_trace = self._project(movie=movie, roi=roi_statistics[1])
-        second_correlations = [float(np.corrcoef(second_trace, activity)[0, 1]) for activity in activities]
+        second_correlations = [float(np.corrcoef(x=second_trace, y=activity)[0, 1]) for activity in activities]
         assert int(np.argmax(second_correlations)) == 1 - dominant_index
         assert max(second_correlations) > 0.75
 
@@ -560,10 +566,10 @@ class TestDetectRoisInFramesSplit:
 
         split_roi = _detect(frames=movie, maximum_iterations=1)[0]
 
-        # The retained component still follows the source the trailing process belongs to, which is the more active
-        # of the two, so the skew comes from that source's own geometry rather than from a wrongly kept component.
+        # The retained component still follows the source to which the trailing process belongs, the more active of the
+        # two, so the skew comes from that source's own geometry rather than from a wrongly kept component.
         trace = self._project(movie=movie, roi=split_roi)
-        correlations = [float(np.corrcoef(trace, activity)[0, 1]) for activity in activities]
+        correlations = [float(np.corrcoef(x=trace, y=activity)[0, 1]) for activity in activities]
         assert int(np.argmax(correlations)) == int(np.argmax(activities.sum(axis=1)))
         assert max(correlations) > 0.75
 

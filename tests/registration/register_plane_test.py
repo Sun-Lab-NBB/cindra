@@ -21,7 +21,7 @@ from cindra.registration.register import (
     _register_alignment_channel,
     _register_secondary_channel,
 )
-from cindra.registration.bidiphase_correction import apply_bidirectional_phase_correction
+from cindra.registration.bidirectional_phase_correction import apply_bidirectional_phase_correction
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -923,9 +923,9 @@ class TestRegisterPlane:
 
         pass_offsets: list[tuple[NDArray[np.int32], NDArray[np.int32]]] = []
 
-        def record_pass_offsets(*, context: RuntimeContext, workers: int) -> None:
+        def record_pass_offsets(*, context: RuntimeContext, workers: int, device: int | None = None) -> None:
             """Runs the real alignment pass and keeps the offsets it measured, which the next pass overwrites."""
-            _register_alignment_channel(context=context, workers=workers)
+            _register_alignment_channel(context=context, workers=workers, device=device)
             registration_data = context.runtime.registration
             assert registration_data.rigid_y_offsets is not None
             assert registration_data.rigid_x_offsets is not None

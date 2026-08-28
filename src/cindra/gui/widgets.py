@@ -366,9 +366,6 @@ def create_play_pause_group(
 ) -> PlayPauseGroup:
     """Creates a play/pause button pair with an exclusive button group.
 
-    Both buttons start disabled with pause pre-selected. Each viewer connects its own callbacks after
-    construction.
-
     Args:
         parent: The parent widget that provides the icon style and owns the button group.
         play_tooltip: Tooltip text for the play button.

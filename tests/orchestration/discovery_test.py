@@ -179,9 +179,9 @@ class TestMultiRecordingJobUniverse:
 
         _mark_processed(output_root=roots[1])
 
-        assert _names(resolve_multi_recording_job_universe(recording_roots=roots, dataset_name="set").possible) == {
-            MultiRecordingJobNames.DISCOVER
-        }
+        universe = resolve_multi_recording_job_universe(recording_roots=roots, dataset_name="set")
+
+        assert _names(jobs=universe.possible) == {MultiRecordingJobNames.DISCOVER}
 
     def test_extraction_waits_for_its_own_recording_projection(self, tmp_path: Path) -> None:
         """Verifies that each extraction job waits for the masks projected into its own recording."""
@@ -195,7 +195,7 @@ class TestMultiRecordingJobUniverse:
         dataset_path.mkdir(parents=True)
         (dataset_path / TRACKING_TEMPLATE_MASKS_FILENAME).write_bytes(b"")
         assert MultiRecordingJobNames.EXTRACT not in _names(
-            resolve_multi_recording_job_universe(recording_roots=roots, dataset_name="set").possible
+            jobs=resolve_multi_recording_job_universe(recording_roots=roots, dataset_name="set").possible
         )
 
         _project_masks(output_root=roots[1], dataset_name="set")

@@ -168,8 +168,7 @@ class MultiRecordingConfiguration(YamlConfig):
     The pipeline reads these parameters and treats them as immutable for the duration of processing.
 
     Notes:
-        This class is based on the reference implementation here:
-        https://github.com/sprustonlab/multiday-suite2p-public.
+        Mirrors the reference implementation at https://github.com/sprustonlab/multiday-suite2p-public.
 
         For runtime data (computed by the pipeline), see MultiRecordingRuntimeData.
     """

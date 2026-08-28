@@ -112,7 +112,7 @@ def launch_viewer_tool(
         command.extend(["--dataset", dataset])
 
     try:
-        process = subprocess.Popen(
+        process = subprocess.Popen(  # noqa: S603 - the vector is built here from sys.executable and fixed flags.
             args=command,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

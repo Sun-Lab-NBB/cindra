@@ -10,6 +10,7 @@ from ..io import (
     resolve_multi_recording_contexts as resolve_multi_recording_contexts,
     resolve_single_recording_contexts as resolve_single_recording_contexts,
 )
+from .gpu import verify_gpu_runtime as verify_gpu_runtime
 from .jobs import (
     MultiRecordingJobNames as MultiRecordingJobNames,
     SingleRecordingJobNames as SingleRecordingJobNames,
@@ -43,6 +44,7 @@ def execute_single_recording_job(
     tracker: ProcessingTracker,
     *,
     workers: int | None = None,
+    device: int | None = None,
 ) -> None: ...
 def execute_multi_recording_job(
     configuration_path: Path,
@@ -62,6 +64,7 @@ def dispatch_single_recording_job(
     job_id: str,
     tracker: ProcessingTracker,
     workers: int | None,
+    device: int | None = None,
 ) -> None: ...
 def dispatch_multi_recording_job(
     configuration: MultiRecordingConfiguration,

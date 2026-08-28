@@ -163,6 +163,35 @@ class TestOnePhotonRegistrationValidation:
         assert "errors" not in result
 
 
+class TestDeviceBatchSizeValidation:
+    """Tests the pre-flight verdict the validator returns for the device batch size."""
+
+    def test_negative_device_batch_size_is_rejected(self, tmp_path: Path) -> None:
+        """Verifies that a negative device batch invalidates every single-recording configuration alike."""
+        file_path = _write_single_recording_configuration(directory=tmp_path)
+        configuration = SingleRecordingConfiguration.load(file_path=file_path)
+        configuration.registration.gpu_batch_size = -1
+        configuration.save(file_path=file_path)
+
+        result = validate_config_file_tool(file_path=str(file_path))
+
+        assert result["valid"] is False
+        assert any("registration.gpu_batch_size must be non-negative" in error for error in result["errors"])
+
+    @pytest.mark.parametrize("gpu_batch_size", [0, 64])
+    def test_non_negative_device_batch_size_validates(self, tmp_path: Path, gpu_batch_size: int) -> None:
+        """Verifies that a zero and a positive device batch both leave the configuration valid."""
+        file_path = _write_single_recording_configuration(directory=tmp_path)
+        configuration = SingleRecordingConfiguration.load(file_path=file_path)
+        configuration.registration.gpu_batch_size = gpu_batch_size
+        configuration.save(file_path=file_path)
+
+        result = validate_config_file_tool(file_path=str(file_path))
+
+        assert result["valid"] is True
+        assert "errors" not in result
+
+
 class TestSetConfigValues:
     """Tests the tool that writes new values into an existing configuration file."""
 

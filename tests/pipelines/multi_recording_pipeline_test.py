@@ -341,7 +341,7 @@ def _build_flickering_movie(*, seed: int) -> NDArray[np.int16]:
         blob = np.exp(-(((rows - center_row) ** 2 + (columns - center_column) ** 2) / (2.0 * _BLOB_SIGMA**2)))
         amplitudes = _BLOB_AMPLITUDE * (0.5 + np.abs(generator.standard_normal(_FRAME_COUNT)))
         movie += amplitudes[:, np.newaxis, np.newaxis] * blob[np.newaxis, :, :]
-    return np.clip(movie, 0, _MAXIMUM_PIXEL_VALUE).astype(np.int16)
+    return np.clip(a=movie, a_min=0, a_max=_MAXIMUM_PIXEL_VALUE).astype(np.int16)
 
 
 def _build_processed_recording(root: Path, *, seed: int) -> Path:

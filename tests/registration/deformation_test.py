@@ -165,8 +165,8 @@ class TestWarp:
 
         # Keeps every sample at least one pixel away from the borders, so the kernel takes its interior branch and
         # the reference never has to extrapolate.
-        samples_y = generator.uniform(1.0, height - 3.0, size=200).astype(np.float32)
-        samples_x = generator.uniform(1.0, width - 3.0, size=200).astype(np.float32)
+        samples_y = generator.uniform(low=1.0, high=height - 3.0, size=200).astype(np.float32)
+        samples_x = generator.uniform(low=1.0, high=width - 3.0, size=200).astype(np.float32)
 
         result = np.empty(200, dtype=np.float32)
         _warp(data=data, result=result, samples_x=samples_x, samples_y=samples_y, order=1)
@@ -187,8 +187,8 @@ class TestWarp:
         generator = np.random.default_rng(seed=6)
         height, width = 17, 23
         data = generator.standard_normal((height, width)).astype(np.float32)
-        samples_y = generator.uniform(0.0, height - 1.0, size=150).astype(np.float32)
-        samples_x = generator.uniform(0.0, width - 1.0, size=150).astype(np.float32)
+        samples_y = generator.uniform(low=0.0, high=height - 1.0, size=150).astype(np.float32)
+        samples_x = generator.uniform(low=0.0, high=width - 1.0, size=150).astype(np.float32)
 
         result = np.empty(150, dtype=np.float32)
         _warp(data=data, result=result, samples_x=samples_x, samples_y=samples_y, order=0)
@@ -199,7 +199,7 @@ class TestWarp:
 
 
 class TestProject:
-    """Tests the _project forward splatting kernel, which Deformation.inverse is built on."""
+    """Tests the _project forward splatting kernel on which Deformation.inverse is built."""
 
     def test_identity_projection_is_exact(self) -> None:
         """Verifies that splatting to the identity grid reproduces the source array element for element."""

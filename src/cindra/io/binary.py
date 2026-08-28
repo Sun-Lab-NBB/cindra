@@ -269,6 +269,10 @@ class BinaryFile:
 
         np.load(source_file_name).tofile(destination_file_name)
 
+    def close(self) -> None:
+        """Closes the memory-mapped file view."""
+        self.file._mmap.close()  # type: ignore[attr-defined]
+
     @property
     def bytes_per_frame(self) -> int:
         """Returns the memory size, in bytes, reserved by each frame stored inside the file."""
@@ -293,10 +297,6 @@ class BinaryFile:
     def size(self) -> np.int64:
         """Returns the total number of pixels (values) stored inside the file."""
         return np.prod(np.array(self.shape).astype(dtype=np.int64))
-
-    def close(self) -> None:
-        """Closes the memory-mapped file view."""
-        self.file._mmap.close()  # type: ignore[attr-defined]
 
     @property
     def data(self) -> NDArray[np.int16]:
@@ -345,10 +345,10 @@ class BinaryFile:
 
         Args:
             bin_size: The size of each bin, in frames.
-            x_range: The minimum and the maximum x-index to include in the output binned dataset. If set to None, no
-                cropping (x or y) is performed.
-            y_range: The minimum and the maximum y-index to include in the output binned dataset. If set to None, no
-                cropping (x or y) is performed.
+            x_range: A tuple of (start, end) indices for cropping frames along the x-axis, where the end index is
+                exclusive. If set to None, no cropping (x or y) is performed.
+            y_range: A tuple of (start, end) indices for cropping frames along the y-axis, where the end index is
+                exclusive. If set to None, no cropping (x or y) is performed.
             bad_frames: A mask holding one element per frame stored inside the BinaryFile managed by this instance,
                 True at each bad frame and False at each good frame.
             reject_threshold: The fraction of good frames to all frames inside the batch that must be exceeded for bad
@@ -356,11 +356,10 @@ class BinaryFile:
                 then both bad and good frames are kept and binned as part of the batch processing.
 
         Returns:
-            The binned movie, shaped as (bin_number, height, width), where each bin holds the average of bin_size
-            consecutive frames.
+            The binned movie, shaped as (bin_number, height, width). Each bin holds the average of bin_size frames taken
+            from one batch. A batch left with bin_size or fewer frames is averaged into a single bin instead, and the
+            bad frames discarded from a batch are absent from the frames its bins average.
         """
-        # If 'bad_frames' is provided, creates a NumPy array that tracks which frames are good. Otherwise, considers all
-        # the frames as good.
         good_frames = ~bad_frames if bad_frames is not None else np.ones(self.frame_number, dtype=np.bool_)
 
         # Resolves the batch size. It is capped either to the total number of good frames or the default maximum batch
@@ -377,8 +376,6 @@ class BinaryFile:
             if x_range is not None and y_range is not None:
                 data = data[:, slice(*y_range), slice(*x_range)]
 
-            # If the fraction of good frames inside the batch is above the threshold, the bad frames are discarded and
-            # only good frames are kept in the batch. Otherwise, keeps both good and bad frames.
             good_indices = good_frames[indices]
             if np.mean(good_indices) > reject_threshold:
                 data = data[good_indices]
@@ -559,7 +556,6 @@ class BinaryFileCombined:
         data = np.zeros((actual_frames, self.height, self.width), dtype=np.int16)
 
         for file_index, file in enumerate(self.files):
-            # Uses the data already read from the first file, otherwise reads from the current file.
             file_data = first_file_data if file_index == 0 else file[indices]
 
             # Overwrites the specific section of the combined file data with the data read from the target file. Note,

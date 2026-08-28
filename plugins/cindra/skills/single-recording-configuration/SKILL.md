@@ -45,14 +45,14 @@ cindra Python functions directly when an MCP tool exists for the task. If MCP to
 These tools are registered on the `cindra-mcp` server. Tool parameters and return values are self-documented via MCP
 introspection.
 
-| Tool                                | Purpose                                                                   |
-|-------------------------------------|---------------------------------------------------------------------------|
-| `generate_config_file_tool`         | Generates a default configuration YAML for the specified pipeline type    |
-| `discover_recordings_tool`          | Discovers single and multi-recording candidates under a root directory    |
-| `read_config_file_tool`             | Reads any YAML file as a raw dictionary (supports legacy and non-cindra)  |
-| `validate_config_file_tool`         | Validates a cindra config against schema, reports errors and non-defaults |
-| `set_config_values_tool`            | Writes new values into an existing cindra configuration file              |
-| `validate_recording_readiness_tool` | Validates the raw TIFFs and acquisition parameters of a `raw_data_path`   |
+| Tool                                | Purpose                                                                       |
+|-------------------------------------|-------------------------------------------------------------------------------|
+| `generate_config_file_tool`         | Generates a default configuration YAML for the specified pipeline type        |
+| `discover_recordings_tool`          | Discovers single and multi-recording candidates under a root directory        |
+| `read_config_file_tool`             | Reads any YAML file as a raw dictionary (supports legacy and non-cindra)      |
+| `validate_config_file_tool`         | Validates a cindra configuration against schema, reports errors, non-defaults |
+| `set_config_values_tool`            | Writes new values into an existing cindra configuration file                  |
+| `validate_recording_readiness_tool` | Validates the raw TIFFs and acquisition parameters of a `raw_data_path`       |
 
 `set_config_values_tool` takes the `file_path` of an existing configuration and a `values` map keyed by the same
 `section.parameter` dotted paths `validate_config_file_tool` reports under `non_default_parameters`. Every entry is
@@ -60,8 +60,8 @@ resolved before any is applied, so one rejected entry leaves the file byte-ident
 once under `errors`. Values arrive in the form the YAML document carries them, so a path is a string, an enumeration is
 its raw value, and a tuple is a list. An integer is accepted for a float-typed parameter, and no other substitution is,
 `bool` included. The response carries `changed`, pairing each dotted path with its `previous` and `current` values, and
-the `valid` status the rewritten file validates to. Gate on `valid` rather than on `success`. The pipeline reads its
-configuration from disk when it dispatches a job, so never write against a configuration whose jobs are running.
+the `valid` status to which the rewritten file validates. Gate on `valid` rather than on `success`. The pipeline reads
+its configuration from disk when it dispatches a job, so never write against a configuration whose jobs are running.
 
 ---
 
@@ -77,9 +77,12 @@ CPU worker allocation lives outside the configuration file. Each processing stag
 invocation argument, supplied by the `cindra run` options `-bw/--binarize-workers`, `-rw/--register-workers` and
 `-pw/--process-workers`, or by `execute_processing_jobs_tool` and `execute_full_pipeline_tool` at dispatch time. Both
 interfaces share one convention. Omitting a `cindra run` worker option, or leaving the MCP `workers_per_job` as None,
-applies the measured default of 3 workers for binarization, 4 for registration and 10 for processing. Setting either to
--1 requests every available core. Any positive value is used exactly, and on the MCP tools it overrides every non-fixed
-resource class alike.
+applies the measured default of 3 workers for binarization, 4 for registration on the host CPU, 2 for a device-backed
+registration, and 10 for processing. Setting either to -1 requests every available core. Any positive value is used
+exactly, and on the MCP tools it overrides every non-fixed resource class alike. The CUDA device on which registration
+runs is an invocation argument too. It is named by the `--register-device` option of `cindra run`, or by the
+`gpu_devices` argument of the execute tools, and naming neither registers on the host CPU. `registration.gpu_batch_size`
+is the only field this file owns for that path.
 
 ---
 
@@ -99,17 +102,17 @@ These parameters are set automatically by the pipeline and should not be manuall
 
 Runtime behavior settings shared between single-recording and multi-recording pipelines.
 
-| Parameter               | Type | Default | Description                                          |
-|-------------------------|------|---------|------------------------------------------------------|
-| `display_progress_bars` | bool | False   | Show progress bars. Batch tools force this False.    |
+| Parameter               | Type | Default | Description                                       |
+|-------------------------|------|---------|---------------------------------------------------|
+| `display_progress_bars` | bool | False   | Show progress bars. Batch tools force this False. |
 
 `cindra run` displays progress bars by default and writes its choice into this field before dispatching, so the flag
 that suppresses them is `-np/--no-progress`. The batch MCP tools write False into every per-recording configuration
 they create, because concurrent jobs sharing a terminal interleave their bars.
 
 Worker allocation reaches each stage as an invocation argument, as described in the Configuration overview section. The
-measured defaults are published as `BINARIZATION_WORKERS`, `REGISTRATION_WORKERS`, `PROCESSING_WORKERS` and
-`COMBINATION_WORKERS` in `cindra.orchestration`.
+measured defaults are published as `BINARIZATION_WORKERS`, `REGISTRATION_WORKERS`, `REGISTRATION_GPU_WORKERS`,
+`PROCESSING_WORKERS` and `COMBINATION_WORKERS` in `cindra.orchestration`.
 
 ---
 
@@ -174,18 +177,14 @@ channel_number)` frames. A recording holding fewer frames than one whole cycle f
 the count it holds, so advise the user to acquire a longer recording or correct `plane_number` and `channel_number` in
 `cindra_parameters.json`.
 
-`repeat_binarization` forces a rebuild of binaries that are otherwise intact, and it is the remedy every binarization
-refusal names. Enable it to recover a recording whose binary an interrupted write left marked, whose binary disagrees
-with its plane geometry, or whose two-channel plane lost its channel 2 binary.
-
 ---
 
 ## Section 4: registration
 
 Corrects whole-frame translational motion by computing per-frame X/Y offsets via phase correlation against a reference
 image built from frames sampled across the recording. Each frame is shifted to align with the reference. Offsets are
-computed in batches and optionally smoothed temporally. Frames with outlier offsets are flagged as bad and excluded from
-downstream ROI detection.
+computed in batches, and the correlation surface from which they are read is optionally smoothed temporally first.
+Frames with outlier offsets are flagged as bad and excluded from downstream ROI detection.
 
 This section controls the rigid (global) component of motion correction. Section 6 owns the nonrigid component and the
 recommendation to run both together.
@@ -200,6 +199,7 @@ recommendation to run both together.
 | `spatial_smoothing_sigma`                  | float | 1.15    | Gaussian sigma (pixels) for phase correlation smoothing.            |
 | `temporal_smoothing_sigma`                 | float | 0.0     | Gaussian sigma (frames) for temporal smoothing. 0 = disabled.       |
 | `two_step_registration`                    | bool  | False   | Enable refinement registration (two-step).                          |
+| `gpu_batch_size`                           | int   | 0       | Frames staged on a CUDA device. 0 = use batch_size there.           |
 | `bad_frame_threshold`                      | float | 1.0     | Offset outlier threshold. Excluded frames are skipped, not removed. |
 | `normalize_frames`                         | bool  | True    | Clip pixel intensities to 1st-99th percentile during registration.  |
 | `registration_metric_principal_components` | int   | 5       | PCs for registration quality metrics. 0 = disable metrics.          |
@@ -217,8 +217,8 @@ recompute.
 - **High motion artifacts**: Increase `maximum_offset_fraction` (0.15-0.2) and enable `two_step_registration` for
   recordings with large, rapid animal movement.
 - **Noisy or low-SNR data**: Increase `spatial_smoothing_sigma` (1.5-2.0) to stabilize phase correlation.
-- **Residual jitter after registration**: Enable `temporal_smoothing_sigma` (1.0-2.0 frames) for sub-pixel smoothing of
-  offset traces.
+- **Residual jitter after registration**: Enable `temporal_smoothing_sigma` (1.0-2.0 frames) to temporally smooth the
+  phase correlation surface across consecutive frames, which stabilizes the per-frame offsets read from it.
 - **Bidirectional scanning artifacts**: Enable `compute_bidirectional_phase_offset` for resonant scanners. Use
   `bidirectional_phase_offset_override` if auto-detection fails.
 - **Too many frames excluded**: Increase `bad_frame_threshold` (1.5-2.0) to retain more frames.
@@ -378,10 +378,7 @@ deconvolves the result to produce an estimated spike rate trace per ROI.
 
 ### Parameters typically left at default
 
-- All registration parameters (work well for 2P imaging)
-- ROI detection parameters (tuned for GCaMP6f)
-- Signal extraction parameters
-- Spike deconvolution parameters
+The registration, ROI detection, signal extraction, and spike deconvolution parameters all suit 2P GCaMP6f data.
 
 ---
 
@@ -411,9 +408,9 @@ authored file that omits it is rejected by both `validate_config_file_tool` and 
 
 ## Configuration lifecycle
 
-1. **Template configs**: de-novo configurations generated via `generate_config_file_tool` or manually created. Templates
-   can live anywhere (e.g., `/Data/CA1_GCaMP6f_SD.yaml`) and are reusable across recordings. The batch MCP tools never
-   modify a template, but `cindra run -i <file>` DOES write back into the file it is given, saving
+1. **Template configurations**: de-novo configurations generated via `generate_config_file_tool` or manually created.
+   Templates can live anywhere (e.g., `/Data/CA1_GCaMP6f_SD.yaml`) and are reusable across recordings. The batch MCP
+   tools never modify a template, but `cindra run -i <file>` DOES write back into the file it is given, saving
    `runtime.display_progress_bars` and any `--data-path` or `--output-path` override into it before dispatching. Never
    pass a shared template to `cindra run`, because the first run stamps one recording's paths into the file every other
    recording shares. Pass a per-recording copy, or the resolved copy the prepare tool already wrote.
@@ -426,7 +423,7 @@ authored file that omits it is rejected by both `validate_config_file_tool` and 
    copy with `set_config_values_tool` instead, and only while none of its jobs are running.
    `execute_processing_jobs_tool` resolves worker allocation at dispatch time and passes it to each job as a dispatch
    argument, so one configuration file serves every job dispatched against it. These resolved copies are what the
-   pipeline actually executes against.
+   pipeline executes.
 
 **Do NOT** create per-recording configuration files manually. Pass a single template path to the batch tool and let it
 handle per-recording fine-tuning automatically.
@@ -455,9 +452,8 @@ handle per-recording fine-tuning automatically.
    parameters. The generated template leaves `file_io.output_path` as None, which the planning tools
    `size_pipeline_jobs_tool` and `get_pipeline_job_universe_tool` reject, so set `file_io.data_path` and
    `file_io.output_path` on a per-recording copy before planning against it.
-6. **Configuration complete**: the validated template file is ready for use. This skill does not start processing. If
-   invoked standalone, the configuration is ready. To run it, proceed to `/single-recording-processing`. If invoked from
-   another skill, return control to the caller.
+6. **Configuration complete**: the validated template file is ready for use. This skill does not start processing. To
+   run it, proceed to `/single-recording-processing`. If invoked from another skill, return control to the caller.
 
 ---
 
@@ -484,16 +480,19 @@ You MUST verify configuration files against this checklist before starting singl
 parameter detection.
 
 ```text
-Single-Recording Configuration Compliance:
-- [ ] cindra MCP server is connected (if not, invoke `/cindra-mcp-environment-setup`)
+Single-Recording Configuration Compliance, tool-settled (run `validate_config_file_tool` and
+`validate_recording_readiness_tool`):
 - [ ] `validate_config_file_tool` reports no errors (run this first)
+- [ ] Review any warnings from `validate_config_file_tool` (pipeline-set parameters, channel consistency)
+- [ ] Acquisition data prepared, `validate_recording_readiness_tool` passed against each `raw_data_path` (else run
+      `/acquisition-data-preparation`)
+
+Single-Recording Configuration Compliance, reader-judged:
+- [ ] cindra MCP server is connected (if not, invoke `/cindra-mcp-environment-setup`)
 - [ ] `main.tau` matches the calcium indicator used (0.4 for GCaMP6f, ~1.5 for GCaMP6s)
 - [ ] `main.two_channels` set correctly for the recording type
 - [ ] `main.ignored_flyback_planes` lists correct flyback plane indices if applicable
 - [ ] `file_io.ignored_file_names` excludes every TIFF in the data directory that is not part of the recording (a
       differently shaped file, such as an anatomical z-stack, fails binarization)
-- [ ] Review any warnings from `validate_config_file_tool` (pipeline-set parameters, channel consistency)
-- [ ] Acquisition data prepared, `validate_recording_readiness_tool` passed against each `raw_data_path` (else run
-      `/acquisition-data-preparation`)
 - [ ] No shared template was passed to `cindra run -i`, which writes back into the file it is given
 ```

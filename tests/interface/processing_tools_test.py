@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-import time
 from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
 from tifffile import imwrite
+from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_data_structures import ProcessingTracker
 
 from cindra.layout import (
@@ -27,13 +27,23 @@ from cindra.layout import (
     SINGLE_RECORDING_CONFIGURATION_FILENAME,
     DetectionImages,
     RecordingArrays,
+    resolve_array_path,
     resolve_plane_path,
+    resolve_output_path,
     resolve_plane_specifier,
 )
 from cindra.interface import processing_tools
-from cindra.dataclasses import AcquisitionParameters, SingleRecordingConfiguration
+from cindra.dataclasses import (
+    AcquisitionParameters,
+    MultiRecordingConfiguration,
+    SingleRecordingConfiguration,
+)
 from cindra.orchestration import (
+    GPU_REMEDY,
     RESOURCE_CLASS_BY_JOB_NAME,
+    GpuDevice,
+    GpuStatus,
+    GpuSummary,
     PendingJob,
     SingleRecordingJobNames,
     get_execution_state,
@@ -41,6 +51,8 @@ from cindra.orchestration import (
 )
 from cindra.orchestration.execution import JobExecutionState
 from cindra.interface.processing_tools import (
+    check_gpu_runtime_tool,
+    size_pipeline_jobs_tool,
     get_recording_status_tool,
     execute_full_pipeline_tool,
     clean_processing_output_tool,
@@ -55,8 +67,9 @@ if TYPE_CHECKING:
     from pathlib import Path
     from collections.abc import Iterator
 
-_SETTLE_SECONDS: float = 0.05
-"""The pause that places the timed session inside the sub-second window a rounded hour conversion collapses."""
+_SETTLE_MILLISECONDS: int = 50
+"""The millisecond pause that places the timed session inside the sub-second window a rounded hour conversion
+collapses."""
 
 _MINIMUM_THROUGHPUT: float = 1000.0
 """The rate a session measured in tens of milliseconds must exceed, expressed in jobs per hour."""
@@ -64,13 +77,8 @@ _MINIMUM_THROUGHPUT: float = 1000.0
 _SOURCE_FRAME_SHAPE: tuple[int, int, int] = (2, 16, 16)
 """The frame count, height, and width of the TIFF file the raw data gate accepts as a readable source file."""
 
-
-@pytest.fixture(autouse=True)
-def _isolated_execution_state() -> Iterator[None]:
-    """Clears the module-global execution state around every test, so no session leaks between them."""
-    set_execution_state(state=None)
-    yield
-    set_execution_state(state=None)
+_ABSENT_DEVICE_INDEX: int = 4096
+"""The CUDA device index no host exposes, which the device mask rejection test asks a session to run on."""
 
 
 class TestActiveExecutionTiming:
@@ -85,7 +93,7 @@ class TestActiveExecutionTiming:
             pass
 
         set_execution_state(state=_build_execution_state(tmp_path=tmp_path, tracker_path=tracker_path, job_id=job_id))
-        time.sleep(_SETTLE_SECONDS)
+        PrecisionTimer(precision=TimerPrecisions.MILLISECOND).delay(delay=_SETTLE_MILLISECONDS, allow_sleep=True)
 
         result = get_active_execution_timing_tool()
 
@@ -123,6 +131,163 @@ class TestExecuteProcessingJobs:
         assert result["invalid_jobs"][0]["job_id"] == job_id
         assert "Unable to size the job from its configuration" in result["invalid_jobs"][0]["reason"]
         assert get_execution_state() is None
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_rejected_override_still_names_the_jobs_validation_refused(self, tmp_path: Path) -> None:
+        """Verifies that a session refused for a bad override reports the invalid jobs it validated beforehand."""
+        manifest_dict, cindra_root = _prepare_recording(tmp_path=tmp_path)
+        tracker_path = cindra_root / SINGLE_RECORDING_TRACKER_FILENAME
+        valid_job = {
+            "configuration_path": str(cindra_root / SINGLE_RECORDING_CONFIGURATION_FILENAME),
+            "tracker_path": str(tracker_path),
+            "job_id": manifest_dict["binarize_job"]["job_id"],
+            "pipeline_type": "single-recording",
+        }
+
+        result = execute_processing_jobs_tool(jobs=[valid_job, {**valid_job, "job_id": "absent"}], workers_per_job=0)
+
+        assert result["success"] is False
+        assert result["started"] is False
+        assert "'workers_per_job' override must be a positive integer" in result["error"]
+        assert result["invalid_jobs"][0]["job_id"] == "absent"
+        assert get_execution_state() is None
+
+
+class TestRegistrationResourceClass:
+    """Tests the resource class a registration job receives from the devices the session names."""
+
+    @pytest.mark.parametrize(
+        ("gpu_registration", "expected_name"), [(True, "registration_gpu"), (False, "registration")]
+    )
+    def test_session_device_request_selects_the_class_of_every_register_job(
+        self, tmp_path: Path, gpu_registration: bool, expected_name: str
+    ) -> None:
+        """Verifies that the session's device request reaches the jobs the full-pipeline tool builds."""
+        manifest_dict, cindra_root = _prepare_recording(tmp_path=tmp_path)
+
+        _, register_jobs, _, _ = processing_tools._resolve_recording_phase_jobs(
+            manifest_dict=manifest_dict,
+            configuration_path=cindra_root / SINGLE_RECORDING_CONFIGURATION_FILENAME,
+            tracker_path=cindra_root / SINGLE_RECORDING_TRACKER_FILENAME,
+            gpu_registration=gpu_registration,
+        )
+
+        assert register_jobs
+        assert {job.resource_class.name for job in register_jobs} == {expected_name}
+
+    def test_device_planned_register_jobs_carry_the_wider_memory_estimate(self, tmp_path: Path) -> None:
+        """Verifies that planning a session for a device reaches the memory figure of every registration job."""
+        manifest_dict, cindra_root = _prepare_recording(tmp_path=tmp_path)
+        arguments = {
+            "manifest_dict": manifest_dict,
+            "configuration_path": cindra_root / SINGLE_RECORDING_CONFIGURATION_FILENAME,
+            "tracker_path": cindra_root / SINGLE_RECORDING_TRACKER_FILENAME,
+        }
+
+        _, host_jobs, _, _ = processing_tools._resolve_recording_phase_jobs(**arguments, gpu_registration=False)
+        _, device_jobs, _, _ = processing_tools._resolve_recording_phase_jobs(**arguments, gpu_registration=True)
+
+        assert [job.memory_megabytes for job in device_jobs] >= [job.memory_megabytes for job in host_jobs]
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_list_naming_an_absent_device_is_reported_rather_than_raised(self, tmp_path: Path) -> None:
+        """Verifies that a device list the host cannot satisfy leaves the session unstarted and names the list."""
+        manifest_dict, cindra_root = _prepare_recording(tmp_path=tmp_path)
+
+        result = execute_processing_jobs_tool(
+            jobs=[
+                {
+                    "configuration_path": str(cindra_root / SINGLE_RECORDING_CONFIGURATION_FILENAME),
+                    "tracker_path": str(cindra_root / SINGLE_RECORDING_TRACKER_FILENAME),
+                    "job_id": manifest_dict["binarize_job"]["job_id"],
+                    "pipeline_type": "single-recording",
+                }
+            ],
+            gpu_devices=[_ABSENT_DEVICE_INDEX],
+        )
+
+        assert result["success"] is False
+        assert result["started"] is False
+        assert "'gpu_devices' list must name at least one of the CUDA devices the host exposes" in result["error"]
+        assert get_execution_state() is None
+
+
+class TestSizePipelineJobs:
+    """Tests the cores, memory, and device memory the sizing tool reports for every job of a pipeline."""
+
+    def test_host_planned_sizing_reports_no_device_memory(self, tmp_path: Path) -> None:
+        """Verifies that a sizing pass naming no device reports a zero device figure for every job."""
+        configuration_path = _prepare_sizable_recording(tmp_path=tmp_path)
+
+        result = size_pipeline_jobs_tool(configuration_path=str(configuration_path), pipeline_type="single-recording")
+
+        assert result["success"] is True
+        assert all(job["device_memory_mb"] == 0 for job in result["jobs"])
+        assert result["peak_device_memory_mb"] == 0
+
+    def test_device_planned_sizing_reports_the_device_memory_of_its_registration_jobs(self, tmp_path: Path) -> None:
+        """Verifies that the flag reaches the registration jobs alone and sets the reported device peak."""
+        configuration_path = _prepare_sizable_recording(tmp_path=tmp_path)
+
+        result = size_pipeline_jobs_tool(
+            configuration_path=str(configuration_path), pipeline_type="single-recording", gpu_registration=True
+        )
+
+        assert result["success"] is True
+        device_figures = {job["name"]: job["device_memory_mb"] for job in result["jobs"] if job["device_memory_mb"] > 0}
+        assert set(device_figures) == {SingleRecordingJobNames.REGISTER}
+        assert result["peak_device_memory_mb"] == max(device_figures.values())
+
+    def test_multi_recording_sizing_reports_no_device_memory(self, tmp_path: Path) -> None:
+        """Verifies that a dataset sizing reports zero device memory whatever the flag holds."""
+        configuration_path = _prepare_sizable_dataset(tmp_path=tmp_path)
+
+        result = size_pipeline_jobs_tool(
+            configuration_path=str(configuration_path), pipeline_type="multi-recording", gpu_registration=True
+        )
+
+        assert result["success"] is True
+        assert all(job["device_memory_mb"] == 0 for job in result["jobs"])
+        assert result["peak_device_memory_mb"] == 0
+
+
+class TestCheckGpuRuntime:
+    """Tests the flat report the GPU runtime tool shapes from the device resolution."""
+
+    def test_usable_device_is_reported_without_a_remedy(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verifies that a host carrying a usable device reports it as ready alongside the device's properties."""
+        summary = GpuSummary(
+            status=GpuStatus.AVAILABLE,
+            devices=(GpuDevice(index=0, name="test device", total_memory_mb=1024, compute_capability="8.6"),),
+            detail="",
+        )
+        monkeypatch.setattr(target=processing_tools, name="resolve_gpu_devices", value=lambda: summary)
+
+        result = check_gpu_runtime_tool()
+
+        assert result["success"] is True
+        assert result["ready"] is True
+        assert result["status"] == GpuStatus.AVAILABLE.value
+        assert result["device_count"] == 1
+        assert result["devices"] == [
+            {"index": 0, "name": "test device", "total_memory_mb": 1024, "compute_capability": "8.6"}
+        ]
+        assert "remedy" not in result
+
+    def test_missing_runtime_carries_the_installation_remedy(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verifies that a host carrying no usable device reports the command that resolves the runtime."""
+        summary = GpuSummary(
+            status=GpuStatus.RUNTIME_MISSING, devices=(), detail="the CuPy distribution is not installed"
+        )
+        monkeypatch.setattr(target=processing_tools, name="resolve_gpu_devices", value=lambda: summary)
+
+        result = check_gpu_runtime_tool()
+
+        assert result["ready"] is False
+        assert result["status"] == GpuStatus.RUNTIME_MISSING.value
+        assert result["devices"] == []
+        assert result["device_count"] == 0
+        assert result["remedy"] == GPU_REMEDY
 
 
 class TestProcessingJobsStatus:
@@ -304,6 +469,28 @@ class TestExecuteFullPipeline:
         assert "accepted none of the provided inputs" in result["error"]
         assert len(result["invalid_recordings"]) == 2
         assert all(any(path in entry for entry in result["invalid_recordings"]) for path in raw_data_paths)
+        assert result["pipeline_type"] == "single-recording"
+        assert get_execution_state() is None
+
+    @pytest.mark.parametrize(
+        ("pipeline_type", "arguments"),
+        [
+            ("neither-pipeline", {}),
+            ("single-recording", {}),
+            ("single-recording", {"raw_data_paths": ["/absent"]}),
+            ("single-recording", {"raw_data_paths": ["/absent"], "configuration_path": "/absent.yaml"}),
+            ("multi-recording", {}),
+        ],
+    )
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_every_argument_rejection_names_the_requested_pipeline(
+        self, pipeline_type: str, arguments: dict[str, object]
+    ) -> None:
+        """Verifies that each argument guard names the pipeline the caller requested, as the Returns block promises."""
+        result = execute_full_pipeline_tool(pipeline_type=pipeline_type, **arguments)
+
+        assert result["success"] is False
+        assert result["pipeline_type"] == pipeline_type
         assert get_execution_state() is None
 
 
@@ -389,8 +576,8 @@ class TestCleanProcessingOutput:
                 removal_order.append(path.name)
             delete_directory(path=path, deleted=deleted, errors=errors)
 
-        monkeypatch.setattr(processing_tools, "_delete_file", _spy_file)
-        monkeypatch.setattr(processing_tools, "_delete_directory", _spy_directory)
+        monkeypatch.setattr(target=processing_tools, name="_delete_file", value=_spy_file)
+        monkeypatch.setattr(target=processing_tools, name="_delete_directory", value=_spy_directory)
 
         result = clean_processing_output_tool(
             output_root=str(tmp_path),
@@ -403,6 +590,14 @@ class TestCleanProcessingOutput:
         assert result["success"] is True
         assert marker_index < removal_order.index(str(MULTI_RECORDING_ARRAYS_DIRECTORY_NAME))
         assert marker_index < removal_order.index(str(DEFORMED_MASKS_FILENAME))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_execution_state() -> Iterator[None]:
+    """Clears the module-global execution state around every test, so no session leaks between them."""
+    set_execution_state(state=None)
+    yield
+    set_execution_state(state=None)
 
 
 def _initialize_binarization_job(tracker_path: Path) -> tuple[ProcessingTracker, str]:
@@ -422,6 +617,28 @@ def _build_execution_state(tmp_path: Path, tracker_path: Path, job_id: str) -> J
         resource_class=RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.BINARIZE],
     )
     return JobExecutionState(all_jobs={pending_job.dispatch_key: pending_job})
+
+
+def _prepare_recording(tmp_path: Path) -> tuple[dict[str, object], Path]:
+    """Prepares one recording through the batch tool, returning its manifest entry and its output root."""
+    configuration_path = tmp_path / "template.yaml"
+    SingleRecordingConfiguration().save(file_path=configuration_path)
+
+    imaging_directory = tmp_path / "session" / "mesoscope_data"
+    imaging_directory.mkdir(parents=True)
+    _write_source_file(directory=imaging_directory)
+    (imaging_directory / PARAMETERS_FILENAME).write_text(
+        json.dumps(obj={"frame_rate": 30.0, "plane_number": 1, "channel_number": 1})
+    )
+    output_root = tmp_path / "output"
+
+    result = prepare_single_recording_batch_tool(
+        raw_data_paths=[str(imaging_directory)],
+        configuration_path=str(configuration_path),
+        output_roots=[str(output_root)],
+    )
+
+    return result["recordings"][str(imaging_directory)], output_root / OUTPUT_DIRECTORY_NAME
 
 
 def _write_source_file(directory: Path) -> None:
@@ -464,3 +681,36 @@ def _build_prepared_recording(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     tracker_path = cindra_root / SINGLE_RECORDING_TRACKER_FILENAME
     _initialize_binarization_job(tracker_path=tracker_path)
     return template_path, raw_data_path, output_root, tracker_path
+
+
+def _prepare_sizable_recording(tmp_path: Path) -> Path:
+    """Prepares one recording and returns the per-recording configuration file the sizing tool reads."""
+    _, cindra_root = _prepare_recording(tmp_path=tmp_path)
+    return cindra_root / SINGLE_RECORDING_CONFIGURATION_FILENAME
+
+
+def _prepare_sizable_dataset(tmp_path: Path) -> Path:
+    """Writes two completed recordings and the dataset configuration naming them, returning that file's path."""
+    recording_roots = []
+    for name in ("day1", "day2"):
+        output_root = tmp_path / name
+        output_path = resolve_output_path(output_root=output_root)
+        output_path.mkdir(parents=True, exist_ok=True)
+        np.savez(
+            output_path / COMBINED_METADATA_FILENAME,
+            combined_height=np.array([64], dtype=np.uint16),
+            combined_width=np.array([64], dtype=np.uint16),
+            frame_count=np.array([600], dtype=np.uint32),
+        )
+        np.save(
+            file=resolve_array_path(root_path=output_path, array=RecordingArrays.CELL_FLUORESCENCE),
+            arr=np.zeros((40, 600), dtype=np.float32),
+        )
+        recording_roots.append(output_root)
+
+    configuration = MultiRecordingConfiguration()
+    configuration.recording_io.recording_directories = tuple(recording_roots)
+    configuration.recording_io.dataset_name = "animal_a_task"
+    configuration_path = tmp_path / "dataset.yaml"
+    configuration.save(file_path=configuration_path)
+    return configuration_path

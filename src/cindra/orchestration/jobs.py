@@ -171,7 +171,7 @@ def generate_job_ids(jobs: Iterable[tuple[str, str]]) -> dict[tuple[str, str], s
         derivation.
 
     Args:
-        jobs: The jobs to generate identifiers for, as the (job name, specifier) pairs the job resolvers return.
+        jobs: The jobs for which to generate identifiers, as the (job name, specifier) pairs the job resolvers return.
 
     Returns:
         The hexadecimal identifier of every job, keyed by its name and specifier.
@@ -191,11 +191,12 @@ def resolve_single_recording_prerequisites(
     """Returns the jobs that must succeed before each single-recording job can run.
 
     Args:
-        jobs: The (job name, specifier) pairs to resolve the prerequisites of, usually a recording's job universe.
+        jobs: The (job name, specifier) pairs for which to resolve the prerequisites, usually a recording's job
+            universe.
 
     Returns:
-        A mapping of every input job to the tuple of jobs it depends on. The tuple is empty for jobs that depend on
-        nothing.
+        A mapping of every input job to the tuple of jobs on which it depends. The tuple is empty for jobs that depend
+        on nothing.
     """
     return _resolve_prerequisites(jobs=jobs, phases=SINGLE_RECORDING_PHASES)
 
@@ -206,11 +207,11 @@ def resolve_multi_recording_prerequisites(
     """Returns the jobs that must succeed before each multi-recording job can run.
 
     Args:
-        jobs: The (job name, specifier) pairs to resolve the prerequisites of, usually a dataset's job universe.
+        jobs: The (job name, specifier) pairs for which to resolve the prerequisites, usually a dataset's job universe.
 
     Returns:
-        A mapping of every input job to the tuple of jobs it depends on. The tuple is empty for jobs that depend on
-        nothing.
+        A mapping of every input job to the tuple of jobs on which it depends. The tuple is empty for jobs that depend
+        on nothing.
     """
     return _resolve_prerequisites(jobs=jobs, phases=MULTI_RECORDING_PHASES)
 
@@ -227,7 +228,7 @@ def resolve_downstream_phases(phase_names: Iterable[str], *, single_recording: b
         single_recording: Determines whether to apply the single-recording or the multi-recording phase chain.
 
     Returns:
-        The set of phase job names to act on.
+        The set of phase job names on which to act.
     """
     phases = SINGLE_RECORDING_PHASES if single_recording else MULTI_RECORDING_PHASES
     ordered_names = [str(phase.job_name) for phase in phases]
@@ -244,7 +245,7 @@ def order_phases_by_execution(phase_names: Iterable[str], *, single_recording: b
 
     Notes:
         Alphabetical order would render the single-recording chain as binarization, combination, processing,
-        registration, which inverts the two middle phases relative to the order they run in.
+        registration, which inverts the two middle phases relative to the order in which they run.
 
     Args:
         phase_names: The phase job names to order.
@@ -265,7 +266,7 @@ def resolve_pipeline_jobs(phases: tuple[PipelinePhase, ...], specifiers: Sequenc
 
     Args:
         phases: The ordered phases of the pipeline.
-        specifiers: The specifiers that the per-specifier phases expand over.
+        specifiers: The specifiers over which the per-specifier phases expand.
 
     Returns:
         A list of (job name, specifier) pairs in phase order. Phases that do not expand per specifier carry an empty
@@ -295,7 +296,7 @@ def resolve_prerequisite_job_ids(
 
     Args:
         registry: The point-in-time job registry of the tracker that owns the target job.
-        job_id: The unique hexadecimal identifier of the job to resolve the prerequisites for.
+        job_id: The unique hexadecimal identifier of the job for which to resolve the prerequisites.
         single_recording: Determines whether to apply single-recording or multi-recording prerequisite rules.
 
     Returns:
@@ -369,7 +370,7 @@ def _collect_phase_job_ids(
 
     Args:
         registry: The point-in-time job registry of the tracker that owns the dependent job.
-        job_name: The name of the prerequisite phase to collect the jobs of.
+        job_name: The name of the prerequisite phase whose jobs are collected.
         specifier: The specifier the prerequisite job must carry, or None to collect every job of the phase.
         dependent_job_id: The identifier of the job that depends on this phase, used in the error message.
 
@@ -406,11 +407,11 @@ def _resolve_prerequisites(
         every phase above it.
 
     Args:
-        jobs: The (job name, specifier) pairs to resolve the prerequisites of.
-        phases: The ordered phases of the pipeline the jobs belong to.
+        jobs: The (job name, specifier) pairs for which to resolve the prerequisites.
+        phases: The ordered phases of the pipeline to which the jobs belong.
 
     Returns:
-        A mapping of every input job to the tuple of jobs it depends on.
+        A mapping of every input job to the tuple of jobs on which it depends.
     """
     job_list = list(jobs)
     phase_by_name = {str(phase.job_name): phase for phase in phases}

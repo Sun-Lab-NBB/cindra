@@ -104,7 +104,6 @@ launch_viewer_tool(viewer_type="roi", output_root="<path>", dataset="<name>")
 - For multi-recording mode, multi-recording processing must be complete for the specified dataset
 
 **Parameters:**
-- `output_root`: Absolute path to the recording's pipeline output root, the parent of its `cindra/` directory
 - `dataset`: Optional multi-recording dataset name, which enables tracked ROI mode when provided
 
 **Capabilities:**
@@ -158,7 +157,6 @@ launch_viewer_tool(viewer_type="registration", output_root="<path>")
 ```
 
 **Parameters:**
-- `output_root`: Absolute path to the recording's pipeline output root, the parent of its `cindra/` directory
 - `dataset`: Ignored, because the registration viewer reads a single recording's own registration output
 
 **Capabilities:**
@@ -322,7 +320,8 @@ consumes. The ROI viewer's Classifier panel is the only interface that writes th
    ones.
 
 4. **Export**. **New** writes the labels and their three features to a `.npz` chosen through a save dialog. **Add to
-   Existing** concatenates them onto a dataset chosen through an open dialog and writes the merged result. Neither
+   Existing** concatenates them onto a dataset chosen through an open dialog, then writes the merged result to a path
+   chosen through a save dialog that defaults to that same dataset. Cancelling either dialog abandons the merge. Neither
    button refits the classifier, so the exported file holds training data alone.
 
 5. **Accumulate to the sample floor**. The classifier fits a 100-node probability grid and rejects a dataset holding

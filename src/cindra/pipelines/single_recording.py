@@ -104,7 +104,7 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
 
     # Holds the recording's existing output to what the recording declares, which either refuses the recording or
     # allows an early return. Every refusal fires before the conversion plan is resolved, so a refused recording keeps
-    # every binary and every result it arrived with.
+    # every binary and every result it held on arrival.
     output_root = configuration.file_io.output_path
     root_path = resolve_output_path(output_root=output_root)
     configuration_path = root_path / SINGLE_RECORDING_CONFIGURATION_FILENAME
@@ -152,7 +152,7 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
 
     # Creates RuntimeContext instances for all planes. The outer pipeline entry (run_single_recording_pipeline) or
     # the prepare_single_recording_batch_tool already wrote the shared configuration, acquisition parameters, and
-    # per-plane runtime_data.yaml files, so this call is load-only to avoid racing against peer worker threads.
+    # per-plane runtime_data.yaml files, so this call is load-only to avoid racing against peer worker processes.
     contexts = resolve_single_recording_contexts(configuration=configuration, persist=False)
 
     # Resolves the source files, the frame accounting, and the destination binaries before anything is deleted. The
@@ -185,7 +185,9 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
     console.echo(message=message, level=LogLevel.SUCCESS)
 
 
-def register_recording_plane(configuration: SingleRecordingConfiguration, plane_index: int, *, workers: int) -> None:
+def register_recording_plane(
+    configuration: SingleRecordingConfiguration, plane_index: int, *, workers: int, device: int | None = None
+) -> None:
     """Removes motion from the target imaging plane and computes its registration quality metrics.
 
     Notes:
@@ -201,10 +203,13 @@ def register_recording_plane(configuration: SingleRecordingConfiguration, plane_
         plane_index: The index of the imaging plane to register.
         workers: The number of parallel workers allocated to this registration job. Must be a positive integer, which
             the caller resolves before invoking this function.
+        device: The zero-based index of the CUDA device on which this job registers the plane. Use None to register the
+            plane on the host CPU.
 
     Raises:
         ValueError: If output_path is not configured, or if the plane contains fewer frames than the processing
             minimum.
+        RuntimeError: If one of the plane's binaries carries the marker of an interrupted write.
         TypeError: If the runtime context loader returns multiple contexts for the target plane.
     """
     context = _resolve_plane_context(
@@ -230,7 +235,7 @@ def register_recording_plane(configuration: SingleRecordingConfiguration, plane_
     timer.reset()
 
     # Runs registration (motion correction) and the registration quality metrics computation.
-    register_plane(context=context, workers=workers)
+    register_plane(context=context, workers=workers, device=device)
 
     if registration_skipped:
         message = (
@@ -331,11 +336,13 @@ def save_combined_data(contexts: list[RuntimeContext]) -> None:
     """Combines processed data from all imaging planes into a unified dataset and saves it to disk.
 
     Args:
-        contexts: A list of RuntimeContext instances, one per plane to combine. Each context must have valid runtime
-            data populated by the processing pipeline.
+        contexts: The plane contexts to combine, one per imaging plane. Each must carry the runtime data that the
+            processing pipeline populates.
 
     Raises:
-        ValueError: If no context is provided, or if output_path is not configured.
+        ValueError: If no context is provided, if output_path is not configured, or if no plane carries ROI statistics.
+        RuntimeError: If a plane's registered binary path (or channel 2 registered binary path, when the second channel
+            is functional) is not set, indicating that registration did not complete successfully.
     """
     if not contexts:
         message = "Unable to combine planes. At least one RuntimeContext must be provided."
@@ -458,7 +465,7 @@ def _validate_binary_sizes(contexts: list[RuntimeContext]) -> None:
 
         # A bootstrapped plane records a zero frame geometry until its conversion saves the measured values, and the
         # conversion persists that save before it clears the binarization marker. A run interrupted before the save
-        # therefore leaves a plane holding no geometry to size its binary against, which this skips rather than
+        # therefore leaves a plane holding no geometry against which to size its binary, which this skips rather than
         # misreports.
         if frame_bytes <= 0:
             continue
@@ -564,8 +571,8 @@ def _clear_result_arrays(directory: Path) -> None:
     """Removes every result array, detection image, and registration offset file stored under one directory.
 
     Args:
-        directory: The plane output directory, or the recording output directory the combination stage writes the
-            merged arrays into.
+        directory: The plane output directory, or the recording output directory into which the combination stage
+            writes the merged arrays.
     """
     stale_paths = [
         resolve_array_path(root_path=directory, array=result, second_channel=second_channel)
@@ -603,7 +610,7 @@ def _resolve_plane_context(
 
     Args:
         configuration: The single-recording pipeline configuration.
-        plane_index: The index of the imaging plane to load the runtime context for.
+        plane_index: The index of the imaging plane whose runtime context is loaded.
         workers: The number of parallel workers allocated to the calling stage. Must be a positive integer, which the
             caller resolves before invoking this function.
         stage_action: The lowercase verb naming the calling stage's action, used in error messages. Use 'register' for

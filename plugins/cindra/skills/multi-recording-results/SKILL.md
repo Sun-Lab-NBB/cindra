@@ -40,9 +40,6 @@ diagnose and resolve connectivity issues.
 
 ## Available tools
 
-Use these cindra MCP tools to query and verify multi-recording output data programmatically. Prefer these over manual
-file reads whenever possible.
-
 ### Verification tool
 
 | Tool                                 | Purpose                                                        |
@@ -80,10 +77,10 @@ quality is visual inspection: confirm that backward-deformed templates overlap w
 
 The `output_root` argument for the verify and query tools must be the pipeline output root, the parent of the `cindra/`
 folder. This equals the `output_roots` entries passed to `prepare_multi_recording_batch_tool`, which are the output
-roots the single-recording pipeline wrote into (the `output_roots` given to `prepare_single_recording_batch_tool`,
+roots into which the single-recording pipeline wrote (the `output_roots` given to `prepare_single_recording_batch_tool`,
 echoed back as each manifest entry's `output_root`). It is not the `raw_data_path` holding the recording's TIFF files,
-because the query tools read pipeline output rather than raw imaging data. The tools resolve the `cindra/`
-subdirectory automatically.
+because the query tools read pipeline output rather than raw imaging data. The tools resolve the `cindra/` subdirectory
+automatically.
 
 The per-recording entries these tools return name two further paths under distinct keys.
 `verify_multi_recording_output_tool` and `query_multi_recording_overview_tool` both report `dataset_output_path`, the
@@ -109,8 +106,8 @@ multi-recording mode. It resolves as an exact directory lookup (`{cindra_root}/m
 name the pipeline lowercases at preparation time, so pass the value `resolve_dataset_name_tool` or
 `prepare_multi_recording_batch_tool` returned rather than the user's original casing. `query_roi_statistics_tool` and
 `query_traces_tool` additionally accept `recording_index` (0-based, default 0). It indexes the dataset's own
-`dataset_output_paths` list, so index 0 is the main recording rather than the recording `output_root` names. Without
-it, a per-recording query silently reports the main recording whichever recording you addressed, so iterate the index
+`dataset_output_paths` list, so index 0 is the main recording rather than the recording `output_root` names. Without it,
+a per-recording query silently reports the main recording whatever recording the caller addressed, so iterate the index
 across the dataset when comparing recordings.
 
 `query_cross_recording_traces_tool` and `query_traces_tool` accept at most 50 ROI indices per call, and
@@ -186,7 +183,7 @@ binary data using backward-transformed template masks. Creates `cell_fluorescenc
 
 ### Registration arrays
 
-Saved in `registration_arrays/` subdirectory. All files are `.npy` format, float32 dtype.
+Saved in the `registration_arrays/` subdirectory. All files are `.npy` format, float32 dtype.
 
 **Deformation fields:**
 

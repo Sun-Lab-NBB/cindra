@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import yaml
 import numpy as np
 import pytest
 from tifffile import TiffWriter
-from ataraxis_base_utilities import error_format, ensure_directory_exists
+from ataraxis_base_utilities import console, error_format, ensure_directory_exists
 from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 
 from cindra.io import (
@@ -20,7 +20,11 @@ from cindra.io import (
 from cindra.io.binary import create_binarization_marker
 from cindra.io.context import PARAMETERS_FILENAME
 from cindra.dataclasses import RuntimeContext, AcquisitionParameters, SingleRecordingConfiguration
-from cindra.orchestration import SingleRecordingJobNames
+from cindra.orchestration import (
+    REGISTRATION_WORKERS,
+    REGISTRATION_GPU_WORKERS,
+    SingleRecordingJobNames,
+)
 from cindra.orchestration.worker import (
     prime_recording,
     execute_single_recording_job,
@@ -75,6 +79,9 @@ _SENTINEL_REGISTRATION_SECONDS: int = 4242
 
 _BINARY_ITEM_SIZE: int = 2
 """The number of bytes one pixel occupies inside a cindra binary, which stores int16 samples."""
+
+_NO_DEVICE_MESSAGE: str = "Unable to run the registration stage on a CUDA device."
+"""The message the stubbed device verification raises for a host exposing no usable CUDA device."""
 
 
 class TestRunSingleRecordingPipeline:
@@ -266,6 +273,76 @@ class TestRunSingleRecordingPipeline:
         )
         with pytest.raises(ValueError, match=error_format(expected_message)):
             run_single_recording_pipeline(configuration_path=configuration_path, binarize=True)
+
+
+class TestRegistrationDeviceVerification:
+    """Tests the CUDA device verification that precedes a registration stage for which the caller named a device."""
+
+    def test_named_device_aborts_before_any_stage_runs(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verifies that a host exposing no usable device fails the run before a registration job is dispatched."""
+        configuration_path, output_directory = _prepare_pipeline_inputs(root=tmp_path)
+        monkeypatch.setattr("cindra.orchestration.pipeline.verify_gpu_runtime", _refuse_device)
+
+        with pytest.raises(RuntimeError, match=error_format(message=_NO_DEVICE_MESSAGE)):
+            run_single_recording_pipeline(
+                configuration_path=configuration_path, binarize=True, register=True, registration_device=0
+            )
+
+        # The conversion is requested alongside the registration, so an untouched binary states that the check
+        # aborted the invocation before its first stage rather than between the two.
+        assert not (output_directory / "cindra" / "plane_0" / "channel_1_data.bin").exists()
+
+    def test_named_index_reaches_the_verification(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verifies that the verification is asked about the index the caller passed."""
+        configuration_path, _ = _prepare_pipeline_inputs(root=tmp_path)
+        observed: list[int | None] = []
+
+        def _record_device(device: int | None) -> None:
+            """Records the device index handed to the verification."""
+            observed.append(device)
+
+        monkeypatch.setattr("cindra.orchestration.pipeline.verify_gpu_runtime", _record_device)
+        monkeypatch.setattr("cindra.orchestration.pipeline.dispatch_single_recording_job", lambda **kwargs: None)
+
+        run_single_recording_pipeline(
+            configuration_path=configuration_path, binarize=True, register=True, registration_device=3
+        )
+
+        assert observed == [3]
+
+    @pytest.mark.parametrize(
+        ("registration_device", "register"),
+        [(None, True), (0, False)],
+    )
+    def test_verification_is_skipped_when_no_device_backed_registration_runs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, registration_device: int | None, register: bool
+    ) -> None:
+        """Verifies that a host CPU registration and a run holding no registration job never reach the check."""
+        configuration_path, _ = _prepare_pipeline_inputs(root=tmp_path)
+        monkeypatch.setattr("cindra.orchestration.pipeline.verify_gpu_runtime", _refuse_device)
+
+        run_single_recording_pipeline(
+            configuration_path=configuration_path,
+            binarize=True,
+            register=register,
+            registration_device=registration_device,
+        )
+
+    def test_remote_registration_job_reaches_the_check(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verifies that a job dispatched by identifier is verified against the device the invocation names."""
+        configuration_path, output_directory = _prepare_pipeline_inputs(root=tmp_path)
+        run_single_recording_pipeline(configuration_path=configuration_path, binarize=True)
+        monkeypatch.setattr("cindra.orchestration.pipeline.verify_gpu_runtime", _refuse_device)
+        register_id = ProcessingTracker.generate_job_id(job_name=SingleRecordingJobNames.REGISTER, specifier="plane_0")
+
+        with pytest.raises(RuntimeError, match=error_format(message=_NO_DEVICE_MESSAGE)):
+            run_single_recording_pipeline(
+                configuration_path=configuration_path, job_id=register_id, registration_device=1
+            )
+
+        # The check precedes the tracker alignment, so the registration job never joins the tracked job set.
+        tracker_path = output_directory / "cindra" / "single_recording_tracker.yaml"
+        assert register_id not in ProcessingTracker(file_path=tracker_path).snapshot()
 
 
 class TestBinarizeRecording:
@@ -672,7 +749,7 @@ class TestBinarizeRecording:
         # reads before skipping a plane and the kind of stale result a later reader would consume.
         stale_reference = undeclared_directory / "registration_data" / "reference_image.npy"
         ensure_directory_exists(stale_reference.parent)
-        np.save(stale_reference, np.zeros((_FRAME_HEIGHT, _FRAME_WIDTH), dtype=np.float32))
+        np.save(file=stale_reference, arr=np.zeros((_FRAME_HEIGHT, _FRAME_WIDTH), dtype=np.float32))
 
         # Re-declares the recording as a single plane, which leaves the second plane's outputs describing a geometry
         # the recording no longer holds.
@@ -1042,7 +1119,7 @@ class TestExecuteSingleRecordingJob:
         expected_message = (
             f"Unable to resolve the worker count for the '{SingleRecordingJobNames.REGISTER}' processing stage. The "
             f"requested worker count must be a positive integer, -1 to request every available core, or None to "
-            f"accept the measured stage default, but encountered 0."
+            f"accept the stage default, but encountered 0."
         )
         with pytest.raises(ValueError, match=error_format(expected_message)):
             dispatch_single_recording_job(
@@ -1055,6 +1132,91 @@ class TestExecuteSingleRecordingJob:
             )
 
         assert tracker.get_job_status(job_id=job_id) == ProcessingStatus.FAILED
+
+
+class TestRegistrationJobDevice:
+    """Tests the device argument the per-job entry points thread into the plane-registration stage."""
+
+    @pytest.mark.parametrize(
+        ("device", "expected_workers"), [(None, REGISTRATION_WORKERS), (2, REGISTRATION_GPU_WORKERS)]
+    )
+    def test_device_selects_the_stage_default_and_reaches_the_stage(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, device: int | None, expected_workers: int
+    ) -> None:
+        """Verifies that naming a device swaps the registration default and hands that device to the stage."""
+        tracker = ProcessingTracker(file_path=tmp_path / "tracker.yaml")
+        tracker.initialize_jobs(jobs=[(SingleRecordingJobNames.REGISTER, "plane_0")])
+        job_id = ProcessingTracker.generate_job_id(job_name=SingleRecordingJobNames.REGISTER, specifier="plane_0")
+        configuration = _make_configuration(data_directory=None, output_directory=tmp_path / "output")
+        observed: list[dict[str, Any]] = []
+        monkeypatch.setattr(
+            "cindra.orchestration.worker.register_recording_plane", lambda **kwargs: observed.append(kwargs)
+        )
+
+        # The dispatch branch verifies the named device before it reaches the stage, so the verification is stubbed
+        # to keep this test independent of the devices the host running it exposes.
+        monkeypatch.setattr("cindra.orchestration.worker.verify_gpu_runtime", lambda device: None)
+
+        dispatch_single_recording_job(
+            configuration=configuration,
+            job_name=SingleRecordingJobNames.REGISTER,
+            specifier="plane_0",
+            job_id=job_id,
+            tracker=tracker,
+            workers=None,
+            device=device,
+        )
+
+        assert observed[0]["device"] == device
+        assert observed[0]["workers"] == expected_workers
+        assert tracker.get_job_status(job_id=job_id) == ProcessingStatus.SUCCEEDED
+
+    def test_injected_entry_point_forwards_the_device(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verifies that the device a caller hands the injected executor reaches the dispatcher unchanged."""
+        configuration_path, output_directory = _prepare_pipeline_inputs(root=tmp_path)
+        tracker = ProcessingTracker(file_path=output_directory / "caller_tracker.yaml")
+        universe = [(SingleRecordingJobNames.REGISTER, "plane_0")]
+        tracker.align_jobs(jobs=universe, universe=universe)
+        job_id = ProcessingTracker.generate_job_id(job_name=SingleRecordingJobNames.REGISTER, specifier="plane_0")
+        observed: list[dict[str, Any]] = []
+        monkeypatch.setattr(
+            "cindra.orchestration.worker.dispatch_single_recording_job", lambda **kwargs: observed.append(kwargs)
+        )
+
+        execute_single_recording_job(
+            configuration_path=configuration_path,
+            job_name=SingleRecordingJobNames.REGISTER,
+            specifier="plane_0",
+            job_id=job_id,
+            tracker=tracker,
+            device=1,
+        )
+
+        assert observed[0]["device"] == 1
+
+    def test_omitted_device_reaches_the_dispatcher_as_the_host_cpu_request(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verifies that omitting the device leaves the dispatcher registering the plane on the host CPU."""
+        configuration_path, output_directory = _prepare_pipeline_inputs(root=tmp_path)
+        tracker = ProcessingTracker(file_path=output_directory / "caller_tracker.yaml")
+        universe = [(SingleRecordingJobNames.REGISTER, "plane_0")]
+        tracker.align_jobs(jobs=universe, universe=universe)
+        job_id = ProcessingTracker.generate_job_id(job_name=SingleRecordingJobNames.REGISTER, specifier="plane_0")
+        observed: list[dict[str, Any]] = []
+        monkeypatch.setattr(
+            "cindra.orchestration.worker.dispatch_single_recording_job", lambda **kwargs: observed.append(kwargs)
+        )
+
+        execute_single_recording_job(
+            configuration_path=configuration_path,
+            job_name=SingleRecordingJobNames.REGISTER,
+            specifier="plane_0",
+            job_id=job_id,
+            tracker=tracker,
+        )
+
+        assert observed[0]["device"] is None
 
 
 class TestExecuteSingleRecordingJobInjection:
@@ -1187,6 +1349,11 @@ class TestExecuteSingleRecordingJobInjection:
             )
 
 
+def _refuse_device(device: int | None = None) -> None:
+    """Refuses the run the way the device verification refuses a host exposing no usable CUDA device."""
+    console.error(message=f"{_NO_DEVICE_MESSAGE} Requested device: {device}.", error=RuntimeError)
+
+
 def _build_flickering_movie(*, frame_count: int, seed: int) -> NDArray[np.int16]:
     """Builds a synthetic movie whose spatially fixed Gaussian blobs flicker independently across frames.
 
@@ -1201,7 +1368,7 @@ def _build_flickering_movie(*, frame_count: int, seed: int) -> NDArray[np.int16]
         blob = np.exp(-(((rows - center_row) ** 2 + (columns - center_column) ** 2) / (2.0 * _BLOB_SIGMA**2)))
         amplitudes = _BLOB_AMPLITUDE * (0.5 + np.abs(generator.standard_normal(frame_count)))
         movie += amplitudes[:, np.newaxis, np.newaxis] * blob[np.newaxis, :, :]
-    return np.clip(movie, 0, _MAXIMUM_PIXEL_VALUE).astype(np.int16)
+    return np.clip(a=movie, a_min=0, a_max=_MAXIMUM_PIXEL_VALUE).astype(np.int16)
 
 
 def _write_raw_recording(
@@ -1289,7 +1456,7 @@ def _prepare_pipeline_inputs(
 def _bootstrap_recording(
     root: Path, *, frame_count: int = _FRAME_COUNT, seed: int = 0, plane_number: int = 1, channel_number: int = 1
 ) -> SingleRecordingConfiguration:
-    """Writes a raw recording and the filesystem bootstrap binarize_recording's load-only resolution depends on."""
+    """Writes a raw recording and the filesystem bootstrap that binarize_recording's load-only resolution requires."""
     data_directory = root / "data"
     output_directory = root / "output"
     _write_raw_recording(

@@ -146,16 +146,16 @@ option to -1 requests every available core.
 
 ## Section 2: recording_io
 
-Controls input recording paths, output dataset naming, and ROI selection caching. The pipeline receives a list of
-recording directories (populated by the MCP batch tool) and natural-sorts them to determine the main recording. Each
-recording stores its own multi-recording output under its own `cindra/multi_recording/{dataset_name}/` directory. The
-main (first natural-sorted) recording additionally holds the shared resolved configuration and the processing tracker.
-ROI selection results are cached per dataset so that re-running the pipeline skips selection unless `repeat_selection`
-is enabled.
+Controls the output roots the dataset reads, output dataset naming, and ROI selection caching. The pipeline receives a
+list of recording directories (populated by the MCP batch tool) and natural-sorts them to determine the main recording.
+Each recording stores its own multi-recording output under its own `cindra/multi_recording/{dataset_name}/` directory.
+The main (first natural-sorted) recording additionally holds the shared resolved configuration and the processing
+tracker. ROI selection results are cached per dataset so that re-running the pipeline skips selection unless
+`repeat_selection` is enabled.
 
 | Parameter               | Type        | Default | Description                                                                                                  |
 |-------------------------|-------------|---------|--------------------------------------------------------------------------------------------------------------|
-| `recording_directories` | tuple[Path] | ()      | **Set by batch tool.** Absolute paths to recording roots. Natural-sorted, first = main recording.            |
+| `recording_directories` | tuple[Path] | ()      | **Set by batch tool.** Absolute paths to output roots. Natural-sorted, first = main recording.               |
 | `dataset_name`          | str         | ""      | **REQUIRED.** Unique identifier for this dataset. Used for output folder: `multi_recording/{dataset_name}/`. |
 | `repeat_selection`      | bool        | False   | Re-run ROI selection even if existing selections are found.                                                  |
 
@@ -252,7 +252,7 @@ native coordinates for fluorescence extraction.
 |--------------------|-----------------|------------|--------------------------------------------------------------------------|
 | `threshold`        | float           | 0.75       | Jaccard distance threshold for clustering. Lower = stricter matching.    |
 | `mask_prevalence`  | int             | 50         | Min % of recordings that must contain the ROI. Higher = more reliable.   |
-| `pixel_prevalence` | int             | 50         | Min % of a cluster's member masks a pixel must appear in.                |
+| `pixel_prevalence` | int             | 50         | Min % of a cluster's member masks in which a pixel must appear.          |
 | `step_sizes`       | tuple[int, int] | (200, 200) | Spatial bin size [h, w] in pixels. Both must be equal.                   |
 | `bin_size`         | int             | 50         | Overlap margin (pixels) between adjacent bins for border ROI clustering. |
 | `maximum_distance` | int             | 20         | Max centroid distance (pixels) between masks to consider same ROI.       |
@@ -422,11 +422,11 @@ and both are left at those defaults in the common case.
    `runtime.display_progress_bars=False`). It then saves the resolved copy as `multi_recording_configuration.yaml`
    inside the main recording's dataset output directory (`cindra/multi_recording/{dataset_name}/`). The resolved copy
    stays immutable after the prepare step, because `execute_processing_jobs_tool` resolves the worker allocation at
-   dispatch time and passes it to each job as an invocation argument. These resolved copies are what the pipeline
-   actually executes against.
+   dispatch time and passes it to each job as an invocation argument. The pipeline executes against these resolved
+   copies.
 
-   A second preparation of a dataset whose tracker already exists never rewrites the resolved copy, so the dataset
-   keeps running against the output roots it was first prepared with. The prepare tool reports that disagreement under
+   A second preparation of a dataset whose tracker already exists never rewrites the resolved copy, so the dataset keeps
+   running against the output roots of its first preparation. The prepare tool reports that disagreement under
    `path_conflicts`, naming the stored value, the passed value, and the directory to remove to prepare it again.
 
 **Do NOT** create per-dataset configuration files manually. Pass a single template path to the batch tool and let it
@@ -486,14 +486,16 @@ You MUST verify configuration files against this checklist before starting multi
 parameter detection.
 
 ```text
-Multi-Recording Configuration Compliance:
+Multi-Recording Configuration Compliance, tool-settled (run `validate_config_file_tool`):
 - [ ] cindra MCP server is connected (if not, invoke `/cindra-mcp-environment-setup`)
 - [ ] `validate_config_file_tool` reports no errors (run this first)
 - [ ] Every parameter change was written with `set_config_values_tool`, whose `valid` flag reported true
+- [ ] Review any warnings from `validate_config_file_tool` (pipeline-set parameters, unusual ranges)
+
+Multi-Recording Configuration Compliance, reader-judged:
 - [ ] `recording_io.dataset_name` is set to a unique, non-empty string (prepare overwrites it with the qualified name)
 - [ ] `roi_selection.probability_threshold` is appropriate for the dataset (0.85 default)
 - [ ] `diffeomorphic_registration.speed_factor` matches expected tissue drift (1-5 range)
 - [ ] `roi_tracking.mask_prevalence` is set appropriately for the number of recordings
 - [ ] Channel 2 roi_selection parameters are set if channel 2 ROIs have different characteristics
-- [ ] Review any warnings from `validate_config_file_tool` (pipeline-set parameters, unusual ranges)
 ```

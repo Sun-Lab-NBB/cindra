@@ -149,7 +149,7 @@ class TestCindraRootResolution:
         nested_root = tmp_path / "session" / OUTPUT_DIRECTORY_NAME
         nested_root.mkdir(parents=True)
         _touch(path=nested_root / SINGLE_RECORDING_CONFIGURATION_FILENAME)
-        monkeypatch.setattr(results_tools, "discover_marker_files", _deny_marker_scan)
+        monkeypatch.setattr(target=results_tools, name="discover_marker_files", value=_deny_marker_scan)
 
         cindra_root, error = results_tools._find_cindra_root(output_root=str(tmp_path))
 
@@ -158,7 +158,7 @@ class TestCindraRootResolution:
 
     def test_denied_marker_scan_reports_the_documented_failure(self, tmp_path: Path, monkeypatch) -> None:
         """Verifies that a tree holding no configuration reports an error dictionary instead of raising."""
-        monkeypatch.setattr(results_tools, "discover_marker_files", _deny_marker_scan)
+        monkeypatch.setattr(target=results_tools, name="discover_marker_files", value=_deny_marker_scan)
 
         result = verify_single_recording_output_tool(output_root=str(tmp_path))
 

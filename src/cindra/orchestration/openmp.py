@@ -19,7 +19,7 @@ _PACKAGE_MANAGER_DIRECTORIES: tuple[Path, ...] = (
     Path("/usr/local/opt/libomp/lib"),
     Path("/opt/local/lib/libomp"),
 )
-"""The directories the macOS package managers install the OpenMP runtime into.
+"""The directories into which the macOS package managers install the OpenMP runtime.
 
 The first two are the Homebrew keg paths for the Apple Silicon and the Intel prefix, and the third is the MacPorts
 path. A package manager runtime is examined ahead of every other source, because its lifecycle is independent of the
@@ -137,15 +137,15 @@ def resolve_openmp_runtime(
     """Links a discovered OpenMP runtime into a directory the dynamic loader searches by default.
 
     The link is what makes Numba's OpenMP threading layer resolve on macOS, because the omppool extension shipped in
-    the Numba wheel names its dependency through an rpath it carries no entries for. A host whose runtime already
+    the Numba wheel names its dependency through an rpath for which it carries no entries. A host whose runtime already
     loads is left alone unless the link is forced. Only macOS reaches the linking path, because every other platform
     runs the TBB threading layer and gains nothing from an OpenMP runtime.
 
     Args:
         runtime_path: The absolute path to the OpenMP runtime to link, or None to search the macOS package manager
             directories, the active conda environment, and the installed Python distributions for one.
-        link_path: The absolute path to write the link to, or None to derive it from the directory the loader
-            searches by default.
+        link_path: The absolute path that receives the link, or None to derive it from the directory the loader searches
+            by default.
         execute: Determines whether to create the resolved link, where a dry run reports it and changes nothing.
         force: Determines whether to link a runtime on a host whose runtime already loads.
 
@@ -153,8 +153,8 @@ def resolve_openmp_runtime(
         The summary describing the resolved runtime, the resolved link, and what the call changed.
 
     Raises:
-        RuntimeError: If the host runs a platform other than macOS, if the link directory cannot be created, or if
-            the link cannot be written.
+        RuntimeError: If the host runs a platform other than macOS, if the resolved link path already holds the runtime
+            itself, if the link directory cannot be created, or if the link cannot be written.
     """
     if sys.platform != "darwin":
         message = (
@@ -281,7 +281,7 @@ def _discover_openmp_runtime(candidates: tuple[Path, ...]) -> Path | None:
 
 
 def _link_would_replace_runtime(runtime_path: Path, link_path: Path) -> bool:
-    """Determines whether writing the link would destroy the runtime it is meant to point at.
+    """Determines whether writing the link would destroy the runtime at which it is meant to point.
 
     Notes:
         A link path that already holds a symbolic link is one this call replaces, which is the ordinary case of
@@ -289,8 +289,8 @@ def _link_would_replace_runtime(runtime_path: Path, link_path: Path) -> bool:
         remove the only copy and leave a link resolving to nothing.
 
     Args:
-        runtime_path: The absolute path to the OpenMP runtime the link would point at.
-        link_path: The absolute path the link would be written to.
+        runtime_path: The absolute path to the OpenMP runtime at which the link would point.
+        link_path: The absolute path that would receive the link.
 
     Returns:
         True when the link path holds the runtime itself rather than a link to it, and False otherwise.
@@ -310,8 +310,8 @@ def _link_openmp_runtime(runtime_path: Path, link_path: Path) -> None:
         failing to write the replacement.
 
     Args:
-        runtime_path: The absolute path to the OpenMP runtime the link points at.
-        link_path: The absolute path to write the link to.
+        runtime_path: The absolute path to the OpenMP runtime at which the link points.
+        link_path: The absolute path that receives the link.
 
     Raises:
         RuntimeError: If the link directory cannot be created or the link cannot be written.
@@ -338,7 +338,7 @@ def _verify_runtime_loadable() -> bool:
     Returns:
         True when the fresh interpreter loads the runtime, and False when it does not.
     """
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603 - a fresh interpreter runs a module constant with no shell.
         args=[sys.executable, "-c", _VERIFICATION_SCRIPT],
         capture_output=True,
         check=False,

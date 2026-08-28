@@ -174,9 +174,8 @@ def register_recordings(contexts: list[MultiRecordingRuntimeContext], *, workers
 def project_templates_to_recordings(contexts: list[MultiRecordingRuntimeContext], *, workers: int) -> None:
     """Projects template masks from shared visual space back to each recording's original coordinate system.
 
-    After ROI tracking produces template masks in the shared deformed space, this function applies the inverse
-    deformation to map those masks back to each recording's native coordinates. This enables fluorescence extraction
-    using the original registered binary data.
+    Applies the inverse deformation of each recording to map the template masks back to that recording's native
+    coordinates.
 
     Notes:
         When every recording's output directory already contains roi_statistics.npz and repeat_registration is
@@ -341,8 +340,7 @@ def _forward_deform_masks(
 ) -> list[ROIMask]:
     """Applies a forward deformation to transform ROI masks to shared visual space.
 
-    Creates lightweight ROIMask instances with transformed coordinates. No shape statistics are computed since the
-    multi-recording pipeline only needs spatial data for tracking.
+    Creates lightweight ROIMask instances that carry transformed coordinates and no shape statistics.
 
     Args:
         masks: The list of ROIMask instances to transform.

@@ -456,8 +456,8 @@ def _compute_plane_offsets(
         if roi_number < plane_number:
             z_plane_number = plane_number // roi_number
 
-            heights_array = np.array([context.runtime.io.frame_height for context in plane_contexts])
-            widths_array = np.array([context.runtime.io.frame_width for context in plane_contexts])
+            heights_array = np.array([context.runtime.io.frame_height for context in plane_contexts], dtype=np.uint16)
+            widths_array = np.array([context.runtime.io.frame_width for context in plane_contexts], dtype=np.uint16)
 
             # Calculates the tile size as the bounding box that contains all ROIs at their MROI positions.
             maximum_height = (y_displacement + heights_array).max()

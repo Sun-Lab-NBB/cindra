@@ -1,10 +1,8 @@
 """Provides MCP tools for preparing, executing, monitoring, and cancelling neural imaging pipeline jobs.
 
-These tools give agents fine-grained control over pipeline execution: prepare builds an execution manifest without
-running anything, execute dispatches selected jobs with prerequisite validation, reset selectively reverts completed
-phases for re-runs, and status/cancel manage the active execution. Both single-recording (four-phase: binarize,
-register, process, combine) and multi-recording (two-phase: discover, extract) pipelines are supported through a
-unified execution model that admits every job as soon as that job's own prerequisites succeed.
+Both single-recording (four-phase: binarize, register, process, combine) and multi-recording (two-phase: discover,
+extract) pipelines are supported through a unified execution model that admits every job as soon as that job's own
+prerequisites succeed.
 """
 
 from __future__ import annotations
@@ -75,6 +73,7 @@ from ..orchestration import (
     SingleRecordingJobNames,
     prime_recording,
     get_execution_state,
+    resolve_gpu_devices,
     set_execution_state,
     resolve_session_load,
     resolve_pipeline_jobs,
@@ -91,6 +90,7 @@ from ..orchestration import (
     resolve_single_recording_jobs,
     load_multi_recording_configuration,
     load_single_recording_configuration,
+    resolve_registration_resource_class,
     resolve_multi_recording_job_universe,
     resolve_single_recording_job_universe,
     estimate_multi_recording_job_memory_mb,
@@ -244,7 +244,6 @@ def get_batch_status_overview_tool(root_directory: str) -> dict[str, object]:
         for tracker_path in natsorted(single_tracker_paths, key=str)
     ]
 
-    # Reads multi-recording trackers. Extracts dataset name from parent directory.
     multi_recordings: list[dict[str, object]] = []
     for tracker_path in natsorted(multi_tracker_paths, key=str):
         dataset_name = tracker_path.parent.name
@@ -791,7 +790,6 @@ def prepare_multi_recording_batch_tool(
                 "extract_jobs": extract_entries,
             }
         else:
-            # New dataset: saves configuration and initializes tracker.
             configuration.save(file_path=configuration_file_path)
 
             # Builds the dataset's job universe from the exported phase model.
@@ -864,12 +862,13 @@ def reset_processing_phases_tool(
         pipeline_type: The pipeline type, either 'single-recording' or 'multi-recording'.
 
     Returns:
-        On success, contains a 'reset' flag, the 'requested_phases' as provided, the 'effective_phases' after
-        dependency expansion, and per-job status showing updated states. A 'warnings' list is present when a reset
-        phase is governed by a repeat flag that is false while that phase's output already exists on disk, because the
-        stage then returns immediately and records success without redoing its work. Each warning names the dotted
-        configuration flag to set and set_config_values_tool as the way to set it, and a caller MUST act on it before
-        dispatching the reset phase. On failure, contains an 'error' describing the issue.
+        On success, contains a 'reset' flag, the 'tracker_path' the reset was applied to, the 'requested_phases' as
+        provided, the 'effective_phases' after dependency expansion, and per-job status showing updated states. A
+        'warnings' list is present when a reset phase is governed by a repeat flag that is false while that phase's
+        output already exists on disk, because the stage then returns immediately and records success without redoing
+        its work. Each warning names the dotted configuration flag to set and set_config_values_tool as the way to set
+        it, and a caller MUST act on it before dispatching the reset phase. On failure, contains an 'error' describing
+        the issue.
     """
     path = Path(tracker_path)
     if not path.exists():
@@ -1224,6 +1223,7 @@ def execute_processing_jobs_tool(
     *,
     workers_per_job: int | None = None,
     max_parallel_jobs: int | None = None,
+    gpu_devices: list[int] | None = None,
 ) -> dict[str, object]:
     """Dispatches pipeline jobs for background execution with prerequisite validation and resource allocation.
 
@@ -1241,9 +1241,16 @@ def execute_processing_jobs_tool(
 
         Each job runs under the resource class of its phase. Binarization holds 3 cores per job at a fixed concurrency
         of 4. Combination holds 1 core per job, because it merges result files serially, and its concurrency is bounded
-        by the CPU budget alone. Registration holds 4 cores per job and processing holds 10, each with a concurrency
-        bounded by the CPU budget. The session memory budget bounds dispatch for every class alike rather than the
-        concurrency cap of any one of them. The binarization class alone ignores both parameters below.
+        by the CPU budget alone. Registration holds 4 cores per job as its floor and widens toward its ceiling of 32,
+        while processing holds 10 at a ceiling that meets that default, so every processing job holds one width. Both
+        classes carry a concurrency bounded by the CPU budget. The session memory budget bounds dispatch for every class
+        alike rather than the concurrency cap of any one of them. The binarization class alone ignores both worker
+        parameters below.
+
+        A registration job of a session that names a CUDA device runs under a separate class instead, holding 2 cores
+        and one CUDA device for its whole duration. The devices the session holds are what bound that class, so it
+        ignores both worker parameters as well. Call check_gpu_runtime_tool before dispatching such a batch, because a
+        host exposing no usable device fails every one of those jobs.
 
         Every class dispatches during the same cycle, so the dispatcher additionally holds the sum of the cores
         committed by the running jobs of every class inside the session CPU budget reported as 'cpu_budget'. That
@@ -1257,18 +1264,28 @@ def execute_processing_jobs_tool(
         workers_per_job: CPU cores per job, overriding the measured default of every class that carries no hard
             concurrency ceiling. Leave as None to accept the measured defaults, which are 3 cores for binarization, 4
             for registration, 10 for processing, 1 for combination, 2 for multi-recording discovery, and 16 for
-            multi-recording extraction. Set to -1 to give every job the whole session core budget. The override is a
-            single scalar applied to every non-fixed class alike.
+            multi-recording extraction. Those figures are the floor each class runs at while the session dispatches at
+            its full concurrency. A None request also lets a job of an elastic class widen at dispatch toward its class
+            ceiling as the queue drains. That ceiling is 32 cores for registration, 8 for multi-recording discovery, and
+            32 for multi-recording extraction, and the processing ceiling meets its default, so a processing job holds
+            one width. Set to -1 to give every job the whole session core budget. The override is a single scalar
+            applied to every non-fixed class alike, and it reaches every job of those classes unchanged.
         max_parallel_jobs: Maximum concurrent jobs per resource class, overriding the derived concurrency cap of every
             non-fixed resource class. Leave as None to accept the derived caps, or set to -1 to lift them so that only
             the job count bounds concurrency.
+        gpu_devices: The zero-based indices of the CUDA devices the session registers on. Use None to register on the
+            host CPU, [-1] to name every device the host exposes, and an explicit list to name those devices, which
+            check_gpu_runtime_tool reports.
 
     Returns:
         Always contains a 'success' flag indicating the tool ran. On a started session, also contains a 'started' flag,
-        'total_jobs' dispatched, and the session 'cpu_budget' and 'memory_budget_mb' that bound the classes in
-        aggregate. A started session further reports a 'resource_classes' mapping with the resolved workers_per_job,
-        max_parallel_jobs, and job_count of every class present in the session, and 'invalid_jobs' listing any jobs that
-        failed validation with reasons. On failure, contains success:False and an 'error' describing the issue.
+        'total_jobs' dispatched, the session 'cpu_budget' and 'memory_budget_mb' that bound the classes in aggregate,
+        and 'gpu_devices' listing the device indices the session holds. A started session further reports a
+        'resource_classes' mapping with the resolved workers_per_job, max_parallel_jobs, and job_count of every class
+        present in the session, and 'invalid_jobs' listing any jobs that failed validation with reasons. On failure,
+        contains success:False and an 'error' describing the issue. A session rejected for an invalid workers_per_job
+        or max_parallel_jobs override carries 'invalid_jobs' alongside that error whenever validation rejected a
+        submitted job, because the override rejection happens after every job is validated.
     """
     if not jobs:
         return {"success": False, "error": "Unable to execute jobs. At least one job descriptor is required."}
@@ -1276,6 +1293,10 @@ def execute_processing_jobs_tool(
     active_session_error = _check_active_session(action="execute jobs")
     if active_session_error is not None:
         return active_session_error
+
+    # The device decision belongs to the session rather than to any recording's configuration, so it is derived from
+    # the request once and reaches both the memory model and the resource class of every registration job.
+    gpu_registration = gpu_devices is not None
 
     required_keys = {"configuration_path", "tracker_path", "job_id", "pipeline_type"}
     candidate_jobs: list[PendingJob] = []
@@ -1328,7 +1349,11 @@ def execute_processing_jobs_tool(
                 job_name=job_info.job_name,
                 specifier=job_info.specifier,
                 single=single_recording,
+                gpu_registration=gpu_registration,
             )
+
+            if job_info.job_name == SingleRecordingJobNames.REGISTER:
+                resource_class = resolve_registration_resource_class(gpu_registration=gpu_registration)
         except Exception as error:
             invalid_jobs.append(
                 {
@@ -1376,6 +1401,7 @@ def execute_processing_jobs_tool(
         all_jobs=all_jobs_map,
         workers_per_job=workers_per_job,
         max_parallel_jobs=max_parallel_jobs,
+        gpu_devices=gpu_devices,
         extra_result_fields={"invalid_jobs": invalid_jobs} if invalid_jobs else {},
     )
 
@@ -1695,6 +1721,7 @@ def execute_full_pipeline_tool(
     dataset_configurations: list[dict[str, object]] | None = None,
     workers_per_job: int | None = None,
     max_parallel_jobs: int | None = None,
+    gpu_devices: list[int] | None = None,
 ) -> dict[str, object]:
     """Executes a complete pipeline from preparation through all phases with automatic dependency sequencing.
 
@@ -1723,30 +1750,38 @@ def execute_full_pipeline_tool(
         workers_per_job: CPU cores per job, overriding the measured default of every class that carries no hard
             concurrency ceiling. Leave as None to accept the measured defaults of 3 cores for binarization, 1 for
             combination, 4 for registration, 10 for processing, 2 for multi-recording discovery, and 16 for
-            multi-recording extraction. Set to -1 to give every job the whole session core budget.
+            multi-recording extraction. Those figures are the floor each class runs at while the session dispatches at
+            its full concurrency. A None request also lets a job of an elastic class widen at dispatch toward its class
+            ceiling as the queue drains. That ceiling is 32 cores for registration, 8 for multi-recording discovery, and
+            32 for multi-recording extraction, and the processing ceiling meets its default, so a processing job holds
+            one width. Set to -1 to give every job the whole session core budget. An explicit count reaches every job of
+            every non-fixed class unchanged.
         max_parallel_jobs: Maximum concurrent jobs per resource class, overriding the derived concurrency cap of every
             non-fixed resource class. Leave as None to accept the derived caps, or set to -1 to lift them so that only
             the job count bounds concurrency.
+        gpu_devices: The zero-based indices of the CUDA devices the session registers on. Use None to register on the
+            host CPU, [-1] to name every device the host exposes, and an explicit list to name those devices, which
+            check_gpu_runtime_tool reports.
 
     Returns:
         Always contains a 'success' flag indicating the tool ran, and callers MUST also check the 'started' flag rather
-        than 'success' alone. When jobs are dispatched, contains started:True, 'total_jobs', 'phase_count', per-phase
-        'phases' with job counts and IDs, the session 'cpu_budget' and 'memory_budget_mb' that bound the classes in
-        aggregate, and a 'resource_classes' mapping with the resolved allocation of every class in the session. When all
-        phases are already complete, returns {success:True, started:False, message:"All pipeline phases are already
-        completed.", pipeline_type:<the requested type>, total_jobs:0, phase_count:0, phases:[]} plus a 'next_step'
-        string. Every outcome carries 'pipeline_type'. The preparation step produces the rejection lists
-        'invalid_paths', 'invalid_recordings', 'invalid_configurations', and 'path_conflicts', and this step's own
-        sizing pass produces 'unsizable_recordings' and 'unsizable_datasets'. Each of those lists is forwarded when
-        non-empty, and together they name every recording or dataset the session omits or runs against paths other than
-        the ones passed here. 'migrated_recordings' is forwarded on the same terms, naming every recording whose tracker
-        gained the missing per-plane register jobs. A batch whose preparation accepted no input at all returns
-        success:False alongside those lists, because it holds no phase to report as complete. On failure, contains
-        success:False and an 'error' describing the issue. Cascade-aborted downstream jobs are recorded in their
-        trackers as FAILED with the exact message "Unable to execute job. A preceding pipeline phase failed.",
-        distinguishing them from genuine per-job failures. A job aborted because its prerequisite phase is absent from
-        the tracker instead records a message naming that phase and asking for the prepare tool to be re-run, because no
-        phase failed in that case.
+        than 'success' alone. When jobs are dispatched, contains started:True, 'total_jobs', 'phase_count', and
+        per-phase 'phases' with job counts and IDs. It also carries the session 'cpu_budget' and 'memory_budget_mb' that
+        bound the classes in aggregate, 'gpu_devices' listing the device indices the session holds, and a
+        'resource_classes' mapping with the resolved allocation of every class in the session. When all phases are
+        already complete, returns {success:True, started:False, message:"All pipeline phases are already completed.",
+        pipeline_type:<the requested type>, total_jobs:0, phase_count:0, phases:[]} plus a 'next_step' string. Every
+        outcome carries 'pipeline_type'. The preparation step produces the rejection lists 'invalid_paths',
+        'invalid_recordings', 'invalid_configurations', and 'path_conflicts', and this step's own sizing pass produces
+        'unsizable_recordings' and 'unsizable_datasets'. Each of those lists is forwarded when non-empty, and together
+        they name every recording or dataset the session omits or runs against paths other than the ones passed here.
+        'migrated_recordings' is forwarded on the same terms, naming every recording whose tracker gained the missing
+        per-plane register jobs. A batch whose preparation accepted no input at all returns success:False alongside
+        those lists, because it holds no phase to report as complete. On failure, contains success:False and an 'error'
+        describing the issue. Cascade-aborted downstream jobs are recorded in their trackers as FAILED with the exact
+        message "Unable to execute job. A preceding pipeline phase failed.", distinguishing them from genuine per-job
+        failures. A job aborted because its prerequisite phase is absent from the tracker instead records a message
+        naming that phase and asking for the prepare tool to be re-run, because no phase failed in that case.
     """
     if pipeline_type not in ("single-recording", "multi-recording"):
         return {
@@ -1755,11 +1790,14 @@ def execute_full_pipeline_tool(
                 f"Unable to execute full pipeline. Invalid pipeline_type '{pipeline_type}'. "
                 f"Must be 'single-recording' or 'multi-recording'."
             ),
+            "pipeline_type": pipeline_type,
         }
 
+    # Every outcome of this tool names the pipeline the caller requested, and the shared session guard shapes its own
+    # error, so the requested type is added to that result here.
     active_session_error = _check_active_session(action="execute full pipeline")
     if active_session_error is not None:
-        return active_session_error
+        return {**active_session_error, "pipeline_type": pipeline_type}
 
     manifest: dict[str, object]
     if pipeline_type == "single-recording":
@@ -1767,16 +1805,19 @@ def execute_full_pipeline_tool(
             return {
                 "success": False,
                 "error": "Unable to execute full pipeline. 'raw_data_paths' is required for single-recording.",
+                "pipeline_type": pipeline_type,
             }
         if not configuration_path:
             return {
                 "success": False,
                 "error": "Unable to execute full pipeline. 'configuration_path' is required for single-recording.",
+                "pipeline_type": pipeline_type,
             }
         if not output_roots:
             return {
                 "success": False,
                 "error": "Unable to execute full pipeline. 'output_roots' is required for single-recording.",
+                "pipeline_type": pipeline_type,
             }
 
         manifest = prepare_single_recording_batch_tool(
@@ -1789,12 +1830,13 @@ def execute_full_pipeline_tool(
             return {
                 "success": False,
                 "error": "Unable to execute full pipeline. 'dataset_configurations' is required for multi-recording.",
+                "pipeline_type": pipeline_type,
             }
 
         manifest = prepare_multi_recording_batch_tool(dataset_configurations=dataset_configurations)
 
     if not manifest.get("success"):
-        return manifest
+        return {**manifest, "pipeline_type": pipeline_type}
 
     # Carries the lists the preparation step produces into every outcome below, so that no response accounts for the
     # batch without naming the recordings or datasets it leaves out, or the trackers it migrated.
@@ -1840,6 +1882,7 @@ def execute_full_pipeline_tool(
                         manifest_dict=manifest_dict,
                         configuration_path=job_configuration_path,
                         tracker_path=tracker_path,
+                        gpu_registration=gpu_devices is not None,
                     )
                 except Exception as error:
                     unsizable_recordings.append(
@@ -1960,6 +2003,7 @@ def execute_full_pipeline_tool(
         all_jobs=all_jobs_map,
         workers_per_job=workers_per_job,
         max_parallel_jobs=max_parallel_jobs,
+        gpu_devices=gpu_devices,
         extra_result_fields=extra_fields,
     )
 
@@ -1969,8 +2013,10 @@ def size_pipeline_jobs_tool(
     configuration_path: str,
     pipeline_type: str,
     planned_roi_count: int | None = None,
+    *,
+    gpu_registration: bool = False,
 ) -> dict[str, object]:
-    """Reports the cores and memory every job of a pipeline holds, without preparing or dispatching anything.
+    """Reports the cores, memory, and device memory every job of a pipeline holds, preparing and dispatching nothing.
 
     Sizes each job of the configuration's whole job universe from the data that exists right now, so a caller plans a
     batch before any tracker or output directory is created. A single-recording job is sized from the recording's
@@ -1988,13 +2034,18 @@ def size_pipeline_jobs_tool(
         pipeline_type: The pipeline type, either 'single-recording' or 'multi-recording'.
         planned_roi_count: The regions to plan for across every plane of a single-recording job. Use None to accept
             the ceiling the detection iteration bound provides. Must be a positive integer when supplied.
+        gpu_registration: Set to True to plan the registration jobs for a CUDA device, matching a session that names
+            one through the 'gpu_devices' argument of the execute tools. A multi-recording sizing reports zero device
+            memory whatever this holds.
 
     Returns:
-        On success, contains a 'jobs' list holding the 'name', 'specifier', 'cores', and 'memory_mb' of every job the
-        pipeline can execute, in execution order, plus 'total_jobs', the 'peak_memory_mb' of the single largest job,
-        the 'total_memory_mb' every job would hold at once, and the 'pipeline_type'. On failure, contains an 'error'
-        describing the issue, which names the recording or dataset that could not be sized. Both cases include a
-        'success' flag.
+        On success, contains a 'jobs' list holding the 'name', 'specifier', 'cores', 'memory_mb', and
+        'device_memory_mb' of every job the pipeline can execute, in execution order. That case also carries
+        'total_jobs', the 'peak_memory_mb' and 'peak_device_memory_mb' of the single largest job, the
+        'total_memory_mb' every job would hold at once, and the 'pipeline_type'. No device total is reported, because
+        the device count rather than a shared device pool bounds the jobs that hold a device at once. On failure,
+        contains an 'error' describing the issue, which names the recording or dataset that could not be sized. Both
+        cases include a 'success' flag.
     """
     if pipeline_type not in ("single-recording", "multi-recording"):
         return {
@@ -2017,25 +2068,35 @@ def size_pipeline_jobs_tool(
     try:
         if pipeline_type == "single-recording":
             sized_jobs = _size_single_recording_universe(
-                configuration_path=configuration_file, planned_roi_count=planned_roi_count
+                configuration_path=configuration_file,
+                planned_roi_count=planned_roi_count,
+                gpu_registration=gpu_registration,
             )
         else:
             sized_jobs = _size_multi_recording_universe(configuration_path=configuration_file)
     except Exception as error:
         return {"success": False, "error": _collapse_whitespace(text=f"Unable to size pipeline jobs. {error}")}
 
-    memory_figures = [memory_mb for _, _, _, memory_mb in sized_jobs]
+    memory_figures = [memory_mb for _, _, _, memory_mb, _ in sized_jobs]
+    device_figures = [device_memory_mb for _, _, _, _, device_memory_mb in sized_jobs]
 
     return {
         "success": True,
         "pipeline_type": pipeline_type,
         "jobs": [
-            {"name": name, "specifier": specifier, "cores": cores, "memory_mb": memory_mb}
-            for name, specifier, cores, memory_mb in sized_jobs
+            {
+                "name": name,
+                "specifier": specifier,
+                "cores": cores,
+                "memory_mb": memory_mb,
+                "device_memory_mb": device_memory_mb,
+            }
+            for name, specifier, cores, memory_mb, device_memory_mb in sized_jobs
         ],
         "total_jobs": len(sized_jobs),
         "peak_memory_mb": max(memory_figures) if memory_figures else 0,
         "total_memory_mb": sum(memory_figures),
+        "peak_device_memory_mb": max(device_figures) if device_figures else 0,
     }
 
 
@@ -2109,6 +2170,47 @@ def check_threading_runtime_tool() -> dict[str, object]:
 
 
 @mcp.tool()
+def check_gpu_runtime_tool() -> dict[str, object]:
+    """Reports whether the CUDA runtime a device-backed registration needs is usable on this host.
+
+    A registration job that names a CUDA device aborts at the pipeline entry point when the host exposes no usable
+    device, which surfaces as a per-job tracker failure rather than as a tool error. Call this before dispatching such
+    a batch to gate on 'ready', and read 'devices' to choose the 'gpu_devices' list the execute tools accept.
+
+    Returns:
+        Always contains a 'success' flag indicating the tool ran, a 'ready' flag reporting whether a device is
+        usable, the 'status' naming the outcome the resolution reached, and a 'detail' sentence describing it. It also
+        contains a 'device_count' and a 'devices' list holding the 'index', 'name', 'total_memory_mb', and
+        'compute_capability' of every usable device. A host that is not ready carries an empty 'devices' list and a
+        'remedy' naming the installation that resolves it. macOS carries no 'remedy', because the CuPy distribution
+        publishes no wheel for it.
+    """
+    summary = resolve_gpu_devices()
+
+    result: dict[str, object] = {
+        "success": True,
+        "ready": summary.available,
+        "status": summary.status.value,
+        "detail": summary.describe(),
+        "device_count": len(summary.devices),
+        "devices": [
+            {
+                "index": device.index,
+                "name": device.name,
+                "total_memory_mb": device.total_memory_mb,
+                "compute_capability": device.compute_capability,
+            }
+            for device in summary.devices
+        ],
+    }
+
+    if summary.remedy:
+        result["remedy"] = summary.remedy
+
+    return result
+
+
+@mcp.tool()
 def get_pipeline_job_universe_tool(configuration_path: str, pipeline_type: str) -> dict[str, object]:
     """Reports every job a recording or dataset declares and which of them can run right now.
 
@@ -2127,11 +2229,11 @@ def get_pipeline_job_universe_tool(configuration_path: str, pipeline_type: str) 
 
     Returns:
         On success, contains a 'jobs' list holding the 'name', 'specifier', and 'ready' flag of every job the pipeline
-        declares, in execution order, plus 'total_jobs', 'ready_jobs' counting the runnable subset, a 'resolved' flag
-        reporting whether the universe follows from the recording's own parameters rather than from their absence, and
-        the 'pipeline_type'. A single-recording report also carries 'plane_count', and a multi-recording report carries
-        'dataset_name' and 'recording_ids'. On failure, contains an 'error' describing the issue. Both cases include a
-        'success' flag.
+        declares, in execution order. The response also holds 'total_jobs', 'ready_jobs' counting the runnable subset, a
+        'resolved' flag reporting whether the universe follows from the recording's own parameters rather than from
+        their absence, and the 'pipeline_type'. A single-recording report also carries 'plane_count', and a
+        multi-recording report carries 'dataset_name' and 'recording_ids'. On failure, contains an 'error' describing
+        the issue. Both cases include a 'success' flag.
     """
     if pipeline_type not in ("single-recording", "multi-recording"):
         return {
@@ -2486,6 +2588,7 @@ def _start_session(
     all_jobs: dict[tuple[str, str], PendingJob],
     workers_per_job: int | None,
     max_parallel_jobs: int | None,
+    gpu_devices: list[int] | None,
     extra_result_fields: dict[str, object],
 ) -> dict[str, object]:
     """Starts a batch execution session and shapes its allocation report into an MCP tool response.
@@ -2496,19 +2599,30 @@ def _start_session(
             class default.
         max_parallel_jobs: Requested maximum concurrent jobs per resource class, -1 to lift the caps, or None to
             accept the derived caps.
+        gpu_devices: The requested CUDA device indices, [-1] to request every device the host exposes, or None to
+            register on the host CPU.
         extra_result_fields: Additional key-value pairs to include in the result dictionary.
 
     Returns:
-        A result dictionary containing 'success', 'started', the session 'cpu_budget' and 'memory_budget_mb', per-class
-        resource allocation details, and any extra fields. A rejected override yields success:False and an 'error'
-        instead.
+        A result dictionary containing 'success', 'started', the session 'cpu_budget', 'memory_budget_mb', and
+        'gpu_devices', per-class resource allocation details, and any extra fields. A rejected override yields
+        success:False, an 'error', and the same extra fields instead.
     """
     try:
         session = start_execution_session(
-            all_jobs=all_jobs, workers_per_job=workers_per_job, max_parallel_jobs=max_parallel_jobs
+            all_jobs=all_jobs,
+            workers_per_job=workers_per_job,
+            max_parallel_jobs=max_parallel_jobs,
+            gpu_devices=gpu_devices,
         )
     except ValueError as error:
-        return {"success": False, "started": False, "error": _collapse_whitespace(text=str(error))}
+        rejection: dict[str, object] = {
+            "success": False,
+            "started": False,
+            "error": _collapse_whitespace(text=str(error)),
+        }
+        rejection.update(extra_result_fields)
+        return rejection
 
     result: dict[str, object] = {"success": True, "started": True, **session}
     result.update(extra_result_fields)
@@ -2800,7 +2914,7 @@ def _resolve_dataset_phase_jobs(
 
 
 def _resolve_recording_phase_jobs(
-    manifest_dict: dict[str, Any], configuration_path: Path, tracker_path: Path
+    manifest_dict: dict[str, Any], configuration_path: Path, tracker_path: Path, *, gpu_registration: bool
 ) -> tuple[list[PendingJob], list[PendingJob], list[PendingJob], list[PendingJob]]:
     """Builds the pending jobs of one recording, grouped by the phase each belongs to.
 
@@ -2813,6 +2927,8 @@ def _resolve_recording_phase_jobs(
         manifest_dict: The recording's entry in the prepared batch manifest.
         configuration_path: The path to the recording's pipeline configuration file.
         tracker_path: The path to the recording's processing tracker.
+        gpu_registration: Determines whether the registration jobs are planned for a CUDA device rather than the host
+            CPU.
 
     Returns:
         The binarization, registration, processing, and combination jobs the recording contributes, in that order.
@@ -2824,6 +2940,10 @@ def _resolve_recording_phase_jobs(
     register_jobs: list[PendingJob] = []
     process_jobs: list[PendingJob] = []
     combine_jobs: list[PendingJob] = []
+
+    # The device a registration job runs on is a property of the session rather than of the recording, so every plane
+    # of every recording in one submission resolves to the same class.
+    registration_class = resolve_registration_resource_class(gpu_registration=gpu_registration)
 
     binarize = manifest_dict.get("binarize_job", {})
     if binarize and binarize.get("status") != "succeeded":
@@ -2849,12 +2969,13 @@ def _resolve_recording_phase_jobs(
             tracker_path=tracker_path,
             job_id=register["job_id"],
             single_recording=True,
-            resource_class=RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.REGISTER],
+            resource_class=registration_class,
             memory_megabytes=_estimate_pending_job_memory(
                 configuration_path=configuration_path,
                 job_name=str(register["name"]),
                 specifier=str(register["specifier"]),
                 single=True,
+                gpu_registration=gpu_registration,
             ),
         )
         for register in manifest_dict.get("register_jobs", [])
@@ -2900,7 +3021,9 @@ def _resolve_recording_phase_jobs(
     return binarize_jobs, register_jobs, process_jobs, combine_jobs
 
 
-def _estimate_pending_job_memory(configuration_path: Path, job_name: str, specifier: str, *, single: bool) -> int:
+def _estimate_pending_job_memory(
+    configuration_path: Path, job_name: str, specifier: str, *, single: bool, gpu_registration: bool = False
+) -> int:
     """Estimates the memory one queued job holds, from the recording or dataset it will process.
 
     Args:
@@ -2908,6 +3031,8 @@ def _estimate_pending_job_memory(configuration_path: Path, job_name: str, specif
         job_name: The name of the pipeline stage the job runs.
         specifier: The job's tracker specifier.
         single: Determines whether the job belongs to the single-recording or the multi-recording pipeline.
+        gpu_registration: Determines whether the registration jobs are planned for a CUDA device rather than the host
+            CPU. A job of any other stage resolves the same figure whatever it holds.
 
     Returns:
         The memory the job holds in megabytes.
@@ -2924,6 +3049,7 @@ def _estimate_pending_job_memory(configuration_path: Path, job_name: str, specif
             output_root=output_path,
             configuration=configuration,
             data_path=configuration.file_io.data_path,
+            gpu_registration=gpu_registration,
         )
 
     dataset_configuration = load_multi_recording_configuration(configuration_path=configuration_path)
@@ -2974,8 +3100,8 @@ def _resolve_job_identifiers(tracker: ProcessingTracker, jobs: list[tuple[str, s
 
 
 def _size_single_recording_universe(
-    configuration_path: Path, planned_roi_count: int | None
-) -> list[tuple[str, str, int, int]]:
+    configuration_path: Path, planned_roi_count: int | None, *, gpu_registration: bool
+) -> list[tuple[str, str, int, int, int]]:
     """Sizes every job the single-recording pipeline can execute for one recording.
 
     Notes:
@@ -2985,13 +3111,18 @@ def _size_single_recording_universe(
     Args:
         configuration_path: The path to the recording's configuration file.
         planned_roi_count: The regions to plan for across every plane, or None to accept the detection ceiling.
+        gpu_registration: Determines whether the registration jobs are planned for a CUDA device rather than the host
+            CPU.
 
     Returns:
-        The name, specifier, cores, and memory in megabytes of every job, in execution order.
+        The name, specifier, cores, memory in megabytes, and device memory in megabytes of every job, in execution
+        order.
 
     Raises:
-        FileNotFoundError: If the recording's raw imaging directory holds no readable source file.
-        ValueError: If planned_roi_count is not a positive integer, or if the recording declares no imaging plane.
+        FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid single-recording
+            configuration.
+        ValueError: If planned_roi_count is not a positive integer, or if the recording declares no imaging plane, which
+            is also the verdict for a recording whose acquisition parameters or source files are unreadable.
     """
     configuration, output_path = load_single_recording_configuration(configuration_path=configuration_path)
     geometry = resolve_recording_geometry(
@@ -3008,7 +3139,7 @@ def _size_single_recording_universe(
         )
         console.error(message=message, error=ValueError)
 
-    sized: list[tuple[str, str, int, int]] = []
+    sized: list[tuple[str, str, int, int, int]] = []
     for job_name, specifier in resolve_single_recording_jobs(plane_count=len(geometry.planes)):
         sizing = size_single_recording_job(
             job_name=SingleRecordingJobNames(job_name),
@@ -3017,13 +3148,14 @@ def _size_single_recording_universe(
             configuration=configuration,
             data_path=configuration.file_io.data_path,
             planned_roi_count=planned_roi_count,
+            gpu_registration=gpu_registration,
         )
-        sized.append((job_name, specifier, sizing.cores, sizing.memory_mb))
+        sized.append((job_name, specifier, sizing.cores, sizing.memory_mb, sizing.device_memory_mb))
 
     return sized
 
 
-def _size_multi_recording_universe(configuration_path: Path) -> list[tuple[str, str, int, int]]:
+def _size_multi_recording_universe(configuration_path: Path) -> list[tuple[str, str, int, int, int]]:
     """Sizes every job the multi-recording pipeline can execute for one tracked dataset.
 
     Notes:
@@ -3034,7 +3166,8 @@ def _size_multi_recording_universe(configuration_path: Path) -> list[tuple[str, 
         configuration_path: The path to the dataset's configuration file.
 
     Returns:
-        The name, specifier, cores, and memory in megabytes of every job, in execution order.
+        The name, specifier, cores, memory in megabytes, and device memory in megabytes of every job, in execution
+        order. Every device memory is zero, because no multi-recording stage runs on a CUDA device.
 
     Raises:
         FileNotFoundError: If no recording the dataset names carries a combined metadata archive.
@@ -3045,7 +3178,7 @@ def _size_multi_recording_universe(configuration_path: Path) -> list[tuple[str, 
         recording_roots=recording_directories, dataset_name=configuration.recording_io.dataset_name
     )
 
-    sized: list[tuple[str, str, int, int]] = []
+    sized: list[tuple[str, str, int, int, int]] = []
     for job_name, specifier in resolve_multi_recording_jobs(recording_ids=inventory.recording_ids):
         sizing = size_multi_recording_job(
             job_name=MultiRecordingJobNames(job_name),
@@ -3053,6 +3186,6 @@ def _size_multi_recording_universe(configuration_path: Path) -> list[tuple[str, 
             recording_directories=recording_directories,
             configuration=configuration,
         )
-        sized.append((job_name, specifier, sizing.cores, sizing.memory_mb))
+        sized.append((job_name, specifier, sizing.cores, sizing.memory_mb, sizing.device_memory_mb))
 
     return sized

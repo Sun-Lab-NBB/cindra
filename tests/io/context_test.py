@@ -390,7 +390,7 @@ class TestResolveRecordingRoots:
         assert result == (Path("/data/rec1"),)
 
     def test_preserves_single_path_outside_the_output_directory(self) -> None:
-        """Verifies that a lone raw-data directory is returned unchanged, because it has no peer to compare with."""
+        """Verifies that a lone raw-data directory is returned unchanged, because it has no peer for comparison."""
         paths = [Path("/data/rec1/raw_data")]
 
         result = resolve_recording_roots(paths=paths)

@@ -1,9 +1,4 @@
-"""Provides shared synthetic-data fixtures for the cindra integration tests.
-
-The fixtures in this module assemble minimal but fully wired RuntimeContext objects backed by on-disk synthetic binary
-movies. They allow the stage-level pipeline entry points (registration, detection, extraction, combination) to run
-end-to-end against small, predictable inputs without requiring real acquisition data.
-"""
+"""Provides shared synthetic-data fixtures for the cindra integration tests."""
 
 from __future__ import annotations
 
@@ -41,10 +36,8 @@ _DEFAULT_FRAME_COUNT: int = 40
 def single_recording_context() -> Callable[..., RuntimeContext]:
     """Returns a factory that builds a minimal single-recording RuntimeContext backed by a synthetic binary movie.
 
-    The returned factory accepts keyword overrides for the frame geometry, the synthetic movie, the channel-2 movie,
-    and a configuration mutator callback. It writes the movie to a channel_1_data.bin file inside a plane_0 output
-    directory and wires the IOData, configuration, and acquisition parameters so that the registration, detection, and
-    extraction stage entry points can run against the context.
+    The factory writes the movie to a channel_1_data.bin file inside a plane_0 output directory and wires the IOData,
+    configuration, and acquisition parameters.
     """
 
     def _make(
@@ -109,8 +102,7 @@ def gaussian_blob_image() -> Callable[..., NDArray[np.float64]]:
     """Returns a builder for a smooth structured image of Gaussian blobs on a flat background.
 
     Smooth, structured content is required for phase-correlation registration and for detection to localize ROIs.
-    White noise produces ambiguous correlation peaks. The returned builder accepts the frame geometry, blob centers,
-    blob standard deviation, amplitude, and background level.
+    White noise produces ambiguous correlation peaks.
     """
 
     def _make(

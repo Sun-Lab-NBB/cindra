@@ -17,11 +17,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class _EllipseData:
-    """Defines an ellipse fitted to the ROI's pixels via weighted covariance analysis.
-
-    Notes:
-        The radius and aspect ratio derived from this ellipse are used as cell classification features.
-    """
+    """Defines an ellipse fitted to the ROI's pixels via weighted covariance analysis."""
 
     radii: tuple[float, float]
     """The semi-major and semi-minor axis lengths, ordered from largest to smallest."""
@@ -46,8 +42,6 @@ class _EllipseData:
 
 def estimate_diameter_from_rois(rois: list[ROIMask], default_diameter: int = 10) -> int:
     """Estimates the ROI diameter from the pixel counts of a list of ROIs.
-
-    Computes the median pixel count across all ROIs and derives an equivalent circular diameter.
 
     Args:
         rois: The list of ROIMask instances to analyze.
@@ -177,7 +171,6 @@ def compute_roi_statistics(
             rois=roi_wrappers, overlap_image=overlap_counts, maximum_overlap_fraction=maximum_overlap_fraction
         )
 
-        # Uses slice assignment to modify the list in-place.
         rois[:] = [roi for roi, keep in zip(rois, keep_flags, strict=True) if keep]
 
         # Recomputes overlap masks after removing ROIs, since remaining ROIs may no longer overlap.
@@ -199,8 +192,8 @@ def _compute_median_pixel_position(y_pixels: NDArray[np.int32], x_pixels: NDArra
     """
     y_median = np.median(y_pixels)
     x_median = np.median(x_pixels)
-    min_index = np.argmin(np.square(x_pixels - x_median) + np.square(y_pixels - y_median))
-    return int(y_pixels[min_index]), int(x_pixels[min_index])
+    minimum_index = np.argmin(np.square(x_pixels - x_median) + np.square(y_pixels - y_median))
+    return int(y_pixels[minimum_index]), int(x_pixels[minimum_index])
 
 
 def _compute_distance_kernel(radius: int) -> NDArray[np.float32]:
@@ -508,14 +501,16 @@ class _ROI:
         # Sorts pixels by distance to enable efficient cumulative weight computation via cumsum.
         sorted_indices = np.argsort(distances)
         sorted_distances = distances[sorted_indices]
-        cumsum_weights = np.cumsum(self.pixel_weights[sorted_indices])
+        cumulative_weight_sums = np.cumsum(self.pixel_weights[sorted_indices])
 
         # Samples cumulative weights at integer radii. Uses searchsorted to find the index where each radius would
         # be inserted, then looks up the cumulative weight at that position.
         radii = np.arange(1, int(distances.max()) + 1, dtype=np.float32)
         indices = np.searchsorted(a=sorted_distances, v=radii, side="left")
         cumulative_weights = np.where(
-            indices > 0, cumsum_weights[np.clip(a=indices - 1, a_min=0, a_max=len(cumsum_weights) - 1)], 0
+            indices > 0,
+            cumulative_weight_sums[np.clip(a=indices - 1, a_min=0, a_max=len(cumulative_weight_sums) - 1)],
+            0,
         )
 
         # Computes radial gradient of cumulative weights. A sharp drop indicates the soma boundary.
@@ -536,6 +531,6 @@ class _ROI:
                 crop_radius = radii[below_threshold_after[0] + first_above_index]
 
         # Returns mask of pixels within the computed crop radius. The radius is drawn from the same distance array
-        # the mask is measured against, and the gradient that selects it is non-zero only where a pixel sits inside
-        # that distance, so at least one pixel always survives the comparison.
+        # against which the mask is measured, and the gradient that selects it is non-zero only where a pixel sits
+        # inside that distance, so at least one pixel always survives the comparison.
         return distances < crop_radius

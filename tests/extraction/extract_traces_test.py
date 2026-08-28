@@ -295,17 +295,19 @@ class TestExtractTracesChannel2:
             centers=((14, 14), (30, 30)), frame_height=frame_height, frame_width=frame_width
         )
 
-        # Detection saves both mean images and then releases them from memory, so extraction inherits a context whose
-        # detection images are None while the files sit in the plane's detection_data directory.
+        # Detection writes the functional mean image and registration writes the structural one. Detection then releases
+        # both from memory, so extraction inherits a context whose detection images are None while the files sit in the
+        # plane's detection_data directory.
         plane_directory = context.runtime.io.output_path
         detection_directory = plane_directory / "detection_data"
         detection_directory.mkdir(parents=True, exist_ok=True)
         np.save(
-            detection_directory / "mean_image.npy", arr=np.full((frame_height, frame_width), 100.0, dtype=np.float32)
+            detection_directory / "mean_image.npy",
+            arr=np.full((frame_height, frame_width), fill_value=100.0, dtype=np.float32),
         )
         np.save(
             detection_directory / "mean_image_channel_2.npy",
-            arr=np.full((frame_height, frame_width), 80.0, dtype=np.float32),
+            arr=np.full((frame_height, frame_width), fill_value=80.0, dtype=np.float32),
         )
         assert context.runtime.detection.mean_image is None
         assert context.runtime.detection.mean_image_channel_2 is None

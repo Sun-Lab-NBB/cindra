@@ -12,6 +12,7 @@ from .mcp_server import run_server
 from ..dataclasses import PipelineType, MultiRecordingConfiguration, SingleRecordingConfiguration, detect_pipeline_type
 from ..orchestration import (
     OpenMPStatus,
+    resolve_gpu_devices,
     resolve_openmp_runtime,
     run_multi_recording_pipeline,
     run_single_recording_pipeline,
@@ -24,7 +25,7 @@ CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
 """The Click context settings that ensure displayed help messages are formatted according to the cindra standard."""
 
 
-# Defined above the commands because a decorator is resolved where it is applied rather than where the module ends.
+# Sits above the commands because a decorator is resolved where it is applied rather than where the module ends.
 def report_command_failure[**P](command: Callable[P, None]) -> Callable[P, None]:
     """Reports the failure of a command through the console instead of an interpreter traceback.
 
@@ -144,6 +145,36 @@ def cindra_omp(source: Path | None, target: Path | None, *, force: bool, yes: bo
         raise SystemExit(1)
 
 
+@cindra_cli.command("gpu")
+@report_command_failure
+def cindra_gpu() -> None:
+    """Reports the CUDA devices the registration stage runs on, and why it reaches none.
+
+    Single-recording planes register on a CUDA device through the CuPy runtime when the run names one. This reports
+    every device the host exposes, together with its memory and compute capability, after transforming a small array on
+    the device the runtime selects by default. That transform is what separates a reachable device from an importable
+    module, because CuPy resolves the CUDA math libraries on first use rather than at import. A host that reaches no
+    device reports the reason and the installation that resolves it, and exits with a non-zero status. Running the
+    command on macOS reports that CuPy publishes no wheel for the platform, where registration runs on the host CPU.
+    """
+    summary = resolve_gpu_devices()
+
+    for device in summary.devices:
+        console.echo(
+            message=(
+                f"device {device.index}: {device.name}, {device.total_memory_mb} MB, "
+                f"compute capability {device.compute_capability}"
+            ),
+            raw=True,
+        )
+
+    console.echo(message=summary.describe())
+    if summary.remedy:
+        console.echo(message=f"remedy:   {summary.remedy}", raw=True)
+    if not summary.available:
+        raise SystemExit(1)
+
+
 @cindra_cli.command("configure")
 @click.option(
     "-p",
@@ -238,9 +269,21 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     default=None,
     help=(
         "[Single-recording] The number of parallel workers to allocate to each plane-registration step. When this "
-        "option is omitted, the step receives its measured default allocation of 4 workers, which is the knee of the "
-        "measured registration scaling curve. Setting this to -1 uses every available core, minus the cores reserved "
-        "for system use."
+        "option is omitted, the step receives its measured default allocation of 4 workers on the host CPU, or 2 "
+        "workers when --register-device names a CUDA device. A device-backed job keeps only its reference, crop, and "
+        "median-filter work on the host. The 4-worker figure is the knee of the measured registration scaling curve. "
+        "Setting this to -1 uses every available core, minus the cores reserved for system use."
+    ),
+)
+@click.option(
+    "-rd",
+    "--register-device",
+    type=int,
+    required=False,
+    default=None,
+    help=(
+        "[Single-recording] The zero-based index of the CUDA device that registers every plane of this run. When this "
+        "option is omitted, every plane of the run registers on the host CPU."
     ),
 )
 @click.option(
@@ -435,6 +478,7 @@ def cindra_run(
     input_path: Path,
     binarize_workers: int | None,
     register_workers: int | None,
+    register_device: int | None,
     process_workers: int | None,
     discover_workers: int | None,
     extract_workers: int | None,
@@ -463,6 +507,13 @@ def cindra_run(
     pipeline_type = detect_pipeline_type(file_path=input_path)
 
     if pipeline_type == PipelineType.SINGLE_RECORDING:
+        if register_device is not None and register_device < 0:
+            message = (
+                f"Unable to run the single-recording pipeline. The --register-device option must name a zero-based "
+                f"CUDA device index, but encountered {register_device}."
+            )
+            console.error(message=message, error=click.UsageError)
+
         configuration = SingleRecordingConfiguration.from_yaml(file_path=input_path)
         configuration.runtime.display_progress_bars = not no_progress
         if data_path is not None:
@@ -488,8 +539,16 @@ def cindra_run(
             binarization_workers=binarize_workers,
             registration_workers=register_workers,
             processing_workers=process_workers,
+            registration_device=register_device,
         )
     else:
+        if register_device is not None:
+            message = (
+                "Unable to run the multi-recording pipeline. The --register-device option names the CUDA device the "
+                "single-recording pipeline registers its planes on, and no multi-recording stage runs on a device."
+            )
+            console.error(message=message, error=click.UsageError)
+
         multi_recording_configuration = MultiRecordingConfiguration.from_yaml(file_path=input_path)
         if recording_paths:
             multi_recording_configuration.recording_io.recording_directories = tuple(natsorted(recording_paths))

@@ -85,7 +85,7 @@ class TestApplyPreclassification:
         assert [id(roi) for roi in result] == [id(compact_roi), id(small_compact_roi)]
 
         # The pass computes the statistics on the same objects, so re-running the classifier over them reproduces
-        # the scores it filtered on. The kept set must be exactly the ROIs whose cell probability, which is the
+        # the scores on which it filtered. The kept set must be exactly the ROIs whose cell probability, which is the
         # second classifier column, exceeds the threshold, in the order the input list holds them.
         classifications = classify(roi_statistics=roi_statistics, custom_classifier_path=None, preclassification=True)
         expected_ids = [

@@ -56,8 +56,8 @@ class TestApplyPhaseCorrelation:
         assert result[0, 0, 0] == result[0].max()
 
     @pytest.mark.parametrize("zero_frame", [False, True])
-    def test_normalization_split_is_bit_identical(self, *, zero_frame: bool) -> None:
-        """Verifies the magnitude normalization matches the fused reference expression bit-for-bit."""
+    def test_normalization_matches_the_fused_reference_expression(self, *, zero_frame: bool) -> None:
+        """Verifies the magnitude normalization matches the fused reference expression to float32 rounding."""
         generator = np.random.default_rng(seed=42)
         frames = generator.standard_normal((5, 32, 32)).astype(np.float32)
         if zero_frame:
@@ -72,8 +72,32 @@ class TestApplyPhaseCorrelation:
 
         result = apply_phase_correlation(frames=frames, kernel=kernel, workers=1)
 
+        # The normalization runs as a compiled parallel kernel, whose complex magnitude and complex division round
+        # differently from the NumPy expression above. The surface therefore agrees to float32 rounding rather than
+        # bit-for-bit, and the offsets read off it are pinned separately by the test below.
         assert result.dtype == np.float32
-        np.testing.assert_array_equal(result, expected)
+        np.testing.assert_allclose(result, expected, rtol=1e-5, atol=1e-4)
+
+    def test_normalization_leaves_every_correlation_peak_in_place(self) -> None:
+        """Verifies the normalization resolves the same peak the fused reference expression resolves."""
+        generator = np.random.default_rng(seed=11)
+        reference = generator.standard_normal((64, 64)).astype(np.float32)
+        shifts = [(0, 0), (1, -2), (-3, 4), (5, 5), (-6, -1)]
+        frames = np.stack([np.roll(reference, shift=shift, axis=(0, 1)) for shift in shifts]).astype(np.float32)
+        kernel = compute_reference_fft(reference_image=reference)
+
+        expected_fft = rfft2(frames, axes=(-2, -1))
+        expected_fft /= NORMALIZATION_EPSILON + np.abs(expected_fft)
+        expected_fft *= kernel
+        expected = irfft2(expected_fft, s=(64, 64), axes=(-2, -1)).astype(np.float32, copy=False)
+
+        result = apply_phase_correlation(frames=frames, kernel=kernel, workers=1)
+
+        # The correlation surface reaches the pipeline through an argmax alone, so the peak index is the output on which
+        # the registration stage depends, and the one this pins.
+        expected_peaks = np.argmax(expected.reshape(len(shifts), -1), axis=1)
+        result_peaks = np.argmax(result.reshape(len(shifts), -1), axis=1)
+        np.testing.assert_array_equal(result_peaks, expected_peaks)
 
 
 class TestApplyMask:
@@ -144,14 +168,14 @@ class TestApplyMask:
         mask = np.ones((4, 4), dtype=np.float32)
         offset = np.zeros((4, 4), dtype=np.float32)
 
-        # The output buffer takes its dtype from the frames, so this pins the contract the callers rely on.
+        # The output buffer takes its dtype from the frames, so this pins the contract on which the callers rely.
         assert apply_mask(frames=frames, mask=mask, offset=offset).dtype == np.float32
 
     def test_four_dimensional_blocks_with_a_per_block_mask(self) -> None:
         """Verifies the nonrigid rank, where a per-block mask meets extracted blocks."""
         frames = np.arange(2 * 3 * 4 * 4, dtype=np.float32).reshape(2, 3, 4, 4)
-        mask = np.linspace(0.0, 1.0, 3 * 4 * 4, dtype=np.float32).reshape(3, 4, 4)
-        offset = np.full((3, 4, 4), 2.0, dtype=np.float32)
+        mask = np.linspace(start=0.0, stop=1.0, num=3 * 4 * 4, dtype=np.float32).reshape(3, 4, 4)
+        offset = np.full((3, 4, 4), fill_value=2.0, dtype=np.float32)
 
         result = apply_mask(frames=frames, mask=mask, offset=offset)
 
@@ -162,8 +186,8 @@ class TestApplyMask:
     def test_single_frame_batch(self) -> None:
         """Verifies a leading axis of one, which the registration metrics path always passes."""
         frames = np.arange(16, dtype=np.float32).reshape(1, 4, 4)
-        mask = np.full((4, 4), 0.5, dtype=np.float32)
-        offset = np.full((4, 4), 1.0, dtype=np.float32)
+        mask = np.full((4, 4), fill_value=0.5, dtype=np.float32)
+        offset = np.full((4, 4), fill_value=1.0, dtype=np.float32)
 
         result = apply_mask(frames=frames, mask=mask, offset=offset)
 
@@ -243,7 +267,7 @@ class TestComputeGaussianFrequencyFilter:
         np.testing.assert_allclose(np.abs(result[0, 0]), 1.0, atol=1e-4)
 
     def test_carries_no_phase_on_even_dimensions(self) -> None:
-        """Verifies the filter is zero-phase, so smoothing leaves the correlation peaks it acts on where they are."""
+        """Verifies the filter is zero-phase, so smoothing leaves the correlation peaks on which it acts in place."""
         result = compute_gaussian_frequency_filter(sigma=1.15, height=48, width=38)
         np.testing.assert_allclose(np.imag(result), 0.0, atol=1e-6)
 

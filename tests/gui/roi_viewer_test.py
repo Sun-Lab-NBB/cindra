@@ -21,16 +21,16 @@ _CLASSIFIED_LABELS: list[float] = [1.0, 0.0, 0.0, 0.0]
 """The classification labels used by every test that is not about the initial selection itself."""
 
 
-@pytest.mark.xdist_group("gui_viewers")
+@pytest.mark.xdist_group(name="gui_viewers")
 class TestInitialSelection:
-    """Tests the ROI selection the viewer opens with."""
+    """Tests the ROI selection that the viewer opens on."""
 
     def test_recording_without_any_classified_cell_opens_on_the_first_roi(
         self,
         qt_application: QApplication,
         single_recording_stub: Callable[..., object],
     ) -> None:
-        """Verifies that labeling every ROI a non-cell opens the viewer instead of aborting the process."""
+        """Verifies that labeling every ROI a non-cell still opens the viewer."""
         viewer = _make_viewer(single_recording_stub=single_recording_stub, cell_labels=[0.0, 0.0, 0.0, 0.0])
 
         assert viewer._selected_roi_index == 0
@@ -52,7 +52,7 @@ class TestInitialSelection:
         viewer.close()
 
 
-@pytest.mark.xdist_group("gui_viewers")
+@pytest.mark.xdist_group(name="gui_viewers")
 class TestCorrelationCache:
     """Tests the correlation coloring cache the viewer builds while loading."""
 
@@ -73,7 +73,7 @@ class TestCorrelationCache:
         viewer.close()
 
 
-@pytest.mark.xdist_group("gui_viewers")
+@pytest.mark.xdist_group(name="gui_viewers")
 class TestRoiIndexField:
     """Tests the ROI index entry field."""
 
@@ -82,7 +82,7 @@ class TestRoiIndexField:
         qt_application: QApplication,
         single_recording_stub: Callable[..., object],
     ) -> None:
-        """Verifies that a negative ROI number selects the first ROI instead of indexing past the list start."""
+        """Verifies that a negative ROI number selects the first ROI."""
         viewer = _make_viewer(single_recording_stub=single_recording_stub, cell_labels=_CLASSIFIED_LABELS)
 
         viewer._roi_index_edit.setText("-500")
@@ -110,7 +110,7 @@ class TestRoiIndexField:
         viewer.close()
 
 
-@pytest.mark.xdist_group("gui_viewers")
+@pytest.mark.xdist_group(name="gui_viewers")
 class TestRankedSelection:
     """Tests the top-n and bottom-n ranked ROI selection."""
 
@@ -119,7 +119,7 @@ class TestRankedSelection:
         qt_application: QApplication,
         single_recording_stub: Callable[..., object],
     ) -> None:
-        """Verifies that a ranked count of zero clears the selection instead of selecting every ROI."""
+        """Verifies that a ranked count of zero clears the selection."""
         viewer = _make_viewer(single_recording_stub=single_recording_stub, cell_labels=_CLASSIFIED_LABELS)
         viewer._ranked_count_edit.setText("0")
 

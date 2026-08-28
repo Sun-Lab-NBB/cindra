@@ -98,7 +98,7 @@ class TestPlaneSpecifiers:
 
     @pytest.mark.parametrize("plane_index", [0, 1, 7, 42])
     def test_specifier_round_trips_through_the_parser(self, plane_index: int) -> None:
-        """Verifies that parsing a resolved specifier recovers the plane index it was built from."""
+        """Verifies that parsing a resolved specifier recovers the plane index from which it was built."""
         assert parse_plane_specifier(specifier=resolve_plane_specifier(plane_index=plane_index)) == plane_index
 
     def test_specifier_carries_the_shared_prefix(self) -> None:

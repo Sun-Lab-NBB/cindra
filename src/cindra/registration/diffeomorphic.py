@@ -182,10 +182,8 @@ class DiffeomorphicDemonsRegistration:
                 )
                 console.error(message=message, error=RuntimeError)
 
-        # Computes maximum scale from image dimensions (quarter of largest dimension).
         maximum_scale = max(self._images[0].shape) * 0.25
 
-        # Computes the number of scale levels needed to span from final_scale to maximum_scale.
         scale_level_count = 1
         while self._final_scale * 2 ** (scale_level_count - 1) < maximum_scale:
             scale_level_count += 1
@@ -205,7 +203,6 @@ class DiffeomorphicDemonsRegistration:
             console.disable_progress()
 
         try:
-            # Main registration loop: processes scales from coarse to fine.
             with console.progress(
                 total=total_iterations,
                 description="Registering recordings to a shared visual space",
@@ -217,7 +214,6 @@ class DiffeomorphicDemonsRegistration:
                         scale *= 2 * iteration_factor
 
                     for iteration in range(1, self._scale_sampling + 1):
-                        # Skips the coarsest level when using smooth scaling.
                         if self._smooth_scale and level >= scale_level_count - 1:
                             continue
 
@@ -287,8 +283,8 @@ class DiffeomorphicDemonsRegistration:
 
         # Accumulates into raw field arrays rather than into Deformation instances, so each contribution after the
         # first writes through an existing buffer instead of allocating a fresh pair of fields. An image holds None
-        # until its first contribution arrives, which reproduces the copy the identity branch of Deformation.add
-        # performs and keeps the sign of a zero-valued field element intact.
+        # until its first contribution arrives, so that contribution is copied into a fresh buffer instead of being
+        # added into a zero-filled one, which keeps the sign of a zero-valued field element intact.
         accumulated_y: list[NDArray[np.float32] | None] = [None] * image_count
         accumulated_x: list[NDArray[np.float32] | None] = [None] * image_count
 

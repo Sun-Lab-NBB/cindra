@@ -22,17 +22,22 @@ from ataraxis_data_structures import (
     initialize_worker_threads,
 )
 
+from .gpu import ALL_DEVICES_REQUEST, resolve_gpu_devices
 from .jobs import (
     PREREQUISITE_FAILURE_MESSAGE,
     UNREACHABLE_PREREQUISITE_MESSAGE,
+    SingleRecordingJobNames,
     resolve_prerequisite_job_ids,
 )
 from .pipeline import run_multi_recording_pipeline, run_single_recording_pipeline
 from .allocation import (
     ALL_CORES_REQUEST,
+    RESOURCE_CLASS_BY_JOB_NAME,
     ResourceClass,
     resolve_core_budget,
+    class_requires_device,
     resolve_class_allocation,
+    resolve_dispatch_workers,
     resolve_memory_budget_mb,
     summarize_class_allocation,
 )
@@ -79,29 +84,6 @@ _CANCELED_JOB_MESSAGE: str = (
 """The tracker error message recorded for a job whose worker pool future was canceled before it ran."""
 
 
-class _AdmissionDecisions(StrEnum):
-    """Defines the outcomes of evaluating one queued job's prerequisites against its own tracker."""
-
-    ADMIT = "admit"
-    """Every prerequisite job succeeded, so the job moves into its resource class queue."""
-    WAIT = "wait"
-    """At least one prerequisite job has not finished, so the job stays in the admission pool."""
-    ABORT = "abort"
-    """At least one prerequisite job failed or is absent from the tracker, so the job can never run."""
-
-
-class _JobOutcomes(StrEnum):
-    """Defines the outcomes of examining the worker pool future the session holds for one dispatched job."""
-
-    RUNNING = "running"
-    """The worker has not finished the job, so the job keeps its place in its resource class running set."""
-    COMPLETED = "completed"
-    """The worker returned, so the job already recorded its own terminal state on its tracker."""
-    ABANDONED = "abandoned"
-    """The future carries an exception or a cancellation rather than a result. That covers a worker the host killed, a
-    worker that raised on its way out of the job, and a job the pool canceled before any worker started it."""
-
-
 @dataclass(slots=True)
 class PendingJob:
     """Describes a single pipeline job queued for batch execution."""
@@ -118,7 +100,16 @@ class PendingJob:
     """The resource class that governs this job's worker count and the concurrency of its queue."""
     resolved_workers: int | None = None
     """The number of parallel workers to allocate to this job, assigned at dispatch time. A value of None makes the
-    pipeline fall back to the measured default for the job's stage."""
+    pipeline fall back to the default for the job's stage."""
+    assigned_device: int | None = None
+    """The zero-based index of the CUDA device this job holds while it runs, taken from the session free list at
+    dispatch time and returned to it when the job leaves the running set.
+
+    Notes:
+        A job of a host-only class carries None for its whole life, which runs its registration on the host CPU. A
+        device-backed job carries an index the session free list supplied, because a session holding no device admits
+        no such job.
+    """
     memory_megabytes: int = 0
     """The memory this job holds while it runs, as the caller's sizing pass estimated it.
 
@@ -139,7 +130,7 @@ class JobExecutionState:
     """Tracks the runtime state for one batch execution session across both pipeline types.
 
     Notes:
-        Each admitted job runs in its own worker process at the width its resource class was allocated, so a
+        Each admitted job runs in its own worker process at the width the dispatcher resolved for it, so a
         registration job and a processing job run side by side, each holding its own numeric-backend budget. Running
         them as threads of one process instead would let the later of the two overwrite the BLAS width the earlier one
         set. That width is a property of the process rather than of the thread that asked for it.
@@ -156,14 +147,35 @@ class JobExecutionState:
     class_capacities: dict[str, int] = field(default_factory=dict)
     """The resolved maximum number of concurrent jobs for each resource class name."""
     class_workers: dict[str, int] = field(default_factory=dict)
-    """The resolved number of CPU cores allocated to each job of each resource class name."""
+    """The per-job CPU core count each resource class resolved at session start, keyed by class name. A job of an
+    elastic class raises that count at dispatch, so this is the floor the class runs at rather than the width every
+    one of its jobs holds."""
     class_reservations: dict[str, int] = field(default_factory=dict)
     """The jobs of each resource class that run before the dispatcher releases that class's reservation, keyed by
     class name. A class absent from this map competes at its full derived width in both passes."""
+    elastic_workers: bool = False
+    """Determines whether a job of a class carrying a worker ceiling takes a share of the cores the session holds free
+    when it is dispatched, rather than the width its class resolved at session start.
+
+    Notes:
+        A session accepting the class defaults sets this, so a queue that drains gradually widens the jobs it has left
+        to run. A session carrying an explicit worker override leaves it clear, so the width the caller asked for
+        reaches every job of every class unchanged.
+    """
     cpu_budget: int = 1
     """The total number of CPU cores this session may commit across every resource class at once."""
     memory_budget_mb: int = 0
     """The total memory this session may commit across every running job at once, in megabytes."""
+    device_budget: int = 0
+    """The number of CUDA devices this session may commit across its device-backed jobs at once."""
+    available_devices: list[int] = field(default_factory=list)
+    """The indices of the CUDA devices no running job holds, from which the dispatcher assigns one to every job of a
+    device-backed class.
+
+    Notes:
+        A session holding no device admits no device-backed job, so the list is empty for the whole life of a session
+        whose registration runs on the host CPU.
+    """
     lock: Lock = field(default_factory=Lock)
     """The lock guarding every mutation of the job queues."""
     manager_thread: Thread | None = None
@@ -212,19 +224,26 @@ def start_execution_session(
     all_jobs: dict[tuple[str, str], PendingJob],
     workers_per_job: int | None,
     max_parallel_jobs: int | None,
+    gpu_devices: list[int] | None = None,
 ) -> dict[str, object]:
-    """Resolves per-class resource allocation, stamps it onto the queued jobs, and starts the execution manager.
+    """Resolves the per-class resource allocation of the queued jobs and starts the execution manager over them.
 
     Notes:
         Every job enters the admission pool, and the manager decides admission from the tracked prerequisites.
 
-        The resolved allocation is stamped onto each job and travels to the pipeline as a dispatch argument, so one
-        configuration file serves every job dispatched concurrently against it.
+        Each job takes its worker count when the dispatcher submits it, and that count travels to the pipeline as a
+        dispatch argument, so one configuration file serves every job dispatched concurrently against it. A session
+        accepting the class defaults widens a job of an elastic class toward that class's ceiling over the cores the
+        host holds free, while a session carrying a worker override gives every job the width it requested.
 
         Each class resolves its own concurrency cap, and the session CPU budget is recorded alongside those caps
         because every class dispatches during the same cycle. The dispatcher holds the sum of the cores committed by
         the running jobs of every class inside that budget, so the per-class caps cannot oversubscribe the machine
         between them.
+
+        The session also holds the CUDA devices its device-backed jobs run on, one device per running job. It holds
+        the devices the caller names, which leaves the rest of the host's devices to the work running beside it, and a
+        session naming none registers on the host CPU.
 
     Args:
         all_jobs: All submitted jobs keyed by dispatch key, in the order the manager should consider them.
@@ -232,14 +251,19 @@ def start_execution_session(
             class default.
         max_parallel_jobs: Requested maximum concurrent jobs per resource class, -1 to lift the caps, or None to
             accept the derived caps.
+        gpu_devices: The zero-based indices of the CUDA devices the session registers on. Use None to register on the
+            host CPU, [-1] to name every device the host exposes, and an explicit list to name those devices.
 
     Returns:
         A dictionary carrying the submitted job total under 'total_jobs', the session core budget under 'cpu_budget',
-        the session memory budget under 'memory_budget_mb', and the per-class worker count, concurrency cap, and job
-        count under 'resource_classes'.
+        the session memory budget under 'memory_budget_mb', the device indices the session holds under 'gpu_devices',
+        and the per-class worker count, concurrency cap, and job count under 'resource_classes'.
 
     Raises:
-        ValueError: If either override is zero or is a negative value other than -1.
+        ValueError: If either override is zero or is a negative value other than -1. If gpu_devices is empty, names a
+            device the host does not expose, or pairs the all-devices request with an explicit index. If a submitted
+            job registers on a CUDA device while the session holds none, or if the session holds a device while a
+            submitted registration job registers on the host CPU.
     """
     # Rejects a non-positive override rather than letting it fall through as a negative core count. None is the only
     # way to ask for a default, so a caller passing 0 or a negative value has confused the two.
@@ -250,11 +274,13 @@ def start_execution_session(
         if override_value is not None and override_value <= 0 and override_value != ALL_CORES_REQUEST:
             message = (
                 f"Unable to start the execution session. The '{override_name}' override must be a positive integer, "
-                f"-1 to request every available core, or None to accept the measured default, but encountered "
+                f"-1 to request every available core, or None to accept the stage default, but encountered "
                 f"{override_value}."
             )
             console.error(message=message, error=ValueError)
 
+    session_devices = _resolve_session_devices(gpu_devices=gpu_devices)
+    _validate_session_device_agreement(all_jobs=all_jobs, session_devices=session_devices)
     budget = resolve_core_budget()
     memory_budget = resolve_memory_budget_mb()
 
@@ -276,11 +302,13 @@ def start_execution_session(
             workers_per_job=workers_per_job,
             max_parallel_jobs=max_parallel_jobs,
         )
+        # The device-backed class caps its concurrency on the devices the host exposes, while the session dispatches
+        # onto the devices it holds, so the reported cap names the pool this session can actually fill.
+        if class_requires_device(resource_class=resource_class):
+            capacity = min(capacity, len(session_devices))
+
         class_workers[class_name] = workers
         class_capacities[class_name] = capacity
-
-    for pending_job in all_jobs.values():
-        pending_job.resolved_workers = class_workers[pending_job.resource_class.name]
 
     execution_state = JobExecutionState(
         all_jobs=all_jobs,
@@ -294,8 +322,11 @@ def start_execution_session(
             for class_name, resource_class in classes_by_name.items()
             if resource_class.concurrency_reservation is not None
         },
+        elastic_workers=workers_per_job is None,
         cpu_budget=budget,
         memory_budget_mb=memory_budget,
+        device_budget=len(session_devices),
+        available_devices=list(session_devices),
         lock=Lock(),
     )
 
@@ -310,6 +341,7 @@ def start_execution_session(
         "total_jobs": len(all_jobs),
         "cpu_budget": budget,
         "memory_budget_mb": memory_budget,
+        "gpu_devices": session_devices,
         "resource_classes": summarize_class_allocation(
             class_workers=class_workers,
             class_capacities=class_capacities,
@@ -323,8 +355,9 @@ def cancel_execution_session() -> tuple[int, int]:
 
     Notes:
         Cancellation empties the admission pool and every resource class queue, so the manager terminates once the
-        running set drains. A job already dispatched keeps its worker process, since interrupting it partway would
-        leave its output directory holding a partial result the tracker reports as running.
+        running set drains. A job already dispatched keeps its worker process and the CUDA device it holds, since
+        interrupting it partway would leave its output directory holding a partial result the tracker reports as
+        running.
 
     Returns:
         The number of jobs cleared from the queues and the number of jobs left running, in that order.
@@ -341,6 +374,29 @@ def cancel_execution_session() -> tuple[int, int]:
         active_count = sum(len(futures) for futures in state.active_futures.values())
 
     return canceled_count, active_count
+
+
+class _AdmissionDecisions(StrEnum):
+    """Defines the outcomes of evaluating one queued job's prerequisites against its own tracker."""
+
+    ADMIT = "admit"
+    """Every prerequisite job succeeded, so the job moves into its resource class queue."""
+    WAIT = "wait"
+    """At least one prerequisite job has not finished, so the job stays in the admission pool."""
+    ABORT = "abort"
+    """At least one prerequisite job failed or is absent from the tracker, so the job can never run."""
+
+
+class _JobOutcomes(StrEnum):
+    """Defines the outcomes of examining the worker pool future the session holds for one dispatched job."""
+
+    RUNNING = "running"
+    """The worker has not finished the job, so the job keeps its place in its resource class running set."""
+    COMPLETED = "completed"
+    """The worker returned, so the job already recorded its own terminal state on its tracker."""
+    ABANDONED = "abandoned"
+    """The future carries an exception or a cancellation rather than a result. That covers a worker the host killed, a
+    worker that raised on its way out of the job, and a job the pool canceled before any worker started it."""
 
 
 def _job_execution_manager(state: JobExecutionState) -> None:
@@ -409,6 +465,81 @@ def _job_execution_manager(state: JobExecutionState) -> None:
             timer.delay(delay=_DISPATCH_POLL_MILLISECONDS, allow_sleep=True)
 
 
+def _resolve_session_devices(gpu_devices: list[int] | None) -> list[int]:
+    """Resolves the CUDA devices one execution session runs its device-backed jobs on.
+
+    Args:
+        gpu_devices: The zero-based device indices the caller asks for, [-1] to ask for every device the host exposes,
+            or None to register on the host CPU.
+
+    Returns:
+        The device indices the session holds, in ascending order, which is empty when the caller asks for the host CPU
+        and when the all-devices request reaches a host exposing no device.
+
+    Raises:
+        ValueError: If gpu_devices is empty, names a device the host does not expose, or pairs the all-devices request
+            with an explicit index.
+    """
+    if gpu_devices is None:
+        return []
+
+    host_devices = [device.index for device in resolve_gpu_devices().devices]
+
+    if ALL_DEVICES_REQUEST in gpu_devices:
+        if len(gpu_devices) > 1:
+            message = (
+                f"Unable to start the execution session. The 'gpu_devices' entry {ALL_DEVICES_REQUEST} already names "
+                f"every CUDA device the host exposes, so it stands alone, but encountered {gpu_devices}."
+            )
+            console.error(message=message, error=ValueError)
+        return host_devices
+
+    unknown = sorted(set(gpu_devices) - set(host_devices))
+    if not gpu_devices or unknown:
+        message = (
+            f"Unable to start the execution session. The 'gpu_devices' list must name at least one of the CUDA "
+            f"devices the host exposes, or {ALL_DEVICES_REQUEST} to name every one of them, but encountered "
+            f"{gpu_devices}. Use None to register on the host CPU. Available device indices: {host_devices}."
+        )
+        console.error(message=message, error=ValueError)
+
+    return sorted(set(gpu_devices))
+
+
+def _validate_session_device_agreement(all_jobs: dict[tuple[str, str], PendingJob], session_devices: list[int]) -> None:
+    """Verifies that the devices one session holds match the jobs it was submitted.
+
+    Notes:
+        A registration job carries the resource class its planner chose, so a session whose devices disagree with that
+        class would run the stage on the resource the plan did not size it for.
+
+    Args:
+        all_jobs: All submitted jobs keyed by dispatch key.
+        session_devices: The device indices the session holds.
+
+    Raises:
+        ValueError: If a submitted job registers on a CUDA device while the session holds none, or if the session
+            holds a device while a submitted registration job registers on the host CPU.
+    """
+    device_jobs = sum(1 for job in all_jobs.values() if class_requires_device(resource_class=job.resource_class))
+    if device_jobs and not session_devices:
+        message = (
+            f"Unable to start the execution session. {device_jobs} of the submitted jobs register on a CUDA device, "
+            f"and the session holds none. Name the devices those jobs run on through 'gpu_devices'."
+        )
+        console.error(message=message, error=ValueError)
+
+    host_class_name = RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.REGISTER].name
+    host_jobs = sum(1 for job in all_jobs.values() if job.resource_class.name == host_class_name)
+    if session_devices and host_jobs:
+        message = (
+            f"Unable to start the execution session. {host_jobs} of the submitted jobs register on the host CPU, and "
+            f"the session holds the CUDA devices {session_devices}. Use None for 'gpu_devices' to register on the "
+            f"host CPU."
+        )
+        console.error(message=message, error=ValueError)
+
+
 def _clear_owned_session(state: JobExecutionState) -> None:
     """Clears the module-level session reference while it still names the target state.
 
@@ -428,6 +559,9 @@ def _reap_completed_jobs(state: JobExecutionState) -> None:
         host killed and a job the pool never started. The reaper records a failure for such a job only when its tracker
         holds no terminal state, so a worker that raised after succeeding keeps its success.
 
+        The CUDA device a job held returns to the session free list here, whatever outcome that job reached, because
+        this is where a device-backed job leaves the running set that holds its device.
+
     Args:
         state: The current job execution state, accessed under its lock.
     """
@@ -438,6 +572,7 @@ def _reap_completed_jobs(state: JobExecutionState) -> None:
                 continue
 
             reaped_job = state.all_jobs.get(key)
+            _release_device(state=state, job=reaped_job)
             if outcome == _JobOutcomes.ABANDONED and reaped_job is not None:
                 _fail_dispatched_job(job=reaped_job, message=outcome_message)
             active_futures.pop(key, None)
@@ -601,11 +736,19 @@ def _dispatch_pass(state: JobExecutionState, pool: Executor, *, release_reservat
         class queue. That keeps it inside a collection the broken-pool handler scans, which is what lets the one job
         the pool refused reach a terminal state alongside its peers.
 
+        A job of an elastic class takes its width from the cores the session holds free at the moment it is submitted,
+        so the same queue hands its last jobs more cores than its first. The peer count that divides those cores is
+        the whole class capacity, because the second pass hands the same queue the room a reservation held back and
+        every job that room admits competes for the same free cores.
+
+        A job of a device-backed class additionally holds one CUDA device for its whole duration, so the pass stops
+        dispatching that class once the session free list empties.
+
     Args:
         state: The current job execution state, accessed under its lock.
         pool: The worker pool the session dispatches its jobs into.
-        release_reservations: Determines whether a class holding a reservation dispatches at its full derived width
-            rather than at the width its reservation leaves free.
+        release_reservations: Determines whether a class holding a reservation dispatches at its full derived
+            concurrency rather than at the concurrency its reservation leaves free.
 
     Returns:
         True if at least one job was submitted during this pass, False otherwise.
@@ -614,20 +757,32 @@ def _dispatch_pass(state: JobExecutionState, pool: Executor, *, release_reservat
         BrokenProcessPool: If a worker process died outside its job's control, leaving the pool unable to accept work.
     """
     dispatched = False
+    competing_classes = _count_competing_classes(state=state)
 
     for class_name, pending_queue in state.pending_queues.items():
         active_futures = state.active_futures[class_name]
         capacity = state.class_capacities[class_name]
         reservation = state.class_reservations.get(class_name)
+        pass_capacity = capacity
         if not release_reservations and reservation is not None:
-            capacity = min(capacity, reservation)
-        workers = state.class_workers[class_name]
-        while len(active_futures) < capacity and pending_queue:
+            pass_capacity = min(capacity, reservation)
+        while len(active_futures) < pass_capacity and pending_queue:
+            pending_job = pending_queue[0]
             committed = _committed_cores(state=state)
+            workers = state.class_workers[class_name]
+            if state.elastic_workers:
+                workers = resolve_dispatch_workers(
+                    resource_class=pending_job.resource_class,
+                    free_cores=max(0, state.cpu_budget - committed),
+                    pending_jobs=len(pending_queue),
+                    running_jobs=len(active_futures),
+                    concurrency_cap=capacity,
+                    competing_classes=competing_classes,
+                )
+
             if committed > 0 and committed + workers > state.cpu_budget:
                 break
 
-            pending_job = pending_queue[0]
             committed_memory = _committed_memory(state=state)
             if (
                 committed_memory > 0
@@ -636,6 +791,14 @@ def _dispatch_pass(state: JobExecutionState, pool: Executor, *, release_reservat
             ):
                 break
 
+            # Takes the device after the budgets have admitted the job, so a job the budgets turn away leaves the
+            # device it would have held to the job dispatched behind it.
+            if class_requires_device(resource_class=pending_job.resource_class) and state.device_budget > 0:
+                if not state.available_devices:
+                    break
+                pending_job.assigned_device = state.available_devices.pop(0)
+
+            pending_job.resolved_workers = workers
             future: Future[None] = pool.submit(
                 _pipeline_worker,
                 configuration_path=pending_job.configuration_path,
@@ -643,12 +806,31 @@ def _dispatch_pass(state: JobExecutionState, pool: Executor, *, release_reservat
                 tracker_path=pending_job.tracker_path,
                 single_recording=pending_job.single_recording,
                 workers=pending_job.resolved_workers,
+                device=pending_job.assigned_device,
             )
             pending_queue.pop(0)
             active_futures[pending_job.dispatch_key] = future
             dispatched = True
 
     return dispatched
+
+
+def _release_device(state: JobExecutionState, job: PendingJob | None) -> None:
+    """Returns the CUDA device one job held to the session free list.
+
+    Notes:
+        The job's own assignment is cleared as the device returns, so a second call for the same job leaves the free
+        list holding one entry for that device rather than two.
+
+    Args:
+        state: The current job execution state, accessed under its lock.
+        job: The job leaving the running set, or None when the session no longer owns the reaped entry.
+    """
+    if job is None or job.assigned_device is None:
+        return
+
+    state.available_devices.append(job.assigned_device)
+    job.assigned_device = None
 
 
 def _create_job_pool(max_workers: int) -> Executor:
@@ -718,8 +900,44 @@ def _committed_memory(state: JobExecutionState) -> int:
     )
 
 
+def _count_competing_classes(state: JobExecutionState) -> int:
+    """Counts the elastic resource classes that hold queued work.
+
+    Args:
+        state: The current job execution state, accessed under its lock.
+
+    Returns:
+        The number of classes whose jobs widen and whose queue is not empty, with a floor of one.
+    """
+    competing = sum(
+        1
+        for pending_queue in state.pending_queues.values()
+        if pending_queue and _class_is_elastic(resource_class=pending_queue[0].resource_class)
+    )
+    return max(1, competing)
+
+
+def _class_is_elastic(resource_class: ResourceClass) -> bool:
+    """Returns True when the jobs of the target resource class widen over the capacity the host holds free.
+
+    Args:
+        resource_class: The resource class to test.
+
+    Returns:
+        True when the class widens its jobs at dispatch.
+    """
+    return resource_class.maximum_workers_per_job is not None and (
+        resource_class.maximum_workers_per_job > resource_class.workers_per_job
+    )
+
+
 def _committed_cores(state: JobExecutionState) -> int:
     """Sums the CPU cores that the currently running jobs of every resource class hold.
+
+    Notes:
+        Each running job contributes the width it was dispatched at rather than the width its class declares, because
+        the dispatcher widens a job of an elastic class over the capacity the host holds free at that moment. Two jobs
+        of one class therefore hold different numbers of cores when the queue drained between their dispatches.
 
     Args:
         state: The current job execution state, accessed under its lock.
@@ -727,7 +945,29 @@ def _committed_cores(state: JobExecutionState) -> int:
     Returns:
         The number of cores the session has committed to running jobs.
     """
-    return sum(len(futures) * state.class_workers[class_name] for class_name, futures in state.active_futures.items())
+    return sum(
+        _resolve_committed_width(state=state, class_name=class_name, dispatch_key=dispatch_key)
+        for class_name, futures in state.active_futures.items()
+        for dispatch_key in futures
+    )
+
+
+def _resolve_committed_width(state: JobExecutionState, class_name: str, dispatch_key: tuple[str, str]) -> int:
+    """Resolves the CPU cores one running job holds, falling back to its class width when the job carries none.
+
+    Args:
+        state: The current job execution state, accessed under its lock.
+        class_name: The name of the resource class the running job belongs to.
+        dispatch_key: The tracker path and job identifier pair that addresses the running job.
+
+    Returns:
+        The number of cores the running job holds.
+    """
+    running_job = state.all_jobs.get(dispatch_key)
+    if running_job is None or running_job.resolved_workers is None:
+        return state.class_workers.get(class_name, 0)
+
+    return running_job.resolved_workers
 
 
 def _pipeline_worker(
@@ -737,6 +977,7 @@ def _pipeline_worker(
     *,
     single_recording: bool = True,
     workers: int | None = None,
+    device: int | None = None,
 ) -> None:
     """Executes a single pipeline job identified by its job ID.
 
@@ -756,7 +997,9 @@ def _pipeline_worker(
         tracker_path: The path to the ProcessingTracker file for this job.
         single_recording: Determines whether to call the single-recording or multi-recording pipeline.
         workers: The number of parallel workers to allocate to this job. A value of None makes the pipeline apply the
-            measured default for the job's stage.
+            default for the job's stage.
+        device: The zero-based index of the CUDA device a registration job runs on. A value of None runs the
+            registration on the host CPU. Every other stage ignores it.
     """
     try:
         if single_recording:
@@ -766,6 +1009,7 @@ def _pipeline_worker(
                 binarization_workers=workers,
                 registration_workers=workers,
                 processing_workers=workers,
+                registration_device=device,
             )
         else:
             run_multi_recording_pipeline(
@@ -797,6 +1041,9 @@ def _fail_broken_session(state: JobExecutionState) -> None:
         A dispatched job that already recorded a terminal state of its own keeps that state, so a stage that succeeded
         before the pool broke stays a satisfied prerequisite instead of being failed and re-run.
 
+        Every running job returns the CUDA device it held, because a broken pool leaves those jobs unable to reach
+        the reaper that would otherwise free it.
+
     Args:
         state: The execution state whose pool broke, accessed under its lock.
     """
@@ -808,6 +1055,7 @@ def _fail_broken_session(state: JobExecutionState) -> None:
 
     for active_futures in state.active_futures.values():
         for key, future in active_futures.items():
+            _release_device(state=state, job=state.all_jobs.get(key))
             outcome, outcome_message = _resolve_job_outcome(future=future)
             if outcome == _JobOutcomes.COMPLETED or key not in state.all_jobs:
                 continue

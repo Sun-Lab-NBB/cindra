@@ -8,6 +8,7 @@ from ataraxis_base_utilities import LogLevel, console
 from ataraxis_data_structures import ProcessingTracker
 
 from ..io import resolve_multi_recording_contexts, resolve_single_recording_contexts
+from .gpu import verify_gpu_runtime
 from .jobs import (
     PER_PLANE_JOB_NAMES,
     MultiRecordingJobNames,
@@ -45,6 +46,7 @@ def run_single_recording_pipeline(
     binarization_workers: int | None = None,
     registration_workers: int | None = None,
     processing_workers: int | None = None,
+    registration_device: int | None = None,
 ) -> None:
     """Executes the requested single-recording processing pipeline steps for the target data.
 
@@ -67,17 +69,21 @@ def run_single_recording_pipeline(
         target_plane: The index of the plane to register and process. Setting this to '-1' processes all available
             planes sequentially.
         binarization_workers: The number of parallel workers to allocate to the binarization stage. Use None to accept
-            the measured default for the stage and -1 to request every available core.
+            the stage default and -1 to request every available core.
         registration_workers: The number of parallel workers to allocate to each plane-registration job. Use None to
-            accept the measured default for the stage and -1 to request every available core.
+            accept the stage default and -1 to request every available core.
         processing_workers: The number of parallel workers to allocate to each plane-processing job. Use None to accept
-            the measured default for the stage and -1 to request every available core.
+            the stage default and -1 to request every available core.
+        registration_device: The zero-based index of the CUDA device on which each plane-registration job runs. Use None
+            to register every plane on the host CPU.
 
     Raises:
         FileNotFoundError: If the single-recording configuration data cannot be loaded from the specified file.
-        RuntimeError: If the host is macOS and carries no loadable OpenMP runtime for the Numba threading layer.
+        RuntimeError: If the host is macOS and carries no loadable OpenMP runtime for the Numba threading layer, or if
+            a registration device is named and the host exposes no usable CUDA device.
         ValueError: If the recording's data validation fails, the specified job_id does not match any available job,
-            or target_plane names a plane the recording does not hold.
+            target_plane names a plane the recording does not hold, or registration_device names a CUDA device index
+            the host does not expose.
     """
     # Every stage below reaches a parallelized kernel, so a host whose threading layer has no runtime to load fails
     # here rather than partway through a recording.
@@ -132,6 +138,8 @@ def run_single_recording_pipeline(
         # REMOTE mode.
         resolved_name, resolved_specifier = tracker.resolve_job(job_id=job_id, universe=universe)
 
+        _verify_registration_device(device=registration_device, job_names=[resolved_name])
+
         tracker.align_jobs(jobs=universe, universe=universe)
 
         dispatch_single_recording_job(
@@ -141,13 +149,14 @@ def run_single_recording_pipeline(
             job_id=job_id,
             tracker=tracker,
             workers=stage_workers.get(resolved_name),
+            device=registration_device,
         )
     else:
         # LOCAL mode.
 
         # Rejects a plane the recording does not hold before the tracker is aligned. Without this guard the
         # out-of-range job pair reaches align_jobs, which rejects it against the universe with a message naming job
-        # identifiers rather than the plane index the caller actually asked for.
+        # identifiers rather than the plane index for which the caller actually asked.
         if target_plane != -1 and target_plane not in range(plane_count):
             message = (
                 f"Unable to run the single-recording cindra processing pipeline. The requested 'target_plane' must be "
@@ -155,6 +164,8 @@ def run_single_recording_pipeline(
                 f"but encountered {target_plane}."
             )
             console.error(message=message, error=ValueError)
+
+        _verify_registration_device(device=registration_device, job_names=jobs_to_run)
 
         jobs: list[tuple[str, str]] = []
         for base_job_name in jobs_to_run:
@@ -179,6 +190,7 @@ def run_single_recording_pipeline(
                 job_id=ProcessingTracker.generate_job_id(job_name=name, specifier=specifier),
                 tracker=tracker,
                 workers=stage_workers.get(name),
+                device=registration_device,
             )
 
     console.echo(message="Single-recording processing: Complete.", level=LogLevel.SUCCESS)
@@ -212,13 +224,15 @@ def run_multi_recording_pipeline(
         target_recording: The unique identifier of the recording to process when running the 'extract' job. If None,
             processes all recordings.
         discovery_workers: The number of parallel workers to allocate to the discovery stage. Use None to accept the
-            measured default for the stage and -1 to request every available core.
+            stage default and -1 to request every available core.
         extraction_workers: The number of parallel workers to allocate to each per-recording extraction job. Use None
-            to accept the measured default for the stage and -1 to request every available core.
+            to accept the stage default and -1 to request every available core.
 
     Raises:
         FileNotFoundError: If the multi-recording configuration data cannot be loaded from the specified file, or if a
-            recording directory holds no combined_metadata.npz file.
+            recording directory holds no combined_metadata.npz file. It is also raised when a job_id is supplied and a
+            recording carries no multi_recording_runtime_data.yaml file, which prepare_multi_recording_batch_tool writes
+            before any worker is dispatched.
         RuntimeError: If the host is macOS and carries no loadable OpenMP runtime for the Numba threading layer. It is
             also raised when a recording directory holds multiple combined_metadata.npz files, when the recording paths
             do not contain unique identifying components, or when a resolved identifying component contains a colon.
@@ -327,3 +341,25 @@ def run_multi_recording_pipeline(
             )
 
     console.echo(message="Multi-recording processing: Complete.", level=LogLevel.SUCCESS)
+
+
+def _verify_registration_device(device: int | None, job_names: list[str]) -> None:
+    """Verifies that the host exposes the CUDA device on which a registration job of this invocation runs.
+
+    Notes:
+        The verification precedes the first dispatch, so a host that exposes no such device aborts the invocation
+        having done no work rather than at the point the registration reaches the device.
+
+    Args:
+        device: The zero-based index of the CUDA device on which the registration jobs run, or None while they run on
+            the host CPU.
+        job_names: The names of the jobs this invocation runs.
+
+    Raises:
+        RuntimeError: If a registration device is named and the host exposes no usable CUDA device.
+        ValueError: If the named device index is one the host does not expose.
+    """
+    if device is None or SingleRecordingJobNames.REGISTER not in job_names:
+        return
+
+    verify_gpu_runtime(device=device)

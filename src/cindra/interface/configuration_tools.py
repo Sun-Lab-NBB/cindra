@@ -1,9 +1,5 @@
 """Provides MCP tools for pipeline configuration generation, reading, validation, modification, recording discovery,
 and dataset name resolution.
-
-These tools enable AI agents to generate default configuration files for both single-recording and multi-recording
-pipelines, read, validate, and modify configuration files, discover recordings available for processing under a
-given root directory, and construct qualified dataset names for multi-recording processing.
 """
 
 from __future__ import annotations
@@ -767,6 +763,10 @@ def _validate_single_recording(
         errors.append(
             f"registration.registration_metric_principal_components must be non-negative "
             f"(current: {config.registration.registration_metric_principal_components})."
+        )
+    if config.registration.gpu_batch_size < 0:
+        errors.append(
+            f"registration.gpu_batch_size must be non-negative (current: {config.registration.gpu_batch_size})."
         )
 
     if config.one_photon_registration.enabled:
