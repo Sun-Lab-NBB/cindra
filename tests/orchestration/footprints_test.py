@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -26,6 +27,7 @@ from cindra.dataclasses import (
 )
 from cindra.orchestration import (
     DISCOVERY_WORKERS,
+    EXTRACTION_WORKERS,
     COMBINATION_WORKERS,
     BINARIZATION_WORKERS,
     REGISTRATION_WORKERS,
@@ -52,6 +54,7 @@ from cindra.orchestration.footprints import (
     _estimate_extraction_mb,
     _estimate_processing_mb,
     _estimate_combination_mb,
+    _resolve_tracked_regions,
     size_multi_recording_job,
     _estimate_registration_mb,
     resolve_maximum_roi_count,
@@ -60,8 +63,8 @@ from cindra.orchestration.footprints import (
     resolve_recording_geometry,
     _resolve_binned_frame_count,
     _resolve_metric_sample_count,
+    read_tracked_recording_geometry,
     _estimate_registration_device_mb,
-    _read_tracked_recording_geometry,
     _resolve_nonrigid_block_geometry,
     estimate_multi_recording_job_memory_mb,
     _estimate_registration_device_memory_mb,
@@ -645,9 +648,11 @@ class TestMultiRecordingEstimates:
             configuration=configuration,
         )
 
+        # Two recordings at the default 50% prevalence demand one recording per template, so the pooled ceiling is
+        # the 1100 regions the dataset holds and the headroom bound, ceil(700 * 1.5), is the smaller of the two.
         geometry = RecordingGeometry(combined_pixels=4096, combined_frame_count=600, region_count=400, resolved=True)
         assert memory_mb == _apply_tolerance(
-            memory_mb=_estimate_extraction_mb(geometry=geometry, tracked_regions=700, configuration=configuration)
+            memory_mb=_estimate_extraction_mb(geometry=geometry, tracked_regions=1050, configuration=configuration)
         )
 
     def test_extraction_without_a_matching_specifier_charges_the_widest_recording(self, tmp_path: Path) -> None:
@@ -664,9 +669,10 @@ class TestMultiRecordingEstimates:
             configuration=configuration,
         )
 
+        # The pooled ceiling is the 900 regions the dataset holds and the headroom bound is ceil(500 * 1.5).
         widest = RecordingGeometry(combined_pixels=65536, combined_frame_count=600, region_count=500, resolved=True)
         assert memory_mb == _apply_tolerance(
-            memory_mb=_estimate_extraction_mb(geometry=widest, tracked_regions=500, configuration=configuration)
+            memory_mb=_estimate_extraction_mb(geometry=widest, tracked_regions=750, configuration=configuration)
         )
 
 
@@ -677,14 +683,14 @@ class TestTrackedRecordingGeometry:
         """Verifies that the region count comes from the combined trace array's own header."""
         _write_tracked_recording(output_root=tmp_path, height=64, width=64, frame_count=600, regions=321)
 
-        geometry = _read_tracked_recording_geometry(cindra_root=resolve_output_path(output_root=tmp_path))
+        geometry = read_tracked_recording_geometry(cindra_root=resolve_output_path(output_root=tmp_path))
 
         assert geometry.region_count == 321
         assert geometry.resolved
 
     def test_a_recording_without_combined_output_resolves_nothing(self, tmp_path: Path) -> None:
         """Verifies that a recording carrying no metadata archive contributes no geometry."""
-        geometry = _read_tracked_recording_geometry(cindra_root=resolve_output_path(output_root=tmp_path))
+        geometry = read_tracked_recording_geometry(cindra_root=resolve_output_path(output_root=tmp_path))
 
         assert not geometry.resolved
         assert geometry.combined_pixels == 0
@@ -693,7 +699,7 @@ class TestTrackedRecordingGeometry:
         """Verifies that a recording whose combination stage wrote no trace array reports no regions."""
         _write_combined(output_root=tmp_path)
 
-        geometry = _read_tracked_recording_geometry(cindra_root=resolve_output_path(output_root=tmp_path))
+        geometry = read_tracked_recording_geometry(cindra_root=resolve_output_path(output_root=tmp_path))
 
         assert geometry.region_count == 0
 
@@ -707,7 +713,7 @@ class TestTrackedRecordingGeometry:
             np.zeros((3, 4, 5), dtype=np.float32),
         )
 
-        geometry = _read_tracked_recording_geometry(cindra_root=resolve_output_path(output_root=tmp_path))
+        geometry = read_tracked_recording_geometry(cindra_root=resolve_output_path(output_root=tmp_path))
 
         assert geometry.region_count == 0
 
@@ -721,7 +727,7 @@ class TestTrackedRecordingGeometry:
             combined_width=np.array([256], dtype=np.uint16),
         )
 
-        geometry = _read_tracked_recording_geometry(cindra_root=output_path)
+        geometry = read_tracked_recording_geometry(cindra_root=output_path)
 
         assert geometry.combined_frame_count == 0
 
@@ -737,7 +743,7 @@ class TestTrackedRecordingGeometry:
             registered_binary_paths_channel_2=np.array(["a.bin"]),
         )
 
-        assert _read_tracked_recording_geometry(cindra_root=output_path).two_channels
+        assert read_tracked_recording_geometry(cindra_root=output_path).two_channels
 
 
 class TestUnresolvedInputReporting:
@@ -1293,6 +1299,244 @@ class TestPlannedRegionCount:
                 output_root=tmp_path,
                 configuration=SingleRecordingConfiguration(),
                 planned_roi_count=0,
+            )
+
+
+class TestTrackedRegionBound:
+    """Tests the bound the tracked extraction estimate substitutes for a template count no plan can read."""
+
+    @staticmethod
+    def _dataset(region_counts: tuple[int, ...]) -> tuple[RecordingGeometry, ...]:
+        """Builds the geometry of a dataset whose recordings hold the given region counts."""
+        return tuple(
+            RecordingGeometry(combined_pixels=4096, combined_frame_count=600, region_count=count, resolved=True)
+            for count in region_counts
+        )
+
+    def test_headroom_bound_holds_when_the_dataset_spans_many_recordings(self) -> None:
+        """Verifies that the domain headroom term is the bound whenever the pooled ceiling sits above it."""
+        configuration = MultiRecordingConfiguration()
+
+        tracked = _resolve_tracked_regions(
+            geometries=self._dataset((1000, 1000, 1000, 1000)), configuration=configuration, planned_roi_count=None
+        )
+
+        # Four recordings at 50% prevalence demand two recordings per template, so the pooled ceiling is 4000 // 2.
+        assert tracked == 1500
+
+    def test_pooled_ceiling_holds_when_the_dataset_spans_few_recordings(self) -> None:
+        """Verifies that the combinatorial ceiling is the bound whenever it sits below the headroom term."""
+        configuration = MultiRecordingConfiguration()
+        configuration.roi_tracking.mask_prevalence = 100
+
+        tracked = _resolve_tracked_regions(
+            geometries=self._dataset((1000, 1000)), configuration=configuration, planned_roi_count=None
+        )
+
+        # Every template consumes one region of each of the two recordings exclusively, so the dataset admits 1000
+        # of them where the headroom term alone would allow 1500.
+        assert tracked == 1000
+
+    def test_minimum_recordings_mirrors_the_count_tracking_derives(self) -> None:
+        """Verifies that the pooled ceiling divides by the recording count tracking rounds its prevalence up to."""
+        configuration = MultiRecordingConfiguration()
+        configuration.roi_tracking.mask_prevalence = 50
+
+        tracked = _resolve_tracked_regions(
+            geometries=self._dataset((300, 300, 300)), configuration=configuration, planned_roi_count=None
+        )
+
+        # Tracking takes the ceiling of 50% of three recordings, which is two, so the pooled ceiling is 900 // 2.
+        assert tracked == 450
+
+    def test_prevalence_of_zero_still_divides_the_pooled_count(self) -> None:
+        """Verifies that a prevalence demanding no recording charges one rather than dividing by nothing."""
+        configuration = MultiRecordingConfiguration()
+        configuration.roi_tracking.mask_prevalence = 0
+
+        tracked = _resolve_tracked_regions(
+            geometries=self._dataset((100, 100)), configuration=configuration, planned_roi_count=None
+        )
+
+        assert tracked == 150
+
+    def test_bound_stays_below_the_pooled_count_of_a_broad_dataset(self) -> None:
+        """Verifies that a dataset of many populated recordings is not sized for its pooled region count."""
+        configuration = MultiRecordingConfiguration()
+        geometries = self._dataset((15000,) * 20)
+
+        tracked = _resolve_tracked_regions(geometries=geometries, configuration=configuration, planned_roi_count=None)
+
+        # The pooled ceiling of 300000 // 10 is what a pooled-only bound would charge, and the headroom term keeps
+        # the reservation well under it.
+        assert tracked == 22500
+        assert tracked < sum(geometry.region_count for geometry in geometries) // 10
+
+    def test_bound_reaches_the_extraction_estimate(self, tmp_path: Path) -> None:
+        """Verifies that the bound is exactly the template count the extraction model is sized for."""
+        configuration = MultiRecordingConfiguration()
+        roots = [tmp_path / "day1", tmp_path / "day2", tmp_path / "day3"]
+        for root, regions in zip(roots, (300, 500, 400), strict=True):
+            _write_tracked_recording(output_root=root, height=64, width=64, frame_count=600, regions=regions)
+
+        memory_mb = estimate_multi_recording_job_memory_mb(
+            job_name=MultiRecordingJobNames.EXTRACT,
+            specifier="day1",
+            recording_directories=roots,
+            configuration=configuration,
+        )
+
+        geometry = RecordingGeometry(combined_pixels=4096, combined_frame_count=600, region_count=300, resolved=True)
+        # Three recordings at 50% prevalence demand two per template, so the pooled ceiling of 1200 // 2 is the
+        # smaller of the two bounds and ceil(500 * 1.5) is not reached.
+        assert memory_mb == _apply_tolerance(
+            memory_mb=_estimate_extraction_mb(geometry=geometry, tracked_regions=600, configuration=configuration)
+        )
+
+    def test_bound_never_exceeds_either_of_its_two_terms(self) -> None:
+        """Verifies that the bound is the smaller of the two terms across a spread of datasets and prevalences."""
+        for counts in ((10, 10), (1000, 200, 30), (700,), (15000,) * 8):
+            for prevalence in (0, 25, 50, 75, 100):
+                configuration = MultiRecordingConfiguration()
+                configuration.roi_tracking.mask_prevalence = prevalence
+                geometries = self._dataset(counts)
+
+                tracked = _resolve_tracked_regions(
+                    geometries=geometries, configuration=configuration, planned_roi_count=None
+                )
+
+                minimum_recordings = max(1, math.ceil(prevalence / 100 * len(counts)))
+                assert tracked <= sum(counts) // minimum_recordings
+                assert tracked <= math.ceil(max(counts) * 1.5)
+                assert tracked >= 1
+
+
+class TestPlannedTrackedRegionCount:
+    """Tests the override a caller that knows its template count states instead of taking the bound."""
+
+    def test_planned_count_is_the_tracked_term_the_estimate_uses(self, tmp_path: Path) -> None:
+        """Verifies that the planned count is exactly what the extraction model is sized for."""
+        configuration = MultiRecordingConfiguration()
+        roots = [tmp_path / "day1", tmp_path / "day2"]
+        for root in roots:
+            _write_tracked_recording(output_root=root, height=64, width=64, frame_count=600, regions=400)
+
+        memory_mb = estimate_multi_recording_job_memory_mb(
+            job_name=MultiRecordingJobNames.EXTRACT,
+            specifier="day1",
+            recording_directories=roots,
+            configuration=configuration,
+            planned_roi_count=137,
+        )
+
+        geometry = RecordingGeometry(combined_pixels=4096, combined_frame_count=600, region_count=400, resolved=True)
+        assert memory_mb == _apply_tolerance(
+            memory_mb=_estimate_extraction_mb(geometry=geometry, tracked_regions=137, configuration=configuration)
+        )
+
+    def test_planned_count_overrides_the_bound_in_both_directions(self, tmp_path: Path) -> None:
+        """Verifies that a caller's figure is taken whether it sits above or below the bound the dataset implies."""
+        roots = [tmp_path / "day1", tmp_path / "day2"]
+        for root in roots:
+            _write_tracked_recording(output_root=root, height=64, width=64, frame_count=60000, regions=400)
+
+        def estimate(planned_roi_count: int | None) -> int:
+            return estimate_multi_recording_job_memory_mb(
+                job_name=MultiRecordingJobNames.EXTRACT,
+                specifier="day1",
+                recording_directories=roots,
+                configuration=MultiRecordingConfiguration(),
+                planned_roi_count=planned_roi_count,
+            )
+
+        assert estimate(planned_roi_count=10) < estimate(planned_roi_count=None) < estimate(planned_roi_count=100000)
+
+    def test_absent_planned_count_falls_back_to_the_bound(self, tmp_path: Path) -> None:
+        """Verifies that a dataset named no planned count is sized for the bound its region counts provide."""
+        configuration = MultiRecordingConfiguration()
+        roots = [tmp_path / "day1", tmp_path / "day2"]
+        for root in roots:
+            _write_tracked_recording(output_root=root, height=64, width=64, frame_count=600, regions=400)
+
+        geometries = [
+            RecordingGeometry(combined_pixels=4096, combined_frame_count=600, region_count=400, resolved=True)
+        ] * 2
+        bound = _resolve_tracked_regions(geometries=geometries, configuration=configuration, planned_roi_count=None)
+        memory_mb = estimate_multi_recording_job_memory_mb(
+            job_name=MultiRecordingJobNames.EXTRACT,
+            specifier="day1",
+            recording_directories=roots,
+            configuration=configuration,
+        )
+
+        assert memory_mb == estimate_multi_recording_job_memory_mb(
+            job_name=MultiRecordingJobNames.EXTRACT,
+            specifier="day1",
+            recording_directories=roots,
+            configuration=configuration,
+            planned_roi_count=bound,
+        )
+
+    def test_discovery_does_not_read_the_planned_count(self, tmp_path: Path) -> None:
+        """Verifies that discovery is sized for the regions each recording reports whatever the caller plans for."""
+        configuration = MultiRecordingConfiguration()
+        roots = [tmp_path / "day1", tmp_path / "day2"]
+        for root in roots:
+            _write_tracked_recording(output_root=root, height=64, width=64, frame_count=600, regions=400)
+
+        def estimate(planned_roi_count: int | None) -> int:
+            return estimate_multi_recording_job_memory_mb(
+                job_name=MultiRecordingJobNames.DISCOVER,
+                specifier="",
+                recording_directories=roots,
+                configuration=configuration,
+                planned_roi_count=planned_roi_count,
+            )
+
+        assert estimate(planned_roi_count=None) == estimate(planned_roi_count=1) == estimate(planned_roi_count=500000)
+
+    def test_sizing_forwards_the_planned_count_to_the_estimate(self, tmp_path: Path) -> None:
+        """Verifies that the sizing entry point reports the memory the planned count implies."""
+        configuration = MultiRecordingConfiguration()
+        roots = [tmp_path / "day1", tmp_path / "day2"]
+        for root in roots:
+            _write_tracked_recording(output_root=root, height=64, width=64, frame_count=60000, regions=400)
+
+        sizing = size_multi_recording_job(
+            job_name=MultiRecordingJobNames.EXTRACT,
+            specifier="day1",
+            recording_directories=roots,
+            configuration=configuration,
+            planned_roi_count=97,
+        )
+
+        assert sizing == JobSizing(
+            cores=EXTRACTION_WORKERS,
+            memory_mb=estimate_multi_recording_job_memory_mb(
+                job_name=MultiRecordingJobNames.EXTRACT,
+                specifier="day1",
+                recording_directories=roots,
+                configuration=configuration,
+                planned_roi_count=97,
+            ),
+            device_memory_mb=0,
+        )
+
+    def test_non_positive_planned_count_is_rejected(self, tmp_path: Path) -> None:
+        """Verifies that a planned template count of zero or less is rejected before the dataset is read."""
+        message = (
+            f"Unable to estimate the memory of the '{MultiRecordingJobNames.EXTRACT}' job. The planned region count "
+            f"must be a positive integer counting the templates the dataset tracks, or None to accept the bound the "
+            f"per-recording region counts provide, but encountered -1."
+        )
+
+        with pytest.raises(ValueError, match=error_format(message=message)):
+            estimate_multi_recording_job_memory_mb(
+                job_name=MultiRecordingJobNames.EXTRACT,
+                specifier="day1",
+                recording_directories=[tmp_path / "day1"],
+                configuration=MultiRecordingConfiguration(),
+                planned_roi_count=-1,
             )
 
 
