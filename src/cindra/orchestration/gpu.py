@@ -103,7 +103,10 @@ class GpuSummary:
             A compact description of the outcome.
         """
         if self.available:
-            names = ", ".join(f"{device.index}: {device.name} ({device.total_memory_mb} MB)" for device in self.devices)
+            names = ", ".join(
+                f"{device.index}: {device.name} ({device.total_memory_mb} MB, compute {device.compute_capability})"
+                for device in self.devices
+            )
             return f"{len(self.devices)} CUDA device(s) available. {names}."
         return f"no usable CUDA device: {self.detail}"
 

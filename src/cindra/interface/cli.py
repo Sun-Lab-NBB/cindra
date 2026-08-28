@@ -159,15 +159,6 @@ def cindra_gpu() -> None:
     """
     summary = resolve_gpu_devices()
 
-    for device in summary.devices:
-        console.echo(
-            message=(
-                f"device {device.index}: {device.name}, {device.total_memory_mb} MB, "
-                f"compute capability {device.compute_capability}"
-            ),
-            raw=True,
-        )
-
     console.echo(message=summary.describe())
     if summary.remedy:
         console.echo(message=f"remedy:   {summary.remedy}", raw=True)

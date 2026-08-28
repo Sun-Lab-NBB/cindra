@@ -28,7 +28,7 @@ class TestGpuSummary:
     """Tests the reporting surface of the device resolution summary."""
 
     def test_available_summary_reports_every_device(self):
-        """Verifies that an available summary names each device with its index and memory."""
+        """Verifies that an available summary names each device with its index, memory, and compute capability."""
         summary = GpuSummary(
             status=GpuStatus.AVAILABLE,
             devices=(GpuDevice(index=0, name="A6000", total_memory_mb=48538, compute_capability="8.6"),),
@@ -37,7 +37,7 @@ class TestGpuSummary:
         assert summary.available
         assert summary.remedy == ""
         assert "1 CUDA device(s) available" in summary.describe()
-        assert "0: A6000 (48538 MB)" in summary.describe()
+        assert "0: A6000 (48538 MB, compute 8.6)" in summary.describe()
 
     @pytest.mark.parametrize(
         ("status", "expects_remedy"),
