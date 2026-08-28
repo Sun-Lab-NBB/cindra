@@ -360,10 +360,11 @@ carries no information. Gate on `ready` alone to decide what to dispatch. Use it
 
 `size_pipeline_jobs_tool` reports the cores and memory every job of a dataset holds, reading the completed
 single-recording output the dataset runs on. Pass the dataset's configuration path and
-`pipeline_type="multi-recording"`. The response lists each job's `name`, `specifier`, `cores`, and `memory_mb`, plus
-`peak_memory_mb` for the single largest job and `total_memory_mb` for every job at once. Read `peak_memory_mb` rather
-than assuming which stage dominates, because discovery's clustering term grows with the square of the region count
-while extraction's trace arrays grow with the frame count, so either stage leads depending on the dataset.
+`pipeline_type="multi-recording"`. The response lists each job's `name`, `specifier`, `cores`, `memory_mb`, and a
+`device_memory_mb` of zero, because no multi-recording stage runs on a CUDA device. It also carries `peak_memory_mb` for
+the single largest job and `total_memory_mb` for every job at once. Read `peak_memory_mb` rather than assuming which
+stage dominates, because discovery's clustering term grows with the square of the region count while extraction's trace
+arrays grow with the frame count, so either stage leads depending on the dataset.
 
 `check_threading_runtime_tool` reports whether the numeric threading layer this host needs is loadable, which is OpenMP
 on macOS and TBB elsewhere. Gate a batch on its `ready` flag. A macOS host that is not ready aborts every job at the

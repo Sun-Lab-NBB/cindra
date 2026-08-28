@@ -63,6 +63,7 @@ Qt.
 | `cindra`                  | group   | Entry point. Dispatches to the subcommands             | None, dispatch only                                          |
 | `cindra mcp`              | command | Starts the data processing MCP server                  | None, it hosts the server                                    |
 | `cindra omp`              | command | Reports and links the macOS OpenMP runtime Numba loads | None, and the command errors off macOS                       |
+| `cindra gpu`              | command | Reports the CUDA devices the host exposes              | `check_gpu_runtime_tool`                                     |
 | `cindra configure`        | command | Generates a default pipeline configuration file        | `generate_config_file_tool`                                  |
 | `cindra run`              | command | Runs a pipeline from a configuration file              | `execute_full_pipeline_tool`, `execute_processing_jobs_tool` |
 | `cindra-gui`              | group   | Entry point. Dispatches to the viewer subcommands      | None, dispatch only                                          |
@@ -104,6 +105,12 @@ line renders the message it interleaves with unparsable.
 
 Without `-y` the command is a report. `/cindra-mcp-environment-setup` owns the workflow that drives it.
 
+### `cindra gpu`
+
+Declares no options. The command reports every CUDA device the host exposes, with the memory and compute capability of
+each, and exits with a non-zero status when it reaches none. `check_gpu_runtime_tool` returns the same report as JSON,
+so call the tool and hand over the command only while the server is down.
+
 ### `cindra configure`
 
 | Short | Long            | Type                                                        | Default | Status   | Effect                                       |
@@ -132,6 +139,7 @@ set, only the matching job runs and every phase flag is ignored.
 | `-i`  | `--input-path`       | file path          | none    | required   | Names the configuration file to run            |
 | `-bw` | `--binarize-workers` | integer            | `None`  | optional   | Workers for the binarization stage             |
 | `-rw` | `--register-workers` | integer            | `None`  | optional   | Workers for the registration stage             |
+| `-rd` | `--register-device`  | integer            | `None`  | optional   | CUDA device the registration stage runs on     |
 | `-pw` | `--process-workers`  | integer            | `None`  | optional   | Workers for the processing stage               |
 | `-dw` | `--discover-workers` | integer            | `None`  | optional   | Workers for the discovery stage                |
 | `-ew` | `--extract-workers`  | integer            | `None`  | optional   | Workers for the extraction stage               |
@@ -156,6 +164,11 @@ these.
 The five worker options follow the shared sentinel convention. Omitting the option accepts the measured default for
 that stage, `-1` requests every available core, and a positive integer is used exactly. Any other non-positive value is
 rejected. `/single-recording-configuration` owns that convention.
+
+`--register-device` carries a contract of its own. Omitting it registers every plane of the run on the host CPU, and a
+zero-based CUDA device index registers every plane on that device. Every negative value is a usage error here,
+including the `-1` the worker options read as a request for the whole host. The option is single-recording only, so
+passing it against a multi-recording configuration is a usage error as well.
 
 **A single-recording run needs an output path before it starts.** The command applies `-dp` and `-s` to the loaded
 configuration, then aborts with a usage error when `file_io.output_path` is still None, naming both the field and the
@@ -197,6 +210,7 @@ whether Click accepted the invocation rather than whether the work succeeded.
 | `Usage: ...` followed by `Error: ...`                      | 2    | A rejected option value, whether Click or the command body caught it |
 | `Aborted!`                                                 | 1    | The user interrupted the command                                     |
 | A report ending in an unresolved status, from `cindra omp` | 1    | No OpenMP runtime resolved on this host                              |
+| A device report, from `cindra gpu`                         | 1    | No usable CUDA device on this host                                   |
 
 **Never read a zero exit code as success.** A library failure exits zero, so ask the user for the terminal output
 rather than for the exit status, and read the ERROR line to decide what failed. A Click exception passes through the
@@ -217,6 +231,7 @@ The failures a user hits most, and where each belongs:
 | No `combined_metadata.npz` under a recording            | A multi-recording input never finished single-recording | `/single-recording-processing`    |
 | No `configuration.yaml` under a viewer's output root    | The recording was never processed                       | `/single-recording-processing`    |
 | An OpenMP runtime that cannot be located, on macOS      | The threading runtime is not on the loader search path  | `/cindra-mcp-environment-setup`   |
+| No usable CUDA device, after --register-device          | The host reaches no device through the CuPy runtime     | `/cindra-mcp-environment-setup`   |
 | A lock acquisition that timed out                       | Another cindra process holds the tracker                | See the contention warning below  |
 
 ---
@@ -236,6 +251,7 @@ any `cindra run` command.
 | Completed work   | Re-run unconditionally                                      | Skipped, reporting that the phases are already complete  |
 | Resource budgets | Per-stage counts, with no session core or memory budget     | Session core and memory budgets bound admission          |
 | Backend threads  | Sized to the whole host                                     | Each worker pinned to one backend thread                 |
+| CUDA device      | One device for every plane of the run                       | One device per running job, from the session list        |
 
 Three of these are hazards rather than trade-offs, so warn the user before handing over a command.
 
@@ -270,6 +286,7 @@ A hand-launched viewer is untracked. `launch_viewer_tool` records the process so
 | `prepare_single_recording_batch_tool` plus the execute tools | `cindra run -i <config> -s <output-root>`        |
 | `prepare_multi_recording_batch_tool` plus the execute tools  | `cindra run -i <config>`                         |
 | `check_threading_runtime_tool`, on macOS alone               | `cindra omp`                                     |
+| `check_gpu_runtime_tool`                                     | `cindra gpu`                                     |
 | `launch_viewer_tool(viewer_type="roi")`                      | `cindra-gui roi -r <output-root>`                |
 | `launch_viewer_tool(viewer_type="registration")`             | `cindra-gui registration -r <output-root>`       |
 | `launch_viewer_tool(viewer_type="tracking")`                 | `cindra-gui tracking -r <output-root> -d <name>` |
@@ -284,10 +301,11 @@ on macOS alone, so on Linux and Windows tell the user to check the TBB runtime w
 environment cindra runs in, and to install `tbb4py` when that import fails.
 
 Everything else blocks until the server is back. That covers acquisition parameter generation and validation, recording
-discovery, dataset name resolution, and configuration reading, validation, and modification. It also covers both
-planning tools `get_pipeline_job_universe_tool` and `size_pipeline_jobs_tool`, every batch status, timing, cancel,
-reset, and cleanup tool, all output verification and query tools, and live viewer state. Say so plainly rather than
-improvising a substitute.
+discovery, dataset name resolution, and configuration reading, validation, and modification. It also covers two of the
+four planning tools, `get_pipeline_job_universe_tool` and `size_pipeline_jobs_tool`, because the table above already
+substitutes for `check_threading_runtime_tool` and `check_gpu_runtime_tool`. It covers every batch status, timing,
+cancel, reset, and cleanup tool, all output verification and query tools, and live viewer state. Say so plainly rather
+than improvising a substitute.
 
 ---
 
@@ -325,6 +343,7 @@ Handing a user a CLI command, reader-judged:
 - [ ] Printed the command for the user instead of running it
 - [ ] Passed `-s <output-root>` on a single-recording `cindra run`, or confirmed `file_io.output_path` is already set
 - [ ] Named `check_threading_runtime_tool` rather than `cindra omp` for a threading check off macOS
+- [ ] Stated that `--register-device` takes a non-negative CUDA device index alone, since `-1` is a usage error there
 - [ ] Warned that `cindra run` rewrites the configuration file `-i` names
 - [ ] Warned about sequential dispatch and abort-on-first-failure before recommending `cindra run`
 - [ ] Confirmed no MCP session holds the tracker for that output directory

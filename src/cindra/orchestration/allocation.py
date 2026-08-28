@@ -211,22 +211,29 @@ RESOURCE_CLASS_BY_JOB_NAME: dict[str, ResourceClass] = {
 def resolve_stage_workers(
     job_name: SingleRecordingJobNames | MultiRecordingJobNames,
     requested_workers: int | None = None,
+    *,
+    gpu_registration: bool = False,
 ) -> int:
     """Resolves the number of workers to allocate to the target pipeline stage.
 
     Notes:
-        A requested count of None resolves to the default for the stage, which is the allocation that stage's
-        scaling curve. A requested count of -1 resolves to every available CPU core, minus the cores the ataraxis
-        worker resolver holds back for system use. A positive requested count is honored exactly. A requested count of
-        zero, or any negative count other than -1, is rejected.
+        A requested count of None resolves to the default for the stage. A requested count of -1 resolves to every
+        available CPU core, minus the cores the ataraxis worker resolver holds back for system use. A positive
+        requested count is honored exactly. A requested count of zero, or any negative count other than -1, is
+        rejected.
 
         Every pipeline stage resolves through this function. The combination stage takes no worker argument of its
         own, so its default is the single core its serial merge occupies.
+
+        The registration stage default alone responds to gpu_registration, because it is the one stage that runs on a
+        CUDA device. Every other stage resolves the same count whatever that flag holds.
 
     Args:
         job_name: The single or multi-recording pipeline stage to allocate workers for.
         requested_workers: The number of workers the caller asks for. Use None to accept the default for the
             stage and -1 to request every available core.
+        gpu_registration: Determines whether the registration jobs are planned for a CUDA device rather than the host
+            CPU.
 
     Returns:
         The number of workers to allocate to the stage, always at least 1.
@@ -243,6 +250,9 @@ def resolve_stage_workers(
             f"{[stage.value for stage in _STAGE_WORKER_DEFAULTS]}."
         )
         console.error(message=message, error=ValueError)
+
+    if gpu_registration and job_name == SingleRecordingJobNames.REGISTER:
+        default_workers = REGISTRATION_GPU_WORKERS
 
     if requested_workers is None:
         return default_workers
@@ -261,16 +271,17 @@ def resolve_stage_workers(
     return requested_workers
 
 
-def resolve_registration_resource_class(*, gpu_backend: bool) -> ResourceClass:
-    """Resolves the resource class that governs a registration job running on the target backend.
+def resolve_registration_resource_class(*, gpu_registration: bool) -> ResourceClass:
+    """Resolves the resource class that governs a registration job planned for a CUDA device or for the host CPU.
 
     Args:
-        gpu_backend: Determines whether the job's configuration names the GPU registration backend.
+        gpu_registration: Determines whether the registration jobs are planned for a CUDA device rather than the host
+            CPU.
 
     Returns:
         The resource class that governs the job's worker count and the concurrency of its queue.
     """
-    return _resolve_registration_gpu_resources() if gpu_backend else _REGISTRATION_RESOURCES
+    return _resolve_registration_gpu_resources() if gpu_registration else _REGISTRATION_RESOURCES
 
 
 def class_requires_device(resource_class: ResourceClass) -> bool:

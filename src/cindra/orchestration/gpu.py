@@ -1,4 +1,4 @@
-"""Provides the CUDA device discovery and verification that gate the GPU registration backend."""
+"""Provides the CUDA device discovery and verification that gate the registration stage running on a CUDA device."""
 
 import sys
 from enum import StrEnum
@@ -28,6 +28,9 @@ Notes:
     importable module.
 """
 
+ALL_DEVICES_REQUEST: int = -1
+"""The requested device index that asks for every CUDA device the host exposes."""
+
 _BYTES_PER_MEGABYTE: int = 1024**2
 """The number of bytes in one megabyte, used to convert the device memory counter into a reported size."""
 
@@ -42,7 +45,7 @@ Notes:
 
 
 class GpuStatus(StrEnum):
-    """Defines the outcome of a request to resolve the CUDA devices the GPU registration backend runs on."""
+    """Defines the outcome of a request to resolve the CUDA devices the registration stage runs on."""
 
     AVAILABLE = "available"
     """At least one device is present and the runtime performs a transform on it."""
@@ -61,7 +64,7 @@ class GpuDevice:
     """Describes one CUDA device the host exposes."""
 
     index: int
-    """The zero-based device index the registration backend selects the device by."""
+    """The zero-based index the registration backend uses to select this device."""
     name: str
     """The marketing name the driver reports for the device."""
     total_memory_mb: int
@@ -72,7 +75,7 @@ class GpuDevice:
 
 @dataclass(frozen=True, slots=True)
 class GpuSummary:
-    """Summarizes the CUDA devices the host exposes and whether the GPU registration backend runs on them."""
+    """Summarizes the CUDA devices the host exposes and whether the registration stage runs on them."""
 
     status: GpuStatus
     """The outcome of the resolution."""
@@ -83,7 +86,7 @@ class GpuSummary:
 
     @property
     def available(self) -> bool:
-        """Returns True when the GPU registration backend runs on this host."""
+        """Returns True when the registration stage runs on a CUDA device of this host."""
         return self.status == GpuStatus.AVAILABLE
 
     @property
@@ -105,11 +108,15 @@ class GpuSummary:
         return f"no usable CUDA device: {self.detail}"
 
 
-def resolve_gpu_devices() -> GpuSummary:
-    """Resolves the CUDA devices the GPU registration backend runs on.
+def resolve_gpu_devices(device: int | None = None) -> GpuSummary:
+    """Resolves the CUDA devices the registration stage runs on.
 
-    Probes the runtime by transforming a small array on the first device, because CuPy resolves the cuFFT shared
-    library on first use rather than at import.
+    Probes the runtime by transforming a small array on one device, because CuPy resolves the cuFFT shared library on
+    first use rather than at import.
+
+    Args:
+        device: The zero-based index of the CUDA device to transform the probe array on. Use None to transform it on
+            the device the runtime selects by default. An index the host does not expose falls back to that same device.
 
     Returns:
         The summary of the devices found and of the reason no device is usable.
@@ -118,7 +125,7 @@ def resolve_gpu_devices() -> GpuSummary:
         return GpuSummary(
             status=GpuStatus.UNSUPPORTED_PLATFORM,
             devices=(),
-            detail="the CuPy distribution publishes no macOS wheel, so registration runs on the CPU backend",
+            detail="the CuPy distribution publishes no macOS wheel, so registration runs on the host CPU",
         )
 
     if cupy is None:
@@ -143,29 +150,44 @@ def resolve_gpu_devices() -> GpuSummary:
 
     try:
         devices = _describe_devices(device_count=device_count)
-        _probe_device_transform()
+        _probe_device_transform(device=device if device is not None and 0 <= device < device_count else None)
     except Exception as error:
         return GpuSummary(status=GpuStatus.LIBRARIES_MISSING, devices=(), detail=str(error))
 
     return GpuSummary(status=GpuStatus.AVAILABLE, devices=devices, detail="")
 
 
-def verify_gpu_runtime() -> None:
-    """Verifies that the GPU registration backend runs on this host, aborting the caller when it does not.
+def verify_gpu_runtime(device: int | None = None) -> None:
+    """Verifies that the registration stage runs on a CUDA device of this host, aborting the caller when it does not.
+
+    Notes:
+        The runtime is verified before the requested index, so a host reaching no device at all reports the
+        installation that resolves it rather than the index it was asked for.
+
+    Args:
+        device: The zero-based index of the CUDA device the caller registers on. Use None to verify the runtime alone,
+            without naming a device.
 
     Raises:
         RuntimeError: If no CUDA device is usable.
+        ValueError: If device names an index the host does not expose.
     """
-    summary = resolve_gpu_devices()
-    if summary.available:
-        return
+    summary = resolve_gpu_devices(device=device)
+    if not summary.available:
+        message = (
+            f"Unable to run the registration stage on a CUDA device. The host exposes no usable CUDA device: "
+            f"{summary.detail}. {summary.remedy} Omit the registration device argument to run the stage on the host "
+            f"CPU instead."
+        )
+        console.error(message=message, error=RuntimeError)
 
-    message = (
-        f"Unable to run the registration stage on the GPU backend. The host exposes no usable CUDA device: "
-        f"{summary.detail}. {summary.remedy} Set 'registration.backend' to 'cpu' to run the stage on the CPU backend "
-        f"instead."
-    )
-    console.error(message=message, error=RuntimeError)
+    host_devices = [entry.index for entry in summary.devices]
+    if device is not None and device not in host_devices:
+        message = (
+            f"Unable to run the registration stage on CUDA device {device}. The host exposes no device carrying that "
+            f"index. Available device indices: {host_devices}."
+        )
+        console.error(message=message, error=ValueError)
 
 
 def resolve_device_budget() -> int:
@@ -201,8 +223,23 @@ def _describe_devices(device_count: int) -> tuple[GpuDevice, ...]:
     return tuple(devices)
 
 
-def _probe_device_transform() -> None:
-    """Transforms a small array on the first device to resolve the CUDA math libraries the backend loads."""
+def _probe_device_transform(device: int | None) -> None:
+    """Transforms a small array on one device to resolve the CUDA math libraries the backend loads.
+
+    Args:
+        device: The zero-based index of the CUDA device to transform on, or None to transform on the device the
+            runtime selects by default.
+    """
+    if device is None:
+        _transform_probe_array()
+        return
+
+    with cupy.cuda.Device(device):
+        _transform_probe_array()
+
+
+def _transform_probe_array() -> None:
+    """Transforms a small array on the current device and waits for the transform to finish."""
     probe = cupy.zeros((_PROBE_DIMENSION, _PROBE_DIMENSION), dtype=cupy.float32)
     cupy.fft.rfft2(probe, axes=(-2, -1))
     cupy.cuda.Stream.null.synchronize()

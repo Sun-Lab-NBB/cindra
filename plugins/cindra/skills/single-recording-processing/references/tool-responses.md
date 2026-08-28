@@ -43,9 +43,13 @@ empty `jobs` list and `success: true`, because the resolver reports absence rath
 
 ### size_pipeline_jobs_tool
 
-Returns `jobs` holding the `name`, `specifier`, `cores`, and `memory_mb` of every declared job, plus `total_jobs`,
-`peak_memory_mb` for the single largest job, `total_memory_mb` for every job at once, and `pipeline_type`. Unlike the
-universe tool, this one fails when the recording's raw imaging data cannot be read, because no stage of it could run.
+Returns `jobs` holding the `name`, `specifier`, `cores`, `memory_mb`, and `device_memory_mb` of every declared job, plus
+`total_jobs`, `peak_memory_mb` and `peak_device_memory_mb` for the single largest job, `total_memory_mb` for every job
+at once, and `pipeline_type`. No device total is reported, because the device count rather than a shared pool bounds the
+jobs that hold a device at once. `gpu_registration=True` plans the registration jobs for a CUDA device, which reports 2
+cores in place of 4, raises their `memory_mb` by the page-locked host buffers the device staging holds, and fills their
+`device_memory_mb`. Every other job reports a `device_memory_mb` of zero. Unlike the universe tool, this one fails when
+the recording's raw imaging data cannot be read, because no stage of it could run.
 
 ### check_threading_runtime_tool
 
@@ -58,6 +62,13 @@ found, `discovered_runtimes` is empty while `searched_paths` still lists every c
 is the list to surface to the user. Both are empty only when the runtime already loads, because a host that already
 loads one runs no discovery.
 
+### check_gpu_runtime_tool
+
+Returns `ready`, the `status` naming the outcome, a `detail` sentence, a `device_count`, and a `devices` list holding
+the `index`, `name`, `total_memory_mb`, and `compute_capability` of every usable device. A host that is not ready
+carries an empty `devices` list and a `remedy` naming the CuPy installation. macOS carries no remedy, because the CuPy
+project publishes no wheel for it. The `index` values are what `gpu_devices` takes.
+
 ### execute_processing_jobs_tool and execute_full_pipeline_tool
 
 | Key                | Meaning                                                                |
@@ -66,7 +77,12 @@ loads one runs no discovery.
 | `total_jobs`       | Jobs the session holds, including those still awaiting prerequisites   |
 | `cpu_budget`       | Session core budget, which is the host core count minus 2              |
 | `memory_budget_mb` | Session memory budget, sampled once at session start                   |
+| `gpu_devices`      | The CUDA device indices the session holds, empty for a host-CPU run    |
 | `resource_classes` | Per class, its `workers_per_job`, `max_parallel_jobs`, and `job_count` |
+
+The `gpu_devices` argument both tools take carries three cases. None registers on the host CPU, `[-1]` names every
+device the host exposes, and an explicit list names those devices. An empty list is rejected, `-1` cannot be paired
+with an index, and an index the host does not expose is rejected against the indices it does.
 
 `execute_full_pipeline_tool` additionally returns `pipeline_type`, `phase_count`, a per-phase `phases` list, and the
 preparation lists it forwards, including `migrated_recordings` and `path_conflicts`. It returns `started: false` with a

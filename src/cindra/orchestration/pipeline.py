@@ -29,7 +29,6 @@ from ..layout import (
     SINGLE_RECORDING_TRACKER_FILENAME,
     resolve_plane_specifier,
 )
-from ..dataclasses import RegistrationBackend, SingleRecordingConfiguration
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -75,15 +74,16 @@ def run_single_recording_pipeline(
             accept the stage default and -1 to request every available core.
         processing_workers: The number of parallel workers to allocate to each plane-processing job. Use None to accept
             the stage default and -1 to request every available core.
-        registration_device: The zero-based index of the CUDA device each plane-registration job runs on while the
-            configuration names the GPU backend. Use None to select the first device the host exposes.
+        registration_device: The zero-based index of the CUDA device each plane-registration job runs on. Use None to
+            register every plane on the host CPU.
 
     Raises:
         FileNotFoundError: If the single-recording configuration data cannot be loaded from the specified file.
         RuntimeError: If the host is macOS and carries no loadable OpenMP runtime for the Numba threading layer, or if
-            a registration job names the GPU backend and the host exposes no usable CUDA device.
+            a registration device is named and the host exposes no usable CUDA device.
         ValueError: If the recording's data validation fails, the specified job_id does not match any available job,
-            or target_plane names a plane the recording does not hold.
+            target_plane names a plane the recording does not hold, or registration_device names a CUDA device index
+            the host does not expose.
     """
     # Every stage below reaches a parallelized kernel, so a host whose threading layer has no runtime to load fails
     # here rather than partway through a recording.
@@ -138,7 +138,7 @@ def run_single_recording_pipeline(
         # REMOTE mode.
         resolved_name, resolved_specifier = tracker.resolve_job(job_id=job_id, universe=universe)
 
-        _verify_registration_device(configuration=configuration, job_names=[resolved_name])
+        _verify_registration_device(device=registration_device, job_names=[resolved_name])
 
         tracker.align_jobs(jobs=universe, universe=universe)
 
@@ -165,7 +165,7 @@ def run_single_recording_pipeline(
             )
             console.error(message=message, error=ValueError)
 
-        _verify_registration_device(configuration=configuration, job_names=jobs_to_run)
+        _verify_registration_device(device=registration_device, job_names=jobs_to_run)
 
         jobs: list[tuple[str, str]] = []
         for base_job_name in jobs_to_run:
@@ -341,24 +341,23 @@ def run_multi_recording_pipeline(
     console.echo(message="Multi-recording processing: Complete.", level=LogLevel.SUCCESS)
 
 
-def _verify_registration_device(configuration: SingleRecordingConfiguration, job_names: list[str]) -> None:
-    """Verifies that the host carries a usable CUDA device before a registration job runs on the GPU backend.
+def _verify_registration_device(device: int | None, job_names: list[str]) -> None:
+    """Verifies that the host exposes the CUDA device a registration job of this invocation runs on.
 
     Notes:
-        The verification precedes the first dispatch, so a host that carries no usable device aborts the invocation
+        The verification precedes the first dispatch, so a host that exposes no such device aborts the invocation
         having done no work rather than at the point the registration reaches the device.
 
     Args:
-        configuration: The loaded configuration whose registration section names the backend.
+        device: The zero-based index of the CUDA device the registration jobs run on, or None while they run on the
+            host CPU.
         job_names: The names of the jobs this invocation runs.
 
     Raises:
-        RuntimeError: If a registration job names the GPU backend and the host exposes no usable CUDA device.
+        RuntimeError: If a registration device is named and the host exposes no usable CUDA device.
+        ValueError: If the named device index is one the host does not expose.
     """
-    if SingleRecordingJobNames.REGISTER not in job_names:
+    if device is None or SingleRecordingJobNames.REGISTER not in job_names:
         return
 
-    if configuration.registration.backend != RegistrationBackend.GPU:
-        return
-
-    verify_gpu_runtime()
+    verify_gpu_runtime(device=device)

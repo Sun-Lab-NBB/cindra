@@ -6,10 +6,14 @@ from concurrent.futures import Future, Executor
 
 from ataraxis_data_structures import JobState as JobState
 
-from .gpu import resolve_gpu_devices as resolve_gpu_devices
+from .gpu import (
+    ALL_DEVICES_REQUEST as ALL_DEVICES_REQUEST,
+    resolve_gpu_devices as resolve_gpu_devices,
+)
 from .jobs import (
     PREREQUISITE_FAILURE_MESSAGE as PREREQUISITE_FAILURE_MESSAGE,
     UNREACHABLE_PREREQUISITE_MESSAGE as UNREACHABLE_PREREQUISITE_MESSAGE,
+    SingleRecordingJobNames as SingleRecordingJobNames,
     resolve_prerequisite_job_ids as resolve_prerequisite_job_ids,
 )
 from .pipeline import (
@@ -18,6 +22,7 @@ from .pipeline import (
 )
 from .allocation import (
     ALL_CORES_REQUEST as ALL_CORES_REQUEST,
+    RESOURCE_CLASS_BY_JOB_NAME as RESOURCE_CLASS_BY_JOB_NAME,
     ResourceClass as ResourceClass,
     resolve_core_budget as resolve_core_budget,
     class_requires_device as class_requires_device,
@@ -87,6 +92,9 @@ def start_execution_session(
 def cancel_execution_session() -> tuple[int, int]: ...
 def _job_execution_manager(state: JobExecutionState) -> None: ...
 def _resolve_session_devices(gpu_devices: list[int] | None) -> list[int]: ...
+def _validate_session_device_agreement(
+    all_jobs: dict[tuple[str, str], PendingJob], session_devices: list[int]
+) -> None: ...
 def _clear_owned_session(state: JobExecutionState) -> None: ...
 def _reap_completed_jobs(state: JobExecutionState) -> None: ...
 def _resolve_job_outcome(future: Future[None]) -> tuple[_JobOutcomes, str]: ...

@@ -79,7 +79,9 @@ invocation argument, supplied by the `cindra run` options `-bw/--binarize-worker
 interfaces share one convention. Omitting a `cindra run` worker option, or leaving the MCP `workers_per_job` as None,
 applies the measured default of 3 workers for binarization, 4 for registration and 10 for processing. Setting either to
 -1 requests every available core. Any positive value is used exactly, and on the MCP tools it overrides every non-fixed
-resource class alike.
+resource class alike. The CUDA device registration runs on is an invocation argument too. It is named by the
+`--register-device` option of `cindra run`, or by the `gpu_devices` argument of the execute tools, and naming neither
+registers on the host CPU. `registration.gpu_batch_size` is the only field this file owns for that path.
 
 ---
 
@@ -200,6 +202,7 @@ recommendation to run both together.
 | `spatial_smoothing_sigma`                  | float | 1.15    | Gaussian sigma (pixels) for phase correlation smoothing.            |
 | `temporal_smoothing_sigma`                 | float | 0.0     | Gaussian sigma (frames) for temporal smoothing. 0 = disabled.       |
 | `two_step_registration`                    | bool  | False   | Enable refinement registration (two-step).                          |
+| `gpu_batch_size`                           | int   | 0       | Frames staged on a CUDA device. 0 = use batch_size there.           |
 | `bad_frame_threshold`                      | float | 1.0     | Offset outlier threshold. Excluded frames are skipped, not removed. |
 | `normalize_frames`                         | bool  | True    | Clip pixel intensities to 1st-99th percentile during registration.  |
 | `registration_metric_principal_components` | int   | 5       | PCs for registration quality metrics. 0 = disable metrics.          |
@@ -378,10 +381,7 @@ deconvolves the result to produce an estimated spike rate trace per ROI.
 
 ### Parameters typically left at default
 
-- All registration parameters (work well for 2P imaging)
-- ROI detection parameters (tuned for GCaMP6f)
-- Signal extraction parameters
-- Spike deconvolution parameters
+The registration, ROI detection, signal extraction, and spike deconvolution parameters all suit 2P GCaMP6f data.
 
 ---
 

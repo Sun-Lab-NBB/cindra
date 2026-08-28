@@ -124,6 +124,68 @@ Notes:
 _MINIMUM_METRIC_FRAME_COUNT: int = 1500
 """The frames a plane must hold before the registration quality metrics run at all."""
 
+_BLOCK_OVERLAP_FACTOR: float = 1.5
+"""The multiplier the nonrigid block tiling applies to a plane extent, which spaces its blocks at roughly half a block
+of overlap."""
+
+_UPSAMPLING_PADDING: int = 3
+"""The half-width of the correlation region the subpixel stage upsamples, from which the nonrigid window size
+derives."""
+
+_DEVICE_PIPELINE_SLOTS: int = 2
+"""The staging slots the device-backed registration cycles a frame batch through."""
+
+_DEVICE_STAGING_DIRECTIONS: int = 2
+"""The transfer directions of the page-locked host buffers each staging slot holds, which are the upload of one batch
+and the download of its registered frames."""
+
+_DEVICE_STAGING_BATCH_PIXEL_BYTES: int = 16
+"""The device staging buffers the backend holds per batch pixel, covering both pipeline slots at the plane binary's
+storage width and every batch geometry a plane's registration passes retain."""
+
+_DEVICE_RIGID_BATCH_PIXEL_BYTES: int = 40
+"""The device working set one rigid-only batch registration holds at its peak, in bytes per batch pixel."""
+
+_DEVICE_NONRIGID_BATCH_PIXEL_BYTES: int = 84
+"""The device working set one nonrigid batch registration holds at its peak, in bytes per batch pixel."""
+
+_DEVICE_BLOCK_BATCH_PIXEL_BYTES: int = 24
+"""The device working set the nonrigid block phase correlation holds at its peak, in bytes per batch block pixel."""
+
+_DEVICE_WINDOW_COPY_BYTES: int = 20
+"""The per-block correlation window copies the nonrigid smoothing and subpixel stages hold at once, in bytes per batch
+block and window sample."""
+
+_DEVICE_SUBPIXEL_BLOCK_BYTES: int = 15080
+"""The gathered correlation region and the upsampled correlation surface one block of one frame holds, in bytes."""
+
+_DEVICE_REFERENCE_FRAME_PIXEL_BYTES: int = 32
+"""The frame-shaped reference state the backend holds for its lifetime, in bytes per frame pixel, covering the rigid
+taper mask, the rigid mean offset, the four nonrigid interpolation grids, and the normalization weight cache."""
+
+_DEVICE_REFERENCE_BLOCK_PIXEL_BYTES: int = 12
+"""The block-shaped reference state the backend holds for its lifetime, in bytes per block pixel, covering the
+per-block taper mask, the per-block mean offset, and the block index arrays."""
+
+_DEVICE_COMPLEX_BYTES: int = 8
+"""The width of one complex single-precision element, which every phase correlation kernel the backend holds
+carries."""
+
+_DEVICE_UPSAMPLING_MATRIX_BYTES: int = 729316
+"""The device memory the Gaussian RBF upsampling matrix occupies, which is one 49 by 3721 single-precision matrix."""
+
+_DEVICE_CONTEXT_BYTES: int = 536870912
+"""The device memory the CUDA primary context, the cuBLAS handle, and the FFT plan cache occupy alongside the arrays
+the registration allocates."""
+
+_DEVICE_LIVE_BACKENDS: int = 2
+"""The device backends one plane registration holds at once while two-step registration refinement runs.
+
+Notes:
+    The refinement pass builds its own backend while the local that names the first pass's backend still binds it, so
+    the resident state of both, and the working set the pool holds for each, stay on the device for that whole pass.
+"""
+
 _COMBINATION_TRACE_KINDS: int = 4
 """The trace arrays the combination stage concatenates, which are the raw, neuropil, subtracted, and spike traces.
 
@@ -284,9 +346,26 @@ class JobSizing:
     """Describes the resources one job receives, as one sizing pass resolved them."""
 
     cores: int
-    """The CPU cores the job occupies while it runs, as the stage's measured default declares them."""
+    """The CPU cores the job occupies while it runs, as the stage's default declares them."""
     memory_mb: int
     """The memory the job occupies at its peak, in megabytes."""
+    device_memory_mb: int
+    """The device memory the job occupies at its peak, in megabytes, which is zero for a job that holds no CUDA
+    device."""
+
+
+@dataclass(frozen=True, slots=True)
+class _NonrigidBlockGeometry:
+    """Describes the overlapping blocks one plane's nonrigid registration resolves its offsets over."""
+
+    count: int
+    """The blocks one frame is tiled with, which is zero while nonrigid registration is disabled."""
+    height: int
+    """The height of one block in pixels."""
+    width: int
+    """The width of one block in pixels."""
+    window_size: int
+    """The side length of the correlation window the subpixel stage reads around each block's peak."""
 
 
 def resolve_recording_geometry(
@@ -355,6 +434,7 @@ def estimate_single_recording_job_memory_mb(
     data_path: Path | None = None,
     *,
     planned_roi_count: int | None = None,
+    gpu_registration: bool = False,
 ) -> int:
     """Estimates the memory one single-recording job occupies at its peak.
 
@@ -377,6 +457,8 @@ def estimate_single_recording_job_memory_mb(
             of the first source file that directory holds.
         planned_roi_count: The regions to plan for, counting every plane of the recording together. Use None to
             accept the ceiling the detection iteration bound provides. Must be a positive integer when supplied.
+        gpu_registration: Determines whether the registration jobs are planned for a CUDA device rather than the host
+            CPU. Every other job name resolves the same figure whatever it holds.
 
     Returns:
         The memory the job occupies in megabytes.
@@ -435,7 +517,10 @@ def estimate_single_recording_job_memory_mb(
 
     if job_name == SingleRecordingJobNames.REGISTER:
         return _apply_tolerance(
-            memory_mb=max(_estimate_registration_mb(plane=plane, configuration=configuration) for plane in planes)
+            memory_mb=max(
+                _estimate_registration_mb(plane=plane, configuration=configuration, gpu_registration=gpu_registration)
+                for plane in planes
+            )
         )
 
     # A per-plane job is charged as though every planned region fell on its own plane, because the planned figure
@@ -507,6 +592,7 @@ def size_single_recording_job(
     data_path: Path | None = None,
     *,
     planned_roi_count: int | None = None,
+    gpu_registration: bool = False,
 ) -> JobSizing:
     """Sizes one single-recording job from the recording it processes.
 
@@ -520,9 +606,11 @@ def size_single_recording_job(
             of the first source file that directory holds.
         planned_roi_count: The regions to plan for, counting every plane of the recording together. Use None to
             accept the ceiling the detection iteration bound provides. Must be a positive integer when supplied.
+        gpu_registration: Determines whether the registration jobs are planned for a CUDA device rather than the host
+            CPU. A job of any other stage reports no device memory whatever it holds.
 
     Returns:
-        The cores the job occupies and the memory it holds.
+        The cores the job occupies, the memory it holds, and the device memory it holds.
 
     Raises:
         FileNotFoundError: If the recording's acquisition parameters were not readable or its raw imaging directory
@@ -538,9 +626,20 @@ def size_single_recording_job(
         configuration=configuration,
         data_path=data_path,
         planned_roi_count=planned_roi_count,
+        gpu_registration=gpu_registration,
     )
 
-    return JobSizing(cores=resolve_stage_workers(job_name=job_name), memory_mb=memory_mb)
+    device_memory_mb = 0
+    if gpu_registration and job_name == SingleRecordingJobNames.REGISTER:
+        device_memory_mb = _estimate_registration_device_memory_mb(
+            specifier=specifier, output_root=output_root, configuration=configuration, data_path=data_path
+        )
+
+    return JobSizing(
+        cores=resolve_stage_workers(job_name=job_name, gpu_registration=gpu_registration),
+        memory_mb=memory_mb,
+        device_memory_mb=device_memory_mb,
+    )
 
 
 def size_multi_recording_job(
@@ -559,7 +658,8 @@ def size_multi_recording_job(
         configuration: The dataset's processing configuration.
 
     Returns:
-        The cores the job occupies and the memory it holds.
+        The cores the job occupies and the memory it holds, alongside a device memory of zero, because no
+        multi-recording stage runs on a CUDA device.
 
     Raises:
         FileNotFoundError: If the dataset names no recording directory, if any recording carries no combined metadata
@@ -573,7 +673,7 @@ def size_multi_recording_job(
         configuration=configuration,
     )
 
-    return JobSizing(cores=resolve_stage_workers(job_name=job_name), memory_mb=memory_mb)
+    return JobSizing(cores=resolve_stage_workers(job_name=job_name), memory_mb=memory_mb, device_memory_mb=0)
 
 
 def _estimate_binarization_mb(geometry: RecordingGeometry, configuration: SingleRecordingConfiguration) -> int:
@@ -603,17 +703,24 @@ def _estimate_binarization_mb(geometry: RecordingGeometry, configuration: Single
     return WORKER_MEMORY_MB + _bytes_to_megabytes(byte_count=batch_bytes + accumulator_bytes)
 
 
-def _estimate_registration_mb(plane: PlaneGeometry, configuration: SingleRecordingConfiguration) -> int:
-    """Estimates the memory one plane registration job holds, from the samples its stages read.
+def _estimate_registration_mb(
+    plane: PlaneGeometry, configuration: SingleRecordingConfiguration, *, gpu_registration: bool
+) -> int:
+    """Estimates the host memory one plane registration job holds, from the samples its stages read.
 
     Notes:
         The peak is the larger of the reference image stage and the registration quality metrics. The metric sample
         count steps down when the plane is large or the recording is short, which is why a taller plane can hold a
         smaller working set than a shorter one.
 
+        A job registering on a CUDA device adds the page-locked staging buffers of both pipeline slots and both
+        transfer directions to that peak, because those buffers stay resident for the whole job while the stages above
+        run.
+
     Args:
         plane: The plane's geometry.
         configuration: The recording's processing configuration.
+        gpu_registration: Determines whether the job is planned for a CUDA device rather than the host CPU.
 
     Returns:
         The memory the job holds in megabytes, before the shared tolerance.
@@ -639,7 +746,167 @@ def _estimate_registration_mb(plane: PlaneGeometry, configuration: SingleRecordi
             * _SINGLE_PRECISION_BYTES
         )
 
-    return WORKER_MEMORY_MB + _bytes_to_megabytes(byte_count=max(reference_bytes, metric_bytes))
+    peak_bytes = max(reference_bytes, metric_bytes)
+    if gpu_registration:
+        peak_bytes += (
+            _DEVICE_PIPELINE_SLOTS
+            * _DEVICE_STAGING_DIRECTIONS
+            * _resolve_device_batch_size(plane=plane, configuration=configuration)
+            * plane_pixels
+            * _SINGLE_PRECISION_BYTES
+        )
+
+    return WORKER_MEMORY_MB + _bytes_to_megabytes(byte_count=peak_bytes)
+
+
+def _estimate_registration_device_memory_mb(
+    specifier: str,
+    output_root: Path,
+    configuration: SingleRecordingConfiguration,
+    data_path: Path | None,
+) -> int:
+    """Estimates the device memory one plane registration job occupies at its peak.
+
+    Notes:
+        A job whose specifier names no single plane is charged the largest per-plane figure, matching the host
+        estimate. That estimate resolves the same geometry first, so every recording this reads holds at least one
+        imaging plane.
+
+    Args:
+        specifier: The job's tracker specifier, which names the plane the job registers.
+        output_root: The output root the recording was configured with.
+        configuration: The recording's processing configuration.
+        data_path: The recording's configured raw imaging path, which is either the directory holding its source files
+            or any parent of the directory that holds its acquisition parameters file.
+
+    Returns:
+        The device memory the job occupies in megabytes.
+    """
+    geometry = resolve_recording_geometry(
+        output_root=output_root,
+        data_path=data_path,
+        ignored_file_names=tuple(configuration.file_io.ignored_file_names),
+    )
+    plane_index = parse_plane_specifier(specifier=specifier)
+    planes = (
+        geometry.planes
+        if plane_index is None
+        else tuple(plane for plane in geometry.planes if plane.index == plane_index)
+    )
+
+    return _apply_tolerance(
+        memory_mb=max(_estimate_registration_device_mb(plane=plane, configuration=configuration) for plane in planes)
+    )
+
+
+def _estimate_registration_device_mb(plane: PlaneGeometry, configuration: SingleRecordingConfiguration) -> int:
+    """Estimates the device memory one plane registration job holds while it runs on a CUDA device.
+
+    Notes:
+        The batch the device stages is the larger of the two configured sizes, because the alignment pass honors the
+        device batch while the secondary channel pass reads the shared one. The staging term and every working term
+        scale with that batch, so it is the one setting that fits a job to a card.
+
+        The frame-shaped, block-shaped, and per-block terms are summed rather than maxed. The device memory pool
+        retains a freed block rather than returning it to the driver, and the three phases request different shapes.
+
+        A configuration enabling two-step registration is charged for two backends. The refinement pass builds its
+        own backend while the first pass's backend is still bound, so both hold their staging buffers and their
+        reference uploads. The device memory pool keys its free lists by stream, so the blocks the first pass
+        released stay on the device and the refinement pass allocates its working set beside them. The context term
+        is charged once, because one process holds one primary context per device.
+
+    Args:
+        plane: The plane's geometry.
+        configuration: The recording's processing configuration.
+
+    Returns:
+        The device memory the job holds in megabytes, before the shared tolerance.
+    """
+    plane_pixels = plane.height * plane.width
+    half_spectrum = plane.height * (plane.width // 2 + 1)
+    batch = _resolve_device_batch_size(plane=plane, configuration=configuration)
+
+    blocks = _resolve_nonrigid_block_geometry(plane=plane, configuration=configuration)
+    block_pixels = blocks.count * blocks.height * blocks.width
+    block_half_spectrum = blocks.count * blocks.height * (blocks.width // 2 + 1)
+    frame_bytes = _DEVICE_NONRIGID_BATCH_PIXEL_BYTES if blocks.count else _DEVICE_RIGID_BATCH_PIXEL_BYTES
+
+    # The staging buffers, the reference uploads, and the upsampling matrix belong to one backend and stay on the
+    # device for its whole lifetime, so a pass that keeps a second backend alive holds them twice.
+    resident_bytes = (
+        _DEVICE_STAGING_BATCH_PIXEL_BYTES * batch * plane_pixels
+        + _DEVICE_REFERENCE_FRAME_PIXEL_BYTES * plane_pixels
+        + _DEVICE_COMPLEX_BYTES * half_spectrum
+        + _DEVICE_REFERENCE_BLOCK_PIXEL_BYTES * block_pixels
+        + _DEVICE_COMPLEX_BYTES * block_half_spectrum
+        + _SINGLE_PRECISION_BYTES * blocks.count**2
+        + _DEVICE_UPSAMPLING_MATRIX_BYTES
+    )
+    working_bytes = (
+        frame_bytes * batch * plane_pixels
+        + _DEVICE_BLOCK_BATCH_PIXEL_BYTES * batch * block_pixels
+        + batch * blocks.count * (_DEVICE_WINDOW_COPY_BYTES * blocks.window_size**2 + _DEVICE_SUBPIXEL_BLOCK_BYTES)
+    )
+    backends = _DEVICE_LIVE_BACKENDS if configuration.registration.two_step_registration else 1
+
+    return _bytes_to_megabytes(byte_count=backends * (resident_bytes + working_bytes) + _DEVICE_CONTEXT_BYTES)
+
+
+def _resolve_device_batch_size(plane: PlaneGeometry, configuration: SingleRecordingConfiguration) -> int:
+    """Resolves the frames one plane's device-backed registration stages at once.
+
+    Args:
+        plane: The plane's geometry.
+        configuration: The recording's processing configuration.
+
+    Returns:
+        The frames the widest of the plane's registration passes stages, bounded by the frames the plane holds.
+    """
+    configured = max(configuration.registration.gpu_batch_size, configuration.registration.batch_size)
+    return min(configured, plane.frame_count)
+
+
+def _resolve_nonrigid_block_geometry(
+    plane: PlaneGeometry, configuration: SingleRecordingConfiguration
+) -> _NonrigidBlockGeometry:
+    """Resolves the block tiling one plane's nonrigid registration resolves its offsets over.
+
+    Args:
+        plane: The plane's geometry.
+        configuration: The recording's processing configuration.
+
+    Returns:
+        The block count, the block extent, and the correlation window size, every one of them zero while nonrigid
+        registration is disabled.
+    """
+    if not configuration.nonrigid_registration.enabled:
+        return _NonrigidBlockGeometry(count=0, height=0, width=0, window_size=0)
+
+    requested_height, requested_width = configuration.nonrigid_registration.block_size
+    if requested_height >= plane.height:
+        block_height, row_blocks = plane.height, 1
+    else:
+        block_height = requested_height
+        row_blocks = math.ceil(_BLOCK_OVERLAP_FACTOR * plane.height / requested_height)
+
+    if requested_width >= plane.width:
+        block_width, column_blocks = plane.width, 1
+    else:
+        block_width = requested_width
+        column_blocks = math.ceil(_BLOCK_OVERLAP_FACTOR * plane.width / requested_width)
+
+    correlation_radius = min(
+        round(configuration.nonrigid_registration.maximum_block_offset),
+        min(block_height, block_width) // 2 - _UPSAMPLING_PADDING,
+    )
+
+    return _NonrigidBlockGeometry(
+        count=row_blocks * column_blocks,
+        height=block_height,
+        width=block_width,
+        window_size=2 * correlation_radius + 2 * _UPSAMPLING_PADDING + 1,
+    )
 
 
 def _estimate_processing_mb(

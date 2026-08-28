@@ -47,6 +47,22 @@ _MINIMUM_METRIC_SAMPLE_COUNT: int
 _MAXIMUM_METRIC_SAMPLE_COUNT: int
 _MAXIMUM_EXTENT_FOR_LARGE_SAMPLE: int
 _MINIMUM_METRIC_FRAME_COUNT: int
+_BLOCK_OVERLAP_FACTOR: float
+_UPSAMPLING_PADDING: int
+_DEVICE_PIPELINE_SLOTS: int
+_DEVICE_STAGING_DIRECTIONS: int
+_DEVICE_STAGING_BATCH_PIXEL_BYTES: int
+_DEVICE_RIGID_BATCH_PIXEL_BYTES: int
+_DEVICE_NONRIGID_BATCH_PIXEL_BYTES: int
+_DEVICE_BLOCK_BATCH_PIXEL_BYTES: int
+_DEVICE_WINDOW_COPY_BYTES: int
+_DEVICE_SUBPIXEL_BLOCK_BYTES: int
+_DEVICE_REFERENCE_FRAME_PIXEL_BYTES: int
+_DEVICE_REFERENCE_BLOCK_PIXEL_BYTES: int
+_DEVICE_COMPLEX_BYTES: int
+_DEVICE_UPSAMPLING_MATRIX_BYTES: int
+_DEVICE_CONTEXT_BYTES: int
+_DEVICE_LIVE_BACKENDS: int
 _COMBINATION_TRACE_KINDS: int
 _EXTRACTION_TRACE_COPIES: int
 _EXTRACTION_BATCH_BYTES_PER_PIXEL: int
@@ -82,6 +98,14 @@ class RecordingGeometry:
 class JobSizing:
     cores: int
     memory_mb: int
+    device_memory_mb: int
+
+@dataclass(frozen=True, slots=True)
+class _NonrigidBlockGeometry:
+    count: int
+    height: int
+    width: int
+    window_size: int
 
 def resolve_recording_geometry(
     output_root: Path, data_path: Path | None = None, ignored_file_names: tuple[str, ...] = ()
@@ -95,6 +119,7 @@ def estimate_single_recording_job_memory_mb(
     data_path: Path | None = None,
     *,
     planned_roi_count: int | None = None,
+    gpu_registration: bool = False,
 ) -> int: ...
 def estimate_multi_recording_job_memory_mb(
     job_name: MultiRecordingJobNames,
@@ -110,6 +135,7 @@ def size_single_recording_job(
     data_path: Path | None = None,
     *,
     planned_roi_count: int | None = None,
+    gpu_registration: bool = False,
 ) -> JobSizing: ...
 def size_multi_recording_job(
     job_name: MultiRecordingJobNames,
@@ -118,7 +144,17 @@ def size_multi_recording_job(
     configuration: MultiRecordingConfiguration,
 ) -> JobSizing: ...
 def _estimate_binarization_mb(geometry: RecordingGeometry, configuration: SingleRecordingConfiguration) -> int: ...
-def _estimate_registration_mb(plane: PlaneGeometry, configuration: SingleRecordingConfiguration) -> int: ...
+def _estimate_registration_mb(
+    plane: PlaneGeometry, configuration: SingleRecordingConfiguration, *, gpu_registration: bool
+) -> int: ...
+def _estimate_registration_device_memory_mb(
+    specifier: str, output_root: Path, configuration: SingleRecordingConfiguration, data_path: Path | None
+) -> int: ...
+def _estimate_registration_device_mb(plane: PlaneGeometry, configuration: SingleRecordingConfiguration) -> int: ...
+def _resolve_device_batch_size(plane: PlaneGeometry, configuration: SingleRecordingConfiguration) -> int: ...
+def _resolve_nonrigid_block_geometry(
+    plane: PlaneGeometry, configuration: SingleRecordingConfiguration
+) -> _NonrigidBlockGeometry: ...
 def _estimate_processing_mb(
     plane: PlaneGeometry, configuration: SingleRecordingConfiguration, regions: int, channels: int
 ) -> int: ...

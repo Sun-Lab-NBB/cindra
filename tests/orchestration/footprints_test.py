@@ -28,11 +28,18 @@ from cindra.orchestration import (
     DISCOVERY_WORKERS,
     COMBINATION_WORKERS,
     BINARIZATION_WORKERS,
+    REGISTRATION_WORKERS,
+    REGISTRATION_GPU_WORKERS,
     MultiRecordingJobNames,
     SingleRecordingJobNames,
 )
 from cindra.orchestration.footprints import (
     WORKER_MEMORY_MB,
+    _BYTES_PER_MEGABYTE,
+    _DEVICE_CONTEXT_BYTES,
+    _DEVICE_PIPELINE_SLOTS,
+    _SINGLE_PRECISION_BYTES,
+    _DEVICE_STAGING_DIRECTIONS,
     _DISCOVERY_TRANSIENT_PLANES,
     _DISCOVERY_PLANES_PER_RECORDING,
     _TRACKING_PAIRWISE_BYTES_PER_SQUARED_REGION,
@@ -49,11 +56,15 @@ from cindra.orchestration.footprints import (
     _estimate_registration_mb,
     resolve_maximum_roi_count,
     size_single_recording_job,
+    _resolve_device_batch_size,
     resolve_recording_geometry,
     _resolve_binned_frame_count,
     _resolve_metric_sample_count,
+    _estimate_registration_device_mb,
     _read_tracked_recording_geometry,
+    _resolve_nonrigid_block_geometry,
     estimate_multi_recording_job_memory_mb,
+    _estimate_registration_device_memory_mb,
     estimate_single_recording_job_memory_mb,
 )
 
@@ -113,9 +124,9 @@ class TestRegistrationSampleCount:
         small = PlaneGeometry(height=690, width=512, frame_count=20000, sampling_rate=30.0)
         tall = PlaneGeometry(height=710, width=512, frame_count=20000, sampling_rate=30.0)
 
-        assert _estimate_registration_mb(plane=tall, configuration=configuration) < _estimate_registration_mb(
-            plane=small, configuration=configuration
-        )
+        assert _estimate_registration_mb(
+            plane=tall, configuration=configuration, gpu_registration=False
+        ) < _estimate_registration_mb(plane=small, configuration=configuration, gpu_registration=False)
 
     def test_disabled_metrics_leave_the_reference_stage_as_the_peak(self) -> None:
         """Verifies that a plane whose quality metrics are disabled is charged the reference stage alone."""
@@ -123,9 +134,190 @@ class TestRegistrationSampleCount:
         configuration = SingleRecordingConfiguration()
         configuration.registration.registration_metric_principal_components = 0
 
-        with_metrics = _estimate_registration_mb(plane=plane, configuration=SingleRecordingConfiguration())
+        with_metrics = _estimate_registration_mb(
+            plane=plane, configuration=SingleRecordingConfiguration(), gpu_registration=False
+        )
 
-        assert _estimate_registration_mb(plane=plane, configuration=configuration) < with_metrics
+        assert (
+            _estimate_registration_mb(plane=plane, configuration=configuration, gpu_registration=False) < with_metrics
+        )
+
+
+class TestDeviceBatchSize:
+    """Tests the frame batch a plane's registration stages at once while it runs on a CUDA device."""
+
+    def test_device_batch_reads_the_wider_of_the_two_configured_sizes(self) -> None:
+        """Verifies that a configured device batch above the shared one is what the device stages."""
+        plane = PlaneGeometry(height=512, width=512, frame_count=20000, sampling_rate=30.0)
+        configuration = SingleRecordingConfiguration()
+        configuration.registration.batch_size = 100
+        configuration.registration.gpu_batch_size = 250
+
+        assert _resolve_device_batch_size(plane=plane, configuration=configuration) == 250
+
+    def test_shared_batch_applies_while_no_device_batch_is_configured(self) -> None:
+        """Verifies that a device batch of zero leaves the shared batch as the size the device stages."""
+        plane = PlaneGeometry(height=512, width=512, frame_count=20000, sampling_rate=30.0)
+        configuration = SingleRecordingConfiguration()
+        configuration.registration.batch_size = 100
+        configuration.registration.gpu_batch_size = 0
+
+        assert _resolve_device_batch_size(plane=plane, configuration=configuration) == 100
+
+    def test_batch_never_exceeds_the_frames_the_plane_holds(self) -> None:
+        """Verifies that a plane shorter than the configured batch is charged the frames it actually holds."""
+        plane = PlaneGeometry(height=512, width=512, frame_count=12, sampling_rate=30.0)
+
+        assert _resolve_device_batch_size(plane=plane, configuration=SingleRecordingConfiguration()) == 12
+
+
+class TestNonrigidBlockGeometry:
+    """Tests the block tiling the device memory model resolves its nonrigid terms over."""
+
+    def test_disabled_nonrigid_registration_tiles_no_block(self) -> None:
+        """Verifies that a configuration running rigid registration alone reports an empty block geometry."""
+        plane = PlaneGeometry(height=512, width=512, frame_count=20000, sampling_rate=30.0)
+        configuration = SingleRecordingConfiguration()
+        configuration.nonrigid_registration.enabled = False
+
+        blocks = _resolve_nonrigid_block_geometry(plane=plane, configuration=configuration)
+
+        assert (blocks.count, blocks.height, blocks.width, blocks.window_size) == (0, 0, 0, 0)
+
+    def test_block_smaller_than_the_plane_tiles_both_axes_with_overlap(self) -> None:
+        """Verifies that a block below both plane extents tiles each axis at roughly half a block of overlap."""
+        plane = PlaneGeometry(height=512, width=512, frame_count=20000, sampling_rate=30.0)
+
+        blocks = _resolve_nonrigid_block_geometry(plane=plane, configuration=SingleRecordingConfiguration())
+
+        assert (blocks.count, blocks.height, blocks.width, blocks.window_size) == (36, 128, 128, 17)
+
+    def test_block_covering_the_plane_tiles_each_axis_once(self) -> None:
+        """Verifies that a block at least as large as the plane spans it as one block on both axes."""
+        plane = PlaneGeometry(height=96, width=96, frame_count=20000, sampling_rate=30.0)
+
+        blocks = _resolve_nonrigid_block_geometry(plane=plane, configuration=SingleRecordingConfiguration())
+
+        assert (blocks.count, blocks.height, blocks.width) == (1, 96, 96)
+
+    def test_block_covering_one_axis_alone_tiles_the_other(self) -> None:
+        """Verifies that each axis resolves its own tiling from the block extent that axis was configured with."""
+        plane = PlaneGeometry(height=96, width=512, frame_count=20000, sampling_rate=30.0)
+
+        blocks = _resolve_nonrigid_block_geometry(plane=plane, configuration=SingleRecordingConfiguration())
+
+        assert (blocks.count, blocks.height, blocks.width) == (6, 96, 128)
+
+    def test_small_block_narrows_the_correlation_window_below_the_configured_offset(self) -> None:
+        """Verifies that a block too small to hold the configured offset bounds the window on its own extent."""
+        plane = PlaneGeometry(height=256, width=256, frame_count=20000, sampling_rate=30.0)
+        configuration = SingleRecordingConfiguration()
+        configuration.nonrigid_registration.block_size = (14, 14)
+
+        blocks = _resolve_nonrigid_block_geometry(plane=plane, configuration=configuration)
+
+        assert (blocks.count, blocks.height, blocks.width, blocks.window_size) == (784, 14, 14, 15)
+
+
+class TestDeviceRegistrationModel:
+    """Tests the device memory model and the host staging term a device-planned registration job adds."""
+
+    def test_host_peak_gains_the_staging_buffers(self) -> None:
+        """Verifies that a job planned for a device adds its page-locked staging buffers to the host peak."""
+        # A 512 by 512 single-precision frame is exactly one megabyte, so the staging term converts without rounding.
+        plane = PlaneGeometry(height=512, width=512, frame_count=20000, sampling_rate=30.0)
+        configuration = SingleRecordingConfiguration()
+
+        host_only = _estimate_registration_mb(plane=plane, configuration=configuration, gpu_registration=False)
+        device_backed = _estimate_registration_mb(plane=plane, configuration=configuration, gpu_registration=True)
+
+        staging_bytes = (
+            _DEVICE_PIPELINE_SLOTS
+            * _DEVICE_STAGING_DIRECTIONS
+            * _resolve_device_batch_size(plane=plane, configuration=configuration)
+            * plane.height
+            * plane.width
+            * _SINGLE_PRECISION_BYTES
+        )
+        assert device_backed - host_only == staging_bytes // _BYTES_PER_MEGABYTE
+
+    def test_nonrigid_plane_holds_its_block_and_window_terms(self) -> None:
+        """Verifies the device figure a tiled 512 pixel plane holds while nonrigid registration runs."""
+        plane = PlaneGeometry(height=512, width=512, frame_count=20000, sampling_rate=30.0)
+
+        assert _estimate_registration_device_mb(plane=plane, configuration=SingleRecordingConfiguration()) == 4453
+
+    def test_two_step_refinement_charges_the_plane_two_live_backends(self) -> None:
+        """Verifies that enabling the refinement pass charges the plane both backends and one context."""
+        plane = PlaneGeometry(height=512, width=512, frame_count=20000, sampling_rate=30.0)
+        configuration = SingleRecordingConfiguration()
+        configuration.registration.two_step_registration = True
+
+        assert _estimate_registration_device_mb(plane=plane, configuration=configuration) == 8393
+
+    def test_rigid_plane_holds_the_frame_terms_alone(self) -> None:
+        """Verifies that disabling nonrigid registration drops every block-shaped term from the device figure."""
+        plane = PlaneGeometry(height=512, width=512, frame_count=20000, sampling_rate=30.0)
+        configuration = SingleRecordingConfiguration()
+        configuration.nonrigid_registration.enabled = False
+
+        assert _estimate_registration_device_mb(plane=plane, configuration=configuration) == 1922
+
+    def test_device_figure_scales_with_the_batch_the_plane_stages(self) -> None:
+        """Verifies that the device batch is the one setting that fits a registration job to a card."""
+        plane = PlaneGeometry(height=512, width=512, frame_count=20000, sampling_rate=30.0)
+        narrow = SingleRecordingConfiguration()
+        narrow.registration.gpu_batch_size = 20
+        wide = SingleRecordingConfiguration()
+        wide.registration.gpu_batch_size = 200
+
+        assert _estimate_registration_device_mb(plane=plane, configuration=narrow) < _estimate_registration_device_mb(
+            plane=plane, configuration=wide
+        )
+
+    def test_every_plane_holds_the_context_floor(self) -> None:
+        """Verifies that even a plane holding one frame is charged the context the driver keeps resident."""
+        plane = PlaneGeometry(height=8, width=8, frame_count=1, sampling_rate=30.0)
+
+        estimate = _estimate_registration_device_mb(plane=plane, configuration=SingleRecordingConfiguration())
+
+        assert estimate >= _DEVICE_CONTEXT_BYTES // _BYTES_PER_MEGABYTE
+
+
+class TestDeviceRegistrationJobEstimate:
+    """Tests the per-job device estimate that reads the recording's own plane geometry."""
+
+    def test_named_plane_is_charged_its_own_geometry(self, tmp_path: Path) -> None:
+        """Verifies that a job naming one plane is charged the device figure that plane's extent produces."""
+        data_path = tmp_path / "raw"
+        _write_raw_recording(data_path=data_path, height=30, roi_lines="[[0, 9], [12, 29]]", roi_number=2)
+        configuration = SingleRecordingConfiguration()
+        geometry = resolve_recording_geometry(output_root=tmp_path / "out", data_path=data_path)
+
+        memory_mb = _estimate_registration_device_memory_mb(
+            specifier="plane_1", output_root=tmp_path / "out", configuration=configuration, data_path=data_path
+        )
+
+        assert memory_mb == _apply_tolerance(
+            memory_mb=_estimate_registration_device_mb(plane=geometry.planes[1], configuration=configuration)
+        )
+
+    def test_unnamed_job_is_charged_the_widest_plane(self, tmp_path: Path) -> None:
+        """Verifies that a job naming no plane is charged the largest per-plane device figure."""
+        data_path = tmp_path / "raw"
+        _write_raw_recording(data_path=data_path, height=30, roi_lines="[[0, 9], [12, 29]]", roi_number=2)
+        configuration = SingleRecordingConfiguration()
+        geometry = resolve_recording_geometry(output_root=tmp_path / "out", data_path=data_path)
+
+        memory_mb = _estimate_registration_device_memory_mb(
+            specifier="", output_root=tmp_path / "out", configuration=configuration, data_path=data_path
+        )
+
+        assert memory_mb == _apply_tolerance(
+            memory_mb=max(
+                _estimate_registration_device_mb(plane=plane, configuration=configuration) for plane in geometry.planes
+            )
+        )
 
 
 class TestProcessingModel:
@@ -409,7 +601,8 @@ class TestSingleRecordingEstimates:
 
         assert memory_mb == _apply_tolerance(
             memory_mb=max(
-                _estimate_registration_mb(plane=plane, configuration=configuration) for plane in geometry.planes
+                _estimate_registration_mb(plane=plane, configuration=configuration, gpu_registration=False)
+                for plane in geometry.planes
             )
         )
 
@@ -675,6 +868,95 @@ class TestJobSizing:
             recording_directories=roots,
             configuration=configuration,
         )
+        assert sizing.device_memory_mb == 0
+
+
+class TestDevicePlannedJobSizing:
+    """Tests the cores and the device memory a single-recording job reports while it is planned for a device."""
+
+    def test_registration_reports_its_device_cores_and_device_memory(self, tmp_path: Path) -> None:
+        """Verifies that a registration planned for a device carries its host-side cores and its device figure."""
+        data_path = tmp_path / "raw"
+        _write_raw_recording(data_path=data_path)
+        configuration = SingleRecordingConfiguration()
+
+        sizing = size_single_recording_job(
+            job_name=SingleRecordingJobNames.REGISTER,
+            specifier="plane_0",
+            output_root=tmp_path / "out",
+            configuration=configuration,
+            data_path=data_path,
+            gpu_registration=True,
+        )
+
+        assert sizing.cores == REGISTRATION_GPU_WORKERS
+        assert sizing.device_memory_mb == _estimate_registration_device_memory_mb(
+            specifier="plane_0", output_root=tmp_path / "out", configuration=configuration, data_path=data_path
+        )
+        assert sizing.memory_mb == estimate_single_recording_job_memory_mb(
+            job_name=SingleRecordingJobNames.REGISTER,
+            specifier="plane_0",
+            output_root=tmp_path / "out",
+            configuration=configuration,
+            data_path=data_path,
+            gpu_registration=True,
+        )
+
+    def test_host_planned_registration_reports_no_device_memory(self, tmp_path: Path) -> None:
+        """Verifies that a registration planned for the host CPU carries its host cores and no device figure."""
+        data_path = tmp_path / "raw"
+        _write_raw_recording(data_path=data_path)
+
+        sizing = size_single_recording_job(
+            job_name=SingleRecordingJobNames.REGISTER,
+            specifier="plane_0",
+            output_root=tmp_path / "out",
+            configuration=SingleRecordingConfiguration(),
+            data_path=data_path,
+        )
+
+        assert sizing.cores == REGISTRATION_WORKERS
+        assert sizing.device_memory_mb == 0
+
+    @pytest.mark.parametrize(
+        "job_name",
+        [SingleRecordingJobNames.BINARIZE, SingleRecordingJobNames.PROCESS, SingleRecordingJobNames.COMBINE],
+    )
+    def test_every_other_stage_reports_no_device_memory(
+        self, tmp_path: Path, job_name: SingleRecordingJobNames
+    ) -> None:
+        """Verifies that the registration stage alone reports a device figure while the flag is set."""
+        data_path = tmp_path / "raw"
+        _write_raw_recording(data_path=data_path)
+
+        sizing = size_single_recording_job(
+            job_name=job_name,
+            specifier="plane_0",
+            output_root=tmp_path / "out",
+            configuration=SingleRecordingConfiguration(),
+            data_path=data_path,
+            gpu_registration=True,
+        )
+
+        assert sizing.device_memory_mb == 0
+
+    def test_device_plan_raises_the_host_estimate_of_a_registration_job(self, tmp_path: Path) -> None:
+        """Verifies that the staging buffers reach the reported host figure of a device-planned registration."""
+        data_path = tmp_path / "raw"
+        _write_raw_recording(data_path=data_path, height=512, width=512, pages=60)
+        configuration = SingleRecordingConfiguration()
+
+        arguments = {
+            "job_name": SingleRecordingJobNames.REGISTER,
+            "specifier": "plane_0",
+            "output_root": tmp_path / "out",
+            "configuration": configuration,
+            "data_path": data_path,
+        }
+
+        assert estimate_single_recording_job_memory_mb(
+            **arguments, gpu_registration=True
+        ) > estimate_single_recording_job_memory_mb(**arguments)
 
 
 class TestUnsizableJobs:

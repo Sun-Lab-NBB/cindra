@@ -62,11 +62,12 @@ ___
   API or CLI for local and remote parallelization.
 - Includes three interactive PySide6/PyQtGraph GUI viewers for inspecting ROI detection, registration quality, and
   multi-recording tracking results.
-- Exposes two MCP servers for AI agent integration: a data processing server with 34 tools for pipeline orchestration
+- Exposes two MCP servers for AI agent integration: a data processing server with 35 tools for pipeline orchestration
   and results querying, and a GUI server with 4 tools for viewer lifecycle management.
 - Natively supports two-channel functional imaging with independent ROI detection, colocalization analysis, and
   fluorescence extraction per channel.
 - Uses Numba JIT compilation with Intel TBB threading (OpenMP on macOS) for parallelized frame-level computation.
+- Runs single-recording registration on the CUDA devices a run names, through CuPy on Linux and Windows.
 - GPL-3.0-or-later License.
 
 ___
@@ -110,6 +111,15 @@ command finds runtimes installed by [Homebrew](https://brew.sh/) or MacPorts, pr
 or carried inside an installed Python package. Install one with `brew install libomp` when the command finds none.
 Without a loadable runtime, processing fails once it reaches a parallelized stage. Linux and Windows run the TBB
 threading layer, which needs no additional steps, so `cindra omp` errors when run on them.
+
+Single-recording registration runs on a CUDA device when the run names one, through [CuPy](https://cupy.dev/). Linux
+and Windows install `cupy-cuda13x[ctk]`, the build targeting CUDA 13, automatically. A host whose driver runs CUDA 12
+installs `cupy-cuda12x[ctk]` over that pin, because one CuPy build targets one CUDA major version. The CuPy project
+publishes no macOS wheel, so registration on macOS runs on the host CPU.
+
+Run `cindra gpu` to report the devices the host exposes, along with the memory and compute capability of each. The
+command transforms a small array on a device before reporting it, so a host carrying CuPy without the CUDA math
+libraries of the `ctk` extra reports as unusable and names the installation that resolves it.
 
 For users, all other library dependencies are installed automatically by all supported installation methods. For
 developers, see the [Developers](#developers) section for information on installing additional development dependencies.
@@ -442,6 +452,15 @@ each pixel corresponds to the same physical location across all frames.
 The algorithm proceeds in two stages. Rigid registration shifts each frame as a whole using phase correlation, and
 optional nonrigid registration corrects local deformations by dividing the frame into blocks and aligning each block
 independently.
+
+Registration runs on the host CPU unless the run names a CUDA device. `cindra run --register-device <index>` registers
+every plane of the run on that zero-based device, and `run_single_recording_pipeline()` takes the same index as its
+`registration_device` argument. An MCP batch names its devices through the `gpu_devices` argument of the execute tools,
+and the engine hands one of them to each running registration job. The `registration.gpu_batch_size` configuration
+parameter bounds the frames the alignment channel pass stages on the device, and a zero there keeps that pass on
+`registration.batch_size`. The secondary channel pass stages at `registration.batch_size` whatever that field holds.
+Registration is the only stage that runs on a device, so every other phase and the whole multi-recording pipeline run on
+the host CPU.
 
 Reads:
 
@@ -799,8 +818,20 @@ run_multi_recording_pipeline(configuration_path=Path("/path/to/md_config.yaml"),
 
 Every phase takes its worker count as a direct API parameter rather than a configuration field, which keeps the
 configuration file immutable and therefore safe to share between concurrently dispatched jobs. Omitting a worker
-parameter gives the phase its measured default (`BINARIZATION_WORKERS`, `REGISTRATION_WORKERS`, `PROCESSING_WORKERS`,
+parameter gives the phase its default (`BINARIZATION_WORKERS`, `REGISTRATION_WORKERS`, `PROCESSING_WORKERS`,
 `DISCOVERY_WORKERS`, `EXTRACTION_WORKERS`, all exported from `cindra`), and passing `-1` requests every available core.
+
+Four of those stages also publish a ceiling as `REGISTRATION_MAXIMUM_WORKERS`, `PROCESSING_MAXIMUM_WORKERS`,
+`DISCOVERY_MAXIMUM_WORKERS`, and `EXTRACTION_MAXIMUM_WORKERS`. A batch driven by `start_execution_session()` widens a
+job whose ceiling stands above its stage default over the cores no running job holds, stopping at that ceiling, so a
+draining queue hands its last jobs more cores than its first. The widening applies in a session that accepted the stage
+defaults, because a session naming its own worker count gives every job that count.
+
+The CUDA device a registration job runs on is threaded through the same way. `run_single_recording_pipeline()` takes
+`registration_device`, where None registers every plane on the host CPU and a zero-based index registers them on that
+device. The entry point verifies that index before its first dispatch, so a run naming a device the host does not expose
+aborts having done no work. `resolve_gpu_devices()` reports the devices a host exposes, and `REGISTRATION_GPU_WORKERS`
+is the core count one device-backed registration job holds. Both are exported from `cindra.orchestration`.
 
 External schedulers that need to enumerate a recording's jobs and their dependencies without driving the pipeline
 themselves can read the phase model exported from `cindra.orchestration`. `SINGLE_RECORDING_PHASES` and
@@ -829,16 +860,18 @@ subdirectories, whose names `cindra.layout` exports. `resolve_plane_specifier()`
 
 `estimate_single_recording_job_memory_mb()` and `estimate_multi_recording_job_memory_mb()` project the memory one job
 holds from the shape of the data it processes, returning the figure in megabytes. `size_single_recording_job()` and
-`size_multi_recording_job()` return that figure together with the cores the stage's measured default declares, as a
-`JobSizing` record. A job is sized from the data that exists when the sizing happens, so a whole job graph resolves up
-front and every job of it reports the same figure at every point in the run. A single-recording job reads the
-acquisition metadata and one source file header, which fix every shape the pipeline writes. The regions detection
-finds are the one input the acquisition leaves open, so a caller that knows them passes them through
-`planned_roi_count` and the ceiling `resolve_maximum_roi_count()` derives from the detection iteration bound covers them
-otherwise. A multi-recording job runs on the completed output of that pipeline, so it reads the combined geometry and
-the region count each recording holds directly. A recording carrying no readable raw imaging data, and a dataset whose
-recordings report no regions, can run no stage at all. Sizing either raises rather than returning a figure, and the
-interface layer reports the job as unsizable instead of admitting it.
+`size_multi_recording_job()` return that figure together with the cores the stage's default declares and the device
+memory the job holds, as a `JobSizing` record. Passing `gpu_registration=True` to the single-recording sizer plans its
+registration jobs for a CUDA device, which substitutes the device core count and memory models. Every other job, and
+every multi-recording job, reports a device memory of zero. A job is sized from the data that exists when the sizing
+happens, so a whole job graph resolves up front and every job of it reports the same figure at every point in the run. A
+single-recording job reads the acquisition metadata and one source file header, which fix every shape the pipeline
+writes. The regions detection finds are the one input the acquisition leaves open, so a caller that knows them passes
+them through `planned_roi_count` and the ceiling `resolve_maximum_roi_count()` derives from the detection iteration
+bound covers them otherwise. A multi-recording job runs on the completed output of that pipeline, so it reads the
+combined geometry and the region count each recording holds directly. A recording carrying no readable raw imaging data,
+and a dataset whose recordings report no regions, can run no stage at all. Sizing either raises rather than returning a
+figure, and the interface layer reports the job as unsizable instead of admitting it.
 
 `prime_recording()` and `prime_dataset()` write the shared bootstrap every job reads and report that same inventory, so
 a scheduler primes a recording and enumerates its jobs in one step.
@@ -855,13 +888,16 @@ This library provides the `cindra` and `cindra-gui` CLIs that expose the followi
 | `run`       | Executes a pipeline using a YAML configuration file with optional CLI overrides    |
 | `mcp`       | Starts the data processing MCP server for AI agent integration                     |
 | `omp`       | Links the OpenMP runtime Numba loads on macOS, erroring on every other platform    |
+| `gpu`       | Reports the CUDA devices the host exposes, with the remedy when it reaches none    |
 
 The `run` command supports executing individual pipeline phases (`--binarize`, `--register`, `--process`, `--combine`
 for single-recording, `--discover` and `--extract` for multi-recording), targeting specific planes (`--target-plane`) or
 recordings (`--target-recording`), and allocating workers per phase (`--binarize-workers`, `--register-workers`,
-`--process-workers`, `--discover-workers`, `--extract-workers`). Omitting a worker option gives that phase its measured
-default allocation, passing `-1` requests every available core, and any positive value is used exactly. The combination
-phase takes no worker option because it merges the per-plane result files with serial input and output.
+`--process-workers`, `--discover-workers`, `--extract-workers`). Omitting a worker option gives that phase its default
+allocation, passing `-1` requests every available core, and any positive value is used exactly. The combination phase
+takes no worker option because it merges the per-plane result files with serial input and output. The
+`--register-device` option names the zero-based CUDA device that registers every plane of the run, and omitting it
+registers them on the host CPU.
 
 #### cindra-gui
 
@@ -913,8 +949,9 @@ cindra mcp
 | Tool                                              | Description                                                         |
 |---------------------------------------------------|---------------------------------------------------------------------|
 | `get_pipeline_job_universe_tool`                  | Reports every declared job and which of them can run right now      |
-| `size_pipeline_jobs_tool`                         | Reports the cores and memory every job holds, without dispatching   |
+| `size_pipeline_jobs_tool`                         | Reports the cores, memory, and device memory of every job           |
 | `check_threading_runtime_tool`                    | Reports whether the host's numeric threading runtime is loadable    |
+| `check_gpu_runtime_tool`                          | Reports the CUDA devices the host exposes for registration          |
 | `generate_acquisition_parameters_file_tool`       | Generates a `cindra_parameters.json` file for a raw data directory  |
 | `validate_acquisition_parameters_file_tool`       | Validates an existing acquisition parameters file                   |
 | `validate_recording_readiness_tool`               | Validates that a recording is ready for pipeline processing         |

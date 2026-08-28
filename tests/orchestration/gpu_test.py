@@ -9,18 +9,39 @@ from ataraxis_base_utilities import error_format
 
 from cindra.orchestration import (
     GPU_REMEDY,
+    ALL_DEVICES_REQUEST,
     GpuStatus,
     GpuSummary,
     gpu as gpu_module,
     resolve_gpu_devices,
-    resolve_device_budget,
 )
-from cindra.orchestration.gpu import GpuDevice, _describe_devices, verify_gpu_runtime, _probe_device_transform
+from cindra.orchestration.gpu import (
+    GpuDevice,
+    _describe_devices,
+    verify_gpu_runtime,
+    resolve_device_budget,
+    _probe_device_transform,
+)
+
+
+class _DeviceContext:
+    """Stands in for the CuPy device context manager, recording the index a probe transforms inside."""
+
+    def __init__(self, index, recorded):
+        self.index = index
+        self._recorded = recorded
+
+    def __enter__(self):
+        self._recorded["entered_devices"].append(self.index)
+        return self
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        return False
 
 
 def _make_cupy(device_count=2, properties=None, probe_error=None, count_error=None, name=b"NVIDIA RTX A6000"):
     """Builds a stand-in for the CuPy binding that answers the calls the discovery makes."""
-    recorded = {"transforms": 0, "synchronized": 0}
+    recorded = {"transforms": 0, "synchronized": 0, "entered_devices": []}
 
     def get_device_count():
         if count_error is not None:
@@ -48,6 +69,7 @@ def _make_cupy(device_count=2, properties=None, probe_error=None, count_error=No
         cuda=SimpleNamespace(
             runtime=SimpleNamespace(getDeviceCount=get_device_count, getDeviceProperties=get_device_properties),
             Stream=SimpleNamespace(null=SimpleNamespace(synchronize=synchronize)),
+            Device=lambda index: _DeviceContext(index=index, recorded=recorded),
         ),
     )
     binding.recorded = recorded
@@ -162,6 +184,31 @@ class TestDeviceResolution:
         assert summary.status == GpuStatus.NO_DEVICES
         assert "reports no device" in summary.detail
 
+    def test_resolution_probes_the_named_device(self, monkeypatch):
+        """Verifies that a named index transforms the probe array inside that device's context."""
+        monkeypatch.setattr(gpu_module.sys, "platform", "linux")
+        binding = _make_cupy(device_count=2)
+        monkeypatch.setattr(gpu_module, "cupy", binding)
+
+        summary = resolve_gpu_devices(device=1)
+
+        assert summary.status == GpuStatus.AVAILABLE
+        assert binding.recorded["entered_devices"] == [1]
+        assert binding.recorded["transforms"] == 1
+
+    @pytest.mark.parametrize("device", [-1, 2, 9])
+    def test_resolution_falls_back_to_the_default_device_for_an_absent_index(self, monkeypatch, device):
+        """Verifies that an index outside the reported range probes the default device rather than raising."""
+        monkeypatch.setattr(gpu_module.sys, "platform", "linux")
+        binding = _make_cupy(device_count=2)
+        monkeypatch.setattr(gpu_module, "cupy", binding)
+
+        summary = resolve_gpu_devices(device=device)
+
+        assert summary.status == GpuStatus.AVAILABLE
+        assert binding.recorded["entered_devices"] == []
+        assert binding.recorded["transforms"] == 1
+
     def test_resolution_reports_a_failing_probe_as_missing_libraries(self, monkeypatch):
         """Verifies that a transform failing on a present device resolves to the missing libraries outcome."""
         monkeypatch.setattr(gpu_module.sys, "platform", "linux")
@@ -190,7 +237,7 @@ class TestDeviceBudget:
 
 
 class TestRuntimeVerification:
-    """Tests the gate every entry point calls before dispatching a GPU registration job."""
+    """Tests the gate every entry point calls before dispatching a registration job onto a CUDA device."""
 
     def test_verification_returns_on_a_usable_runtime(self, monkeypatch):
         """Verifies that the gate returns without raising when a device is usable."""
@@ -198,18 +245,53 @@ class TestRuntimeVerification:
         monkeypatch.setattr(gpu_module, "cupy", _make_cupy())
         assert verify_gpu_runtime() is None
 
+    @pytest.mark.parametrize("device", [0, 1])
+    def test_verification_accepts_an_index_the_host_exposes(self, monkeypatch, device):
+        """Verifies that the gate returns for every device index the host reports."""
+        monkeypatch.setattr(gpu_module.sys, "platform", "linux")
+        monkeypatch.setattr(gpu_module, "cupy", _make_cupy(device_count=2))
+        assert verify_gpu_runtime(device=device) is None
+
     def test_verification_refuses_an_unusable_runtime(self, monkeypatch):
-        """Verifies that the gate errors with the reason, the remedy, and the CPU backend fallback."""
+        """Verifies that the gate errors with the reason, the remedy, and the host CPU fallback."""
         monkeypatch.setattr(gpu_module.sys, "platform", "linux")
         monkeypatch.setattr(gpu_module, "cupy", None)
 
         expected_message = (
-            "Unable to run the registration stage on the GPU backend. The host exposes no usable CUDA device: the "
-            f"CuPy distribution is not installed. {GPU_REMEDY} Set 'registration.backend' to 'cpu' to run the stage "
-            "on the CPU backend instead."
+            "Unable to run the registration stage on a CUDA device. The host exposes no usable CUDA device: the "
+            f"CuPy distribution is not installed. {GPU_REMEDY} Omit the registration device argument to run the "
+            "stage on the host CPU instead."
         )
         with pytest.raises(RuntimeError, match=error_format(message=expected_message)):
             verify_gpu_runtime()
+
+    def test_verification_refuses_an_index_the_host_does_not_expose(self, monkeypatch):
+        """Verifies that a usable runtime still refuses an index no device on the host carries."""
+        monkeypatch.setattr(gpu_module.sys, "platform", "linux")
+        monkeypatch.setattr(gpu_module, "cupy", _make_cupy(device_count=2))
+
+        expected_message = (
+            "Unable to run the registration stage on CUDA device 5. The host exposes no device carrying that index. "
+            "Available device indices: [0, 1]."
+        )
+        with pytest.raises(ValueError, match=error_format(message=expected_message)):
+            verify_gpu_runtime(device=5)
+
+    def test_unusable_runtime_is_reported_before_the_named_index(self, monkeypatch):
+        """Verifies that a host reaching no device reports the installation rather than the index it was given."""
+        monkeypatch.setattr(gpu_module.sys, "platform", "linux")
+        monkeypatch.setattr(gpu_module, "cupy", None)
+
+        with pytest.raises(RuntimeError, match=error_format(message="The host exposes no usable CUDA device")):
+            verify_gpu_runtime(device=5)
+
+
+class TestAllDevicesRequest:
+    """Tests the sentinel the session device list carries to name every device the host exposes."""
+
+    def test_sentinel_is_the_negative_index_no_device_carries(self):
+        """Verifies that the all-devices request mirrors the all-cores request the allocator declares."""
+        assert ALL_DEVICES_REQUEST == -1
 
 
 class TestDeviceHelpers:
@@ -222,9 +304,18 @@ class TestDeviceHelpers:
         assert len(devices) == 2
         assert devices[1].index == 1
 
-    def test_probe_transforms_a_square_array(self, monkeypatch):
-        """Verifies that the probe allocates a square array and transforms it."""
+    def test_probe_transforms_a_square_array_on_the_default_device(self, monkeypatch):
+        """Verifies that the probe allocates a square array and transforms it without naming a device."""
         binding = _make_cupy()
         monkeypatch.setattr(gpu_module, "cupy", binding)
-        _probe_device_transform()
+        _probe_device_transform(device=None)
         assert binding.recorded["transforms"] == 1
+        assert binding.recorded["entered_devices"] == []
+
+    def test_probe_transforms_inside_the_named_device_context(self, monkeypatch):
+        """Verifies that a named index transforms the probe array inside that device's own context."""
+        binding = _make_cupy(device_count=2)
+        monkeypatch.setattr(gpu_module, "cupy", binding)
+        _probe_device_transform(device=1)
+        assert binding.recorded["transforms"] == 1
+        assert binding.recorded["entered_devices"] == [1]

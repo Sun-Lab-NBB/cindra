@@ -1,17 +1,16 @@
-"""Contains tests for the CuPy GPU registration backend and for the backend selection register_plane performs."""
+"""Contains tests for the CuPy GPU registration backend and for the device selection register_plane performs."""
 
 from __future__ import annotations
-
-import re
 
 import numpy as np
 import pytest
 from ataraxis_base_utilities import error_format
 
 from cindra.detection import compute_registration_blocks
-from cindra.dataclasses import RegistrationBackend
 from cindra.registration import gpu as gpu_module
 from cindra.registration.gpu import (
+    _GPU_REMEDY,
+    _TF32_VARIABLE,
     GpuRegistrationBackend,
     _require_gpu_runtime,
     _verify_tf32_disabled,
@@ -90,6 +89,11 @@ _BATCH_PARAMETERS = {
 }
 
 
+def _register_single_batch(backend, frames, *, nonrigid_enabled, **parameters):
+    """Registers one batch through the streaming entry point and returns the single result it yields."""
+    return next(backend.register_batches(batches=(frames,), nonrigid_enabled=nonrigid_enabled, **parameters))
+
+
 class TestBufferReuseContract:
     """Tests which returned arrays survive being held while later batches are produced."""
 
@@ -146,7 +150,9 @@ class TestDeviceParity:
             **_BATCH_PARAMETERS,
         )
         backend = GpuRegistrationBackend(reference_data=reference_data, device=0)
-        device = backend.register_batch(frames=movie.astype(np.float32), nonrigid_enabled=nonrigid, **_BATCH_PARAMETERS)
+        device = _register_single_batch(
+            backend=backend, frames=movie.astype(np.float32), nonrigid_enabled=nonrigid, **_BATCH_PARAMETERS
+        )
 
         np.testing.assert_array_equal(device.y_offsets, host.y_offsets)
         np.testing.assert_array_equal(device.x_offsets, host.x_offsets)
@@ -159,8 +165,10 @@ class TestDeviceParity:
         movie, reference = _build_shifted_movie(frame_count=64, height=128, width=128)
         backend = GpuRegistrationBackend(reference_data=_build_reference_data(reference, nonrigid=False), device=0)
 
-        narrow = backend.register_batch(frames=movie, nonrigid_enabled=False, **_BATCH_PARAMETERS)
-        wide = backend.register_batch(frames=movie.astype(np.float32), nonrigid_enabled=False, **_BATCH_PARAMETERS)
+        narrow = _register_single_batch(backend=backend, frames=movie, nonrigid_enabled=False, **_BATCH_PARAMETERS)
+        wide = _register_single_batch(
+            backend=backend, frames=movie.astype(np.float32), nonrigid_enabled=False, **_BATCH_PARAMETERS
+        )
 
         np.testing.assert_array_equal(narrow.y_offsets, wide.y_offsets)
         np.testing.assert_array_equal(narrow.x_offsets, wide.x_offsets)
@@ -170,46 +178,45 @@ class TestDeviceParity:
         assert wide.frame_sum is None
 
 
-class TestBackendSelection:
-    """Tests that register_plane routes the pass to the backend the configuration names."""
+class TestDeviceSelection:
+    """Tests that register_plane routes the pass to the resource the device argument names."""
 
-    def test_gpu_backend_writes_the_binary_the_cpu_backend_writes(
+    def test_device_pass_writes_the_binary_the_host_pass_writes(
         self, tmp_path, single_recording_context, read_binary_movie
     ):
         """Verifies a plane registered on the device holds the offsets and the binary the host pass produces."""
         movie, _ = _build_shifted_movie(frame_count=64, height=128, width=128)
 
         outputs = {}
-        for backend in (RegistrationBackend.CPU, RegistrationBackend.GPU):
-            root = tmp_path / backend.value
+        for label, device in (("host", None), ("device", 0)):
+            root = tmp_path / label
 
-            def configure(configuration, backend=backend):
-                configuration.registration.backend = backend
+            def configure(configuration):
                 configuration.registration.batch_size = 20
 
             root.mkdir()
             context = single_recording_context(
                 tmp_path=root, frame_height=128, frame_width=128, frame_count=64, movie=movie, configure=configure
             )
-            register_plane(context=context, workers=1)
+            register_plane(context=context, workers=1, device=device)
 
             # register_plane releases the registration arrays once it has persisted them, so the recorded offsets are
             # read back off disk rather than off the context.
             registration_directory = root / "output" / "cindra" / "plane_0" / "registration_data"
-            outputs[backend] = (
+            outputs[label] = (
                 np.load(registration_directory / "rigid_y_offsets.npy"),
                 np.load(registration_directory / "rigid_x_offsets.npy"),
                 read_binary_movie(context.runtime.io.registered_binary_path, 128, 128).copy(),
                 context.runtime.detection.mean_image.copy(),
             )
 
-        cpu, gpu = outputs[RegistrationBackend.CPU], outputs[RegistrationBackend.GPU]
+        cpu, gpu = outputs["host"], outputs["device"]
         np.testing.assert_array_equal(gpu[0], cpu[0])
         np.testing.assert_array_equal(gpu[1], cpu[1])
         np.testing.assert_array_equal(gpu[2], cpu[2])
         np.testing.assert_allclose(gpu[3], cpu[3], rtol=1e-5, atol=1e-3)
 
-    def test_gpu_backend_registers_both_channels_like_the_cpu_backend(
+    def test_device_pass_registers_both_channels_like_the_host_pass(
         self, tmp_path, single_recording_context, read_binary_movie
     ):
         """Verifies a two-channel plane registered on the device holds the binaries the host pass produces."""
@@ -217,11 +224,10 @@ class TestBackendSelection:
         movie_channel_2 = (movie // 2).astype(np.int16)
 
         outputs = {}
-        for backend in (RegistrationBackend.CPU, RegistrationBackend.GPU):
-            root = tmp_path / backend.value
+        for label, device in (("host", None), ("device", 0)):
+            root = tmp_path / label
 
-            def configure(configuration, backend=backend):
-                configuration.registration.backend = backend
+            def configure(configuration):
                 configuration.registration.batch_size = 20
                 configuration.nonrigid_registration.enabled = True
                 configuration.nonrigid_registration.block_size = _BLOCK_SIZE
@@ -236,14 +242,14 @@ class TestBackendSelection:
                 movie_channel_2=movie_channel_2,
                 configure=configure,
             )
-            register_plane(context=context, workers=1)
-            outputs[backend] = (
+            register_plane(context=context, workers=1, device=device)
+            outputs[label] = (
                 read_binary_movie(context.runtime.io.registered_binary_path, 128, 128).copy(),
                 read_binary_movie(context.runtime.io.registered_binary_path_channel_2, 128, 128).copy(),
                 context.runtime.detection.mean_image.copy(),
             )
 
-        cpu, gpu = outputs[RegistrationBackend.CPU], outputs[RegistrationBackend.GPU]
+        cpu, gpu = outputs["host"], outputs["device"]
 
         # The alignment channel resolves the same offsets on both backends, so its binary matches exactly. The
         # secondary channel reaches its frames through the bilinear warp, whose interpolation weights the host forms
@@ -277,7 +283,9 @@ class TestPreprocessingPaths:
             **parameters,
         )
         backend = GpuRegistrationBackend(reference_data=reference_data, device=0)
-        device = backend.register_batch(frames=movie.astype(np.float32), nonrigid_enabled=True, **parameters)
+        device = _register_single_batch(
+            backend=backend, frames=movie.astype(np.float32), nonrigid_enabled=True, **parameters
+        )
 
         np.testing.assert_array_equal(device.y_offsets, host.y_offsets)
         np.testing.assert_array_equal(device.x_offsets, host.x_offsets)
@@ -296,7 +304,9 @@ class TestPreprocessingPaths:
             **parameters,
         )
         backend = GpuRegistrationBackend(reference_data=reference_data, device=0)
-        device = backend.register_batch(frames=movie.astype(np.float32), nonrigid_enabled=False, **parameters)
+        device = _register_single_batch(
+            backend=backend, frames=movie.astype(np.float32), nonrigid_enabled=False, **parameters
+        )
 
         np.testing.assert_array_equal(device.y_offsets, host.y_offsets)
         np.testing.assert_array_equal(device.x_offsets, host.x_offsets)
@@ -316,7 +326,9 @@ class TestPreprocessingPaths:
             **parameters,
         )
         backend = GpuRegistrationBackend(reference_data=reference_data, device=0)
-        device = backend.register_batch(frames=movie.astype(np.float32), nonrigid_enabled=False, **parameters)
+        device = _register_single_batch(
+            backend=backend, frames=movie.astype(np.float32), nonrigid_enabled=False, **parameters
+        )
 
         np.testing.assert_array_equal(device.y_offsets, host.y_offsets)
         np.testing.assert_array_equal(device.frames, host.frames)
@@ -339,7 +351,9 @@ class TestPreprocessingPaths:
             **parameters,
         )
         backend = GpuRegistrationBackend(reference_data=reference_data, device=0)
-        device = backend.register_batch(frames=movie.astype(np.float32), nonrigid_enabled=True, **parameters)
+        device = _register_single_batch(
+            backend=backend, frames=movie.astype(np.float32), nonrigid_enabled=True, **parameters
+        )
 
         np.testing.assert_array_equal(device.y_offsets_nonrigid, host.y_offsets_nonrigid)
         np.testing.assert_array_equal(device.x_offsets_nonrigid, host.x_offsets_nonrigid)
@@ -428,7 +442,9 @@ class TestBackendGuards:
             "int16 or float32, but got float64."
         )
         with pytest.raises(ValueError, match=error_format(message=expected_message)):
-            backend.register_batch(frames=movie.astype(np.float64), nonrigid_enabled=False, **_BATCH_PARAMETERS)
+            _register_single_batch(
+                backend=backend, frames=movie.astype(np.float64), nonrigid_enabled=False, **_BATCH_PARAMETERS
+            )
 
     def test_nonrigid_without_block_reference_data_is_refused(self):
         """Verifies that requesting nonrigid registration against a rigid reference reports the missing blocks."""
@@ -440,7 +456,9 @@ class TestBackendGuards:
             "rigid registration alone."
         )
         with pytest.raises(ValueError, match=error_format(message=expected_message)):
-            backend.register_batch(frames=movie.astype(np.float32), nonrigid_enabled=True, **_BATCH_PARAMETERS)
+            _register_single_batch(
+                backend=backend, frames=movie.astype(np.float32), nonrigid_enabled=True, **_BATCH_PARAMETERS
+            )
 
     def test_odd_smoothing_window_is_refused(self):
         """Verifies the spatial smoothing refuses a window the integral-image differencing cannot express."""
@@ -452,18 +470,31 @@ class TestBackendGuards:
         )
         parameters = _parameters(one_photon_enabled=True, pre_smoothing_sigma=41.0)
         with pytest.raises(ValueError, match=error_format(message=expected_message)):
-            backend.register_batch(frames=movie.astype(np.float32), nonrigid_enabled=False, **parameters)
+            _register_single_batch(
+                backend=backend, frames=movie.astype(np.float32), nonrigid_enabled=False, **parameters
+            )
 
     def test_absent_runtime_is_refused(self, monkeypatch):
         """Verifies the backend refuses to initialize while the CuPy distribution is absent."""
         monkeypatch.setattr(gpu_module, "cupy", None)
-        with pytest.raises(RuntimeError, match=re.escape("CuPy distribution is not installed")):
+        expected_message = (
+            f"Unable to initialize the GPU registration backend. The CuPy distribution is not installed, so no CUDA "
+            f"device is reachable. {_GPU_REMEDY} Omit the device argument to run the stage on the host CPU instead."
+        )
+        with pytest.raises(RuntimeError, match=error_format(message=expected_message)):
             _require_gpu_runtime()
 
     def test_reduced_precision_matrix_mode_is_refused(self, monkeypatch):
         """Verifies the backend refuses a device whose cuBLAS handle allows reduced-precision multiplication."""
         monkeypatch.setattr(gpu_module.cupy.cuda.cublas, "getMathMode", lambda handle: 1)
-        with pytest.raises(RuntimeError, match=re.escape("0.1 pixel quantum")):
+        expected_message = (
+            f"Unable to initialize the GPU registration backend. The cuBLAS handle of the selected device reports "
+            f"math mode 1 rather than the default single-precision mode "
+            f"{int(gpu_module.cupy.cuda.cublas.CUBLAS_DEFAULT_MATH)}, so the nonrigid subpixel upsampling would run "
+            f"at reduced precision and shift the reported correlation peak by a whole 0.1 pixel quantum. Set the "
+            f"'{_TF32_VARIABLE}' environment variable to 0 before starting the process."
+        )
+        with pytest.raises(RuntimeError, match=error_format(message=expected_message)):
             _verify_tf32_disabled()
 
 
@@ -484,7 +515,9 @@ class TestRemainingBranches:
             **parameters,
         )
         backend = GpuRegistrationBackend(reference_data=reference_data, device=0)
-        device = backend.register_batch(frames=movie.astype(np.float32), nonrigid_enabled=False, **parameters)
+        device = _register_single_batch(
+            backend=backend, frames=movie.astype(np.float32), nonrigid_enabled=False, **parameters
+        )
 
         np.testing.assert_array_equal(device.y_offsets, host.y_offsets)
 
@@ -508,21 +541,36 @@ class TestRemainingBranches:
 
 
 class TestConfiguredBatchSize:
-    """Tests the device batch size the configuration names for the GPU backend."""
+    """Tests the device batch size the configuration names for a pass running on a CUDA device."""
 
     def test_gpu_batch_size_overrides_the_shared_batch_size(self, tmp_path, single_recording_context):
-        """Verifies the GPU backend reads its own batch size while the CPU backend keeps the shared one."""
+        """Verifies a pass naming a device reads its own batch size while the shared one bounds the host pass."""
         movie, _ = _build_shifted_movie(frame_count=48, height=128, width=128)
 
         def configure(configuration):
-            configuration.registration.backend = RegistrationBackend.GPU
             configuration.registration.batch_size = 100
             configuration.registration.gpu_batch_size = 16
 
         context = single_recording_context(
             tmp_path=tmp_path, frame_height=128, frame_width=128, frame_count=48, movie=movie, configure=configure
         )
-        register_plane(context=context, workers=1)
+        register_plane(context=context, workers=1, device=0)
+
+        offsets = np.load(tmp_path / "output" / "cindra" / "plane_0" / "registration_data" / "rigid_y_offsets.npy")
+        assert offsets.shape == (48,)
+
+    def test_zero_gpu_batch_size_keeps_the_shared_batch_size(self, tmp_path, single_recording_context):
+        """Verifies a device pass configured with no device batch stages the shared batch instead."""
+        movie, _ = _build_shifted_movie(frame_count=48, height=128, width=128)
+
+        def configure(configuration):
+            configuration.registration.batch_size = 20
+            configuration.registration.gpu_batch_size = 0
+
+        context = single_recording_context(
+            tmp_path=tmp_path, frame_height=128, frame_width=128, frame_count=48, movie=movie, configure=configure
+        )
+        register_plane(context=context, workers=1, device=0)
 
         offsets = np.load(tmp_path / "output" / "cindra" / "plane_0" / "registration_data" / "rigid_y_offsets.npy")
         assert offsets.shape == (48,)

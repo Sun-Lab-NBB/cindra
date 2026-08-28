@@ -91,22 +91,6 @@ class GpuRegistrationBackend:
         one_photon_enabled: bool,
         nonrigid_enabled: bool,
     ) -> Iterator[BatchRegistrationResult]: ...
-    def register_batch(
-        self,
-        frames: NDArray[np.int16] | NDArray[np.float32],
-        normalization_minimum: float,
-        normalization_maximum: float,
-        bidirectional_phase_offset: int,
-        pre_smoothing_sigma: float,
-        spatial_highpass_window: int,
-        temporal_smoothing_sigma: float,
-        maximum_offset_fraction: float,
-        signal_to_noise_threshold: float,
-        maximum_block_offset: float,
-        *,
-        one_photon_enabled: bool,
-        nonrigid_enabled: bool,
-    ) -> BatchRegistrationResult: ...
     def apply_precomputed_offsets(
         self,
         frames: NDArray[np.int16] | NDArray[np.float32],

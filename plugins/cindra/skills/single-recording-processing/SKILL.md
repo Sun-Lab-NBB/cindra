@@ -53,8 +53,9 @@ diagnose and resolve connectivity issues.
 | Tool                                  | Purpose                                                                 |
 |---------------------------------------|-------------------------------------------------------------------------|
 | `get_pipeline_job_universe_tool`      | Reports every job a recording declares and which can run right now      |
-| `size_pipeline_jobs_tool`             | Reports the cores and memory every job holds, before preparing anything |
+| `size_pipeline_jobs_tool`             | Reports the cores, memory, and device memory every job holds            |
 | `check_threading_runtime_tool`        | Reports whether the numeric threading layer this host needs is loadable |
+| `check_gpu_runtime_tool`              | Reports the CUDA devices this host exposes for registration             |
 | `prepare_single_recording_batch_tool` | Prepares execution manifest without starting execution (idempotent)     |
 | `execute_full_pipeline_tool`          | Convenience: prepares and executes all phases with automatic sequencing |
 
@@ -168,7 +169,8 @@ against the verification checklist at the end of this skill, before calling any 
 
    **Simple (recommended for straightforward runs):**
    Call `execute_full_pipeline_tool` with `pipeline_type="single-recording"`, the confirmed `raw_data_paths`,
-   `configuration_path`, `output_roots`, and worker settings. This prepares and executes all phases automatically.
+   `configuration_path`, `output_roots`, worker settings, and `gpu_devices` when registration runs on a CUDA device.
+   This prepares and executes all phases automatically.
 
    **Fine-grained (for selective execution or re-runs):**
    a. Call `prepare_single_recording_batch_tool` with `raw_data_paths`, `configuration_path`, and `output_roots`. This
@@ -271,29 +273,32 @@ which the later phases recompute, so warn the user and budget a full reprocessin
 
 ## Resource management
 
-Each single-recording phase runs under its own resource class with a measured per-job worker count. Both
-`workers_per_job` and `max_parallel_jobs` are single scalars applied to every resource class separately, so neither one
-is a session-wide total. Leaving either as None accepts that class's measured default, and a positive value replaces
-that class's figure outright, in every class at once. Setting `workers_per_job` to -1 gives every job the whole session
-core budget, while setting `max_parallel_jobs` to -1 lifts the derived cap so that only the job count bounds
-concurrency. The session CPU budget is `cpu_count - 2`, with 2 cores reserved for system operations, and the dispatcher
-holds the sum of the cores committed by every class inside that budget. While nothing is running it admits a single job
-regardless, so a job whose worker count exceeds the whole budget still runs rather than stalling the session.
+Each single-recording phase runs under its own resource class with a per-job worker count. Both `workers_per_job` and
+`max_parallel_jobs` are single scalars applied to every resource class separately, so neither one is a session-wide
+total. Leaving either as None accepts that class's default, and a positive value replaces that class's figure outright,
+in every class at once. Setting `workers_per_job` to -1 gives every job the whole session core budget, while setting
+`max_parallel_jobs` to -1 lifts the derived cap so that only the job count bounds concurrency. The session CPU budget is
+`cpu_count - 2`, with 2 cores reserved for system operations, and the dispatcher holds the sum of the cores committed by
+every class inside that budget. While nothing is running it admits a single job regardless, so a job whose worker count
+exceeds the whole budget still runs rather than stalling the session.
 
-| Phase    | Resource class | Cores per job | Concurrency                         |
-|----------|----------------|---------------|-------------------------------------|
-| BINARIZE | `binarization` | 3             | Hard ceiling of 4                   |
-| REGISTER | `registration` | 4             | Session CPU budget, 4 jobs reserved |
-| PROCESS  | `processing`   | 10            | Session CPU budget, 5 jobs reserved |
-| COMBINE  | `combination`  | 1             | Session CPU budget                  |
+| Phase    | Resource class     | Cores per job | Dispatch ceiling | Concurrency                         |
+|----------|--------------------|---------------|------------------|-------------------------------------|
+| BINARIZE | `binarization`     | 3             | None             | Hard ceiling of 4                   |
+| REGISTER | `registration`     | 4             | 32               | Session CPU budget, 4 jobs reserved |
+| REGISTER | `registration_gpu` | 2             | None             | One job per session CUDA device     |
+| PROCESS  | `processing`       | 10            | 10               | Session CPU budget, 5 jobs reserved |
+| COMBINE  | `combination`      | 1             | None             | Session CPU budget                  |
 
-Every cap but binarization's derives from the host as `min(max(1, budget // cores_per_job), max(1, job_count))`, so a
-wider machine raises it without being asked, and the dispatcher then admits against the live core and memory budgets
-rather than against the cap alone. The engine saturates the host it is given, so leave both parameters as None unless
-the user asks for an override. Binarization's ceiling of 4 never lifts, because the stage decodes at the storage's rate
-rather than the host's core count, and that class alone ignores both `workers_per_job` and `max_parallel_jobs`.
-
-A reservation binds only in the dispatcher's first pass. The second pass releases it over whatever capacity the first
+Every cap but the two hard ceilings derives from the host as `min(max(1, budget // cores_per_job), max(1, job_count))`,
+so a wider machine raises it without being asked, and the dispatcher then admits against the live core and memory
+budgets rather than against the cap alone. The engine saturates the host it is given, so leave both parameters as None
+unless the user asks for an override. Binarization's ceiling of 4 never lifts, because the stage decodes at the
+storage's rate rather than the host's core count. A registration job takes `registration_gpu` when the session passed
+`gpu_devices`. `Cores per job` is the smallest width a class gives a job and `Dispatch ceiling` is the largest, so a
+class whose ceiling stands higher widens each job it dispatches over the cores no running job holds. That widening
+applies only where the session left `workers_per_job` as None, and `resource_classes` reports the smallest width. A
+reservation binds only in the dispatcher's first pass, and the second pass releases it over whatever capacity the first
 left unused, so a reserved class runs at its full derived width whenever no other queue can use the room.
 
 Memory bounds dispatch separately from every class cap. Each job is estimated from the recording it will process, and
@@ -302,20 +307,19 @@ the dispatcher holds the sum of the running jobs' estimates inside the session m
 so memory another process frees or claims mid-batch changes nothing. A batch that dispatches fewer jobs than the caps
 allow, on a host with idle cores, is memory-bound rather than stalled.
 
-The multi-recording `discovery` and `extraction` classes carry measured defaults of 2 and 16 cores per job and take
-the same two overrides. See `/multi-recording-processing` for their concurrency caps.
+See `/multi-recording-processing` for the `discovery` and `extraction` classes the multi-recording pipeline runs.
 
 Report the resolved allocation after dispatch, from the `resource_classes` mapping the execute tool returns, rather
 than predicting it beforehand. When the user does ask for an override, state its full reach first. A `workers_per_job`
 of 30 gives 30 cores to every registration, processing, and combination job alike rather than raising processing alone,
 and it lowers each of those classes' derived concurrency to at most the CPU budget divided by 30. A `max_parallel_jobs`
 of 4 likewise permits 4 registration jobs AND 4 processing jobs AND 4 combination jobs at the same time, held together
-only by the session core and memory budgets. Binarization ignores both overrides, because its hard ceiling fixes its
-allocation.
+only by the session core and memory budgets. Binarization and device-backed registration ignore both overrides, because
+a hard ceiling fixes each one's allocation.
 
 ### Planning before dispatch
 
-Both planning tools load their configuration through the same loader the pipeline uses, which rejects a configuration
+The two planning tools that read a configuration load it through the loader the pipeline uses, which rejects a file
 whose `file_io.output_path` is None with "The output_path must be configured in the FileIO section of the
 configuration, but it is currently None." A freshly generated template carries None there, so neither tool accepts one.
 Plan against the per-recording configuration the prepare tool writes at `<output_root>/cindra/configuration.yaml`, or
@@ -330,19 +334,26 @@ ready once its plane carries the reference image, and the combination job once e
 plan a selective re-run, and `get_recording_status_tool` to read recorded outcomes once a batch has been prepared,
 because a job whose input exists may still have a prerequisite that has not succeeded on the tracker.
 
-`size_pipeline_jobs_tool` reports the cores and memory every job of a recording holds, reading its acquisition metadata
-and one source file header. Pass the recording's configuration path and `pipeline_type="single-recording"`. The
-response lists each job's `name`, `specifier`, `cores`, and `memory_mb`, plus `peak_memory_mb` for the single largest
-job and `total_memory_mb` for every job at once. Compare `peak_memory_mb` against the host's free memory to learn
-whether the largest job fits at all, and `total_memory_mb` to learn whether the whole batch could ever run
-concurrently. These are the figures the execute tools charge against the session memory budget, so a batch whose peak
-exceeds free memory admits its jobs serially rather than failing.
+`size_pipeline_jobs_tool` reports the cores, memory, and device memory every job of a recording holds, reading its
+acquisition metadata and one source file header. Pass the recording's configuration path and
+`pipeline_type="single-recording"`, and set `gpu_registration=True` whenever the batch will pass `gpu_devices`, so the
+registration jobs report their device figures. The response lists each job's `name`, `specifier`, `cores`, `memory_mb`,
+and `device_memory_mb`, plus `peak_memory_mb` and `peak_device_memory_mb` for the single largest job and
+`total_memory_mb` for every job at once. Compare `peak_memory_mb` against the host's free memory to learn whether the
+largest job fits at all, and `total_memory_mb` to learn whether the whole batch could ever run concurrently. These are
+the figures the execute tools charge against the session memory budget, so a batch whose peak exceeds free memory admits
+its jobs serially rather than failing.
 
 `check_threading_runtime_tool` reports whether the numeric threading layer this host needs is loadable, which is OpenMP
 on macOS and TBB elsewhere. Gate a batch on its `ready` flag. A macOS host that is not ready aborts every job at the
 pipeline entry point before any stage runs, while a non-macOS host missing TBB fails at the job's first parallelized
 call. Either outcome surfaces as a per-job tracker failure rather than as a tool error, so checking first replaces
 parsing those failures. The response carries a `remedy` command when the host is not ready.
+
+`check_gpu_runtime_tool` reports the CUDA devices this host exposes. `execute_processing_jobs_tool` and
+`execute_full_pipeline_tool` both take a `gpu_devices` list, so gate any batch that passes one on the `ready` flag and
+read `devices` for the indices, since an index the host does not expose is rejected with `started: false`. Omitting
+`gpu_devices` registers on the host CPU, and `[-1]` names every device the host exposes without naming an index.
 
 ---
 
@@ -478,6 +489,7 @@ Single-Recording Processing Workflow:
 - [ ] Configuration file confirmed or created via `/single-recording-configuration`
 - [ ] Output root confirmed with user (required, no default)
 - [ ] Share of the machine to dedicate to processing confirmed with user
+- [ ] For a device-backed batch, `check_gpu_runtime_tool` gated on `ready` and its `devices` passed as `gpu_devices`
 - [ ] For a phase re-run, reset `warnings` acted on and every governing repeat flag set via `set_config_values_tool`
 - [ ] Batch prepared or full pipeline executed
 - [ ] Every entry of `invalid_paths`, `invalid_recordings`, `path_conflicts`, `migrated_recordings`, and
