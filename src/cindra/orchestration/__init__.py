@@ -84,6 +84,7 @@ from .footprints import (
     resolve_maximum_roi_count,
     size_single_recording_job,
     resolve_recording_geometry,
+    read_tracked_recording_geometry,
     estimate_multi_recording_job_memory_mb,
     estimate_single_recording_job_memory_mb,
 )
@@ -140,6 +141,7 @@ __all__ = [
     "parse_plane_specifier",
     "prime_dataset",
     "prime_recording",
+    "read_tracked_recording_geometry",
     "resolve_downstream_phases",
     "resolve_gpu_devices",
     "resolve_maximum_roi_count",
