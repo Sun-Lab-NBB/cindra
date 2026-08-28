@@ -476,6 +476,19 @@ def _apply_forward_deformation(context: MultiRecordingRuntimeContext, deformatio
         masks_path = single_recording_output / RecordingArrays.ROI_MASKS
         if masks_path.exists():
             all_masks = ROIMask.load_list(masks_path)
+
+            # A selection names regions by their position in the recording's own region list, so a recording that was
+            # detected again since the selection was made carries indices that address regions it no longer holds.
+            if max(selected_indices) >= len(all_masks):
+                message = (
+                    f"Unable to deform the selected regions of recording "
+                    f"'{context.runtime.io.recording_id}'. The dataset selection names region index "
+                    f"{max(selected_indices)}, and the recording now holds {len(all_masks)} regions, so the selection "
+                    f"was made against a different detection run. Set 'recording_io.repeat_selection' to true and "
+                    f"re-run the discovery phase to select against the regions the recording currently holds."
+                )
+                console.error(message=message, error=ValueError)
+
             selected_masks = [all_masks[index] for index in selected_indices]
             registration_data.deformed_roi_masks = _forward_deform_masks(
                 masks=selected_masks,

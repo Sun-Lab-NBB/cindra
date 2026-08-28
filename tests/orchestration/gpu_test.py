@@ -21,6 +21,7 @@ from cindra.orchestration.gpu import (
     verify_gpu_runtime,
     resolve_device_budget,
     _probe_device_transform,
+    resolve_free_device_memory_mb,
 )
 
 
@@ -269,6 +270,38 @@ class TestDeviceHelpers:
         assert binding.recorded["entered_devices"] == [1]
 
 
+class TestFreeDeviceMemory:
+    """Tests the free device memory query against a stand-in for the CuPy binding."""
+
+    def test_query_reports_the_runtime_figure_in_megabytes(self, monkeypatch):
+        """Verifies that the free byte count the runtime reports reaches the caller as megabytes."""
+        binding = _make_cupy(device_count=1, free_bytes=3 * 1024**2)
+        monkeypatch.setattr(gpu_module, "cupy", binding)
+
+        assert resolve_free_device_memory_mb(device=0) == 3
+
+    def test_query_reads_inside_the_named_device_context(self, monkeypatch):
+        """Verifies that the figure is read inside the context of the device the caller named."""
+        binding = _make_cupy(device_count=2)
+        monkeypatch.setattr(gpu_module, "cupy", binding)
+
+        resolve_free_device_memory_mb(device=1)
+
+        assert binding.recorded["entered_devices"] == [1]
+
+    def test_query_reports_none_without_a_runtime(self, monkeypatch):
+        """Verifies that an absent CuPy distribution reports no figure rather than a zero."""
+        monkeypatch.setattr(gpu_module, "cupy", None)
+
+        assert resolve_free_device_memory_mb(device=0) is None
+
+    def test_query_reports_none_when_the_runtime_refuses(self, monkeypatch):
+        """Verifies that a driver raising on the query reports no figure rather than a zero."""
+        monkeypatch.setattr(gpu_module, "cupy", _make_cupy(memory_error=RuntimeError("cudaErrorNotReady")))
+
+        assert resolve_free_device_memory_mb(device=0) is None
+
+
 class _DeviceContext:
     """Stands in for the CuPy device context manager, recording the index inside which a probe transforms."""
 
@@ -284,9 +317,22 @@ class _DeviceContext:
         return False
 
 
-def _make_cupy(device_count=2, properties=None, probe_error=None, count_error=None, name=b"NVIDIA RTX A6000"):
+def _make_cupy(
+    device_count=2,
+    properties=None,
+    probe_error=None,
+    count_error=None,
+    name=b"NVIDIA RTX A6000",
+    free_bytes=2 * 1024**3,
+    memory_error=None,
+):
     """Builds a stand-in for the CuPy binding that answers the calls the discovery makes."""
     recorded = {"transforms": 0, "synchronized": 0, "entered_devices": []}
+
+    def get_memory_info():
+        if memory_error is not None:
+            raise memory_error
+        return free_bytes, 4 * 1024**3
 
     def get_device_count():
         if count_error is not None:
@@ -312,7 +358,11 @@ def _make_cupy(device_count=2, properties=None, probe_error=None, count_error=No
         zeros=lambda shape, dtype: SimpleNamespace(shape=shape, dtype=dtype),
         fft=SimpleNamespace(rfft2=rfft2),
         cuda=SimpleNamespace(
-            runtime=SimpleNamespace(getDeviceCount=get_device_count, getDeviceProperties=get_device_properties),
+            runtime=SimpleNamespace(
+                getDeviceCount=get_device_count,
+                getDeviceProperties=get_device_properties,
+                memGetInfo=get_memory_info,
+            ),
             Stream=SimpleNamespace(null=SimpleNamespace(synchronize=synchronize)),
             Device=lambda index: _DeviceContext(index=index, recorded=recorded),
         ),

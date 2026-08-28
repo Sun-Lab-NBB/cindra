@@ -10,6 +10,7 @@ from ..io import (
     is_plane_converted as is_plane_converted,
     find_data_directory as find_data_directory,
     is_dataset_discovered as is_dataset_discovered,
+    clear_dataset_selection as clear_dataset_selection,
     resolve_recording_planes as resolve_recording_planes,
     resolve_dataset_recordings as resolve_dataset_recordings,
     resolve_source_frame_geometry as resolve_source_frame_geometry,
@@ -151,6 +152,9 @@ def _resolve_recording_phase_jobs(
 ) -> tuple[list[PendingJob], list[PendingJob], list[PendingJob], list[PendingJob]]: ...
 def _estimate_pending_job_memory(
     configuration_path: Path, job_name: str, specifier: str, *, single: bool, gpu_registration: bool = False
+) -> int: ...
+def _estimate_pending_job_device_memory(
+    configuration_path: Path, job_name: str, specifier: str, *, gpu_registration: bool
 ) -> int: ...
 def _manifest_entry(identifiers: dict[tuple[str, str], str], job_name: str, specifier: str) -> dict[str, object]: ...
 def _resolve_job_identifiers(tracker: ProcessingTracker, jobs: list[tuple[str, str]]) -> dict[tuple[str, str], str]: ...

@@ -175,9 +175,7 @@ def _resolve_planned_regions(
     geometry: RecordingGeometry, configuration: SingleRecordingConfiguration, planned_roi_count: int | None
 ) -> int: ...
 def _resolve_tracked_regions(
-    geometries: Sequence[RecordingGeometry],
-    configuration: MultiRecordingConfiguration,
-    planned_roi_count: int | None,
+    geometries: Sequence[RecordingGeometry], configuration: MultiRecordingConfiguration, planned_roi_count: int | None
 ) -> int: ...
 def _resolve_target_geometry(
     cindra_roots: Sequence[Path], geometries: Sequence[RecordingGeometry], specifier: str
@@ -185,6 +183,7 @@ def _resolve_target_geometry(
 def _derive_plane_geometries(
     acquisition: AcquisitionParameters | None, source: SourceFrameGeometry | None
 ) -> tuple[PlaneGeometry, ...]: ...
+def _resolve_plane_height(acquisition: AcquisitionParameters, source: SourceFrameGeometry, plane_index: int) -> int: ...
 def _read_source_geometry(
     data_path: Path | None, ignored_file_names: tuple[str, ...]
 ) -> SourceFrameGeometry | None: ...

@@ -179,6 +179,7 @@ class GpuRegistrationBackend:
         _staging_slot: Index of the pipeline slot the next batch stages through, advanced by every entry point.
         _compute_stream: The CUDA stream every registration kernel and every download runs on.
         _transfer_stream: The CUDA stream every upload runs on, which is what lets an upload overlap a computation.
+        _released: Determines whether the backend has already handed its device and page-locked host allocations back.
 
     Raises:
         RuntimeError: If the CuPy distribution is absent, or if the device allows TF32 matrix multiplication.
@@ -194,6 +195,7 @@ class GpuRegistrationBackend:
         self._input_slots: tuple[_StagingSlot, ...] = tuple(_StagingSlot() for _ in range(_PIPELINE_DEPTH))
         self._output_slots: tuple[_StagingSlot, ...] = tuple(_StagingSlot() for _ in range(_PIPELINE_DEPTH))
         self._staging_slot: int = 0
+        self._released: bool = False
 
         with cupy.cuda.Device(self._device):
             _verify_tf32_disabled()
@@ -413,6 +415,40 @@ class GpuRegistrationBackend:
             self._compute_stream.synchronize()
 
         return registered_frames, frame_sum
+
+    def release(self) -> None:
+        """Releases every device and page-locked host allocation this backend holds.
+
+        Notes:
+            The CuPy memory pool caches a freed block rather than returning it to the driver, so a registration job
+            that drops its backend without calling this leaves that memory unavailable to the job dispatched behind
+            it. Handing both pools back explicitly returns the device to the state it held before the backend was
+            built, which is what lets one session register more planes than a single device could hold at once.
+
+            The instance is unusable once this returns, because the reference data every entry point reads is gone.
+            A second call is a no-op, so a caller may release inside a finally block another release already covered.
+        """
+        if self._released:
+            return
+
+        self._released = True
+        with cupy.cuda.Device(self._device):
+            # Both streams are drained first, because a block a queued kernel still reads is not free to return.
+            self._compute_stream.synchronize()
+            self._transfer_stream.synchronize()
+
+            self._normalization_weights.clear()
+            for slot in (*self._input_slots, *self._output_slots):
+                slot.host_buffers.clear()
+                slot.device_buffers.clear()
+
+            self._nonrigid_data = None
+            del self._taper_mask
+            del self._mean_offset
+            del self._reference_kernel
+
+            cupy.get_default_memory_pool().free_all_blocks()
+            cupy.get_default_pinned_memory_pool().free_all_blocks()
 
     def _upload_batch(self, frames: NDArray[np.int16] | NDArray[np.float32], slot: int) -> cupy.ndarray:
         """Stages one host batch in the slot's page-locked buffer and starts its upload on the transfer stream.

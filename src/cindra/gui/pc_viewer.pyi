@@ -29,7 +29,7 @@ from .viewer_context import SingleRecordingData as SingleRecordingData
 class PCViewer(QMainWindow):
     _central_widget: QWidget
     _layout: QGridLayout
-    data: SingleRecordingData
+    _data: SingleRecordingData
     _loaded: bool
     _current_frame: int
     _pc_count: int

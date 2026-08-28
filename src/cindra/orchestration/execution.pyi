@@ -9,6 +9,7 @@ from ataraxis_data_structures import JobState as JobState
 from .gpu import (
     ALL_DEVICES_REQUEST as ALL_DEVICES_REQUEST,
     resolve_gpu_devices as resolve_gpu_devices,
+    resolve_free_device_memory_mb as resolve_free_device_memory_mb,
 )
 from .jobs import (
     PREREQUISITE_FAILURE_MESSAGE as PREREQUISITE_FAILURE_MESSAGE,
@@ -38,16 +39,6 @@ _POOL_START_METHOD: str
 _BROKEN_POOL_MESSAGE: str
 _CANCELED_JOB_MESSAGE: str
 
-class _AdmissionDecisions(StrEnum):
-    ADMIT = "admit"
-    WAIT = "wait"
-    ABORT = "abort"
-
-class _JobOutcomes(StrEnum):
-    RUNNING = "running"
-    COMPLETED = "completed"
-    ABANDONED = "abandoned"
-
 @dataclass(slots=True)
 class PendingJob:
     configuration_path: Path
@@ -58,6 +49,7 @@ class PendingJob:
     resolved_workers: int | None = ...
     assigned_device: int | None = ...
     memory_megabytes: int = ...
+    device_memory_megabytes: int = ...
     @property
     def dispatch_key(self) -> tuple[str, str]: ...
 
@@ -90,6 +82,17 @@ def start_execution_session(
     gpu_devices: list[int] | None = None,
 ) -> dict[str, object]: ...
 def cancel_execution_session() -> tuple[int, int]: ...
+
+class _AdmissionDecisions(StrEnum):
+    ADMIT = "admit"
+    WAIT = "wait"
+    ABORT = "abort"
+
+class _JobOutcomes(StrEnum):
+    RUNNING = "running"
+    COMPLETED = "completed"
+    ABANDONED = "abandoned"
+
 def _job_execution_manager(state: JobExecutionState) -> None: ...
 def _resolve_session_devices(gpu_devices: list[int] | None) -> list[int]: ...
 def _validate_session_device_agreement(
@@ -105,6 +108,7 @@ def _resolve_job_admission(
 def _dispatch_admitted_jobs(state: JobExecutionState, pool: Executor) -> bool: ...
 def _dispatch_pass(state: JobExecutionState, pool: Executor, *, release_reservations: bool) -> bool: ...
 def _release_device(state: JobExecutionState, job: PendingJob | None) -> None: ...
+def _device_memory_admits(device: int, required_megabytes: int) -> bool: ...
 def _create_job_pool(max_workers: int) -> Executor: ...
 def _resolve_pool_size(state: JobExecutionState) -> int: ...
 def _committed_memory(state: JobExecutionState) -> int: ...

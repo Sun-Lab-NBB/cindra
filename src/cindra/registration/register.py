@@ -157,11 +157,18 @@ def register_plane(context: RuntimeContext, *, workers: int, device: int | None 
         timer.reset()
 
         gpu_backend = _register_alignment_channel(context=context, workers=workers, device=device)
-
-        # Applies the same registration offsets to the secondary channel if present. The secondary binary has not been
-        # bidirectionally corrected at this point, so the correction travels with the offsets.
-        if has_second_channel:
-            _register_secondary_channel(context=context, bidirectional_phase_corrected=False, gpu_backend=gpu_backend)
+        try:
+            # Applies the same registration offsets to the secondary channel if present. The secondary binary has not
+            # been bidirectionally corrected at this point, so the correction travels with the offsets.
+            if has_second_channel:
+                _register_secondary_channel(
+                    context=context, bidirectional_phase_corrected=False, gpu_backend=gpu_backend
+                )
+        finally:
+            # The device memory this pass held returns before the next plane is dispatched, rather than staying in the
+            # CuPy pool for the lifetime of the worker process that ran it.
+            if gpu_backend is not None:
+                gpu_backend.release()
 
         context.runtime.timing.registration_time = timer.elapsed
         console.echo(
@@ -179,13 +186,16 @@ def register_plane(context: RuntimeContext, *, workers: int, device: int | None 
 
             # Re-runs registration (computes new reference from already-registered frames).
             gpu_backend = _register_alignment_channel(context=context, workers=workers, device=device)
-
-            # Re-applies offsets to the secondary channel if present. The step-1 pass above already applied the
-            # bidirectional correction to that binary, so this pass carries the rigid offsets alone.
-            if has_second_channel:
-                _register_secondary_channel(
-                    context=context, bidirectional_phase_corrected=True, gpu_backend=gpu_backend
-                )
+            try:
+                # Re-applies offsets to the secondary channel if present. The step-1 pass above already applied the
+                # bidirectional correction to that binary, so this pass carries the rigid offsets alone.
+                if has_second_channel:
+                    _register_secondary_channel(
+                        context=context, bidirectional_phase_corrected=True, gpu_backend=gpu_backend
+                    )
+            finally:
+                if gpu_backend is not None:
+                    gpu_backend.release()
 
             context.runtime.timing.two_step_registration_time = int(timer.elapsed)
             console.echo(
