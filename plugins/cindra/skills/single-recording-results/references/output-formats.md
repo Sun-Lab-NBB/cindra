@@ -25,9 +25,8 @@ demand by `/single-recording-results`.
 | `registered_binary_paths`           | str     | (N,)  | Relative paths to channel 1 registered binaries        |
 | `registered_binary_paths_channel_2` | str     | (N,)  | Channel 2 paths, when both channels are functional     |
 
-`frame_count` is the frame count of the shortest plane that contributed traces, which is what the combined traces were
-trimmed to. `plane_frame_counts` holds each plane's own count, which binarization makes identical across the planes of
-the recording, so every entry equals `frame_count` once every plane has completed.
+`plane_frame_counts` holds each plane's own count, which binarization makes identical across the planes of the
+recording, so every entry equals `frame_count` once every plane has completed.
 
 ---
 
@@ -75,7 +74,7 @@ Saved at both the combined root and per-plane levels. Uses the `ROIMask` seriali
 | `centroids`       | int32   | (num_rois, 2)   | ROI centroid coordinates (y, x)                       |
 | `radius`          | float32 | (num_rois,)     | Fitted ellipse radius per ROI                         |
 | `cluster_id`      | uint32  | (num_rois,)     | Multi-recording tracking cluster ID (0 = unclustered) |
-| `recording_count` | uint16  | (num_rois,)     | Number of recordings ROI appears in                   |
+| `recording_count` | uint16  | (num_rois,)     | Number of recordings in which the ROI appears         |
 | `frame_width`     | uint32  | (1,)            | Frame width in pixels                                 |
 
 To reconstruct per-ROI pixel arrays, split the concatenated `y_pixels`, `x_pixels`, and `pixel_weights` arrays using
@@ -91,7 +90,7 @@ Saved at both the combined root and per-plane levels. Companion file to `roi_mas
 
 | NPZ key                  | Dtype   | Shape       | Description                                            |
 |--------------------------|---------|-------------|--------------------------------------------------------|
-| `footprints`             | uint16  | (num_rois,) | Index of the detection scale the ROI was found at      |
+| `footprints`             | uint16  | (num_rois,) | Index of the detection scale that found the ROI        |
 | `compactness`            | float32 | (num_rois,) | Ratio of actual to expected mean radius (1.0=circular) |
 | `solidity`               | float32 | (num_rois,) | Ratio of soma pixels to convex hull area               |
 | `pixel_count`            | uint32  | (num_rois,) | Total pixels in complete ROI                           |

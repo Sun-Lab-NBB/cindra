@@ -9,7 +9,8 @@ user-invocable: true
 
 # Single-recording results data reference
 
-Complete output data format documentation for the single-recording (within-recording) cindra processing pipeline.
+The single-recording pipeline writes its results under each recording's `cindra/` output directory, which holds the
+combined arrays at its root and one `plane_{index}/` directory per virtual plane.
 
 ---
 
@@ -41,16 +42,14 @@ diagnose and resolve connectivity issues.
 
 ## Available tools
 
-Use these cindra MCP tools to query and verify single-recording output data programmatically. Prefer these over manual
-file reads whenever possible.
-
 ### Verification tool
 
 | Tool                                  | Purpose                                                         |
 |---------------------------------------|-----------------------------------------------------------------|
 | `verify_single_recording_output_tool` | Verifies completeness of all expected output files and NPZ keys |
 
-The verification response reports `complete`, `plane_count` counted from the plane directories on disk, `two_channels`,
+The verification response reports `success`, `complete`, the echoed `output_root`, `cindra_path` naming the resolved
+`cindra/` directory the tool inspected, `plane_count` counted from the plane directories on disk, `two_channels`,
 `total_checks`, `passed`, `failed`, `missing`, and `warnings`. `failed` counts the required checks that did not pass, so
 it always equals the length of `missing`, and `complete` is False whenever `missing` is non-empty. The `warnings` list
 is always present and holds non-fatal issues such as a registered-binary path that does not resolve on disk, so a
@@ -85,6 +84,10 @@ of the `cindra/` folder, which equals the `output_roots` entries passed to the p
 `output_root` entries it returns. It is never the `raw_data_paths` entry, which is the directory holding the TIFF
 files. The tools resolve the `cindra/` subdirectory automatically.
 
+`verify_single_recording_output_tool` and `query_single_recording_metadata_tool` both report `cindra_path`, the resolved
+`cindra/` directory they inspected under the `output_root` they were given. It reaches the caller as a response key
+rather than as an `output_root`, so keep passing the `output_root` back into the next tool call.
+
 `query_single_recording_metadata_tool` reports the top-level `frame_count` from the combined traces and each
 `plane_timing` entry's `frame_count` from that plane's `runtime_data.yaml`. The counts agree, because binarization
 gives every plane of the recording the same frame count.
@@ -110,16 +113,16 @@ against a default detection or trace result therefore compares one plane against
 `plane_index` explicitly whenever you relate the two, and an unknown plane fails with "Plane directory plane_N not
 found. Available: ...".
 
-| Argument            | Tools                                       | Accepted values                                                                                             |
-|---------------------|---------------------------------------------|-------------------------------------------------------------------------------------------------------------|
-| `plane_index`       | detection summary, ROI statistics, traces   | `-1` combined view, `0`+ a specific plane                                                                   |
-| `plane_index`       | `query_registration_quality_tool`           | `0`+ a specific plane. `-1` always fails, because no combined `registration_data/` exists                   |
-| `trace_type`        | `query_traces_tool`, cross-recording traces | `fluorescence`, `neuropil`, `corrected`, `spikes`                                                           |
-| `downsample_factor` | `query_traces_tool`, cross-recording traces | `1` none, `N` every Nth sample. Below 1 clamps to 1                                                         |
-| `start_frame`       | `query_traces_tool`, cross-recording traces | inclusive, applied before downsampling, default `0`                                                         |
-| `end_frame`         | `query_traces_tool`, cross-recording traces | exclusive, applied before downsampling, default all                                                         |
-| `sort_by`           | `query_roi_statistics_tool`                 | `skewness`, `compactness`, `footprint`, `aspect_ratio`, `pixel_count`, `solidity`, `normalized_pixel_count` |
-| `top_n`             | `query_roi_statistics_tool`                 | with `sort_by`, the top N. Without it, the first N                                                          |
+| Argument            | Tools                                                                            | Accepted values                                                                                             |
+|---------------------|----------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------|
+| `plane_index`       | `query_detection_summary_tool`, `query_roi_statistics_tool`, `query_traces_tool` | `-1` combined view, `0`+ a specific plane                                                                   |
+| `plane_index`       | `query_registration_quality_tool`                                                | `0`+ a specific plane. `-1` always fails, because no combined `registration_data/` exists                   |
+| `trace_type`        | `query_traces_tool`, cross-recording traces                                      | `fluorescence`, `neuropil`, `corrected`, `spikes`                                                           |
+| `downsample_factor` | `query_traces_tool`, cross-recording traces                                      | `1` none, `N` every Nth sample. Below 1 clamps to 1                                                         |
+| `start_frame`       | `query_traces_tool`, cross-recording traces                                      | inclusive, applied before downsampling, default `0`                                                         |
+| `end_frame`         | `query_traces_tool`, cross-recording traces                                      | exclusive, applied before downsampling, default all                                                         |
+| `sort_by`           | `query_roi_statistics_tool`                                                      | `skewness`, `compactness`, `footprint`, `aspect_ratio`, `pixel_count`, `solidity`, `normalized_pixel_count` |
+| `top_n`             | `query_roi_statistics_tool`                                                      | with `sort_by`, the top N. Without it, the first N                                                          |
 
 `trace_type` names the trace, not the file: `corrected` returns the neuropil-subtracted trace and `spikes` returns the
 deconvolved trace. An unrecognized value fails with "Invalid trace_type '...'. Valid options: ...".
@@ -159,6 +162,7 @@ copy.
 cindra/
 ├── configuration.yaml                          # Saved pipeline configuration
 ├── acquisition_parameters.yaml                 # Saved acquisition metadata
+├── single_recording_tracker.yaml               # Processing tracker
 ├── combined_metadata.npz                       # Combined multi-plane metadata
 ├── detection_data/                             # Combined detection images
 │   ├── mean_image.npy

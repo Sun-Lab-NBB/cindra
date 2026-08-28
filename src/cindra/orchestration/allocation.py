@@ -113,8 +113,8 @@ class ResourceClass:
     Notes:
         The ceiling is the width at which the stage stops converting cores into wall clock, so an allocation past it
         holds capacity another job would turn into throughput. A class carries None when its work waits on something
-        the host cores do not supply, which covers the storage the conversion decodes from and the serial merge the
-        combination stage performs.
+        the host cores do not supply, which covers the storage the conversion decodes from, the serial merge the
+        combination stage performs, and the device a registration job holds.
     """
     concurrency_limit: int | None
     """The jobs of this class that may run at once regardless of the capacity the budgets could still supply, or None
@@ -143,8 +143,8 @@ _BINARIZATION_RESOURCES: ResourceClass = ResourceClass(
     concurrency_reservation=None,
 )
 """The resource class of the binarization jobs. The allocated cores become the TIFF image decode threads, and the
-stage streams frames to disk instead of holding them, so its concurrency is the hard ceiling this class alone
-carries."""
+stage streams frames to disk instead of holding them, so its concurrency is a hard ceiling rather than a cap the CPU
+budget derives."""
 
 _REGISTRATION_RESOURCES: ResourceClass = ResourceClass(
     name="registration",
@@ -285,7 +285,14 @@ def resolve_registration_resource_class(*, gpu_registration: bool) -> ResourceCl
 
 
 def class_requires_device(resource_class: ResourceClass) -> bool:
-    """Returns True when each job of the target resource class holds one CUDA device while it runs."""
+    """Returns True when each job of the target resource class holds one CUDA device while it runs.
+
+    Args:
+        resource_class: The resource class to test.
+
+    Returns:
+        True when each job of the class holds one CUDA device while it runs.
+    """
     return resource_class.name == _REGISTRATION_GPU_CLASS_NAME
 
 

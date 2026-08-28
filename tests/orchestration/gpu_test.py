@@ -24,58 +24,6 @@ from cindra.orchestration.gpu import (
 )
 
 
-class _DeviceContext:
-    """Stands in for the CuPy device context manager, recording the index a probe transforms inside."""
-
-    def __init__(self, index, recorded):
-        self.index = index
-        self._recorded = recorded
-
-    def __enter__(self):
-        self._recorded["entered_devices"].append(self.index)
-        return self
-
-    def __exit__(self, exception_type, exception_value, traceback):
-        return False
-
-
-def _make_cupy(device_count=2, properties=None, probe_error=None, count_error=None, name=b"NVIDIA RTX A6000"):
-    """Builds a stand-in for the CuPy binding that answers the calls the discovery makes."""
-    recorded = {"transforms": 0, "synchronized": 0, "entered_devices": []}
-
-    def get_device_count():
-        if count_error is not None:
-            raise count_error
-        return device_count
-
-    def get_device_properties(index):
-        if properties is not None:
-            return properties(index)
-        return {"name": name, "totalGlobalMem": (index + 1) * 1024**3, "major": 8, "minor": 6}
-
-    def rfft2(array, axes):
-        if probe_error is not None:
-            raise probe_error
-        recorded["transforms"] += 1
-        return array
-
-    def synchronize():
-        recorded["synchronized"] += 1
-
-    binding = SimpleNamespace(
-        float32="float32",
-        zeros=lambda shape, dtype: SimpleNamespace(shape=shape, dtype=dtype),
-        fft=SimpleNamespace(rfft2=rfft2),
-        cuda=SimpleNamespace(
-            runtime=SimpleNamespace(getDeviceCount=get_device_count, getDeviceProperties=get_device_properties),
-            Stream=SimpleNamespace(null=SimpleNamespace(synchronize=synchronize)),
-            Device=lambda index: _DeviceContext(index=index, recorded=recorded),
-        ),
-    )
-    binding.recorded = recorded
-    return binding
-
-
 class TestGpuSummary:
     """Tests the reporting surface of the device resolution summary."""
 
@@ -138,8 +86,8 @@ class TestDeviceResolution:
         assert binding.recorded["transforms"] == 1
         assert binding.recorded["synchronized"] == 1
 
-    def test_resolution_decodes_a_byte_string_device_name(self, monkeypatch):
-        """Verifies that a device name the runtime reports as bytes reaches the caller as text."""
+    def test_resolution_passes_a_text_device_name_through(self, monkeypatch):
+        """Verifies that a device name the runtime already reports as text reaches the caller unchanged."""
         monkeypatch.setattr(gpu_module.sys, "platform", "linux")
         monkeypatch.setattr(gpu_module, "cupy", _make_cupy(device_count=1, name="A6000"))
 
@@ -221,7 +169,7 @@ class TestDeviceResolution:
 
 
 class TestDeviceBudget:
-    """Tests the device budget the batch engine schedules GPU registration jobs across."""
+    """Tests the device budget across which the batch engine schedules GPU registration jobs."""
 
     def test_budget_counts_every_usable_device(self, monkeypatch):
         """Verifies that the budget reports one entry per usable device."""
@@ -295,7 +243,7 @@ class TestAllDevicesRequest:
 
 
 class TestDeviceHelpers:
-    """Tests the private helpers the resolution builds its summary from."""
+    """Tests the private helpers from which the resolution builds its summary."""
 
     def test_description_reads_every_reported_device(self, monkeypatch):
         """Verifies that the descriptor reads one entry per device index."""
@@ -319,3 +267,55 @@ class TestDeviceHelpers:
         _probe_device_transform(device=1)
         assert binding.recorded["transforms"] == 1
         assert binding.recorded["entered_devices"] == [1]
+
+
+class _DeviceContext:
+    """Stands in for the CuPy device context manager, recording the index inside which a probe transforms."""
+
+    def __init__(self, index, recorded):
+        self.index = index
+        self._recorded = recorded
+
+    def __enter__(self):
+        self._recorded["entered_devices"].append(self.index)
+        return self
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        return False
+
+
+def _make_cupy(device_count=2, properties=None, probe_error=None, count_error=None, name=b"NVIDIA RTX A6000"):
+    """Builds a stand-in for the CuPy binding that answers the calls the discovery makes."""
+    recorded = {"transforms": 0, "synchronized": 0, "entered_devices": []}
+
+    def get_device_count():
+        if count_error is not None:
+            raise count_error
+        return device_count
+
+    def get_device_properties(index):
+        if properties is not None:
+            return properties(index)
+        return {"name": name, "totalGlobalMem": (index + 1) * 1024**3, "major": 8, "minor": 6}
+
+    def rfft2(array, axes):
+        if probe_error is not None:
+            raise probe_error
+        recorded["transforms"] += 1
+        return array
+
+    def synchronize():
+        recorded["synchronized"] += 1
+
+    binding = SimpleNamespace(
+        float32="float32",
+        zeros=lambda shape, dtype: SimpleNamespace(shape=shape, dtype=dtype),
+        fft=SimpleNamespace(rfft2=rfft2),
+        cuda=SimpleNamespace(
+            runtime=SimpleNamespace(getDeviceCount=get_device_count, getDeviceProperties=get_device_properties),
+            Stream=SimpleNamespace(null=SimpleNamespace(synchronize=synchronize)),
+            Device=lambda index: _DeviceContext(index=index, recorded=recorded),
+        ),
+    )
+    binding.recorded = recorded
+    return binding

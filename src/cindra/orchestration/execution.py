@@ -84,29 +84,6 @@ _CANCELED_JOB_MESSAGE: str = (
 """The tracker error message recorded for a job whose worker pool future was canceled before it ran."""
 
 
-class _AdmissionDecisions(StrEnum):
-    """Defines the outcomes of evaluating one queued job's prerequisites against its own tracker."""
-
-    ADMIT = "admit"
-    """Every prerequisite job succeeded, so the job moves into its resource class queue."""
-    WAIT = "wait"
-    """At least one prerequisite job has not finished, so the job stays in the admission pool."""
-    ABORT = "abort"
-    """At least one prerequisite job failed or is absent from the tracker, so the job can never run."""
-
-
-class _JobOutcomes(StrEnum):
-    """Defines the outcomes of examining the worker pool future the session holds for one dispatched job."""
-
-    RUNNING = "running"
-    """The worker has not finished the job, so the job keeps its place in its resource class running set."""
-    COMPLETED = "completed"
-    """The worker returned, so the job already recorded its own terminal state on its tracker."""
-    ABANDONED = "abandoned"
-    """The future carries an exception or a cancellation rather than a result. That covers a worker the host killed, a
-    worker that raised on its way out of the job, and a job the pool canceled before any worker started it."""
-
-
 @dataclass(slots=True)
 class PendingJob:
     """Describes a single pipeline job queued for batch execution."""
@@ -397,6 +374,29 @@ def cancel_execution_session() -> tuple[int, int]:
         active_count = sum(len(futures) for futures in state.active_futures.values())
 
     return canceled_count, active_count
+
+
+class _AdmissionDecisions(StrEnum):
+    """Defines the outcomes of evaluating one queued job's prerequisites against its own tracker."""
+
+    ADMIT = "admit"
+    """Every prerequisite job succeeded, so the job moves into its resource class queue."""
+    WAIT = "wait"
+    """At least one prerequisite job has not finished, so the job stays in the admission pool."""
+    ABORT = "abort"
+    """At least one prerequisite job failed or is absent from the tracker, so the job can never run."""
+
+
+class _JobOutcomes(StrEnum):
+    """Defines the outcomes of examining the worker pool future the session holds for one dispatched job."""
+
+    RUNNING = "running"
+    """The worker has not finished the job, so the job keeps its place in its resource class running set."""
+    COMPLETED = "completed"
+    """The worker returned, so the job already recorded its own terminal state on its tracker."""
+    ABANDONED = "abandoned"
+    """The future carries an exception or a cancellation rather than a result. That covers a worker the host killed, a
+    worker that raised on its way out of the job, and a job the pool canceled before any worker started it."""
 
 
 def _job_execution_manager(state: JobExecutionState) -> None:
@@ -918,7 +918,14 @@ def _count_competing_classes(state: JobExecutionState) -> int:
 
 
 def _class_is_elastic(resource_class: ResourceClass) -> bool:
-    """Returns True when the jobs of the target resource class widen over the capacity the host holds free."""
+    """Returns True when the jobs of the target resource class widen over the capacity the host holds free.
+
+    Args:
+        resource_class: The resource class to test.
+
+    Returns:
+        True when the class widens its jobs at dispatch.
+    """
     return resource_class.maximum_workers_per_job is not None and (
         resource_class.maximum_workers_per_job > resource_class.workers_per_job
     )

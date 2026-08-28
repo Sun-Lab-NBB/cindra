@@ -17,7 +17,7 @@ class TestUpdateCorrelationMasks:
     """Tests the activity correlation coloring helper."""
 
     def test_single_temporal_bin_colors_every_roi_once(self) -> None:
-        """Verifies that a single-bin trace yields one correlation per ROI instead of a square matrix."""
+        """Verifies that a single-bin trace yields one correlation per ROI."""
         color_arrays = _make_color_arrays(roi_count=4)
         binned_fluorescence = np.array([[1.0], [2.0], [3.0], [4.0]], dtype=np.float32)
 

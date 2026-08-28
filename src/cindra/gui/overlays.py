@@ -163,8 +163,8 @@ def compute_colors(
     normalized_statistics = np.zeros((color_count, roi_count), dtype=np.float32)
 
     # Generates deterministic random hues (seeded for reproducibility across recordings).
-    np.random.seed(seed=ROI_CONFIG.random_color_seed)  # noqa: NPY002
-    random_colors = np.random.random((roi_count,)).astype(np.float32)  # noqa: NPY002
+    np.random.seed(seed=ROI_CONFIG.random_color_seed)  # noqa: NPY002 - the legacy global stream keeps ROI hues stable.
+    random_colors = np.random.random((roi_count,)).astype(np.float32)  # noqa: NPY002 - default_rng redraws every hue.
     if two_channels:
         # Shifts hues into the channel 2 color range so the two channels are visually distinct.
         random_colors = random_colors / ROI_CONFIG.channel_2_color_divisor + ROI_CONFIG.channel_2_color_offset
@@ -600,8 +600,7 @@ def update_correlation_masks(
     # dot product into an approximate Pearson correlation coefficient for each ROI.
     denominator = binned_fluorescence.shape[-1] * fluorescence_standard_deviation * selected_standard_deviation
 
-    # Dot product of each ROI's trace against the reference template, normalized by the denominator.
-    correlation = np.dot(binned_fluorescence, selected_mean) / denominator
+    correlation = np.dot(a=binned_fluorescence, b=selected_mean) / denominator
 
     # Replaces the selected ROIs' self-correlation with the population mean to prevent them from dominating the
     # color scale (they would otherwise always be the highest values).
@@ -848,14 +847,12 @@ def _place_in_valid_region(
     Returns:
         Full-frame image with the normalized data placed in the valid region.
     """
-    # Delegates to normalize_percentile when no valid subregion is specified.
     if valid_y_range is None or valid_x_range is None:
         return normalize_percentile(image=image, frame_height=frame_height, frame_width=frame_width)
 
     if image.size == 0:
         return np.full((frame_height, frame_width), fill_value=0.5, dtype=np.float32)
 
-    # Normalizes the image using percentile clipping.
     lower_bound = np.percentile(a=image, q=COMMON_CONFIG.lower_percentile)
     upper_bound = np.percentile(a=image, q=COMMON_CONFIG.upper_percentile)
 
@@ -957,7 +954,6 @@ def _flip_roi(
         cell_color: RGB color for cell ROIs derived from the active colormap high endpoint.
         non_cell_color: RGB color for non-cell ROIs derived from the active colormap low endpoint.
     """
-    # Updates the binary classification color and normalized statistic for the flipped ROI.
     is_cell = bool(cell_classification_labels[roi_index])
     color_arrays.colors[ROIColorMode.CELL_CLASSIFICATION, roi_index] = cell_color if is_cell else non_cell_color
     color_arrays.normalized_statistics[ROIColorMode.CELL_CLASSIFICATION, roi_index] = float(is_cell)

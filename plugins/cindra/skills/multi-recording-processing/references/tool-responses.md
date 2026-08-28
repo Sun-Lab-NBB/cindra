@@ -53,9 +53,10 @@ alone.
 Returns `jobs` holding the `name`, `specifier`, `cores`, `memory_mb`, and `device_memory_mb` of every declared job,
 plus `total_jobs`, `peak_memory_mb` and `peak_device_memory_mb` for the single largest job, `total_memory_mb` for every
 job at once, and `pipeline_type`. Every device figure is zero here, because no multi-recording stage runs on a CUDA
-device, and the `gpu_registration` argument leaves them at zero as well. Unlike the universe tool, this one fails when
-the dataset names no recording directory, when any recording carries no combined metadata archive, or when any
-recording reports no regions in its combined trace array.
+device, and the `gpu_registration` argument leaves them at zero as well. Like the universe tool, it fails when the
+dataset names fewer than two recording directories, because both load through the same loader. Unlike the universe tool,
+it also fails when any recording carries no combined metadata archive, or when any recording reports no regions in its
+combined trace array, both of which the universe tool reports as `ready: false` instead.
 
 ### check_threading_runtime_tool
 
@@ -111,9 +112,12 @@ a `note`.
 
 ### reset_processing_phases_tool
 
-Returns `reset`, `requested_phases`, `effective_phases` after downstream expansion in pipeline execution order, and a
-`jobs` list. That list is a post-reset snapshot of **every** job of every valid phase, not only the jobs the reset
-touched, so selecting from it dispatches jobs that were already succeeded. Select from the prepare manifest instead.
+Returns `reset`, the echoed `tracker_path`, `requested_phases`, `effective_phases` after downstream expansion in
+pipeline execution order, and a `jobs` list. That list is a post-reset snapshot of **every** job of every valid phase,
+not only the jobs the reset touched, so selecting from it dispatches jobs that were already succeeded. Select from the
+prepare manifest instead. A `warnings` list joins them when a reset phase is governed by a repeat flag that is false
+while that phase's output already exists. Each entry names the dotted configuration flag to set, and a caller must act
+on every entry before dispatching the reset phase.
 
 ### clean_processing_output_tool
 

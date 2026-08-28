@@ -1,8 +1,6 @@
 """Provides the command-line interface for launching the cindra Graphical User Interface (GUI) applications and the GUI
-MCP server.
-
-This CLI is installed as a separate entry-point from the main 'cindra' CLI to avoid loading GUI dependencies during
-headless pipeline execution.
+MCP server. This CLI is installed as a separate entry-point from the main 'cindra' CLI to avoid loading GUI
+dependencies during headless pipeline execution.
 """
 
 from typing import Literal

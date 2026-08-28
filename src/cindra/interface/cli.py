@@ -25,7 +25,7 @@ CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
 """The Click context settings that ensure displayed help messages are formatted according to the cindra standard."""
 
 
-# Defined above the commands because a decorator is resolved where it is applied rather than where the module ends.
+# Sits above the commands because a decorator is resolved where it is applied rather than where the module ends.
 def report_command_failure[**P](command: Callable[P, None]) -> Callable[P, None]:
     """Reports the failure of a command through the console instead of an interpreter traceback.
 
@@ -269,9 +269,10 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     default=None,
     help=(
         "[Single-recording] The number of parallel workers to allocate to each plane-registration step. When this "
-        "option is omitted, the step receives its measured default allocation of 4 workers, which is the knee of the "
-        "measured registration scaling curve. Setting this to -1 uses every available core, minus the cores reserved "
-        "for system use."
+        "option is omitted, the step receives its measured default allocation of 4 workers on the host CPU, or 2 "
+        "workers when --register-device names a CUDA device. A device-backed job keeps only its reference, crop, and "
+        "median-filter work on the host. The 4-worker figure is the knee of the measured registration scaling curve. "
+        "Setting this to -1 uses every available core, minus the cores reserved for system use."
     ),
 )
 @click.option(

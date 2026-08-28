@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from PySide6.QtWidgets import QApplication
 
 
-@pytest.mark.xdist_group("gui_viewers")
+@pytest.mark.xdist_group(name="gui_viewers")
 class TestPrincipalComponentField:
     """Tests the principal component number field reads."""
 
@@ -56,7 +56,7 @@ class TestPrincipalComponentField:
         viewer.close()
 
 
-@pytest.mark.xdist_group("gui_viewers")
+@pytest.mark.xdist_group(name="gui_viewers")
 class TestAnimatedPanelLabel:
     """Tests the caption of the animated principal component panel."""
 

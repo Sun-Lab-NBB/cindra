@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from typing import Literal
 
+# Imports the modules themselves rather than the names they declare, because importing a module is what runs its
+# @mcp.tool() decorators and registers its tools on the shared instance.
 from . import results_tools, processing_tools, acquisition_tools, configuration_tools  # noqa: F401
 from .mcp_instance import mcp
 

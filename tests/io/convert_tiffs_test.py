@@ -84,11 +84,11 @@ class TestConvertTiffsToBinary:
             file_path=io_data.registered_binary_path, frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH
         )
         assert np.array_equal(
-            binary, _constant_stack(frame_values=frame_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+            a1=binary, a2=_constant_stack(frame_values=frame_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
         )
 
         expected_mean = np.full((_FRAME_HEIGHT, _FRAME_WIDTH), fill_value=np.mean(frame_values), dtype=np.float32)
-        assert np.allclose(context.runtime.detection.mean_image, expected_mean)
+        assert np.allclose(a=context.runtime.detection.mean_image, b=expected_mean)
 
     def test_multi_plane_interleaves_frames(
         self, tmp_path: Path, read_binary_movie: Callable[[Path, int, int], NDArray[np.int16]]
@@ -120,15 +120,15 @@ class TestConvertTiffsToBinary:
             file_path=context_1.runtime.io.registered_binary_path, frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH
         )
         assert np.array_equal(
-            binary_0, _constant_stack(frame_values=[0, 2, 4, 6], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+            a1=binary_0, a2=_constant_stack(frame_values=[0, 2, 4, 6], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
         )
         assert np.array_equal(
-            binary_1, _constant_stack(frame_values=[1, 3, 5, 7], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+            a1=binary_1, a2=_constant_stack(frame_values=[1, 3, 5, 7], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
         )
         assert context_0.runtime.io.frame_count == 4
         assert context_1.runtime.io.frame_count == 4
-        assert np.allclose(context_0.runtime.detection.mean_image, 3.0)
-        assert np.allclose(context_1.runtime.detection.mean_image, 4.0)
+        assert np.allclose(a=context_0.runtime.detection.mean_image, b=3.0)
+        assert np.allclose(a=context_1.runtime.detection.mean_image, b=4.0)
 
     def test_two_channels_split_across_small_batches(
         self, tmp_path: Path, read_binary_movie: Callable[[Path, int, int], NDArray[np.int16]]
@@ -165,14 +165,14 @@ class TestConvertTiffsToBinary:
             file_path=io_data.registered_binary_path_channel_2, frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH
         )
         assert np.array_equal(
-            binary_1, _constant_stack(frame_values=[0, 2, 4, 6], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+            a1=binary_1, a2=_constant_stack(frame_values=[0, 2, 4, 6], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
         )
         assert np.array_equal(
-            binary_2, _constant_stack(frame_values=[1, 3, 5, 7], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+            a1=binary_2, a2=_constant_stack(frame_values=[1, 3, 5, 7], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
         )
         assert io_data.frame_count == 4
-        assert np.allclose(context.runtime.detection.mean_image, 3.0)
-        assert np.allclose(context.runtime.detection.mean_image_channel_2, 4.0)
+        assert np.allclose(a=context.runtime.detection.mean_image, b=3.0)
+        assert np.allclose(a=context.runtime.detection.mean_image_channel_2, b=4.0)
 
     def test_each_channel_mean_image_uses_its_own_frame_count(self, tmp_path: Path) -> None:
         """Verifies that each channel's mean image is divided by the frames that channel received."""
@@ -214,9 +214,9 @@ class TestConvertTiffsToBinary:
         convert_tiffs_to_binary(plan=plan)
 
         assert context.runtime.io.frame_count == 2
-        assert np.allclose(context.runtime.detection.mean_image, 15.0)
+        assert np.allclose(a=context.runtime.detection.mean_image, b=15.0)
         # Dividing channel 2 by the two frames channel 1 received would halve this to 2.0.
-        assert np.allclose(context.runtime.detection.mean_image_channel_2, 4.0)
+        assert np.allclose(a=context.runtime.detection.mean_image_channel_2, b=4.0)
 
     def test_second_channel_functional_swaps_channel_streams(
         self, tmp_path: Path, read_binary_movie: Callable[[Path, int, int], NDArray[np.int16]]
@@ -253,10 +253,10 @@ class TestConvertTiffsToBinary:
         )
         # With the functional channel set to the second interleave slot, the functional binary receives the odd frames.
         assert np.array_equal(
-            binary_1, _constant_stack(frame_values=[1, 3, 5, 7], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+            a1=binary_1, a2=_constant_stack(frame_values=[1, 3, 5, 7], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
         )
         assert np.array_equal(
-            binary_2, _constant_stack(frame_values=[0, 2, 4, 6], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+            a1=binary_2, a2=_constant_stack(frame_values=[0, 2, 4, 6], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
         )
 
     def test_mroi_single_channel_slices_roi_lines(
@@ -292,7 +292,9 @@ class TestConvertTiffsToBinary:
         binary = read_binary_movie(
             file_path=io_data.registered_binary_path, frame_height=roi_height, frame_width=_FRAME_WIDTH
         )
-        assert np.array_equal(binary, _constant_stack(frame_values=frame_values, height=roi_height, width=_FRAME_WIDTH))
+        assert np.array_equal(
+            a1=binary, a2=_constant_stack(frame_values=frame_values, height=roi_height, width=_FRAME_WIDTH)
+        )
 
     def test_mroi_two_channels_slices_both_streams(
         self, tmp_path: Path, read_binary_movie: Callable[[Path, int, int], NDArray[np.int16]]
@@ -331,16 +333,16 @@ class TestConvertTiffsToBinary:
             file_path=io_data.registered_binary_path_channel_2, frame_height=roi_height, frame_width=_FRAME_WIDTH
         )
         assert np.array_equal(
-            binary_1, _constant_stack(frame_values=[0, 2, 4, 6], height=roi_height, width=_FRAME_WIDTH)
+            a1=binary_1, a2=_constant_stack(frame_values=[0, 2, 4, 6], height=roi_height, width=_FRAME_WIDTH)
         )
         assert np.array_equal(
-            binary_2, _constant_stack(frame_values=[1, 3, 5, 7], height=roi_height, width=_FRAME_WIDTH)
+            a1=binary_2, a2=_constant_stack(frame_values=[1, 3, 5, 7], height=roi_height, width=_FRAME_WIDTH)
         )
 
     def test_mroi_incomplete_final_volume_is_discarded_for_every_roi(
         self, tmp_path: Path, read_binary_movie: Callable[[Path, int, int], NDArray[np.int16]]
     ) -> None:
-        """Verifies that MROI planes sharing a physical plane receive the same frames whatever ROI they belong to."""
+        """Verifies that MROI planes sharing a physical plane receive the same frames whichever ROI owns them."""
         data_path = tmp_path / "data"
         output_path = tmp_path / "output"
         _write_parameters_json(directory=data_path, plane_number=2, channel_number=1)
@@ -379,7 +381,7 @@ class TestConvertTiffsToBinary:
                 file_path=io_data.registered_binary_path, frame_height=roi_height, frame_width=_FRAME_WIDTH
             )
             assert np.array_equal(
-                binary, _constant_stack(frame_values=selection, height=roi_height, width=_FRAME_WIDTH)
+                a1=binary, a2=_constant_stack(frame_values=selection, height=roi_height, width=_FRAME_WIDTH)
             )
 
     def test_multiple_files_skip_a_plane_with_no_frames_in_a_batch(
@@ -415,8 +417,12 @@ class TestConvertTiffsToBinary:
         binary_1 = read_binary_movie(
             file_path=context_1.runtime.io.registered_binary_path, frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH
         )
-        assert np.array_equal(binary_0, _constant_stack(frame_values=[0, 2], height=_FRAME_HEIGHT, width=_FRAME_WIDTH))
-        assert np.array_equal(binary_1, _constant_stack(frame_values=[1, 3], height=_FRAME_HEIGHT, width=_FRAME_WIDTH))
+        assert np.array_equal(
+            a1=binary_0, a2=_constant_stack(frame_values=[0, 2], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+        )
+        assert np.array_equal(
+            a1=binary_1, a2=_constant_stack(frame_values=[1, 3], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+        )
 
     def test_interleave_selection_survives_split_batches(
         self, tmp_path: Path, read_binary_movie: Callable[[Path, int, int], NDArray[np.int16]]
@@ -470,15 +476,15 @@ class TestConvertTiffsToBinary:
                 frame_width=_FRAME_WIDTH,
             )
             assert np.array_equal(
-                binary_1, _constant_stack(frame_values=channel_1_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+                a1=binary_1, a2=_constant_stack(frame_values=channel_1_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
             )
             assert np.array_equal(
-                binary_2, _constant_stack(frame_values=channel_2_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+                a1=binary_2, a2=_constant_stack(frame_values=channel_2_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
             )
             expected_mean = np.full(
                 (_FRAME_HEIGHT, _FRAME_WIDTH), fill_value=np.mean(channel_1_values), dtype=np.float32
             )
-            np.testing.assert_array_equal(context.runtime.detection.mean_image, expected_mean)
+            np.testing.assert_array_equal(actual=context.runtime.detection.mean_image, desired=expected_mean)
 
     def test_incomplete_final_cycle_is_discarded(
         self, tmp_path: Path, read_binary_movie: Callable[[Path, int, int], NDArray[np.int16]]
@@ -531,10 +537,10 @@ class TestConvertTiffsToBinary:
                 frame_width=_FRAME_WIDTH,
             )
             assert np.array_equal(
-                binary_1, _constant_stack(frame_values=channel_1_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+                a1=binary_1, a2=_constant_stack(frame_values=channel_1_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
             )
             assert np.array_equal(
-                binary_2, _constant_stack(frame_values=channel_2_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+                a1=binary_2, a2=_constant_stack(frame_values=channel_2_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
             )
 
     def test_ragged_files_write_the_channel_a_short_batch_reaches(
@@ -590,10 +596,10 @@ class TestConvertTiffsToBinary:
                 frame_width=_FRAME_WIDTH,
             )
             assert np.array_equal(
-                binary_1, _constant_stack(frame_values=channel_1_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+                a1=binary_1, a2=_constant_stack(frame_values=channel_1_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
             )
             assert np.array_equal(
-                binary_2, _constant_stack(frame_values=channel_2_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+                a1=binary_2, a2=_constant_stack(frame_values=channel_2_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
             )
 
     def test_file_beyond_the_converted_budget_is_not_read(
@@ -647,10 +653,10 @@ class TestConvertTiffsToBinary:
                 frame_width=_FRAME_WIDTH,
             )
             assert np.array_equal(
-                binary_1, _constant_stack(frame_values=channel_1_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+                a1=binary_1, a2=_constant_stack(frame_values=channel_1_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
             )
             assert np.array_equal(
-                binary_2, _constant_stack(frame_values=channel_2_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+                a1=binary_2, a2=_constant_stack(frame_values=channel_2_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
             )
 
     def test_single_frame_tiff(
@@ -677,7 +683,7 @@ class TestConvertTiffsToBinary:
         binary = read_binary_movie(
             file_path=io_data.registered_binary_path, frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH
         )
-        assert np.array_equal(binary, _constant_stack(frame_values=[7], height=_FRAME_HEIGHT, width=_FRAME_WIDTH))
+        assert np.array_equal(a1=binary, a2=_constant_stack(frame_values=[7], height=_FRAME_HEIGHT, width=_FRAME_WIDTH))
 
     def test_ignored_file_names_are_excluded(
         self, tmp_path: Path, read_binary_movie: Callable[[Path, int, int], NDArray[np.int16]]
@@ -707,7 +713,7 @@ class TestConvertTiffsToBinary:
             file_path=io_data.registered_binary_path, frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH
         )
         assert np.array_equal(
-            binary, _constant_stack(frame_values=frame_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+            a1=binary, a2=_constant_stack(frame_values=frame_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
         )
 
     def test_frame_count_mismatch_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -800,7 +806,7 @@ class TestConvertTiffsToBinary:
         # Eight frames deinterleave into four frames per plane, and the frames are 8 rows by 6 columns, so a geometry
         # recorded transposed reads differently from one recorded correctly. No mark comes off until every plane of
         # the recording holds that geometry durably, so a run killed at any clear leaves no binary sized against
-        # zeros and none whose plane has yet to record what it was written against.
+        # zeros and none whose plane has yet to record the geometry against which it was written.
         geometry = (4, _FRAME_HEIGHT, _FRAME_WIDTH)
         assert records == [
             (context_0.runtime.io.registered_binary_path, (geometry, geometry)),
@@ -1062,7 +1068,7 @@ class TestScanSourceFrames:
         open_tiff_file = TiffFile
 
         def _counting_open(file_path: Path) -> TiffFile:
-            """Records the file being opened and hands back the TiffFile instance the scan works through."""
+            """Records the file being opened and hands back the TiffFile instance that the scan reads."""
             opened.append(file_path)
             return open_tiff_file(file_path)
 

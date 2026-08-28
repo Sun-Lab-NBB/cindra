@@ -208,19 +208,26 @@ def _describe_devices(device_count: int) -> tuple[GpuDevice, ...]:
     Returns:
         One descriptor per device, ordered by device index.
     """
-    devices = []
-    for index in range(device_count):
-        properties = cupy.cuda.runtime.getDeviceProperties(index)
-        name = properties["name"]
-        devices.append(
-            GpuDevice(
-                index=index,
-                name=name.decode() if isinstance(name, bytes) else str(name),
-                total_memory_mb=int(properties["totalGlobalMem"]) // _BYTES_PER_MEGABYTE,
-                compute_capability=f"{properties['major']}.{properties['minor']}",
-            )
-        )
-    return tuple(devices)
+    return tuple(_describe_device(index=index) for index in range(device_count))
+
+
+def _describe_device(index: int) -> GpuDevice:
+    """Reads the properties of the CUDA device that carries the target index.
+
+    Args:
+        index: The zero-based index of the device to describe.
+
+    Returns:
+        The descriptor of the device the runtime reports under that index.
+    """
+    properties = cupy.cuda.runtime.getDeviceProperties(index)
+    name = properties["name"]
+    return GpuDevice(
+        index=index,
+        name=name.decode() if isinstance(name, bytes) else str(name),
+        total_memory_mb=int(properties["totalGlobalMem"]) // _BYTES_PER_MEGABYTE,
+        compute_capability=f"{properties['major']}.{properties['minor']}",
+    )
 
 
 def _probe_device_transform(device: int | None) -> None:

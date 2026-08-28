@@ -1,6 +1,4 @@
-"""Provides the fluorescence extraction entry points for the single-recording and multi-recording
-processing pipelines.
-"""
+"""Provides the fluorescence extraction entry points for the single-recording and multi-recording pipelines."""
 
 from __future__ import annotations
 
@@ -898,7 +896,8 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
 
     Raises:
         RuntimeError: If the combined single-recording data is not loaded, if backward-transformed ROI statistics are
-            not available, or if an interrupted registration left one of the recording's plane binaries marked.
+            not available, or if an interrupted binarization or registration left one of the recording's plane binaries
+            marked.
     """
     extraction_config = context.configuration.signal_extraction
     deconvolution_config = context.configuration.spike_deconvolution

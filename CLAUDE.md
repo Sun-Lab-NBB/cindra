@@ -20,8 +20,7 @@ You MUST invoke the appropriate style skill before performing ANY of the followi
 | Creating or verifying project structure       | `/project-layout`  |
 | Committing local changes                      | `/commit`          |
 
-Each skill contains a verification checklist that you MUST complete before submitting any work. Failure to invoke the
-appropriate skill results in style violations.
+Each skill contains a verification checklist that you MUST complete before submitting any work.
 
 ## Cross-referenced library verification
 

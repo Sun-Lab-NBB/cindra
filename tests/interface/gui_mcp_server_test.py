@@ -29,14 +29,6 @@ _READER_THREADS: int = 4
 """The number of threads listing viewers concurrently with the same number of closing threads."""
 
 
-@pytest.fixture(autouse=True)
-def _empty_registry() -> Iterator[None]:
-    """Clears the module-global viewer registry around every test, so no viewer leaks between them."""
-    _viewer_registry.clear()
-    yield
-    _viewer_registry.clear()
-
-
 class TestLaunchViewer:
     """Tests the precondition the launch tool enforces before it spawns a viewer subprocess."""
 
@@ -126,6 +118,14 @@ class TestViewerRegistryConcurrency:
 
         assert failures == []
         assert _viewer_registry == {}
+
+
+@pytest.fixture(autouse=True)
+def _empty_registry() -> Iterator[None]:
+    """Clears the module-global viewer registry around every test, so no viewer leaks between them."""
+    _viewer_registry.clear()
+    yield
+    _viewer_registry.clear()
 
 
 class _StubProcess:

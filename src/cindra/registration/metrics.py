@@ -21,7 +21,7 @@ from .rigid import (
 from .utils import apply_spatial_high_pass, apply_spatial_smoothing
 from .nonrigid import compute_nonrigid_offsets, compute_nonrigid_reference_data
 from ..detection import compute_registration_blocks
-from .bidiphase_correction import apply_bidirectional_phase_correction
+from .bidirectional_phase_correction import apply_bidirectional_phase_correction
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -218,10 +218,10 @@ def _compute_pc_extremes(
         component_count: The number of principal components to compute.
 
     Returns:
-        A tuple of (pc_low, pc_high, projections). The pc_low array with shape (component_count, height, width)
-        contains mean images from frames with the lowest PC projections. The pc_high array has the same shape and
-        contains mean images from the highest PC projections. The projections array with shape
-        (frame_count, component_count) contains the PC projection values for each frame.
+        A tuple of (pc_low, pc_high, projections). The pc_low array with shape (component_count, height, width) contains
+        mean images from frames with the lowest PC projections. The pc_high array has the same shape and contains mean
+        images from the highest PC projections. The projections array with shape (frame_count, component_count) contains
+        the PC projection values for each frame.
     """
     frame_count, height, width = frames.shape
 
@@ -302,7 +302,6 @@ def _register_pc_extremes(
     # Computes constants that do not change across components.
     taper_slope = edge_taper_slope if one_photon_mode else 3.0 * smoothing_sigma
 
-    # Computes registration blocks for nonrigid processing.
     y_blocks, x_blocks, _, _, smoothing_kernel = compute_registration_blocks(
         height=height,
         width=width,
@@ -315,25 +314,21 @@ def _register_pc_extremes(
         reference_image = pc_low[component_index]
         target_frame = pc_high[component_index].copy()
 
-        # Applies one-photon preprocessing to reference image.
         if one_photon_mode and spatial_highpass_window is not None:
             if pre_smoothing_window is not None and pre_smoothing_window > 0:
                 reference_image = apply_spatial_smoothing(data=reference_image, window=pre_smoothing_window)
             reference_image = apply_spatial_high_pass(data=reference_image, window=spatial_highpass_window)
 
-        # Clips reference image to 1st-99th percentile range.
-        intensity_min = np.percentile(a=reference_image, q=1)
-        intensity_max = np.percentile(a=reference_image, q=99)
-        reference_image = np.clip(a=reference_image, a_min=intensity_min, a_max=intensity_max)
+        intensity_minimum = np.percentile(a=reference_image, q=1)
+        intensity_maximum = np.percentile(a=reference_image, q=99)
+        reference_image = np.clip(a=reference_image, a_min=intensity_minimum, a_max=intensity_maximum)
 
-        # Computes edge taper and phase correlation kernel for rigid registration.
         taper_mask, mean_offset = compute_edge_taper(reference_image=reference_image, taper_slope=taper_slope)
         reference_kernel = compute_phase_correlation_kernel(
             reference_image=reference_image,
             smoothing_sigma=smoothing_sigma,
         )
 
-        # Applies bidirectional phase correction to target if needed.
         if bidirectional_phase_offset and not bidirectional_corrected:
             target_batch = target_frame[np.newaxis, :, :]
             apply_bidirectional_phase_correction(
@@ -342,17 +337,14 @@ def _register_pc_extremes(
             )
             target_frame = target_batch[0]
 
-        # Applies one-photon preprocessing to target frame.
         if one_photon_mode and spatial_highpass_window is not None:
             if pre_smoothing_window is not None and pre_smoothing_window > 0:
                 target_frame = apply_spatial_smoothing(data=target_frame, window=pre_smoothing_window)
             target_frame = apply_spatial_high_pass(data=target_frame, window=spatial_highpass_window)
 
-        # Clips target frame in-place and adds batch dimension.
-        np.clip(a=target_frame, a_min=intensity_min, a_max=intensity_max, out=target_frame)
+        np.clip(a=target_frame, a_min=intensity_minimum, a_max=intensity_maximum, out=target_frame)
         preprocessed_target = target_frame[np.newaxis, :, :]
 
-        # Computes rigid registration offsets.
         tapered_target = apply_edge_taper(frames=preprocessed_target, taper_mask=taper_mask, mean_offset=mean_offset)
         y_offsets, x_offsets, _ = compute_rigid_offsets(
             frames=tapered_target,
@@ -362,20 +354,16 @@ def _register_pc_extremes(
             workers=workers,
         )
 
-        # Records rigid offset magnitude.
         rigid_magnitude = float(np.sqrt(y_offsets[0] ** 2 + x_offsets[0] ** 2))
         metrics[component_index, 0] = rigid_magnitude
 
-        # Computes nonrigid registration metrics if enabled.
         if nonrigid_enabled:
-            # Applies rigid offset to target before nonrigid registration.
             translated_target = translate_frame(
                 frame=preprocessed_target[0],
                 y_offset=int(y_offsets[0]),
                 x_offset=int(x_offsets[0]),
             )[np.newaxis, :, :]
 
-            # Prepares nonrigid reference data.
             nonrigid_taper, nonrigid_offset, nonrigid_kernel = compute_nonrigid_reference_data(
                 reference_image=reference_image,
                 taper_slope=taper_slope,
@@ -397,7 +385,6 @@ def _register_pc_extremes(
                 workers=workers,
             )
 
-            # Computes nonrigid offset magnitudes.
             nonrigid_magnitudes = np.sqrt(y_nonrigid**2 + x_nonrigid**2)
             metrics[component_index, 1] = float(np.mean(nonrigid_magnitudes))
             metrics[component_index, 2] = float(np.amax(nonrigid_magnitudes))

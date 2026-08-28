@@ -82,7 +82,9 @@ class TestRegisterDeviceOption:
         configuration.file_io.output_path = tmp_path / "output"
         configuration.save(file_path=configuration_path)
         observed: list[dict[str, Any]] = []
-        monkeypatch.setattr(cli, "run_single_recording_pipeline", lambda **kwargs: observed.append(kwargs))
+        monkeypatch.setattr(
+            target=cli, name="run_single_recording_pipeline", value=lambda **kwargs: observed.append(kwargs)
+        )
 
         result = CliRunner().invoke(
             cli=cindra_cli,
@@ -99,7 +101,9 @@ class TestRegisterDeviceOption:
         configuration.file_io.output_path = tmp_path / "output"
         configuration.save(file_path=configuration_path)
         observed: list[dict[str, Any]] = []
-        monkeypatch.setattr(cli, "run_single_recording_pipeline", lambda **kwargs: observed.append(kwargs))
+        monkeypatch.setattr(
+            target=cli, name="run_single_recording_pipeline", value=lambda **kwargs: observed.append(kwargs)
+        )
 
         result = CliRunner().invoke(cli=cindra_cli, args=["run", "--input-path", str(configuration_path)])
 

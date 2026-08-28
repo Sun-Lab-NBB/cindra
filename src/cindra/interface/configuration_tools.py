@@ -1,9 +1,5 @@
 """Provides MCP tools for pipeline configuration generation, reading, validation, modification, recording discovery,
 and dataset name resolution.
-
-These tools enable AI agents to generate default configuration files for both single-recording and multi-recording
-pipelines, read, validate, and modify configuration files, discover recordings available for processing under a
-given root directory, and construct qualified dataset names for multi-recording processing.
 """
 
 from __future__ import annotations

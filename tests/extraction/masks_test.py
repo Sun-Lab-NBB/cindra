@@ -139,7 +139,7 @@ class TestCreateRoiMasks:
         )
         masks = _create_roi_masks(roi_statistics=[roi], width=20, include_overlap=True)
         _, weights = masks[0]
-        np.testing.assert_allclose(weights.sum(), 1.0, atol=1e-6)
+        np.testing.assert_allclose(actual=weights.sum(), desired=1.0, atol=1e-6)
 
     def test_empty_weights_after_overlap_exclusion(self) -> None:
         """Verifies that fully overlapping ROIs produce empty weight arrays."""
@@ -194,7 +194,7 @@ class TestCreateNeuropilMasks:
         assert neuropil_masks[0].size >= minimum_size
 
     def test_cached_masks_returned(self) -> None:
-        """Verifies that a cached neuropil mask is returned unchanged rather than recomputed."""
+        """Verifies that a cached neuropil mask is returned unchanged."""
         roi = _make_circular_roi(center_y=25, center_x=25, radius=3, frame_height=50, frame_width=50)
 
         # Plants a sentinel mask no computation could produce. Mask computation is deterministic, so equality alone
@@ -263,7 +263,7 @@ class TestCreateNeuropilMasks:
             minimum_neuropil_pixels=100000,
             cell_probability_percentile=0,
         )
-        np.testing.assert_array_equal(neuropil_masks[0], expected_flat)
+        np.testing.assert_array_equal(actual=neuropil_masks[0], desired=expected_flat)
 
 
 def _make_roi(

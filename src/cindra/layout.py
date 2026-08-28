@@ -165,8 +165,10 @@ class RegistrationArrays(StrEnum):
     registration computes from its own offsets after registering every frame.
 
     Notes:
-        The same name identifies an optional input file placed in the raw imaging directory, where it instead holds the
-        indices of the frames to mark bad before the crop is computed.
+        The same name identifies an optional input file the registration stage reads from the configured
+        'file_io.data_path' root, where it instead holds the indices of the frames to mark bad before the crop is
+        computed. The stage joins the file name to that root directly, so the file belongs under the configured path
+        even where the TIFF files sit in a subdirectory below it.
     """
     REFERENCE_IMAGE = "reference_image.npy"
     """The reference image every frame is registered against, whose presence marks a plane as registered."""

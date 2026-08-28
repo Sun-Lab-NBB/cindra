@@ -274,7 +274,8 @@ def _make_context(
         rois: The channel 1 ROIStatistics list stored in the combined data.
         classification: The channel 1 classification array stored in the combined data.
         rois_channel_2: The optional channel 2 ROIStatistics list to enable two-channel selection.
-        classification_channel_2: The optional channel 2 classification array.
+        classification_channel_2: The per-ROI probabilities that filter the channel 2 selection, stored only when
+            channel 2 ROIs are supplied.
         persist: Determines whether to save the combined data to disk and attach a metadata-only copy that
             forces on-demand memory mapping during selection.
         data_path_none: Determines whether to leave the runtime data path unset when persist is False, which
@@ -289,7 +290,7 @@ def _make_context(
         selected_roi_indices_channel_2: The pre-existing channel 2 selection used by the skip guard.
 
     Returns:
-        The assembled MultiRecordingRuntimeContext ready to pass to select_recording_rois.
+        The context carrying the assembled combined data and the requested selection configuration.
     """
     base = tmp_path / recording_id / "cindra"
     output_directory = base / "multi_recording" / "dataset"

@@ -74,8 +74,8 @@ class TestComputePlaneOffsets:
 
         assert y_displacement.shape == (3,)
         assert x_displacement.shape == (3,)
-        np.testing.assert_array_equal(x_displacement, [0, 100, 200])
-        np.testing.assert_array_equal(y_displacement, [0, 0, 0])
+        np.testing.assert_array_equal(actual=x_displacement, desired=[0, 100, 200])
+        np.testing.assert_array_equal(actual=y_displacement, desired=[0, 0, 0])
 
     def test_mroi_multiple_z_planes_applies_two_level_tiling(self) -> None:
         """Verifies that MROI contexts with multiple z-planes per ROI tile across z-planes correctly."""
@@ -100,8 +100,8 @@ class TestComputePlaneOffsets:
 
         # Both planes of one ROI keep that ROI's x position, and the second z-plane of each ROI is tiled below the
         # first by one tile height.
-        np.testing.assert_array_equal(x_displacement, [0, 0, 50, 50])
-        np.testing.assert_array_equal(y_displacement, [0, 32, 0, 32])
+        np.testing.assert_array_equal(actual=x_displacement, desired=[0, 0, 50, 50])
+        np.testing.assert_array_equal(actual=y_displacement, desired=[0, 32, 0, 32])
 
     def test_mroi_three_rois_two_z_planes_pins_offsets(self) -> None:
         """Verifies the exact displacements for a six-plane recording holding three ROIs with two z-planes each."""
@@ -114,8 +114,8 @@ class TestComputePlaneOffsets:
         y_displacement, x_displacement = _compute_plane_offsets(plane_contexts=contexts)
 
         # The tile bounding box spans 132 pixels in x, so a single tile column fits the six planes into two rows.
-        np.testing.assert_array_equal(x_displacement, [0, 0, 50, 50, 100, 100])
-        np.testing.assert_array_equal(y_displacement, [0, 32, 0, 32, 0, 32])
+        np.testing.assert_array_equal(actual=x_displacement, desired=[0, 0, 50, 50, 100, 100])
+        np.testing.assert_array_equal(actual=y_displacement, desired=[0, 32, 0, 32, 0, 32])
 
         offsets = np.stack([y_displacement, x_displacement], axis=1)
         assert len(np.unique(offsets, axis=0)) == 6
@@ -132,8 +132,8 @@ class TestComputePlaneOffsets:
 
         # The tile bounding box spans 82 pixels in x and the grid holds two tile columns, so the third z-plane wraps
         # onto the second tile row while the second z-plane shifts one tile width to the right.
-        np.testing.assert_array_equal(x_displacement, [0, 82, 0, 50, 132, 50])
-        np.testing.assert_array_equal(y_displacement, [0, 0, 32, 0, 0, 32])
+        np.testing.assert_array_equal(actual=x_displacement, desired=[0, 82, 0, 50, 132, 50])
+        np.testing.assert_array_equal(actual=y_displacement, desired=[0, 0, 32, 0, 0, 32])
 
         offsets = np.stack([y_displacement, x_displacement], axis=1)
         assert len(np.unique(offsets, axis=0)) == 6
@@ -145,8 +145,8 @@ class TestComputePlaneOffsets:
         y_displacement, x_displacement = _compute_plane_offsets(plane_contexts=contexts)
 
         # A single plane holds as many unique MROI positions as it holds planes, so the two-level tiling is skipped.
-        np.testing.assert_array_equal(y_displacement, [10])
-        np.testing.assert_array_equal(x_displacement, [20])
+        np.testing.assert_array_equal(actual=y_displacement, desired=[10])
+        np.testing.assert_array_equal(actual=x_displacement, desired=[20])
 
     def test_mroi_single_roi_multiple_z_planes_tiles_as_grid(self) -> None:
         """Verifies that a single-ROI recording with multiple z-planes tiles its planes into a square grid."""
@@ -156,8 +156,8 @@ class TestComputePlaneOffsets:
 
         # With one ROI position, every virtual plane index is also its z-plane index, so the four planes fill a 2x2
         # grid of tiles.
-        np.testing.assert_array_equal(x_displacement, [0, 32, 0, 32])
-        np.testing.assert_array_equal(y_displacement, [0, 0, 32, 32])
+        np.testing.assert_array_equal(actual=x_displacement, desired=[0, 32, 0, 32])
+        np.testing.assert_array_equal(actual=y_displacement, desired=[0, 0, 32, 32])
 
 
 def _make_context(
@@ -171,8 +171,10 @@ def _make_context(
     Args:
         frame_height: The frame height in pixels.
         frame_width: The frame width in pixels.
-        mroi_y_offset: The optional MROI y-offset.
-        mroi_x_offset: The optional MROI x-offset.
+        mroi_y_offset: The vertical offset in pixels positioning this ROI within the combined field of view, unset
+            for a non-MROI recording.
+        mroi_x_offset: The horizontal offset in pixels positioning this ROI within the combined field of view, unset
+            for a non-MROI recording.
 
     Returns:
         The context populated with the requested frame geometry and MROI offsets.

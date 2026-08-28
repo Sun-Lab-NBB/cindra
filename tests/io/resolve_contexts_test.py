@@ -196,8 +196,8 @@ class TestResolveSingleRecordingContexts:
         resolve_single_recording_contexts(configuration=configuration, persist=True)
 
         # The plane keeps its runtime file where the resolution finds it, but that file now records a different
-        # directory. The check derives the path it looks for from the record rather than from the directory it read
-        # the record out of, so the resolution is refused with the recorded directory named.
+        # directory. The check derives the expected path from the record rather than from the directory that supplied
+        # the record, so the resolution is refused with the recorded directory named.
         stale_directory = tmp_path / "elsewhere" / "plane_0"
         _rewrite_plane_output_path(
             plane_directory=output_path / "cindra" / "plane_0", recorded_path=str(stale_directory)
@@ -219,10 +219,9 @@ class TestResolveSingleRecordingContexts:
         configuration = _make_single_configuration(output_path=output_path)
         resolve_single_recording_contexts(configuration=configuration, persist=True)
 
-        # A record carrying no output directory names no file the check could look for, which leaves the plane
-        # resolved as it was loaded while its peer is still held to its own bootstrap file. The exempt plane is the
-        # FIRST of the two, so a guard that abandoned the loop instead of skipping the one plane would leave the
-        # peer unchecked.
+        # A record carrying no output directory names no file for the check to seek, which leaves the plane resolved as
+        # it was loaded while its peer is still held to its own bootstrap file. The exempt plane is the FIRST of the
+        # two, so a guard that abandoned the loop instead of skipping the one plane would leave the peer unchecked.
         _rewrite_plane_output_path(plane_directory=output_path / "cindra" / "plane_0", recorded_path=None)
 
         contexts = resolve_single_recording_contexts(configuration=configuration, persist=False)
@@ -356,7 +355,7 @@ class TestResolveMultiRecordingContexts:
 
         contexts = resolve_multi_recording_contexts(configuration=configuration, persist=False)
 
-        # The record names no file the check could look for, so the recording resolves as it was loaded.
+        # The record names no file for the check to seek, so the recording resolves as it was loaded.
         assert len(contexts) == 2
         assert contexts[0].runtime.output_path is None
         assert contexts[0].runtime.io.recording_id == "rec1"

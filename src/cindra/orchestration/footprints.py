@@ -182,8 +182,9 @@ _DEVICE_LIVE_BACKENDS: int = 2
 """The device backends one plane registration holds at once while two-step registration refinement runs.
 
 Notes:
-    The refinement pass builds its own backend while the local that names the first pass's backend still binds it, so
-    the resident state of both, and the working set the pool holds for each, stay on the device for that whole pass.
+    The refinement pass builds its own backend while the local that names the first pass's backend still binds it. The
+    resident state of both backends, and the working set the pool holds for each, therefore stay on the device for that
+    whole pass.
 """
 
 _COMBINATION_TRACE_KINDS: int = 4
@@ -245,7 +246,9 @@ Notes:
 
 @dataclass(frozen=True, slots=True)
 class PlaneGeometry:
-    """Describes the shape of one virtual imaging plane as its binarized output reports it."""
+    """Describes the shape one virtual imaging plane will hold, as the acquisition metadata and the source file header
+    fix it before the conversion runs.
+    """
 
     height: int
     """The height of the plane in pixels."""
@@ -1136,23 +1139,33 @@ def _derive_plane_geometries(
     sampling_rate = acquisition.frame_rate / max(1, acquisition.plane_number)
     plane_count = acquisition.virtual_plane_count if acquisition.is_mroi else acquisition.plane_number
 
-    geometries: list[PlaneGeometry] = []
-    for virtual_plane_index in range(plane_count):
-        if acquisition.is_mroi and acquisition.roi_lines:
-            lines = acquisition.roi_lines[virtual_plane_index // max(1, acquisition.plane_number)]
-            height, width = lines[-1] - lines[0] + 1, source.frame_width
-        else:
-            height, width = source.frame_height, source.frame_width
-        geometries.append(
-            PlaneGeometry(
-                height=height,
-                width=width,
-                frame_count=frame_count,
-                sampling_rate=sampling_rate,
-                index=virtual_plane_index,
-            )
+    return tuple(
+        PlaneGeometry(
+            height=_resolve_plane_height(acquisition=acquisition, source=source, plane_index=virtual_plane_index),
+            width=source.frame_width,
+            frame_count=frame_count,
+            sampling_rate=sampling_rate,
+            index=virtual_plane_index,
         )
-    return tuple(geometries)
+        for virtual_plane_index in range(plane_count)
+    )
+
+
+def _resolve_plane_height(acquisition: AcquisitionParameters, source: SourceFrameGeometry, plane_index: int) -> int:
+    """Resolves the frame height one virtual plane holds.
+
+    Args:
+        acquisition: The recording's acquisition parameters.
+        source: The geometry the recording's source files hold.
+        plane_index: The zero-based index of the virtual plane whose height is resolved.
+
+    Returns:
+        The plane's frame height, which spans the line list of the plane's region for a multi-region recording.
+    """
+    if acquisition.is_mroi and acquisition.roi_lines:
+        lines = acquisition.roi_lines[plane_index // max(1, acquisition.plane_number)]
+        return lines[-1] - lines[0] + 1
+    return source.frame_height
 
 
 def _read_source_geometry(data_path: Path | None, ignored_file_names: tuple[str, ...]) -> SourceFrameGeometry | None:

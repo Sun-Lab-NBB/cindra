@@ -71,8 +71,8 @@ def execute_single_recording_job(
         tracker: The caller-owned ProcessingTracker onto which this job's start, completion, or failure is recorded.
         workers: The number of parallel workers to allocate to this job. Use None to accept the stage default and -1
             to request every available core. The combination job ignores this parameter.
-        device: The zero-based index of the CUDA device a registration job runs on. Use None to run the registration
-            on the host CPU. Every other job ignores this parameter.
+        device: The zero-based index of the CUDA device on which a registration job runs. Use None to run the
+            registration on the host CPU. Every other job ignores this parameter.
 
     Raises:
         FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid single-recording
@@ -276,8 +276,8 @@ def dispatch_single_recording_job(
         tracker: The tracker that records this job's state transitions.
         workers: The number of parallel workers to allocate to this job. Use None to accept the stage default and -1
             to request every available core. The combination job ignores this parameter.
-        device: The zero-based index of the CUDA device a registration job runs on. Use None to run the registration
-            on the host CPU. Every other job ignores it.
+        device: The zero-based index of the CUDA device on which a registration job runs. Use None to run the
+            registration on the host CPU. Every other job ignores it.
 
     Raises:
         RuntimeError: If a registration job names a CUDA device on a host that exposes no usable one.

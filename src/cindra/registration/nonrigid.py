@@ -379,17 +379,14 @@ def _apply_bilinear_interpolation(  # pragma: no cover
 
     for row in range(output_height):
         for column in range(output_width):
-            # Extracts the floating-point coordinates for the current output pixel.
             y_coordinate = y_coordinates[row, column]
             x_coordinate = x_coordinates[row, column]
 
-            # Separates coordinates into integer (floor) and fractional components.
             y_floor = int(y_coordinate)
             x_floor = int(x_coordinate)
             y_fraction = y_coordinate - y_floor
             x_fraction = x_coordinate - x_floor
 
-            # Clamps the four neighbor indices to valid source image bounds.
             y_floor = min(height - 1, max(0, y_floor))
             x_floor = min(width - 1, max(0, x_floor))
             y_ceiling = min(height - 1, y_floor + 1)
@@ -511,7 +508,6 @@ def _extract_upsampling_regions(  # pragma: no cover
         peak_y = y_peaks[block_index, frame_index]
         peak_x = x_peaks[block_index, frame_index]
 
-        # Copies the region around the peak to the output array.
         for row in range(region_size):
             for column in range(region_size):
                 output[block_index, frame_index, row, column] = correlation[

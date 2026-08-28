@@ -212,7 +212,8 @@ def _make_runtime_and_configuration(
         maximum_size: The maximum allowed ROI size in pixels.
 
     Returns:
-        A tuple of (runtime, configuration) instances with combined_data populated.
+        The runtime carrying the populated combined data, paired with the configuration holding the requested selection
+        thresholds.
     """
     rois = [_make_roi(centroid=(20 + index * 15, 20 + index * 15)) for index in range(roi_count)]
     if probabilities is None:

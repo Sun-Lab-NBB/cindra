@@ -61,10 +61,9 @@ def detect_plane_rois(context: RuntimeContext, *, workers: int) -> None:
         ROI populations may have different soma sizes and spatial scales. Results are written into
         context.runtime.detection, context.runtime.extraction, and context.runtime.timing.
 
-        The worker count drives the PCA denoising thread pool. The linear-algebra backends the detection loop calls
-        into are confined to the same budget by the processing stage entry point, which encloses this call. Movie
-        binning IO and the serial detection loop bound this stage, so its runtime plateaus at the measured processing
-        default.
+        The worker count drives the PCA denoising thread pool. The linear-algebra backends that the detection loop uses
+        run under the same budget. Movie binning IO and the serial detection loop bound this stage, so its runtime
+        plateaus at the measured processing default.
 
     Args:
         context: The RuntimeContext containing configuration, file paths, and mutable runtime data structures. Modified
@@ -72,6 +71,7 @@ def detect_plane_rois(context: RuntimeContext, *, workers: int) -> None:
         workers: The number of parallel workers allocated to this processing job. Must be a positive integer.
 
     Raises:
+        FileNotFoundError: If the configuration provides a custom classifier path that does not name an existing file.
         RuntimeError: If the registered binary file path for channel 1 is not set.
         ValueError: If no ROIs are detected on either channel, if preclassification rejects every detected ROI on
             either channel, or if 'workers' is not a positive integer while PCA denoising is enabled.
@@ -110,7 +110,7 @@ def detect_plane_rois(context: RuntimeContext, *, workers: int) -> None:
     valid_x_range = registration_data.valid_x_range
 
     # Validates that the registered binary path exists. This is always satisfied when called from the processing
-    # pipeline, since registration creates the binary file before detection runs.
+    # pipeline, since binarization creates the binary file and sets its path before registration rewrites it in place.
     channel_1_path = io_data.registered_binary_path
     if channel_1_path is None:
         message = "Unable to run ROI detection. The registered binary file path is not set for channel 1."
@@ -380,6 +380,7 @@ def _detect_channel(
         detected ROIs.
 
     Raises:
+        FileNotFoundError: If 'custom_classifier_path' is provided but does not name an existing file.
         ValueError: If no ROIs are detected after the sparse detection step or if preclassification rejects every
             detected ROI.
     """
@@ -414,7 +415,6 @@ def _detect_channel(
     # Stores the mean image before detect_rois_in_frames() modifies binned_frames in-place.
     mean_image = binned_frames.mean(axis=0)
 
-    # Applies optional PCA denoising to improve signal-to-noise ratio.
     if detection_config.denoise:
         pca_denoise(
             frames=binned_frames,
@@ -487,7 +487,6 @@ def _detect_channel(
         roi.mask.x_pixels += x_pixel_offset
         roi.mask.centroid = (roi.mask.centroid[0] + y_pixel_offset, roi.mask.centroid[1] + x_pixel_offset)
 
-    # Applies optional preclassification filtering to remove unlikely ROI candidates early.
     if detection_config.preclassification_threshold > 0:
         detected_roi_count = len(roi_statistics)
         roi_statistics = _apply_preclassification(

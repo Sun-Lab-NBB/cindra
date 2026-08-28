@@ -58,7 +58,7 @@ class TestDiscoverTiffFiles:
         file_path.write_bytes(b"file content")
 
         expected_message = f"Unable to discover TIFF files. The path is not a directory: {file_path}."
-        with pytest.raises(ValueError, match=error_format(expected_message)):
+        with pytest.raises(ValueError, match=error_format(message=expected_message)):
             _discover_tiff_files(data_directory=file_path)
 
     def test_results_are_naturally_sorted(self, tmp_path: Path) -> None:
@@ -222,8 +222,8 @@ class TestReadTiff:
 
         assert result is not None
         assert result.dtype == np.int16
-        # The expected values are the hand-derived truncations of the page values above, which is what the C cast the
-        # conversion performs produces. np.rint would instead give [-1, 6, -4, 2, 1201, -1201, 0].
+        # The expected values are the hand-derived truncations of the page values above, which is what the C cast
+        # performed by the conversion produces. np.rint would instead give [-1, 6, -4, 2, 1201, -1201, 0].
         expected_column = np.array([0, 5, -3, 2, 1200, -1200, 0], dtype=np.int16)
         np.testing.assert_array_equal(result, np.tile(expected_column[:, None, None], (1, 4, 5)))
         np.testing.assert_array_equal(result, np.trunc(np.stack(pages)).astype(np.int16))

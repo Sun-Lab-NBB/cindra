@@ -1,10 +1,8 @@
 """Provides MCP tools for preparing, executing, monitoring, and cancelling neural imaging pipeline jobs.
 
-These tools give agents fine-grained control over pipeline execution: prepare builds an execution manifest without
-running anything, execute dispatches selected jobs with prerequisite validation, reset selectively reverts completed
-phases for re-runs, and status/cancel manage the active execution. Both single-recording (four-phase: binarize,
-register, process, combine) and multi-recording (two-phase: discover, extract) pipelines are supported through a
-unified execution model that admits every job as soon as that job's own prerequisites succeed.
+Both single-recording (four-phase: binarize, register, process, combine) and multi-recording (two-phase: discover,
+extract) pipelines are supported through a unified execution model that admits every job as soon as that job's own
+prerequisites succeed.
 """
 
 from __future__ import annotations
@@ -246,7 +244,6 @@ def get_batch_status_overview_tool(root_directory: str) -> dict[str, object]:
         for tracker_path in natsorted(single_tracker_paths, key=str)
     ]
 
-    # Reads multi-recording trackers. Extracts dataset name from parent directory.
     multi_recordings: list[dict[str, object]] = []
     for tracker_path in natsorted(multi_tracker_paths, key=str):
         dataset_name = tracker_path.parent.name
@@ -793,7 +790,6 @@ def prepare_multi_recording_batch_tool(
                 "extract_jobs": extract_entries,
             }
         else:
-            # New dataset: saves configuration and initializes tracker.
             configuration.save(file_path=configuration_file_path)
 
             # Builds the dataset's job universe from the exported phase model.
@@ -866,12 +862,13 @@ def reset_processing_phases_tool(
         pipeline_type: The pipeline type, either 'single-recording' or 'multi-recording'.
 
     Returns:
-        On success, contains a 'reset' flag, the 'requested_phases' as provided, the 'effective_phases' after
-        dependency expansion, and per-job status showing updated states. A 'warnings' list is present when a reset
-        phase is governed by a repeat flag that is false while that phase's output already exists on disk, because the
-        stage then returns immediately and records success without redoing its work. Each warning names the dotted
-        configuration flag to set and set_config_values_tool as the way to set it, and a caller MUST act on it before
-        dispatching the reset phase. On failure, contains an 'error' describing the issue.
+        On success, contains a 'reset' flag, the 'tracker_path' the reset was applied to, the 'requested_phases' as
+        provided, the 'effective_phases' after dependency expansion, and per-job status showing updated states. A
+        'warnings' list is present when a reset phase is governed by a repeat flag that is false while that phase's
+        output already exists on disk, because the stage then returns immediately and records success without redoing
+        its work. Each warning names the dotted configuration flag to set and set_config_values_tool as the way to set
+        it, and a caller MUST act on it before dispatching the reset phase. On failure, contains an 'error' describing
+        the issue.
     """
     path = Path(tracker_path)
     if not path.exists():
@@ -1244,9 +1241,11 @@ def execute_processing_jobs_tool(
 
         Each job runs under the resource class of its phase. Binarization holds 3 cores per job at a fixed concurrency
         of 4. Combination holds 1 core per job, because it merges result files serially, and its concurrency is bounded
-        by the CPU budget alone. Registration holds 4 cores per job and processing holds 10, each with a concurrency
-        bounded by the CPU budget. The session memory budget bounds dispatch for every class alike rather than the
-        concurrency cap of any one of them. The binarization class alone ignores both worker parameters below.
+        by the CPU budget alone. Registration holds 4 cores per job as its floor and widens toward its ceiling of 32,
+        while processing holds 10 at a ceiling that meets that default, so every processing job holds one width. Both
+        classes carry a concurrency bounded by the CPU budget. The session memory budget bounds dispatch for every class
+        alike rather than the concurrency cap of any one of them. The binarization class alone ignores both worker
+        parameters below.
 
         A registration job of a session that names a CUDA device runs under a separate class instead, holding 2 cores
         and one CUDA device for its whole duration. The devices the session holds are what bound that class, so it
@@ -1265,8 +1264,12 @@ def execute_processing_jobs_tool(
         workers_per_job: CPU cores per job, overriding the measured default of every class that carries no hard
             concurrency ceiling. Leave as None to accept the measured defaults, which are 3 cores for binarization, 4
             for registration, 10 for processing, 1 for combination, 2 for multi-recording discovery, and 16 for
-            multi-recording extraction. Set to -1 to give every job the whole session core budget. The override is a
-            single scalar applied to every non-fixed class alike.
+            multi-recording extraction. Those figures are the floor each class runs at while the session dispatches at
+            its full concurrency. A None request also lets a job of an elastic class widen at dispatch toward its class
+            ceiling as the queue drains. That ceiling is 32 cores for registration, 8 for multi-recording discovery, and
+            32 for multi-recording extraction, and the processing ceiling meets its default, so a processing job holds
+            one width. Set to -1 to give every job the whole session core budget. The override is a single scalar
+            applied to every non-fixed class alike, and it reaches every job of those classes unchanged.
         max_parallel_jobs: Maximum concurrent jobs per resource class, overriding the derived concurrency cap of every
             non-fixed resource class. Leave as None to accept the derived caps, or set to -1 to lift them so that only
             the job count bounds concurrency.
@@ -1747,7 +1750,12 @@ def execute_full_pipeline_tool(
         workers_per_job: CPU cores per job, overriding the measured default of every class that carries no hard
             concurrency ceiling. Leave as None to accept the measured defaults of 3 cores for binarization, 1 for
             combination, 4 for registration, 10 for processing, 2 for multi-recording discovery, and 16 for
-            multi-recording extraction. Set to -1 to give every job the whole session core budget.
+            multi-recording extraction. Those figures are the floor each class runs at while the session dispatches at
+            its full concurrency. A None request also lets a job of an elastic class widen at dispatch toward its class
+            ceiling as the queue drains. That ceiling is 32 cores for registration, 8 for multi-recording discovery, and
+            32 for multi-recording extraction, and the processing ceiling meets its default, so a processing job holds
+            one width. Set to -1 to give every job the whole session core budget. An explicit count reaches every job of
+            every non-fixed class unchanged.
         max_parallel_jobs: Maximum concurrent jobs per resource class, overriding the derived concurrency cap of every
             non-fixed resource class. Leave as None to accept the derived caps, or set to -1 to lift them so that only
             the job count bounds concurrency.
@@ -1757,24 +1765,23 @@ def execute_full_pipeline_tool(
 
     Returns:
         Always contains a 'success' flag indicating the tool ran, and callers MUST also check the 'started' flag rather
-        than 'success' alone. When jobs are dispatched, contains started:True, 'total_jobs', 'phase_count', per-phase
-        'phases' with job counts and IDs, the session 'cpu_budget' and 'memory_budget_mb' that bound the classes in
-        aggregate, 'gpu_devices' listing the device indices the session holds, and a 'resource_classes' mapping with
-        the resolved allocation of every class in the session. When all phases are already complete, returns
-        {success:True, started:False, message:"All pipeline phases are already
-        completed.", pipeline_type:<the requested type>, total_jobs:0, phase_count:0, phases:[]} plus a 'next_step'
-        string. Every outcome carries 'pipeline_type'. The preparation step produces the rejection lists
-        'invalid_paths', 'invalid_recordings', 'invalid_configurations', and 'path_conflicts', and this step's own
-        sizing pass produces 'unsizable_recordings' and 'unsizable_datasets'. Each of those lists is forwarded when
-        non-empty, and together they name every recording or dataset the session omits or runs against paths other than
-        the ones passed here. 'migrated_recordings' is forwarded on the same terms, naming every recording whose tracker
-        gained the missing per-plane register jobs. A batch whose preparation accepted no input at all returns
-        success:False alongside those lists, because it holds no phase to report as complete. On failure, contains
-        success:False and an 'error' describing the issue. Cascade-aborted downstream jobs are recorded in their
-        trackers as FAILED with the exact message "Unable to execute job. A preceding pipeline phase failed.",
-        distinguishing them from genuine per-job failures. A job aborted because its prerequisite phase is absent from
-        the tracker instead records a message naming that phase and asking for the prepare tool to be re-run, because no
-        phase failed in that case.
+        than 'success' alone. When jobs are dispatched, contains started:True, 'total_jobs', 'phase_count', and
+        per-phase 'phases' with job counts and IDs. It also carries the session 'cpu_budget' and 'memory_budget_mb' that
+        bound the classes in aggregate, 'gpu_devices' listing the device indices the session holds, and a
+        'resource_classes' mapping with the resolved allocation of every class in the session. When all phases are
+        already complete, returns {success:True, started:False, message:"All pipeline phases are already completed.",
+        pipeline_type:<the requested type>, total_jobs:0, phase_count:0, phases:[]} plus a 'next_step' string. Every
+        outcome carries 'pipeline_type'. The preparation step produces the rejection lists 'invalid_paths',
+        'invalid_recordings', 'invalid_configurations', and 'path_conflicts', and this step's own sizing pass produces
+        'unsizable_recordings' and 'unsizable_datasets'. Each of those lists is forwarded when non-empty, and together
+        they name every recording or dataset the session omits or runs against paths other than the ones passed here.
+        'migrated_recordings' is forwarded on the same terms, naming every recording whose tracker gained the missing
+        per-plane register jobs. A batch whose preparation accepted no input at all returns success:False alongside
+        those lists, because it holds no phase to report as complete. On failure, contains success:False and an 'error'
+        describing the issue. Cascade-aborted downstream jobs are recorded in their trackers as FAILED with the exact
+        message "Unable to execute job. A preceding pipeline phase failed.", distinguishing them from genuine per-job
+        failures. A job aborted because its prerequisite phase is absent from the tracker instead records a message
+        naming that phase and asking for the prepare tool to be re-run, because no phase failed in that case.
     """
     if pipeline_type not in ("single-recording", "multi-recording"):
         return {
@@ -2222,11 +2229,11 @@ def get_pipeline_job_universe_tool(configuration_path: str, pipeline_type: str) 
 
     Returns:
         On success, contains a 'jobs' list holding the 'name', 'specifier', and 'ready' flag of every job the pipeline
-        declares, in execution order, plus 'total_jobs', 'ready_jobs' counting the runnable subset, a 'resolved' flag
-        reporting whether the universe follows from the recording's own parameters rather than from their absence, and
-        the 'pipeline_type'. A single-recording report also carries 'plane_count', and a multi-recording report carries
-        'dataset_name' and 'recording_ids'. On failure, contains an 'error' describing the issue. Both cases include a
-        'success' flag.
+        declares, in execution order. The response also holds 'total_jobs', 'ready_jobs' counting the runnable subset, a
+        'resolved' flag reporting whether the universe follows from the recording's own parameters rather than from
+        their absence, and the 'pipeline_type'. A single-recording report also carries 'plane_count', and a
+        multi-recording report carries 'dataset_name' and 'recording_ids'. On failure, contains an 'error' describing
+        the issue. Both cases include a 'success' flag.
     """
     if pipeline_type not in ("single-recording", "multi-recording"):
         return {
@@ -3112,8 +3119,10 @@ def _size_single_recording_universe(
         order.
 
     Raises:
-        FileNotFoundError: If the recording's raw imaging directory holds no readable source file.
-        ValueError: If planned_roi_count is not a positive integer, or if the recording declares no imaging plane.
+        FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid single-recording
+            configuration.
+        ValueError: If planned_roi_count is not a positive integer, or if the recording declares no imaging plane, which
+            is also the verdict for a recording whose acquisition parameters or source files are unreadable.
     """
     configuration, output_path = load_single_recording_configuration(configuration_path=configuration_path)
     geometry = resolve_recording_geometry(

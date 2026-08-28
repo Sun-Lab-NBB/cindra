@@ -1298,9 +1298,9 @@ class TestCombinedDataSaveLoad:
         assert loaded.registered_binary_paths_channel_2 is None
 
     def test_load_legacy_metadata_without_geometry_and_paths(self, tmp_path: Path) -> None:
-        """Verifies that loading legacy metadata lacking geometry and binary path fields falls back to defaults."""
-        # Writes a metadata file that predates the per-plane geometry and binary path fields, exercising the optional
-        # metadata branches in CombinedData._load_metadata.
+        """Verifies that legacy metadata lacking frame count, geometry, and binary path fields loads with defaults."""
+        # Writes a metadata file that predates the frame count, per-plane geometry, and binary path fields, exercising
+        # the optional metadata branches in CombinedData._load_metadata.
         np.savez(
             tmp_path / "combined_metadata.npz",
             allow_pickle=False,
