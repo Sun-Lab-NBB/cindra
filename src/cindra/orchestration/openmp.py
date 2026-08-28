@@ -338,7 +338,7 @@ def _verify_runtime_loadable() -> bool:
     Returns:
         True when the fresh interpreter loads the runtime, and False when it does not.
     """
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603 - a fresh interpreter runs a module constant with no shell.
         args=[sys.executable, "-c", _VERIFICATION_SCRIPT],
         capture_output=True,
         check=False,
