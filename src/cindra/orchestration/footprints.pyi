@@ -71,6 +71,7 @@ _DISCOVERY_PLANES_PER_RECORDING: int
 _DISCOVERY_TRANSIENT_PLANES: int
 _TRACE_ARRAY_DIMENSIONS: int
 _TRACKING_PAIRWISE_BYTES_PER_SQUARED_REGION: float
+_TRACKED_REGION_HEADROOM: float
 
 @dataclass(frozen=True, slots=True)
 class PlaneGeometry:
@@ -110,6 +111,7 @@ class _NonrigidBlockGeometry:
 def resolve_recording_geometry(
     output_root: Path, data_path: Path | None = None, ignored_file_names: tuple[str, ...] = ()
 ) -> RecordingGeometry: ...
+def read_tracked_recording_geometry(cindra_root: Path) -> RecordingGeometry: ...
 def resolve_maximum_roi_count(plane_count: int, configuration: SingleRecordingConfiguration) -> int: ...
 def estimate_single_recording_job_memory_mb(
     job_name: SingleRecordingJobNames,
@@ -126,6 +128,8 @@ def estimate_multi_recording_job_memory_mb(
     specifier: str,
     recording_directories: Sequence[Path],
     configuration: MultiRecordingConfiguration,
+    *,
+    planned_roi_count: int | None = None,
 ) -> int: ...
 def size_single_recording_job(
     job_name: SingleRecordingJobNames,
@@ -142,6 +146,8 @@ def size_multi_recording_job(
     specifier: str,
     recording_directories: Sequence[Path],
     configuration: MultiRecordingConfiguration,
+    *,
+    planned_roi_count: int | None = None,
 ) -> JobSizing: ...
 def _estimate_binarization_mb(geometry: RecordingGeometry, configuration: SingleRecordingConfiguration) -> int: ...
 def _estimate_registration_mb(
@@ -168,6 +174,11 @@ def _resolve_binned_frame_count(plane: PlaneGeometry, configuration: SingleRecor
 def _resolve_planned_regions(
     geometry: RecordingGeometry, configuration: SingleRecordingConfiguration, planned_roi_count: int | None
 ) -> int: ...
+def _resolve_tracked_regions(
+    geometries: Sequence[RecordingGeometry],
+    configuration: MultiRecordingConfiguration,
+    planned_roi_count: int | None,
+) -> int: ...
 def _resolve_target_geometry(
     cindra_roots: Sequence[Path], geometries: Sequence[RecordingGeometry], specifier: str
 ) -> RecordingGeometry: ...
@@ -177,7 +188,6 @@ def _derive_plane_geometries(
 def _read_source_geometry(
     data_path: Path | None, ignored_file_names: tuple[str, ...]
 ) -> SourceFrameGeometry | None: ...
-def _read_tracked_recording_geometry(cindra_root: Path) -> RecordingGeometry: ...
 def _resolve_cindra_directories(recording_directories: Sequence[Path]) -> tuple[Path, ...]: ...
 def _read_combined_geometry(metadata_path: Path) -> tuple[int, int, bool]: ...
 def _resolve_dataset_geometries(
