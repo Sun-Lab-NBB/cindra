@@ -3,6 +3,7 @@ from pathlib import Path
 from ..io import (
     combine_planes as combine_planes,
     convert_tiffs_to_binary as convert_tiffs_to_binary,
+    clear_recording_selections as clear_recording_selections,
     resolve_active_binary_marker as resolve_active_binary_marker,
     resolve_tiff_conversion_plan as resolve_tiff_conversion_plan,
     resolve_single_recording_contexts as resolve_single_recording_contexts,

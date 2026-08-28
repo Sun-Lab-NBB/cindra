@@ -508,6 +508,46 @@ class TestRemainingBranches:
         GpuRegistrationBackend._apply_bidirectional_phase_correction(frames=frames, bidirectional_phase_offset=0)
         assert bool((frames == expected).all())
 
+    def test_two_step_refinement_releases_both_device_backends(
+        self, tmp_path: Path, single_recording_context: Callable[..., RuntimeContext]
+    ) -> None:
+        """Verifies that a two-step device pass releases the refinement backend as well as the first one."""
+        movie, _ = _build_shifted_movie(frame_count=48, height=128, width=128)
+
+        def configure(configuration: SingleRecordingConfiguration) -> None:
+            configuration.registration.batch_size = 20
+            configuration.registration.two_step_registration = True
+
+        context = single_recording_context(
+            tmp_path=tmp_path, frame_height=128, frame_width=128, frame_count=48, movie=movie, configure=configure
+        )
+
+        register_plane(context=context, workers=1, device=0)
+
+        assert context.runtime.registration.is_registered(output_path=context.runtime.io.output_path)
+
+    def test_release_hands_the_device_allocations_back(self) -> None:
+        """Verifies that releasing drops the staged buffers and the resident reference data."""
+        _, reference = _build_shifted_movie(frame_count=8, height=128, width=128)
+        backend = GpuRegistrationBackend(reference_data=_build_reference_data(reference, nonrigid=False), device=0)
+
+        backend.release()
+
+        assert backend._nonrigid_data is None
+        assert not backend._normalization_weights
+        assert all(not slot.host_buffers and not slot.device_buffers for slot in backend._input_slots)
+        assert all(not slot.host_buffers and not slot.device_buffers for slot in backend._output_slots)
+
+    def test_second_release_returns_without_touching_the_device(self) -> None:
+        """Verifies that releasing twice is a no-op, so a finally block may cover an already-released backend."""
+        _, reference = _build_shifted_movie(frame_count=8, height=128, width=128)
+        backend = GpuRegistrationBackend(reference_data=_build_reference_data(reference, nonrigid=False), device=0)
+
+        backend.release()
+        backend.release()
+
+        assert backend._released
+
 
 class TestConfiguredBatchSize:
     """Tests the device batch size the configuration names for a pass running on a CUDA device."""

@@ -22,7 +22,7 @@ from ataraxis_data_structures import (
     initialize_worker_threads,
 )
 
-from .gpu import ALL_DEVICES_REQUEST, resolve_gpu_devices
+from .gpu import ALL_DEVICES_REQUEST, resolve_gpu_devices, resolve_free_device_memory_mb
 from .jobs import (
     PREREQUISITE_FAILURE_MESSAGE,
     UNREACHABLE_PREREQUISITE_MESSAGE,
@@ -117,6 +117,14 @@ class PendingJob:
         A value of zero states that the caller supplied no estimate, which leaves the job admitted on the core budget
         alone. Memory is carried per job rather than per resource class, because the memory one job holds follows the
         recording it processes rather than the stage it runs.
+    """
+    device_memory_megabytes: int = 0
+    """The device memory this job holds while it runs, as the caller's sizing pass estimated it.
+
+    Notes:
+        A value of zero states that the caller supplied no estimate, or that the job runs on the host CPU, and either
+        case admits the job without reading the device. The figure bounds admission rather than concurrency, because
+        the devices a session holds already bound how many device-backed jobs run at once.
     """
 
     @property
@@ -796,6 +804,10 @@ def _dispatch_pass(state: JobExecutionState, pool: Executor, *, release_reservat
             if class_requires_device(resource_class=pending_job.resource_class) and state.device_budget > 0:
                 if not state.available_devices:
                     break
+                if active_futures and not _device_memory_admits(
+                    device=state.available_devices[0], required_megabytes=pending_job.device_memory_megabytes
+                ):
+                    break
                 pending_job.assigned_device = state.available_devices.pop(0)
 
             pending_job.resolved_workers = workers
@@ -831,6 +843,32 @@ def _release_device(state: JobExecutionState, job: PendingJob | None) -> None:
 
     state.available_devices.append(job.assigned_device)
     job.assigned_device = None
+
+
+def _device_memory_admits(device: int, required_megabytes: int) -> bool:
+    """Determines whether one CUDA device reports enough free memory to hold a job's estimate.
+
+    Notes:
+        The dispatcher consults this only while a job of the same class is already running, which mirrors how the host
+        memory budget admits the first job of an idle session regardless of its estimate. That keeps a session whose
+        device is too small for any single job reporting a legible per-job failure rather than stalling forever.
+
+    Args:
+        device: The zero-based index of the CUDA device the job would hold.
+        required_megabytes: The device memory the job's sizing pass estimated it holds.
+
+    Returns:
+        True when the job may take the device, which covers a job carrying no estimate and a device whose runtime
+        cannot report what it has free.
+    """
+    if required_megabytes <= 0:
+        return True
+
+    free_megabytes = resolve_free_device_memory_mb(device=device)
+    if free_megabytes is None:
+        return True
+
+    return free_megabytes >= required_megabytes
 
 
 def _create_job_pool(max_workers: int) -> Executor:

@@ -20,6 +20,7 @@ from cindra.layout import (
     DETECTION_DATA_DIRECTORY_NAME,
     MULTI_RECORDING_DIRECTORY_NAME,
     ACQUISITION_PARAMETERS_FILENAME,
+    REGISTRATION_DATA_DIRECTORY_NAME,
     TRACKING_TEMPLATE_MASKS_FILENAME,
     SINGLE_RECORDING_TRACKER_FILENAME,
     MULTI_RECORDING_ARRAYS_DIRECTORY_NAME,
@@ -27,6 +28,7 @@ from cindra.layout import (
     SINGLE_RECORDING_CONFIGURATION_FILENAME,
     DetectionImages,
     RecordingArrays,
+    RegistrationArrays,
     resolve_array_path,
     resolve_plane_path,
     resolve_output_path,
@@ -515,6 +517,33 @@ class TestResetProcessingPhases:
         assert "file_io.repeat_binarization" in warnings[0]
         assert "set_config_values_tool" in warnings[0]
 
+    def test_registration_reset_over_a_corrected_binary_warns_about_the_second_pass(self, tmp_path: Path) -> None:
+        """Verifies that re-registering a plane whose binary is already corrected names the rebuild that avoids it."""
+        _, _, output_root, tracker_path = _build_prepared_recording(tmp_path=tmp_path)
+        _mark_plane_registered(output_root=output_root)
+        _write_repeat_flags(output_root=output_root, repeat_registration=True)
+
+        result = reset_processing_phases_tool(
+            tracker_path=str(tracker_path), phases=["registration"], pipeline_type="single-recording"
+        )
+
+        warnings = result["warnings"]
+        assert len(warnings) == 1
+        assert "rewrites the plane binary in place" in warnings[0]
+        assert "file_io.repeat_binarization" in warnings[0]
+
+    def test_registration_reset_that_rebuilds_the_binary_reports_no_second_pass_warning(self, tmp_path: Path) -> None:
+        """Verifies that resetting binarization with the rebuild enabled leaves the registration reset unflagged."""
+        _, _, output_root, tracker_path = _build_prepared_recording(tmp_path=tmp_path)
+        _mark_plane_registered(output_root=output_root)
+        _write_repeat_flags(output_root=output_root, repeat_registration=True, repeat_binarization=True)
+
+        result = reset_processing_phases_tool(
+            tracker_path=str(tracker_path), phases=["binarization"], pipeline_type="single-recording"
+        )
+
+        assert "warnings" not in result
+
     def test_reset_without_existing_output_reports_no_warning(self, tmp_path: Path) -> None:
         """Verifies that a phase whose output does not exist yet carries no skip warning."""
         _, _, _, tracker_path = _build_prepared_recording(tmp_path=tmp_path)
@@ -681,6 +710,26 @@ def _build_prepared_recording(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     tracker_path = cindra_root / SINGLE_RECORDING_TRACKER_FILENAME
     _initialize_binarization_job(tracker_path=tracker_path)
     return template_path, raw_data_path, output_root, tracker_path
+
+
+def _mark_plane_registered(output_root: Path, plane_index: int = 0) -> None:
+    """Writes the reference image the inventory reads to decide that one plane carries registration output."""
+    registration_path = (
+        resolve_plane_path(output_root=output_root, plane_index=plane_index) / REGISTRATION_DATA_DIRECTORY_NAME
+    )
+    registration_path.mkdir(parents=True, exist_ok=True)
+    (registration_path / RegistrationArrays.REFERENCE_IMAGE).write_bytes(b"")
+
+
+def _write_repeat_flags(
+    output_root: Path, *, repeat_registration: bool = False, repeat_binarization: bool = False
+) -> None:
+    """Rewrites the recording's configuration copy with the requested repeat flags."""
+    configuration_path = output_root / OUTPUT_DIRECTORY_NAME / SINGLE_RECORDING_CONFIGURATION_FILENAME
+    configuration = SingleRecordingConfiguration.from_yaml(file_path=configuration_path)
+    configuration.registration.repeat_registration = repeat_registration
+    configuration.file_io.repeat_binarization = repeat_binarization
+    configuration.save(file_path=configuration_path)
 
 
 def _prepare_sizable_recording(tmp_path: Path) -> Path:

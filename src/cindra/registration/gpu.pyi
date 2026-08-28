@@ -17,7 +17,7 @@ from .utils import (
 _GPU_REMEDY: str
 _TF32_VARIABLE: str
 _MINIMUM_CORRELATION_RADIUS: int
-_SNR_EPSILON: float
+_SIGNAL_TO_NOISE_EPSILON: float
 _SUBPIXEL_FACTOR: int
 _UPSAMPLING_PADDING: int
 _CORRELATION_BATCH_SIZE: int
@@ -66,6 +66,7 @@ class GpuRegistrationBackend:
     _input_slots: tuple[_StagingSlot, ...]
     _output_slots: tuple[_StagingSlot, ...]
     _staging_slot: int
+    _released: bool
     _compute_stream: cupy.cuda.Stream
     _transfer_stream: cupy.cuda.Stream
     _upload_events: tuple[cupy.cuda.Event, ...]
@@ -103,6 +104,7 @@ class GpuRegistrationBackend:
         bidirectional_phase_corrected: bool,
         nonrigid_enabled: bool,
     ) -> tuple[NDArray[np.int16] | NDArray[np.float32], NDArray[np.float32] | None]: ...
+    def release(self) -> None: ...
     def _upload_batch(self, frames: NDArray[np.int16] | NDArray[np.float32], slot: int) -> cupy.ndarray: ...
     def _register_device_batch(
         self,
@@ -135,7 +137,11 @@ class GpuRegistrationBackend:
         temporal_smoothing_sigma: float,
     ) -> tuple[cupy.ndarray, cupy.ndarray, cupy.ndarray]: ...
     def _compute_nonrigid_offsets(
-        self, nonrigid_data: _NonrigidDeviceData, frames: cupy.ndarray, snr_threshold: float, maximum_offset: float
+        self,
+        nonrigid_data: _NonrigidDeviceData,
+        frames: cupy.ndarray,
+        signal_to_noise_threshold: float,
+        maximum_offset: float,
     ) -> tuple[cupy.ndarray, cupy.ndarray, cupy.ndarray]: ...
     def _locate_subpixel_peaks(
         self, nonrigid_data: _NonrigidDeviceData, smoothed_correlation: cupy.ndarray, correlation_radius: int
@@ -172,7 +178,7 @@ class GpuRegistrationBackend:
         source: cupy.ndarray, y_coordinates: cupy.ndarray, x_coordinates: cupy.ndarray
     ) -> cupy.ndarray: ...
     @staticmethod
-    def _compute_correlation_snr(correlation_data: cupy.ndarray, padding: int) -> cupy.ndarray: ...
+    def _compute_correlation_signal_to_noise_ratio(correlation_data: cupy.ndarray, padding: int) -> cupy.ndarray: ...
 
 def _require_gpu_runtime() -> None: ...
 def _verify_tf32_disabled() -> None: ...

@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 from ataraxis_base_utilities import error_format, ensure_directory_exists
 
+from cindra.layout import RecordingArrays
 from cindra.dataclasses import (
     ROIMask,
     CombinedData,
@@ -373,6 +374,41 @@ class TestApplyForwardDeformation:
         expected_message = (
             "Unable to register recording 'rec0' to shared visual space. The recording's combined_data must be "
             "loaded before transforming images and ROI masks."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
+            _apply_forward_deformation(context=context, deformation=deformation)
+
+    def test_raises_when_the_selection_outruns_the_recording_regions(self, tmp_path: Path) -> None:
+        """Verifies that a selection made against a different detection run names the flag that reselects."""
+        runtime = MultiRecordingRuntimeData()
+        runtime.io.recording_id = "rec0"
+        runtime.io.data_path = tmp_path
+        runtime.io.selected_roi_indices = (0, 5)
+        runtime.combined_data = CombinedData(
+            detection=DetectionData(),
+            extraction=ExtractionData(),
+            plane_count=1,
+            combined_height=_FRAME_SIZE,
+            combined_width=_FRAME_SIZE,
+            tau=1.0,
+            sampling_rate=30.0,
+        )
+        ROIMask.save_list(
+            mask_list=[
+                _make_circle_mask(centroid=(8, 8), radius=2, frame_width=_FRAME_SIZE),
+                _make_circle_mask(centroid=(16, 16), radius=2, frame_width=_FRAME_SIZE),
+            ],
+            file_path=tmp_path / RecordingArrays.ROI_MASKS,
+        )
+        context = MultiRecordingRuntimeContext(configuration=MultiRecordingConfiguration(), runtime=runtime)
+        zero_field = np.zeros((_FRAME_SIZE, _FRAME_SIZE), dtype=np.float32)
+        deformation = Deformation(field_y=zero_field, field_x=zero_field.copy())
+
+        expected_message = (
+            "Unable to deform the selected regions of recording 'rec0'. The dataset selection names region index 5, "
+            "and the recording now holds 2 regions, so the selection was made against a different detection run. Set "
+            "'recording_io.repeat_selection' to true and re-run the discovery phase to select against the regions the "
+            "recording currently holds."
         )
         with pytest.raises(ValueError, match=error_format(expected_message)):
             _apply_forward_deformation(context=context, deformation=deformation)
