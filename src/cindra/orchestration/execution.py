@@ -22,15 +22,17 @@ from ataraxis_data_structures import (
     initialize_worker_threads,
 )
 
-from .gpu import resolve_gpu_devices
+from .gpu import ALL_DEVICES_REQUEST, resolve_gpu_devices
 from .jobs import (
     PREREQUISITE_FAILURE_MESSAGE,
     UNREACHABLE_PREREQUISITE_MESSAGE,
+    SingleRecordingJobNames,
     resolve_prerequisite_job_ids,
 )
 from .pipeline import run_multi_recording_pipeline, run_single_recording_pipeline
 from .allocation import (
     ALL_CORES_REQUEST,
+    RESOURCE_CLASS_BY_JOB_NAME,
     ResourceClass,
     resolve_core_budget,
     class_requires_device,
@@ -127,9 +129,9 @@ class PendingJob:
     dispatch time and returned to it when the job leaves the running set.
 
     Notes:
-        A job of a host-only class carries None for its whole life, and so does a device-backed job of a session that
-        resolved no device. None makes the registration stage select the first device the host exposes, and the
-        pipeline's own device verification refuses that stage when the host exposes none.
+        A job of a host-only class carries None for its whole life, which runs its registration on the host CPU. A
+        device-backed job carries an index the session free list supplied, because a session holding no device admits
+        no such job.
     """
     memory_megabytes: int = 0
     """The memory this job holds while it runs, as the caller's sizing pass estimated it.
@@ -194,8 +196,8 @@ class JobExecutionState:
     device-backed class.
 
     Notes:
-        A session that resolved no device dispatches its device-backed jobs without an assignment, so each one reaches
-        the pipeline's device verification and fails there rather than waiting on a device the host never exposes.
+        A session holding no device admits no device-backed job, so the list is empty for the whole life of a session
+        whose registration runs on the host CPU.
     """
     lock: Lock = field(default_factory=Lock)
     """The lock guarding every mutation of the job queues."""
@@ -262,9 +264,9 @@ def start_execution_session(
         the running jobs of every class inside that budget, so the per-class caps cannot oversubscribe the machine
         between them.
 
-        The session also holds the CUDA devices its device-backed jobs run on, one device per running job. A mask
-        narrows that set to the devices the caller names, which leaves the rest of the host's devices to the work
-        running beside this session.
+        The session also holds the CUDA devices its device-backed jobs run on, one device per running job. It holds
+        the devices the caller names, which leaves the rest of the host's devices to the work running beside it, and a
+        session naming none registers on the host CPU.
 
     Args:
         all_jobs: All submitted jobs keyed by dispatch key, in the order the manager should consider them.
@@ -272,8 +274,8 @@ def start_execution_session(
             class default.
         max_parallel_jobs: Requested maximum concurrent jobs per resource class, -1 to lift the caps, or None to
             accept the derived caps.
-        gpu_devices: The zero-based indices of the CUDA devices the session's device-backed jobs may run on. Use None
-            to accept every device the host exposes.
+        gpu_devices: The zero-based indices of the CUDA devices the session registers on. Use None to register on the
+            host CPU, [-1] to name every device the host exposes, and an explicit list to name those devices.
 
     Returns:
         A dictionary carrying the submitted job total under 'total_jobs', the session core budget under 'cpu_budget',
@@ -281,8 +283,10 @@ def start_execution_session(
         and the per-class worker count, concurrency cap, and job count under 'resource_classes'.
 
     Raises:
-        ValueError: If either override is zero or is a negative value other than -1, or if gpu_devices is empty or
-            names a device the host does not expose.
+        ValueError: If either override is zero or is a negative value other than -1. If gpu_devices is empty, names a
+            device the host does not expose, or pairs the all-devices request with an explicit index. If a submitted
+            job registers on a CUDA device while the session holds none, or if the session holds a device while a
+            submitted registration job registers on the host CPU.
     """
     # Rejects a non-positive override rather than letting it fall through as a negative core count. None is the only
     # way to ask for a default, so a caller passing 0 or a negative value has confused the two.
@@ -299,6 +303,7 @@ def start_execution_session(
             console.error(message=message, error=ValueError)
 
     session_devices = _resolve_session_devices(gpu_devices=gpu_devices)
+    _validate_session_device_agreement(all_jobs=all_jobs, session_devices=session_devices)
     budget = resolve_core_budget()
     memory_budget = resolve_memory_budget_mb()
 
@@ -320,6 +325,11 @@ def start_execution_session(
             workers_per_job=workers_per_job,
             max_parallel_jobs=max_parallel_jobs,
         )
+        # The device-backed class caps its concurrency on the devices the host exposes, while the session dispatches
+        # onto the devices it holds, so the reported cap names the pool this session can actually fill.
+        if class_requires_device(resource_class=resource_class):
+            capacity = min(capacity, len(session_devices))
+
         class_workers[class_name] = workers
         class_capacities[class_name] = capacity
 
@@ -459,28 +469,75 @@ def _resolve_session_devices(gpu_devices: list[int] | None) -> list[int]:
     """Resolves the CUDA devices one execution session runs its device-backed jobs on.
 
     Args:
-        gpu_devices: The zero-based device indices the caller asks for, or None to accept every device the host
-            exposes.
+        gpu_devices: The zero-based device indices the caller asks for, [-1] to ask for every device the host exposes,
+            or None to register on the host CPU.
 
     Returns:
-        The device indices the session holds, in ascending order, which is empty when the host exposes no device.
+        The device indices the session holds, in ascending order, which is empty when the caller asks for the host CPU
+        and when the all-devices request reaches a host exposing no device.
 
     Raises:
-        ValueError: If gpu_devices is empty or names a device the host does not expose.
+        ValueError: If gpu_devices is empty, names a device the host does not expose, or pairs the all-devices request
+            with an explicit index.
     """
-    host_devices = [device.index for device in resolve_gpu_devices().devices]
     if gpu_devices is None:
+        return []
+
+    host_devices = [device.index for device in resolve_gpu_devices().devices]
+
+    if ALL_DEVICES_REQUEST in gpu_devices:
+        if len(gpu_devices) > 1:
+            message = (
+                f"Unable to start the execution session. The 'gpu_devices' entry {ALL_DEVICES_REQUEST} already names "
+                f"every CUDA device the host exposes, so it stands alone, but encountered {gpu_devices}."
+            )
+            console.error(message=message, error=ValueError)
         return host_devices
 
     unknown = sorted(set(gpu_devices) - set(host_devices))
     if not gpu_devices or unknown:
         message = (
-            f"Unable to start the execution session. The 'gpu_devices' mask must name at least one of the CUDA "
-            f"devices the host exposes, but encountered {gpu_devices}. Available device indices: {host_devices}."
+            f"Unable to start the execution session. The 'gpu_devices' list must name at least one of the CUDA "
+            f"devices the host exposes, or {ALL_DEVICES_REQUEST} to name every one of them, but encountered "
+            f"{gpu_devices}. Use None to register on the host CPU. Available device indices: {host_devices}."
         )
         console.error(message=message, error=ValueError)
 
     return sorted(set(gpu_devices))
+
+
+def _validate_session_device_agreement(all_jobs: dict[tuple[str, str], PendingJob], session_devices: list[int]) -> None:
+    """Verifies that the devices one session holds match the jobs it was submitted.
+
+    Notes:
+        A registration job carries the resource class its planner chose, so a session whose devices disagree with that
+        class would run the stage on the resource the plan did not size it for.
+
+    Args:
+        all_jobs: All submitted jobs keyed by dispatch key.
+        session_devices: The device indices the session holds.
+
+    Raises:
+        ValueError: If a submitted job registers on a CUDA device while the session holds none, or if the session
+            holds a device while a submitted registration job registers on the host CPU.
+    """
+    device_jobs = sum(1 for job in all_jobs.values() if class_requires_device(resource_class=job.resource_class))
+    if device_jobs and not session_devices:
+        message = (
+            f"Unable to start the execution session. {device_jobs} of the submitted jobs register on a CUDA device, "
+            f"and the session holds none. Name the devices those jobs run on through 'gpu_devices'."
+        )
+        console.error(message=message, error=ValueError)
+
+    host_class_name = RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.REGISTER].name
+    host_jobs = sum(1 for job in all_jobs.values() if job.resource_class.name == host_class_name)
+    if session_devices and host_jobs:
+        message = (
+            f"Unable to start the execution session. {host_jobs} of the submitted jobs register on the host CPU, and "
+            f"the session holds the CUDA devices {session_devices}. Use None for 'gpu_devices' to register on the "
+            f"host CPU."
+        )
+        console.error(message=message, error=ValueError)
 
 
 def _clear_owned_session(state: JobExecutionState) -> None:
@@ -934,8 +991,8 @@ def _pipeline_worker(
         single_recording: Determines whether to call the single-recording or multi-recording pipeline.
         workers: The number of parallel workers to allocate to this job. A value of None makes the pipeline apply the
             default for the job's stage.
-        device: The zero-based index of the CUDA device a registration job runs on. A value of None makes the
-            registration stage select the first device the host exposes. Every other stage ignores it.
+        device: The zero-based index of the CUDA device a registration job runs on. A value of None runs the
+            registration on the host CPU. Every other stage ignores it.
     """
     try:
         if single_recording:

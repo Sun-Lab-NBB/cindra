@@ -148,14 +148,14 @@ def cindra_omp(source: Path | None, target: Path | None, *, force: bool, yes: bo
 @cindra_cli.command("gpu")
 @report_command_failure
 def cindra_gpu() -> None:
-    """Reports the CUDA devices the GPU registration backend runs on, and why it reaches none.
+    """Reports the CUDA devices the registration stage runs on, and why it reaches none.
 
-    The GPU backend registers single-recording planes on a CUDA device through the CuPy runtime. This reports every
-    device the host exposes, together with its memory and compute capability, after transforming a small array on the
-    first of them. That transform is what separates a reachable device from an importable module, because CuPy
-    resolves the CUDA math libraries on first use rather than at import. A host that reaches no device reports the
-    reason and the installation that resolves it, and exits with a non-zero status. Running the command on macOS
-    reports that CuPy publishes no wheel for the platform, where registration runs on the CPU backend.
+    Single-recording planes register on a CUDA device through the CuPy runtime when the run names one. This reports
+    every device the host exposes, together with its memory and compute capability, after transforming a small array on
+    the device the runtime selects by default. That transform is what separates a reachable device from an importable
+    module, because CuPy resolves the CUDA math libraries on first use rather than at import. A host that reaches no
+    device reports the reason and the installation that resolves it, and exits with a non-zero status. Running the
+    command on macOS reports that CuPy publishes no wheel for the platform, where registration runs on the host CPU.
     """
     summary = resolve_gpu_devices()
 
@@ -281,9 +281,8 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     required=False,
     default=None,
     help=(
-        "[Single-recording] The zero-based index of the CUDA device that registers every plane of this run, used "
-        "while the configuration's 'registration.backend' names the GPU backend. When this option is omitted, the "
-        "registration runs on the first device the host exposes."
+        "[Single-recording] The zero-based index of the CUDA device that registers every plane of this run. When this "
+        "option is omitted, every plane of the run registers on the host CPU."
     ),
 )
 @click.option(
@@ -542,6 +541,13 @@ def cindra_run(
             registration_device=register_device,
         )
     else:
+        if register_device is not None:
+            message = (
+                "Unable to run the multi-recording pipeline. The --register-device option names the CUDA device the "
+                "single-recording pipeline registers its planes on, and no multi-recording stage runs on a device."
+            )
+            console.error(message=message, error=click.UsageError)
+
         multi_recording_configuration = MultiRecordingConfiguration.from_yaml(file_path=input_path)
         if recording_paths:
             multi_recording_configuration.recording_io.recording_directories = tuple(natsorted(recording_paths))

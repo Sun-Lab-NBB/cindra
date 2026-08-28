@@ -31,6 +31,8 @@ Orchestration
    falls back to the docstring of the value's own type when it is pointed at the re-exporting package. The block covers
    exactly the constants the package's __all__ names and the package's own modules define. A constant the package holds
    for its own use stays off the page, and one this page documents under its own module's section renders there.
+.. autodata:: cindra.orchestration.gpu.GPU_REMEDY
+.. autodata:: cindra.orchestration.gpu.ALL_DEVICES_REQUEST
 .. autodata:: cindra.orchestration.jobs.SINGLE_RECORDING_PHASES
 .. autodata:: cindra.orchestration.jobs.MULTI_RECORDING_PHASES
 .. autodata:: cindra.orchestration.allocation.BINARIZATION_WORKERS

@@ -50,10 +50,12 @@ alone.
 
 ### size_pipeline_jobs_tool
 
-Returns `jobs` holding the `name`, `specifier`, `cores`, and `memory_mb` of every declared job, plus `total_jobs`,
-`peak_memory_mb` for the single largest job, `total_memory_mb` for every job at once, and `pipeline_type`. Unlike the
-universe tool, this one fails when the dataset names no recording directory, when any recording carries no combined
-metadata archive, or when any recording reports no regions in its combined trace array.
+Returns `jobs` holding the `name`, `specifier`, `cores`, `memory_mb`, and `device_memory_mb` of every declared job,
+plus `total_jobs`, `peak_memory_mb` and `peak_device_memory_mb` for the single largest job, `total_memory_mb` for every
+job at once, and `pipeline_type`. Every device figure is zero here, because no multi-recording stage runs on a CUDA
+device, and the `gpu_registration` argument leaves them at zero as well. Unlike the universe tool, this one fails when
+the dataset names no recording directory, when any recording carries no combined metadata archive, or when any
+recording reports no regions in its combined trace array.
 
 ### check_threading_runtime_tool
 

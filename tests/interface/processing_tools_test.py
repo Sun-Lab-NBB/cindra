@@ -27,11 +27,17 @@ from cindra.layout import (
     SINGLE_RECORDING_CONFIGURATION_FILENAME,
     DetectionImages,
     RecordingArrays,
+    resolve_array_path,
     resolve_plane_path,
+    resolve_output_path,
     resolve_plane_specifier,
 )
 from cindra.interface import processing_tools
-from cindra.dataclasses import RegistrationBackend, AcquisitionParameters, SingleRecordingConfiguration
+from cindra.dataclasses import (
+    AcquisitionParameters,
+    MultiRecordingConfiguration,
+    SingleRecordingConfiguration,
+)
 from cindra.orchestration import (
     GPU_REMEDY,
     RESOURCE_CLASS_BY_JOB_NAME,
@@ -46,6 +52,7 @@ from cindra.orchestration import (
 from cindra.orchestration.execution import JobExecutionState
 from cindra.interface.processing_tools import (
     check_gpu_runtime_tool,
+    size_pipeline_jobs_tool,
     get_recording_status_tool,
     execute_full_pipeline_tool,
     clean_processing_output_tool,
@@ -134,31 +141,45 @@ class TestExecuteProcessingJobs:
 
 
 class TestRegistrationResourceClass:
-    """Tests the resource class a registration job receives from the backend its configuration names."""
+    """Tests the resource class a registration job receives from the devices the session names."""
 
     @pytest.mark.parametrize(
-        ("backend", "expected_name"),
-        [(RegistrationBackend.GPU, "registration_gpu"), (RegistrationBackend.CPU, "registration")],
+        ("gpu_registration", "expected_name"), [(True, "registration_gpu"), (False, "registration")]
     )
-    def test_configured_backend_selects_the_class_of_every_register_job(
-        self, tmp_path: Path, backend: RegistrationBackend, expected_name: str
+    def test_session_device_request_selects_the_class_of_every_register_job(
+        self, tmp_path: Path, gpu_registration: bool, expected_name: str
     ) -> None:
-        """Verifies that the backend a recording configures reaches the jobs the full-pipeline tool builds."""
-        manifest_dict, cindra_root = _prepare_recording_with_backend(tmp_path=tmp_path, backend=backend)
+        """Verifies that the session's device request reaches the jobs the full-pipeline tool builds."""
+        manifest_dict, cindra_root = _prepare_recording(tmp_path=tmp_path)
 
         _, register_jobs, _, _ = processing_tools._resolve_recording_phase_jobs(
             manifest_dict=manifest_dict,
             configuration_path=cindra_root / SINGLE_RECORDING_CONFIGURATION_FILENAME,
             tracker_path=cindra_root / SINGLE_RECORDING_TRACKER_FILENAME,
+            gpu_registration=gpu_registration,
         )
 
         assert register_jobs
         assert {job.resource_class.name for job in register_jobs} == {expected_name}
 
+    def test_device_planned_register_jobs_carry_the_wider_memory_estimate(self, tmp_path: Path) -> None:
+        """Verifies that planning a session for a device reaches the memory figure of every registration job."""
+        manifest_dict, cindra_root = _prepare_recording(tmp_path=tmp_path)
+        arguments = {
+            "manifest_dict": manifest_dict,
+            "configuration_path": cindra_root / SINGLE_RECORDING_CONFIGURATION_FILENAME,
+            "tracker_path": cindra_root / SINGLE_RECORDING_TRACKER_FILENAME,
+        }
+
+        _, host_jobs, _, _ = processing_tools._resolve_recording_phase_jobs(**arguments, gpu_registration=False)
+        _, device_jobs, _, _ = processing_tools._resolve_recording_phase_jobs(**arguments, gpu_registration=True)
+
+        assert [job.memory_megabytes for job in device_jobs] >= [job.memory_megabytes for job in host_jobs]
+
     @pytest.mark.xdist_group(name="execution_state")
-    def test_mask_naming_an_absent_device_is_reported_rather_than_raised(self, tmp_path: Path) -> None:
-        """Verifies that a device mask the host cannot satisfy leaves the session unstarted and names the mask."""
-        manifest_dict, cindra_root = _prepare_recording_with_backend(tmp_path=tmp_path, backend=RegistrationBackend.GPU)
+    def test_list_naming_an_absent_device_is_reported_rather_than_raised(self, tmp_path: Path) -> None:
+        """Verifies that a device list the host cannot satisfy leaves the session unstarted and names the list."""
+        manifest_dict, cindra_root = _prepare_recording(tmp_path=tmp_path)
 
         result = execute_processing_jobs_tool(
             jobs=[
@@ -174,8 +195,47 @@ class TestRegistrationResourceClass:
 
         assert result["success"] is False
         assert result["started"] is False
-        assert "'gpu_devices' mask must name at least one of the CUDA devices the host exposes" in result["error"]
+        assert "'gpu_devices' list must name at least one of the CUDA devices the host exposes" in result["error"]
         assert get_execution_state() is None
+
+
+class TestSizePipelineJobs:
+    """Tests the cores, memory, and device memory the sizing tool reports for every job of a pipeline."""
+
+    def test_host_planned_sizing_reports_no_device_memory(self, tmp_path: Path) -> None:
+        """Verifies that a sizing pass naming no device reports a zero device figure for every job."""
+        configuration_path = _prepare_sizable_recording(tmp_path=tmp_path)
+
+        result = size_pipeline_jobs_tool(configuration_path=str(configuration_path), pipeline_type="single-recording")
+
+        assert result["success"] is True
+        assert all(job["device_memory_mb"] == 0 for job in result["jobs"])
+        assert result["peak_device_memory_mb"] == 0
+
+    def test_device_planned_sizing_reports_the_device_memory_of_its_registration_jobs(self, tmp_path: Path) -> None:
+        """Verifies that the flag reaches the registration jobs alone and sets the reported device peak."""
+        configuration_path = _prepare_sizable_recording(tmp_path=tmp_path)
+
+        result = size_pipeline_jobs_tool(
+            configuration_path=str(configuration_path), pipeline_type="single-recording", gpu_registration=True
+        )
+
+        assert result["success"] is True
+        device_figures = {job["name"]: job["device_memory_mb"] for job in result["jobs"] if job["device_memory_mb"] > 0}
+        assert set(device_figures) == {SingleRecordingJobNames.REGISTER}
+        assert result["peak_device_memory_mb"] == max(device_figures.values())
+
+    def test_multi_recording_sizing_reports_no_device_memory(self, tmp_path: Path) -> None:
+        """Verifies that a dataset sizing reports zero device memory whatever the flag holds."""
+        configuration_path = _prepare_sizable_dataset(tmp_path=tmp_path)
+
+        result = size_pipeline_jobs_tool(
+            configuration_path=str(configuration_path), pipeline_type="multi-recording", gpu_registration=True
+        )
+
+        assert result["success"] is True
+        assert all(job["device_memory_mb"] == 0 for job in result["jobs"])
+        assert result["peak_device_memory_mb"] == 0
 
 
 class TestCheckGpuRuntime:
@@ -516,12 +576,10 @@ def _build_execution_state(tmp_path: Path, tracker_path: Path, job_id: str) -> J
     return JobExecutionState(all_jobs={pending_job.dispatch_key: pending_job})
 
 
-def _prepare_recording_with_backend(tmp_path: Path, backend: RegistrationBackend) -> tuple[dict[str, object], Path]:
-    """Prepares one recording whose configuration names the given backend, returning its manifest and output root."""
+def _prepare_recording(tmp_path: Path) -> tuple[dict[str, object], Path]:
+    """Prepares one recording through the batch tool, returning its manifest entry and its output root."""
     configuration_path = tmp_path / "template.yaml"
-    template = SingleRecordingConfiguration()
-    template.registration.backend = backend
-    template.save(file_path=configuration_path)
+    SingleRecordingConfiguration().save(file_path=configuration_path)
 
     imaging_directory = tmp_path / "session" / "mesoscope_data"
     imaging_directory.mkdir(parents=True)
@@ -580,3 +638,36 @@ def _build_prepared_recording(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     tracker_path = cindra_root / SINGLE_RECORDING_TRACKER_FILENAME
     _initialize_binarization_job(tracker_path=tracker_path)
     return template_path, raw_data_path, output_root, tracker_path
+
+
+def _prepare_sizable_recording(tmp_path: Path) -> Path:
+    """Prepares one recording and returns the per-recording configuration file the sizing tool reads."""
+    _, cindra_root = _prepare_recording(tmp_path=tmp_path)
+    return cindra_root / SINGLE_RECORDING_CONFIGURATION_FILENAME
+
+
+def _prepare_sizable_dataset(tmp_path: Path) -> Path:
+    """Writes two completed recordings and the dataset configuration naming them, returning that file's path."""
+    recording_roots = []
+    for name in ("day1", "day2"):
+        output_root = tmp_path / name
+        output_path = resolve_output_path(output_root=output_root)
+        output_path.mkdir(parents=True, exist_ok=True)
+        np.savez(
+            output_path / COMBINED_METADATA_FILENAME,
+            combined_height=np.array([64], dtype=np.uint16),
+            combined_width=np.array([64], dtype=np.uint16),
+            frame_count=np.array([600], dtype=np.uint32),
+        )
+        np.save(
+            resolve_array_path(root_path=output_path, array=RecordingArrays.CELL_FLUORESCENCE),
+            np.zeros((40, 600), dtype=np.float32),
+        )
+        recording_roots.append(output_root)
+
+    configuration = MultiRecordingConfiguration()
+    configuration.recording_io.recording_directories = tuple(recording_roots)
+    configuration.recording_io.dataset_name = "animal_a_task"
+    configuration_path = tmp_path / "dataset.yaml"
+    configuration.save(file_path=configuration_path)
+    return configuration_path

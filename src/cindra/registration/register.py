@@ -42,7 +42,6 @@ from .nonrigid import (
     compute_nonrigid_reference_data,
 )
 from ..detection import compute_registration_blocks
-from ..dataclasses import RegistrationBackend
 from .bidiphase_correction import compute_bidirectional_phase_offset, apply_bidirectional_phase_correction
 
 if TYPE_CHECKING:
@@ -87,10 +86,10 @@ def register_plane(context: RuntimeContext, *, workers: int, device: int | None 
         the nonrigid warping kernels. The Numba mask is thread-local, so concurrently dispatched planes can hold
         different worker budgets inside a single process.
 
-        The backend configuration selects where both channels are registered. Only the alignment channel resolves
-        offsets against a reference, and the secondary channel receives those same offsets, so the two channels hold the
-        same correction whichever backend applied it. The secondary channel reuses the device state the alignment pass
-        built.
+        The device argument selects where both channels are registered, running the pass on a CUDA device when the
+        caller names one and on the host CPU otherwise. Only the alignment channel resolves offsets against a
+        reference, and the secondary channel receives those same offsets, so the two channels hold the same correction.
+        The secondary channel reuses the device state the alignment pass built.
 
         A '<binary>.registering' marker guards every one of the plane's channel binaries for the whole registration.
         Only the alignment channel is registered against a reference, and the secondary channel receives the offsets
@@ -102,8 +101,8 @@ def register_plane(context: RuntimeContext, *, workers: int, device: int | None 
         context: The RuntimeContext containing configuration, file paths, and mutable runtime data structures. Modified
             in-place to store registration outputs including reference image, offsets, mean images, and timing data.
         workers: The number of parallel workers allocated to this registration job. Must be a positive integer.
-        device: The zero-based index of the CUDA device the GPU backend registers this plane on. None selects the
-            first device. The argument is ignored while config.registration.backend selects the CPU backend.
+        device: The zero-based index of the CUDA device to register this plane on. Use None to register the plane on
+            the host CPU.
     """
     # The Numba thread mask is thread-local and cannot exceed the core count Numba detected at import time.
     numba.set_num_threads(min(workers, numba.config.NUMBA_NUM_THREADS))
@@ -809,12 +808,12 @@ def _register_alignment_channel(
     Args:
         context: The RuntimeContext containing configuration, acquisition parameters, and runtime data.
         workers: The number of parallel workers to use for the phase correlation FFT computations.
-        device: The zero-based index of the CUDA device the GPU backend registers this plane on, or None to select
-            the first device. The argument is ignored while the configuration selects the CPU backend.
+        device: The zero-based index of the CUDA device to register this plane on. Use None to register the plane on
+            the host CPU.
 
     Returns:
         The device backend this pass registered through, which the secondary channel reuses, or None when the pass
-        ran on the CPU backend.
+        ran on the host CPU.
     """
     config = context.configuration
     align_by_first_channel = config.registration.align_by_first_channel
@@ -827,10 +826,10 @@ def _register_alignment_channel(
     maximum_offset_fraction = config.registration.maximum_offset_fraction
     normalize_frames = config.registration.normalize_frames
     reference_frame_count = config.registration.reference_frame_count
-    gpu_enabled = config.registration.backend == RegistrationBackend.GPU
+    gpu_enabled = device is not None
 
-    # The GPU backend bounds its batch by the device memory budget rather than the host RAM budget, so it reads its
-    # own size when one is configured. A zero keeps both backends on the shared size.
+    # Registration on a CUDA device bounds its batch by the device memory budget rather than the host RAM budget, so
+    # it reads its own size when one is configured. A zero keeps the device on the shared size.
     batch_size = config.registration.batch_size
     if gpu_enabled and config.registration.gpu_batch_size > 0:
         batch_size = config.registration.gpu_batch_size
@@ -966,13 +965,11 @@ def _register_alignment_channel(
             blocks=blocks,
         )
 
-        # The GPU backend uploads the reference data once and holds it on the device for every batch of this pass, so
-        # it is built here rather than per batch. The device the batch engine assigned reaches it through the plane
-        # entry point, and the first device serves a caller that named none.
+        # The device backend uploads the reference data once and holds it on the device for every batch of this pass,
+        # so it is built here rather than per batch. The device the batch engine assigned reaches it through the plane
+        # entry point.
         gpu_backend = (
-            GpuRegistrationBackend(reference_data=reference_data, device=0 if device is None else device)
-            if gpu_enabled
-            else None
+            GpuRegistrationBackend(reference_data=reference_data, device=device) if device is not None else None
         )
 
         mean_image = np.zeros((height, width), dtype=np.float32)
@@ -1001,9 +998,9 @@ def _register_alignment_channel(
                 start = int(start_index)
                 yield frames_file[start : min(start + batch_size, frame_count)]
 
-        # The two backends differ in where each batch is registered rather than in what the pass does with the result,
-        # so both present the same stream of batch results to the loop below. The GPU backend consumes the stored width
-        # directly and widens it on the device.
+        # The device path and the host path differ in where each batch is registered rather than in what the pass does
+        # with the result, so both present the same stream of batch results to the loop below. The device consumes the
+        # stored width directly and widens it there.
         def register_on_host() -> Iterator[BatchRegistrationResult]:
             """Registers every batch of the pass through the host kernels."""
             for batch in read_batches():
@@ -1158,7 +1155,7 @@ def _register_secondary_channel(
             phase correction, which holds for the two-step refinement pass that follows a completed first pass. The
             flag stored in context.runtime.registration tracks the alignment channel rather than this one.
         gpu_backend: The device backend the alignment pass registered through, whose device-resident reference data
-            this channel reuses, or None when the alignment pass ran on the CPU backend.
+            this channel reuses, or None when the alignment pass ran on the host CPU.
     """
     config = context.configuration
     align_by_first_channel = config.registration.align_by_first_channel

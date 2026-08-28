@@ -12,6 +12,7 @@ from ataraxis_base_utilities import error_format
 from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 
 from cindra.orchestration import (
+    ALL_DEVICES_REQUEST,
     RESOURCE_CLASS_BY_JOB_NAME,
     GpuDevice,
     GpuStatus,
@@ -44,6 +45,8 @@ from cindra.orchestration.execution import (
     _reap_completed_jobs,
     _resolve_job_admission,
     _dispatch_admitted_jobs,
+    _resolve_session_devices,
+    _validate_session_device_agreement,
 )
 from cindra.orchestration.allocation import (
     BINARIZATION_WORKERS,
@@ -915,10 +918,10 @@ class TestDeviceAssignment:
         assert not state.available_devices
 
     @pytest.mark.xdist_group(name="execution_state")
-    def test_session_without_a_device_dispatches_without_an_assignment(
+    def test_state_holding_no_device_dispatches_without_an_assignment(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Verifies that a host exposing no device runs its device-backed job into the pipeline's own verification."""
+        """Verifies that a state carrying an empty free list dispatches its job without reaching that list."""
         tracker_path = tmp_path / "single_recording_tracker.yaml"
         job = _make_device_job(tracker_path=tracker_path, specifier="plane_0")
         state = _make_state(jobs=[job], admitted=True, capacity=1, devices=[])
@@ -935,26 +938,146 @@ class TestDeviceAssignment:
         assert [entry["device"] for entry in observed] == [None]
 
 
-class TestSessionDeviceMask:
-    """Tests the session-level mask that narrows the CUDA devices a batch runs its device-backed jobs on."""
+class TestSessionDeviceResolution:
+    """Tests the session device list the caller's request resolves to."""
+
+    def test_absent_request_registers_on_the_host_cpu(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verifies that a session naming no device holds none, which is how a caller asks for the host CPU."""
+        _patch_host_devices(monkeypatch=monkeypatch, indices=[0, 1, 2])
+
+        assert _resolve_session_devices(gpu_devices=None) == []
+
+    def test_all_devices_request_holds_every_device_the_host_exposes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verifies that the all-devices sentinel resolves to every index the host reports."""
+        _patch_host_devices(monkeypatch=monkeypatch, indices=[0, 1, 2])
+
+        assert _resolve_session_devices(gpu_devices=[ALL_DEVICES_REQUEST]) == [0, 1, 2]
+
+    def test_all_devices_request_on_a_host_exposing_none_resolves_to_an_empty_list(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verifies that the sentinel reaching a host exposing no device resolves to an empty list."""
+        _patch_host_devices(monkeypatch=monkeypatch, indices=[])
+
+        assert _resolve_session_devices(gpu_devices=[ALL_DEVICES_REQUEST]) == []
+
+    @pytest.mark.parametrize(("gpu_devices", "expected"), [([0], [0]), ([2, 0], [0, 2]), ([1, 1], [1])])
+    def test_explicit_list_holds_the_named_devices_in_ascending_order(
+        self, monkeypatch: pytest.MonkeyPatch, gpu_devices: list[int], expected: list[int]
+    ) -> None:
+        """Verifies that a named list leaves the devices it does not name to the work running beside the session."""
+        _patch_host_devices(monkeypatch=monkeypatch, indices=[0, 1, 2])
+
+        assert _resolve_session_devices(gpu_devices=gpu_devices) == expected
+
+    @pytest.mark.parametrize("gpu_devices", [[], [3], [0, 4]])
+    def test_empty_list_and_absent_index_are_rejected(
+        self, monkeypatch: pytest.MonkeyPatch, gpu_devices: list[int]
+    ) -> None:
+        """Verifies that an empty list and a list naming an unexposed device both raise before any dispatch."""
+        _patch_host_devices(monkeypatch=monkeypatch, indices=[0, 1])
+
+        message = (
+            f"Unable to start the execution session. The 'gpu_devices' list must name at least one of the CUDA "
+            f"devices the host exposes, or {ALL_DEVICES_REQUEST} to name every one of them, but encountered "
+            f"{gpu_devices}. Use None to register on the host CPU. Available device indices: {[0, 1]}."
+        )
+
+        with pytest.raises(ValueError, match=error_format(message=message)):
+            _resolve_session_devices(gpu_devices=gpu_devices)
+
+    @pytest.mark.parametrize("gpu_devices", [[ALL_DEVICES_REQUEST, 0], [1, ALL_DEVICES_REQUEST]])
+    def test_sentinel_paired_with_an_index_is_rejected(
+        self, monkeypatch: pytest.MonkeyPatch, gpu_devices: list[int]
+    ) -> None:
+        """Verifies that the sentinel stands alone, because it already names every device the host exposes."""
+        _patch_host_devices(monkeypatch=monkeypatch, indices=[0, 1])
+
+        message = (
+            f"Unable to start the execution session. The 'gpu_devices' entry {ALL_DEVICES_REQUEST} already names "
+            f"every CUDA device the host exposes, so it stands alone, but encountered {gpu_devices}."
+        )
+
+        with pytest.raises(ValueError, match=error_format(message=message)):
+            _resolve_session_devices(gpu_devices=gpu_devices)
+
+
+@pytest.mark.xdist_group(name="execution_state")
+class TestSessionDeviceAgreement:
+    """Tests the guard that holds the session devices and the submitted jobs to the same registration resource."""
+
+    def test_device_backed_job_without_a_session_device_is_rejected(self, tmp_path: Path) -> None:
+        """Verifies that a job planned for a device refuses to start against a session holding none."""
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        jobs = [_make_device_job(tracker_path=tracker_path, specifier=f"plane_{index}") for index in range(2)]
+
+        message = (
+            "Unable to start the execution session. 2 of the submitted jobs register on a CUDA device, and the "
+            "session holds none. Name the devices those jobs run on through 'gpu_devices'."
+        )
+
+        with pytest.raises(ValueError, match=error_format(message=message)):
+            _validate_session_device_agreement(all_jobs={job.dispatch_key: job for job in jobs}, session_devices=[])
+
+    def test_host_backed_registration_job_against_a_session_device_is_rejected(self, tmp_path: Path) -> None:
+        """Verifies that a registration planned for the host CPU refuses to start against a session holding one."""
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        job = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.REGISTER, specifier="plane_0")
+
+        message = (
+            "Unable to start the execution session. 1 of the submitted jobs register on the host CPU, and the "
+            "session holds the CUDA devices [0, 1]. Use None for 'gpu_devices' to register on the host CPU."
+        )
+
+        with pytest.raises(ValueError, match=error_format(message=message)):
+            _validate_session_device_agreement(all_jobs={job.dispatch_key: job}, session_devices=[0, 1])
+
+    def test_agreeing_submission_passes(self, tmp_path: Path) -> None:
+        """Verifies that a session whose devices match the class of every registration job it holds starts."""
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        device_job = _make_device_job(tracker_path=tracker_path, specifier="plane_0")
+        host_job = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.REGISTER, specifier="plane_1")
+
+        assert (
+            _validate_session_device_agreement(all_jobs={device_job.dispatch_key: device_job}, session_devices=[0])
+            is None
+        )
+        assert (
+            _validate_session_device_agreement(all_jobs={host_job.dispatch_key: host_job}, session_devices=[]) is None
+        )
+
+    @pytest.mark.parametrize("session_devices", [[], [0]])
+    def test_batch_holding_no_registration_job_agrees_with_either_session(
+        self, tmp_path: Path, session_devices: list[int]
+    ) -> None:
+        """Verifies that a batch running no registration stage is admitted whatever devices the session holds."""
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        job = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.BINARIZE)
+
+        assert (
+            _validate_session_device_agreement(all_jobs={job.dispatch_key: job}, session_devices=session_devices)
+            is None
+        )
+
+
+class TestSessionDeviceReport:
+    """Tests the device list and the device-class capacity one started session reports."""
 
     @pytest.mark.xdist_group(name="execution_state")
-    def test_absent_mask_holds_every_device_the_host_exposes(
+    def test_absent_request_starts_a_session_holding_no_device(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Verifies that a session naming no mask runs its device-backed jobs on every device the host reports."""
+        """Verifies that a session naming no device reports an empty device list and registers on the host CPU."""
         _patch_host_devices(monkeypatch=monkeypatch, indices=[0, 1, 2])
 
         summary, state = _start_drained_session(tmp_path=tmp_path, monkeypatch=monkeypatch, gpu_devices=None)
 
-        assert summary["gpu_devices"] == [0, 1, 2]
-        assert state.device_budget == 3
+        assert summary["gpu_devices"] == []
+        assert state.device_budget == 0
 
     @pytest.mark.xdist_group(name="execution_state")
-    def test_mask_narrows_the_session_to_the_named_devices(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Verifies that a masked session leaves the devices it does not name to the work running beside it."""
+    def test_named_devices_reach_the_session_free_list(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verifies that the devices a caller names are the ones the started session holds."""
         _patch_host_devices(monkeypatch=monkeypatch, indices=[0, 1, 2])
 
         summary, state = _start_drained_session(tmp_path=tmp_path, monkeypatch=monkeypatch, gpu_devices=[2, 0])
@@ -963,21 +1086,64 @@ class TestSessionDeviceMask:
         assert state.device_budget == 2
 
     @pytest.mark.xdist_group(name="execution_state")
-    @pytest.mark.parametrize("gpu_devices", [[], [3], [0, 4]])
-    def test_mask_naming_an_absent_device_is_rejected(
+    def test_device_class_capacity_names_the_devices_this_session_holds(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verifies that a session naming one device of a wider host reports a device-class cap of one."""
+        _patch_host_devices(monkeypatch=monkeypatch, indices=[0, 1, 2])
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        _build_single_recording_tracker(tracker_path=tracker_path, plane_count=2)
+        jobs = [_make_device_job(tracker_path=tracker_path, specifier=f"plane_{index}") for index in range(2)]
+        monkeypatch.setattr(execution, "_pipeline_worker", _make_completing_worker(observed=[]))
+        _use_same_process_pool(monkeypatch=monkeypatch)
+
+        summary = start_execution_session(
+            all_jobs={job.dispatch_key: job for job in jobs},
+            workers_per_job=None,
+            max_parallel_jobs=None,
+            gpu_devices=[1],
+        )
+        _wait_for_session_end()
+
+        classes = summary["resource_classes"]
+        assert isinstance(classes, dict)
+        assert classes["registration_gpu"]["max_parallel_jobs"] == 1
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_device_backed_submission_without_a_device_never_starts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verifies that the agreement guard fires from the session entry point before any state is published."""
+        _patch_host_devices(monkeypatch=monkeypatch, indices=[0, 1])
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        job = _make_device_job(tracker_path=tracker_path, specifier="plane_0")
+
+        message = (
+            "Unable to start the execution session. 1 of the submitted jobs register on a CUDA device, and the "
+            "session holds none. Name the devices those jobs run on through 'gpu_devices'."
+        )
+
+        with pytest.raises(ValueError, match=error_format(message=message)):
+            start_execution_session(
+                all_jobs={job.dispatch_key: job},
+                workers_per_job=None,
+                max_parallel_jobs=None,
+                gpu_devices=None,
+            )
+
+        assert get_execution_state() is None
+
+    @pytest.mark.xdist_group(name="execution_state")
+    @pytest.mark.parametrize("gpu_devices", [[], [3], [0, 4], [ALL_DEVICES_REQUEST, 0]])
+    def test_rejected_device_list_leaves_the_session_unstarted(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, gpu_devices: list[int]
     ) -> None:
-        """Verifies that an empty mask and a mask naming an unexposed device both raise before any dispatch."""
+        """Verifies that every device list the resolver refuses raises before any state is published."""
         _patch_host_devices(monkeypatch=monkeypatch, indices=[0, 1])
         tracker_path = tmp_path / "single_recording_tracker.yaml"
         job = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.BINARIZE)
 
-        message = (
-            f"Unable to start the execution session. The 'gpu_devices' mask must name at least one of the CUDA "
-            f"devices the host exposes, but encountered {gpu_devices}. Available device indices: {[0, 1]}."
-        )
-
-        with pytest.raises(ValueError, match=error_format(message=message)):
+        with pytest.raises(ValueError, match=error_format(message="Unable to start the execution session.")):
             start_execution_session(
                 all_jobs={job.dispatch_key: job},
                 workers_per_job=None,
@@ -1397,7 +1563,7 @@ def _make_device_job(tracker_path: Path, specifier: str) -> PendingJob:
         tracker_path=tracker_path,
         job_id=ProcessingTracker.generate_job_id(job_name=SingleRecordingJobNames.REGISTER, specifier=specifier),
         single_recording=True,
-        resource_class=resolve_registration_resource_class(gpu_backend=True),
+        resource_class=resolve_registration_resource_class(gpu_registration=True),
     )
 
 

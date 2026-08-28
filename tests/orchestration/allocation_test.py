@@ -1,7 +1,7 @@
 """Contains tests for the per-stage worker defaults, the resource-class model, and the allocation resolvers."""
 
 import pytest
-from ataraxis_base_utilities import resolve_worker_count
+from ataraxis_base_utilities import error_format, resolve_worker_count
 
 from cindra.orchestration import (
     DISCOVERY_WORKERS,
@@ -14,10 +14,10 @@ from cindra.orchestration import (
     ResourceClass,
     MultiRecordingJobNames,
     SingleRecordingJobNames,
-    resolve_device_budget,
     resolve_stage_workers,
     resolve_registration_resource_class,
 )
+from cindra.orchestration.gpu import resolve_device_budget
 from cindra.orchestration.allocation import (
     _RESERVED_CORES,
     ALL_CORES_REQUEST,
@@ -27,6 +27,7 @@ from cindra.orchestration.allocation import (
     _EXTRACTION_RESOURCES,
     _PROCESSING_RESOURCES,
     _COMBINATION_RESOURCES,
+    _STAGE_WORKER_DEFAULTS,
     _BINARIZATION_RESOURCES,
     _REGISTRATION_RESOURCES,
     DISCOVERY_MAXIMUM_WORKERS,
@@ -75,6 +76,51 @@ class TestStageDefaults:
         assert EXTRACTION_WORKERS > 0
 
 
+class TestDevicePlannedDefaults:
+    """Tests the stage default the registration resolves while its job is planned for a CUDA device."""
+
+    def test_registration_takes_its_device_default(self) -> None:
+        """Verifies that a registration planned for a device resolves the host-side count that stage occupies."""
+        resolved = resolve_stage_workers(job_name=SingleRecordingJobNames.REGISTER, gpu_registration=True)
+
+        assert resolved == REGISTRATION_GPU_WORKERS
+        assert resolved != resolve_stage_workers(job_name=SingleRecordingJobNames.REGISTER)
+
+    @pytest.mark.parametrize(
+        ("job_name", "expected_workers"),
+        [
+            (SingleRecordingJobNames.BINARIZE, BINARIZATION_WORKERS),
+            (SingleRecordingJobNames.PROCESS, PROCESSING_WORKERS),
+            (SingleRecordingJobNames.COMBINE, COMBINATION_WORKERS),
+            (MultiRecordingJobNames.DISCOVER, DISCOVERY_WORKERS),
+            (MultiRecordingJobNames.EXTRACT, EXTRACTION_WORKERS),
+        ],
+    )
+    def test_every_other_stage_ignores_the_device_plan(
+        self, job_name: SingleRecordingJobNames | MultiRecordingJobNames, expected_workers: int
+    ) -> None:
+        """Verifies that the registration stage alone responds to the flag that plans a job for a device."""
+        assert resolve_stage_workers(job_name=job_name, gpu_registration=True) == expected_workers
+
+    def test_explicit_request_still_overrides_the_device_default(self) -> None:
+        """Verifies that the sentinel contract holds unchanged while the registration is planned for a device."""
+        resolved = resolve_stage_workers(
+            job_name=SingleRecordingJobNames.REGISTER, requested_workers=9, gpu_registration=True
+        )
+
+        assert resolved == 9
+
+    def test_unknown_stage_is_rejected_before_the_device_default_applies(self) -> None:
+        """Verifies that a name the stage map does not hold raises rather than reaching the device default."""
+        expected_message = (
+            "Unable to resolve the worker count for the 'recording_denoise' processing stage. The input job name "
+            "does not name a pipeline stage. Use one of the valid stage names: "
+            f"{[stage.value for stage in _STAGE_WORKER_DEFAULTS]}."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
+            resolve_stage_workers(job_name="recording_denoise", gpu_registration=True)  # type: ignore[arg-type]
+
+
 class TestExplicitRequests:
     """Tests the worker counts a caller asks for explicitly."""
 
@@ -118,7 +164,12 @@ class TestRejectedRequests:
 
     def test_unknown_stage_is_rejected(self) -> None:
         """Verifies that a name that is not a pipeline stage raises rather than returning a count."""
-        with pytest.raises(ValueError, match=r"does not name a\s+pipeline\s+stage"):
+        expected_message = (
+            "Unable to resolve the worker count for the 'recording_denoise' processing stage. The input job name "
+            "does not name a pipeline stage. Use one of the valid stage names: "
+            f"{[stage.value for stage in _STAGE_WORKER_DEFAULTS]}."
+        )
+        with pytest.raises(ValueError, match=error_format(expected_message)):
             resolve_stage_workers(job_name="recording_denoise")  # type: ignore[arg-type]
 
     @pytest.mark.parametrize("requested_workers", [0, -2, -3, -100])
@@ -278,10 +329,12 @@ class TestDeviceResourceClass:
         assert _resolve_registration_gpu_resources().maximum_workers_per_job is None
         assert _resolve_registration_gpu_resources().concurrency_reservation is None
 
-    @pytest.mark.parametrize(("gpu_backend", "expected_name"), [(True, "registration_gpu"), (False, "registration")])
-    def test_backend_selects_the_registration_class(self, gpu_backend: bool, expected_name: str) -> None:
-        """Verifies that the backend a configuration names selects the class its registration jobs run under."""
-        assert resolve_registration_resource_class(gpu_backend=gpu_backend).name == expected_name
+    @pytest.mark.parametrize(
+        ("gpu_registration", "expected_name"), [(True, "registration_gpu"), (False, "registration")]
+    )
+    def test_device_plan_selects_the_registration_class(self, gpu_registration: bool, expected_name: str) -> None:
+        """Verifies that planning the registration for a device selects the class its jobs run under."""
+        assert resolve_registration_resource_class(gpu_registration=gpu_registration).name == expected_name
 
     def test_only_the_device_class_holds_a_device(self) -> None:
         """Verifies that the device predicate separates the device-backed class from every host-only class."""
@@ -437,8 +490,8 @@ class TestDispatchWorkers:
     """Tests the width one job takes when the dispatcher submits it against the capacity the host holds free."""
 
     @pytest.mark.parametrize("resource_class", [_BINARIZATION_RESOURCES, _COMBINATION_RESOURCES])
-    def test_class_without_a_ceiling_keeps_its_measured_width(self, resource_class: ResourceClass) -> None:
-        """Verifies that a class the host cores cannot widen holds its measured allocation however much sits free."""
+    def test_class_without_a_ceiling_keeps_its_default_width(self, resource_class: ResourceClass) -> None:
+        """Verifies that a class carrying no ceiling holds its default allocation however much of the host sits free."""
         resolved = resolve_dispatch_workers(
             resource_class=resource_class, free_cores=126, pending_jobs=1, running_jobs=0, concurrency_cap=8
         )
@@ -467,7 +520,7 @@ class TestDispatchWorkers:
         assert resolved == REGISTRATION_MAXIMUM_WORKERS
 
     def test_discovery_queue_resolves_to_its_own_narrower_ceiling(self) -> None:
-        """Verifies that each class stops at the ceiling its own measurement reports rather than a shared one."""
+        """Verifies that each class stops at the ceiling it declares rather than at one shared across classes."""
         resolved = resolve_dispatch_workers(
             resource_class=_DISCOVERY_RESOURCES, free_cores=126, pending_jobs=1, running_jobs=0, concurrency_cap=8
         )
@@ -513,7 +566,7 @@ class TestDispatchWorkers:
     def test_class_whose_ceiling_meets_its_default_never_widens(
         self, resource_class: ResourceClass, expected_workers: int
     ) -> None:
-        """Verifies that a class measured to plateau at its default holds that width on an idle host."""
+        """Verifies that a class whose ceiling meets its default holds that width on an idle host."""
         resolved = resolve_dispatch_workers(
             resource_class=resource_class, free_cores=126, pending_jobs=1, running_jobs=0, concurrency_cap=12
         )
@@ -581,7 +634,7 @@ class _VirtualMemory:
 class TestExtractionCeiling:
     """Tests the widening the multi-recording extraction class performs."""
 
-    def test_extraction_widens_toward_its_measured_ceiling(self) -> None:
+    def test_extraction_widens_toward_its_ceiling(self) -> None:
         """Verifies that an extraction job with the host to itself widens past the stage default."""
         resolved = resolve_dispatch_workers(
             resource_class=_EXTRACTION_RESOURCES,

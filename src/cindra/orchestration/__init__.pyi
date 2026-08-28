@@ -1,11 +1,10 @@
 from .gpu import (
     GPU_REMEDY as GPU_REMEDY,
+    ALL_DEVICES_REQUEST as ALL_DEVICES_REQUEST,
     GpuDevice as GpuDevice,
     GpuStatus as GpuStatus,
     GpuSummary as GpuSummary,
-    verify_gpu_runtime as verify_gpu_runtime,
     resolve_gpu_devices as resolve_gpu_devices,
-    resolve_device_budget as resolve_device_budget,
 )
 from .jobs import (
     MULTI_RECORDING_PHASES as MULTI_RECORDING_PHASES,
@@ -95,6 +94,7 @@ from .footprints import (
 )
 
 __all__ = [
+    "ALL_DEVICES_REQUEST",
     "BINARIZATION_WORKERS",
     "COMBINATION_WORKERS",
     "DISCOVERY_MAXIMUM_WORKERS",
@@ -145,7 +145,6 @@ __all__ = [
     "parse_plane_specifier",
     "prime_dataset",
     "prime_recording",
-    "resolve_device_budget",
     "resolve_downstream_phases",
     "resolve_gpu_devices",
     "resolve_maximum_roi_count",
@@ -169,5 +168,4 @@ __all__ = [
     "size_single_recording_job",
     "start_execution_session",
     "validate_job_prerequisites",
-    "verify_gpu_runtime",
 ]

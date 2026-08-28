@@ -39,7 +39,6 @@ from ..detection import compute_registration_blocks as compute_registration_bloc
 from ..dataclasses import (
     IOData as IOData,
     RuntimeContext as RuntimeContext,
-    RegistrationBackend as RegistrationBackend,
 )
 from .bidiphase_correction import (
     compute_bidirectional_phase_offset as compute_bidirectional_phase_offset,

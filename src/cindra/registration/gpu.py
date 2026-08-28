@@ -143,12 +143,13 @@ class GpuRegistrationBackend:
 
     The reference data reaches the device once, while the backend is constructed, and stays there for the lifetime of
     the instance. Every entry point accepts host arrays and returns host arrays, so a batch crosses the bus exactly
-    once on the way in and once on the way out. The device algorithms reproduce the arithmetic of the CPU backend, so
-    both backends resolve the same rigid pixel offsets and the same quantized nonrigid offsets from the same frames.
+    once on the way in and once on the way out. The device algorithms reproduce the arithmetic of the host
+    implementation, so the two resolve the same rigid pixel offsets and the same quantized nonrigid offsets from the
+    same frames.
 
     Notes:
         The frames the nonrigid warp writes agree to single-precision rounding rather than exactly. The host bilinear
-        kernel subtracts an integer neighbour index from a float32 coordinate, which Numba promotes to double precision,
+        kernel subtracts an integer neighbor index from a float32 coordinate, which Numba promotes to double precision,
         so the host accumulates its four-term weighted sum in double precision while the device accumulates in single
         precision. A sample the two backends disagree on sits one storage unit from the value the host writes, and never
         further. The rigid path carries no interpolation, so its frames match the host exactly.
@@ -323,77 +324,6 @@ class GpuRegistrationBackend:
             yield result
             staged_frames = upcoming
             slot = next_slot
-
-    def register_batch(
-        self,
-        frames: NDArray[np.int16] | NDArray[np.float32],
-        normalization_minimum: float,
-        normalization_maximum: float,
-        bidirectional_phase_offset: int,
-        pre_smoothing_sigma: float,
-        spatial_highpass_window: int,
-        temporal_smoothing_sigma: float,
-        maximum_offset_fraction: float,
-        signal_to_noise_threshold: float,
-        maximum_block_offset: float,
-        *,
-        one_photon_enabled: bool,
-        nonrigid_enabled: bool,
-    ) -> BatchRegistrationResult:
-        """Registers the input batch of frames to the reference image using rigid and optionally nonrigid correlation.
-
-        Notes:
-            The registered frames alias a page-locked buffer the backend reuses, and the backend cycles through two
-            such buffers, so a batch stays readable until the second batch after it is produced. A caller that keeps
-            more than the current batch and the one before it copies the frames it means to keep.
-
-        Args:
-            frames: The batch of frames with shape (batch_size, height, width) sampled from the processed recording,
-                with a dtype of either int16 or float32.
-            normalization_minimum: The minimum intensity value for clipping frames before correlation.
-            normalization_maximum: The maximum intensity value for clipping frames before correlation.
-            bidirectional_phase_offset: The pixel offset to correct bidirectional scanning artifacts.
-            pre_smoothing_sigma: The sliding-window (box) smoothing size, in pixels, applied before high-pass
-                filtering. Cast to an integer, which must be a positive even number.
-            spatial_highpass_window: The window size for the spatial high-pass filter that removes low-frequency
-                background.
-            temporal_smoothing_sigma: The standard deviation for temporal Gaussian smoothing of correlation maps.
-                If 0, no smoothing is applied.
-            maximum_offset_fraction: The maximum allowed offset as a fraction of the minimum spatial dimension.
-                The search window is limited to min(height, width) * maximum_offset_fraction pixels.
-            signal_to_noise_threshold: The SNR threshold below which additional smoothing is applied to correlation
-                peaks. Higher values apply more smoothing. Typical values range from 1.0 to 1.5.
-            maximum_block_offset: The maximum allowed offset for nonrigid blocks in pixels.
-            one_photon_enabled: Determines whether to apply one-photon preprocessing, which includes spatial smoothing
-                followed by high-pass filtering.
-            nonrigid_enabled: Determines whether to apply nonrigid (piecewise) registration after rigid alignment.
-
-        Returns:
-            The registered frames, in the dtype of the input batch, together with the per-frame rigid offsets and
-            phase correlation peaks. The nonrigid offsets and correlations are None when nonrigid registration is
-            disabled. A result carrying int16 frames also carries the per-pixel sum the batch contributes to the mean
-            image, measured before the frames were clipped and narrowed.
-
-        Raises:
-            ValueError: If the batch carries a dtype other than int16 or float32, or if nonrigid registration is
-                enabled and the backend holds no block reference data.
-        """
-        return next(
-            self.register_batches(
-                batches=(frames,),
-                normalization_minimum=normalization_minimum,
-                normalization_maximum=normalization_maximum,
-                bidirectional_phase_offset=bidirectional_phase_offset,
-                pre_smoothing_sigma=pre_smoothing_sigma,
-                spatial_highpass_window=spatial_highpass_window,
-                temporal_smoothing_sigma=temporal_smoothing_sigma,
-                maximum_offset_fraction=maximum_offset_fraction,
-                signal_to_noise_threshold=signal_to_noise_threshold,
-                maximum_block_offset=maximum_block_offset,
-                one_photon_enabled=one_photon_enabled,
-                nonrigid_enabled=nonrigid_enabled,
-            )
-        )
 
     def apply_precomputed_offsets(
         self,
@@ -826,7 +756,7 @@ class GpuRegistrationBackend:
         correlation_window = correlation_window.transpose(1, 0, 2, 3).reshape(block_count, -1)
 
         # Applies progressive smoothing based on SNR. The third level squares the kernel before it reaches the
-        # correlation surface, which keeps the product small while matching the association the CPU backend uses.
+        # correlation surface, which keeps the product small while matching the association the host kernels use.
         smoothing_kernel = nonrigid_data.smoothing_kernel
         smoothing_levels = [
             correlation_window,
@@ -1013,7 +943,7 @@ class GpuRegistrationBackend:
 
         Notes:
             Every transform is a real FFT, and the inverse names the output size explicitly. A real FFT stores an
-            odd-width axis and its even-width neighbour in the same number of frequency bins. An inverse that infers
+            odd-width axis and its even-width neighbor in the same number of frequency bins. An inverse that infers
             its size from the spectrum therefore returns an even width, silently dropping the last column of an
             odd-width frame.
 
@@ -1203,7 +1133,7 @@ class GpuRegistrationBackend:
         """Samples every source image of a batch at the requested coordinates using bilinear interpolation.
 
         Notes:
-            The coordinate is truncated toward zero and its fractional part is taken before the four neighbour indices
+            The coordinate is truncated toward zero and its fractional part is taken before the four neighbor indices
             are clamped into range. A coordinate above the last row or column therefore resolves to the edge pixel,
             while a coordinate below zero keeps a negative fraction and is linearly extrapolated from the first two edge
             pixels. Neither the map_coordinates routine nor a normalized grid sampler reproduces that extrapolation.
@@ -1310,8 +1240,7 @@ def _require_gpu_runtime() -> None:
 
     message = (
         f"Unable to initialize the GPU registration backend. The CuPy distribution is not installed, so no CUDA "
-        f"device is reachable. {_GPU_REMEDY} Set 'registration.backend' to 'cpu' to run the stage on the CPU backend "
-        f"instead."
+        f"device is reachable. {_GPU_REMEDY} Omit the device argument to run the stage on the host CPU instead."
     )
     console.error(message=message, error=RuntimeError)
 
@@ -1322,7 +1251,7 @@ def _verify_tf32_disabled() -> None:
     Notes:
         The nonrigid subpixel stage multiplies a (block_count * frame_count, 49) correlation matrix by a
         (49, 3721) RBF upsampling matrix and reads the result with an argmax over a 61 by 61 surface. TF32 carries a
-        10-bit mantissa, which perturbs neighbouring samples of that surface by more than the 0.1 pixel spacing
+        10-bit mantissa, which perturbs neighboring samples of that surface by more than the 0.1 pixel spacing
         between them and therefore moves the reported peak by a whole subpixel quantum. CuPy switches the cuBLAS math
         mode away from its default only when the environment enables TF32, so the mode the handle reports answers the
         question directly.

@@ -203,8 +203,8 @@ def register_recording_plane(
         plane_index: The index of the imaging plane to register.
         workers: The number of parallel workers allocated to this registration job. Must be a positive integer, which
             the caller resolves before invoking this function.
-        device: The zero-based index of the CUDA device this job registers the plane on while the configuration names
-            the GPU backend. Use None to select the first device the host exposes.
+        device: The zero-based index of the CUDA device this job registers the plane on. Use None to register the
+            plane on the host CPU.
 
     Raises:
         ValueError: If output_path is not configured, or if the plane contains fewer frames than the processing

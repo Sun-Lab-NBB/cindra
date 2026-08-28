@@ -25,10 +25,6 @@ from ..layout import (
     SINGLE_RECORDING_TRACKER_FILENAME as SINGLE_RECORDING_TRACKER_FILENAME,
     resolve_plane_specifier as resolve_plane_specifier,
 )
-from ..dataclasses import (
-    RegistrationBackend as RegistrationBackend,
-    SingleRecordingConfiguration as SingleRecordingConfiguration,
-)
 
 def run_single_recording_pipeline(
     configuration_path: Path,
@@ -54,4 +50,4 @@ def run_multi_recording_pipeline(
     discovery_workers: int | None = None,
     extraction_workers: int | None = None,
 ) -> None: ...
-def _verify_registration_device(configuration: SingleRecordingConfiguration, job_names: list[str]) -> None: ...
+def _verify_registration_device(device: int | None, job_names: list[str]) -> None: ...
