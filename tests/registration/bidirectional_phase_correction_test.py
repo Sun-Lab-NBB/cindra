@@ -1,11 +1,11 @@
-"""Contains tests for the bidiphase_correction module."""
+"""Contains tests for the bidirectional_phase_correction module."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from cindra.registration.bidiphase_correction import (
+from cindra.registration.bidirectional_phase_correction import (
     compute_bidirectional_phase_offset,
     apply_bidirectional_phase_correction,
 )

@@ -118,13 +118,13 @@ class TestComputeDistanceKernel:
         """Verifies the corner distance matches the expected Euclidean distance."""
         kernel = _compute_distance_kernel(radius=3)
         expected = np.sqrt(3**2 + 3**2)
-        np.testing.assert_allclose(kernel[0, 0], expected, atol=1e-5)
+        np.testing.assert_allclose(actual=kernel[0, 0], desired=expected, atol=1e-5)
 
     def test_symmetry(self) -> None:
         """Verifies that the distance kernel is symmetric."""
         kernel = _compute_distance_kernel(radius=5)
-        np.testing.assert_array_equal(kernel, kernel[::-1, :])
-        np.testing.assert_array_equal(kernel, kernel[:, ::-1])
+        np.testing.assert_array_equal(actual=kernel, desired=kernel[::-1, :])
+        np.testing.assert_array_equal(actual=kernel, desired=kernel[:, ::-1])
 
 
 class TestROI:
@@ -163,10 +163,9 @@ class TestROI:
         """Verifies that a compact circular ROI has a compactness near 1.0."""
         roi_statistics = _make_circular_roi(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
         roi = _ROI(data=roi_statistics, diameter=10)
-        # compactness is the ROI's mean pixel-to-center distance over the mean radius a uniformly packed pixel set
-        # of the same count would occupy, floored at 1.0. A near-perfect disk therefore sits at 1.0. An elongated or
-        # fragmented shape
-        # would exceed this tight band.
+        # compactness is the ROI's mean pixel-to-center distance over the mean radius a uniformly packed pixel set of
+        # the same count would occupy, floored at 1.0. A near-perfect disk therefore sits at 1.0. An elongated or
+        # fragmented shape would exceed this tight band.
         assert roi.compactness == pytest.approx(1.0, abs=0.3)
 
     def test_mean_radius_positive(self) -> None:
@@ -328,12 +327,12 @@ class TestEllipseData:
         """Verifies that the effective radius is scaled by the mean of y_scale and x_scale."""
         ellipse = TestEllipseData._make_ellipse(radii=(5.0, 3.0))
         expected = 5.0 * np.mean([10, 10])
-        np.testing.assert_allclose(ellipse.radius, expected, atol=1e-4)
+        np.testing.assert_allclose(actual=ellipse.radius, desired=expected, atol=1e-4)
 
     def test_aspect_ratio_circular(self) -> None:
         """Verifies that equal radii produce an aspect ratio of ~1."""
         ellipse = TestEllipseData._make_ellipse(radii=(5.0, 5.0))
-        np.testing.assert_allclose(ellipse.aspect_ratio, 1.0, atol=0.01)
+        np.testing.assert_allclose(actual=ellipse.aspect_ratio, desired=1.0, atol=0.01)
 
     def test_aspect_ratio_bounded(self) -> None:
         """Verifies that the aspect ratio is bounded between 0 and 2."""
@@ -421,7 +420,7 @@ class TestComputeRoiStatistics:
         assert roi.aspect_ratio > 0
 
     def test_non_diagonal_covariance_eigenvectors(self) -> None:
-        """Verifies that an elongated ROI triggers the non-diagonal covariance eigenvector branch."""
+        """Verifies that an elongated ROI's off-diagonal covariance drives the fitted aspect ratio away from 1.0."""
         # Creates an elongated diagonal stripe of pixels with significant off-diagonal covariance.
         y_pixels = np.arange(20, dtype=np.int32)
         x_pixels = np.arange(20, dtype=np.int32)

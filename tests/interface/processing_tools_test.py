@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-import time
 from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
 from tifffile import imwrite
+from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_data_structures import ProcessingTracker
 
 from cindra.layout import (
@@ -67,8 +67,9 @@ if TYPE_CHECKING:
     from pathlib import Path
     from collections.abc import Iterator
 
-_SETTLE_SECONDS: float = 0.05
-"""The pause that places the timed session inside the sub-second window a rounded hour conversion collapses."""
+_SETTLE_MILLISECONDS: int = 50
+"""The millisecond pause that places the timed session inside the sub-second window a rounded hour conversion
+collapses."""
 
 _MINIMUM_THROUGHPUT: float = 1000.0
 """The rate a session measured in tens of milliseconds must exceed, expressed in jobs per hour."""
@@ -78,14 +79,6 @@ _SOURCE_FRAME_SHAPE: tuple[int, int, int] = (2, 16, 16)
 
 _ABSENT_DEVICE_INDEX: int = 4096
 """The CUDA device index no host exposes, which the device mask rejection test asks a session to run on."""
-
-
-@pytest.fixture(autouse=True)
-def _isolated_execution_state() -> Iterator[None]:
-    """Clears the module-global execution state around every test, so no session leaks between them."""
-    set_execution_state(state=None)
-    yield
-    set_execution_state(state=None)
 
 
 class TestActiveExecutionTiming:
@@ -100,7 +93,7 @@ class TestActiveExecutionTiming:
             pass
 
         set_execution_state(state=_build_execution_state(tmp_path=tmp_path, tracker_path=tracker_path, job_id=job_id))
-        time.sleep(_SETTLE_SECONDS)
+        PrecisionTimer(precision=TimerPrecisions.MILLISECOND).delay(delay=_SETTLE_MILLISECONDS, allow_sleep=True)
 
         result = get_active_execution_timing_tool()
 
@@ -268,7 +261,7 @@ class TestCheckGpuRuntime:
             devices=(GpuDevice(index=0, name="test device", total_memory_mb=1024, compute_capability="8.6"),),
             detail="",
         )
-        monkeypatch.setattr(processing_tools, "resolve_gpu_devices", lambda: summary)
+        monkeypatch.setattr(target=processing_tools, name="resolve_gpu_devices", value=lambda: summary)
 
         result = check_gpu_runtime_tool()
 
@@ -286,7 +279,7 @@ class TestCheckGpuRuntime:
         summary = GpuSummary(
             status=GpuStatus.RUNTIME_MISSING, devices=(), detail="the CuPy distribution is not installed"
         )
-        monkeypatch.setattr(processing_tools, "resolve_gpu_devices", lambda: summary)
+        monkeypatch.setattr(target=processing_tools, name="resolve_gpu_devices", value=lambda: summary)
 
         result = check_gpu_runtime_tool()
 
@@ -583,8 +576,8 @@ class TestCleanProcessingOutput:
                 removal_order.append(path.name)
             delete_directory(path=path, deleted=deleted, errors=errors)
 
-        monkeypatch.setattr(processing_tools, "_delete_file", _spy_file)
-        monkeypatch.setattr(processing_tools, "_delete_directory", _spy_directory)
+        monkeypatch.setattr(target=processing_tools, name="_delete_file", value=_spy_file)
+        monkeypatch.setattr(target=processing_tools, name="_delete_directory", value=_spy_directory)
 
         result = clean_processing_output_tool(
             output_root=str(tmp_path),
@@ -597,6 +590,14 @@ class TestCleanProcessingOutput:
         assert result["success"] is True
         assert marker_index < removal_order.index(str(MULTI_RECORDING_ARRAYS_DIRECTORY_NAME))
         assert marker_index < removal_order.index(str(DEFORMED_MASKS_FILENAME))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_execution_state() -> Iterator[None]:
+    """Clears the module-global execution state around every test, so no session leaks between them."""
+    set_execution_state(state=None)
+    yield
+    set_execution_state(state=None)
 
 
 def _initialize_binarization_job(tracker_path: Path) -> tuple[ProcessingTracker, str]:
@@ -702,8 +703,8 @@ def _prepare_sizable_dataset(tmp_path: Path) -> Path:
             frame_count=np.array([600], dtype=np.uint32),
         )
         np.save(
-            resolve_array_path(root_path=output_path, array=RecordingArrays.CELL_FLUORESCENCE),
-            np.zeros((40, 600), dtype=np.float32),
+            file=resolve_array_path(root_path=output_path, array=RecordingArrays.CELL_FLUORESCENCE),
+            arr=np.zeros((40, 600), dtype=np.float32),
         )
         recording_roots.append(output_root)
 

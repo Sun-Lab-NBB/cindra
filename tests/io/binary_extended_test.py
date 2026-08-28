@@ -30,14 +30,14 @@ class TestConvertNumpyFileToBinary:
         source_path = tmp_path / "source.npy"
         destination_path = tmp_path / "output.bin"
         data = np.arange(100, dtype=np.float64)
-        np.save(source_path, data)
+        np.save(file=source_path, arr=data)
 
         BinaryFile.convert_numpy_file_to_binary(source_file_name=source_path, destination_file_name=destination_path)
 
         assert destination_path.exists()
         # The binary contents match the array np.load returns, because the conversion writes that array with tofile.
         loaded = np.fromfile(destination_path, dtype=np.float64)
-        np.testing.assert_array_equal(loaded, data)
+        np.testing.assert_array_equal(actual=loaded, desired=data)
 
     def test_nonexistent_source_raises_error(self, tmp_path: Path) -> None:
         """Verifies that a non-existent source file raises a FileNotFoundError."""
@@ -54,7 +54,7 @@ class TestConvertNumpyFileToBinary:
         source_path = tmp_path / "source.npy"
         destination_path = tmp_path / "output"
         data = np.arange(50, dtype=np.float32)
-        np.save(source_path, data)
+        np.save(file=source_path, arr=data)
 
         BinaryFile.convert_numpy_file_to_binary(source_file_name=source_path, destination_file_name=destination_path)
 
@@ -82,7 +82,7 @@ class TestWriteTiff:
             tiff_data = tiff.asarray()
 
         assert tiff_data.shape == (frame_count, _FRAME_HEIGHT, _FRAME_WIDTH)
-        np.testing.assert_array_equal(tiff_data, data)
+        np.testing.assert_array_equal(actual=tiff_data, desired=data)
 
     def test_writes_frame_range_subset(self, tmp_path: Path) -> None:
         """Verifies that writing a subset of frames produces a TIFF with the correct frame count."""
@@ -101,7 +101,7 @@ class TestWriteTiff:
             tiff_data = tiff.asarray()
 
         assert tiff_data.shape[0] == 3
-        np.testing.assert_array_equal(tiff_data, data[2:5])
+        np.testing.assert_array_equal(actual=tiff_data, desired=data[2:5])
 
     def test_appends_tiff_suffix_if_missing(self, tmp_path: Path) -> None:
         """Verifies that the .tiff suffix is appended when the output path lacks it."""
@@ -209,8 +209,8 @@ class TestBinaryFileCombined:
         combined.close()
 
         assert result.shape == (frame_count, combined_height, combined_width)
-        np.testing.assert_array_equal(result[:, :plane_height, :], 10)
-        np.testing.assert_array_equal(result[:, plane_height:, :], 20)
+        np.testing.assert_array_equal(actual=result[:, :plane_height, :], desired=10)
+        np.testing.assert_array_equal(actual=result[:, plane_height:, :], desired=20)
 
     def test_reads_combined_frames_from_horizontally_tiled_planes(self, tmp_path: Path) -> None:
         """Verifies that a plane offset along x is pasted into its own column range of the combined frame."""
@@ -240,8 +240,8 @@ class TestBinaryFileCombined:
         combined.close()
 
         assert result.shape == (frame_count, plane_height, plane_width * 2)
-        np.testing.assert_array_equal(result[:, :, :plane_width], 10)
-        np.testing.assert_array_equal(result[:, :, plane_width:], 20)
+        np.testing.assert_array_equal(actual=result[:, :, :plane_width], desired=10)
+        np.testing.assert_array_equal(actual=result[:, :, plane_width:], desired=20)
 
     def test_context_manager_opens_and_closes(self, tmp_path: Path) -> None:
         """Verifies that the context manager protocol correctly opens and closes file handles."""
@@ -309,8 +309,8 @@ class TestBinaryFileCombined:
         ) as combined:
             frame_number, heights, widths = combined.shape
             assert frame_number == frame_count
-            np.testing.assert_array_equal(heights, plane_heights)
-            np.testing.assert_array_equal(widths, plane_widths)
+            np.testing.assert_array_equal(actual=heights, desired=plane_heights)
+            np.testing.assert_array_equal(actual=widths, desired=plane_widths)
 
     def test_mismatched_frame_counts_resolve_to_the_shortest_plane(self, tmp_path: Path) -> None:
         """Verifies that widely differing plane frame counts resolve to the shortest plane rather than raising."""

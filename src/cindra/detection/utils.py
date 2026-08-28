@@ -1,5 +1,5 @@
 """Provides utility functions for filtering and downsampling data arrays during ROI detection, together with the
-meshgrid, spatial taper mask, and registration block helpers shared with the registration pipeline.
+spatial taper mask and registration block helpers shared with the registration pipeline.
 """
 
 from __future__ import annotations

@@ -473,32 +473,38 @@ class DetectionData:
     2*major/(major+minor), bounded between 0 and 2 where 1 indicates a circular shape."""
 
     mean_image: NDArray[np.float32] | None = None
-    """The temporal mean of all registered frames, providing a static view of the imaging field."""
+    """The mean of the temporally binned movie, which excludes the frames registration marked bad, zero outside the
+    valid registration crop."""
 
     enhanced_mean_image: NDArray[np.float32] | None = None
     """The high-pass filtered mean image that enhances ROI boundaries for improved detection."""
 
     maximum_projection: NDArray[np.float32] | None = None
-    """The maximum intensity projection across all frames, highlighting active structures."""
+    """The maximum of every pixel across the temporally binned and high-pass filtered movie, zero outside the valid
+    registration crop."""
 
     correlation_map: NDArray[np.float32] | None = None
-    """The pixel-wise correlation map used to identify regions with correlated activity for ROI detection."""
+    """The maximum activity of every pixel across the detection scale pyramid, zero outside the valid registration crop,
+    retained for visualization and detection-quality assessment."""
 
     roi_diameter_channel_2: int = 0
     """The estimated ROI diameter for the second imaging channel in pixels. Computed independently because channel 2 may
     label a different ROI population with different soma sizes."""
 
     mean_image_channel_2: NDArray[np.float32] | None = None
-    """The temporal mean of all registered frames for the second imaging channel."""
+    """The mean of the temporally binned movie for the second imaging channel, which excludes the frames registration
+    marked bad, zero outside the valid registration crop."""
 
     enhanced_mean_image_channel_2: NDArray[np.float32] | None = None
     """The high-pass filtered mean image for the second imaging channel."""
 
     maximum_projection_channel_2: NDArray[np.float32] | None = None
-    """The maximum intensity projection across all frames for the second imaging channel."""
+    """The maximum of every pixel across the temporally binned and high-pass filtered movie for the second imaging
+    channel, zero outside the valid registration crop."""
 
     correlation_map_channel_2: NDArray[np.float32] | None = None
-    """The pixel-wise correlation map for the second imaging channel."""
+    """The maximum activity of every pixel across the detection scale pyramid for the second imaging channel, zero
+    outside the valid registration crop."""
 
     def prepare_for_saving(self) -> None:
         """Sets all array fields to None for YAML serialization."""
@@ -1544,17 +1550,17 @@ class SingleRecordingRuntimeData(YamlConfig):
         self.extraction.memory_map_arrays(output_path=self.output_path)
 
     def save(self, output_path: Path) -> None:
-        """Saves the runtime data to a YAML file and arrays to .npy files.
+        """Saves the runtime data to a YAML file and arrays to .npz/.npy files.
 
-        This method saves all NumPy arrays as separate .npy files in the output directory, then creates a shallow copy
-        of the instance and of each child dataclass, with arrays set to None, before writing the YAML file.
+        This method saves all NumPy arrays as separate .npz/.npy files in the output directory, then creates a shallow
+        copy of the instance and of each child dataclass, with arrays set to None, before writing the YAML file.
         ``to_yaml()`` performs the Path-to-string conversion.
 
         Notes:
             This storage form avoids pickle serialization in favor of safer YAML and NumPy serialization.
 
         Args:
-            output_path: The directory in which to save the runtime_data.yaml file and .npy files.
+            output_path: The directory in which to save the runtime_data.yaml file and .npz/.npy files.
         """
         ensure_directory_exists(path=output_path, is_file=False)
         self.output_path = output_path
@@ -1770,13 +1776,13 @@ class CombinedData:
             "registered_binary_paths_channel_2": None,
         }
 
-        # The frame counts are absent in metadata files saved before these fields were added, where they load as zero
-        # and an empty array. A consumer therefore reads a zero frame_count as "this metadata does not record it".
+        # Metadata files written by earlier cindra releases carry no frame counts, so they load as zero and an empty
+        # array. A consumer therefore reads a zero frame_count as "this metadata does not record it".
         if "frame_count" in metadata:
             kwargs["frame_count"] = int(metadata["frame_count"][0])
             kwargs["plane_frame_counts"] = metadata["plane_frame_counts"].astype(np.uint32)
 
-        # Per-plane geometry and binary paths may be absent in metadata files saved before these fields were added.
+        # Metadata files written by earlier cindra releases may carry no per-plane geometry or binary paths.
         if "plane_heights" in metadata:
             kwargs["plane_heights"] = metadata["plane_heights"].astype(np.uint16)
             kwargs["plane_widths"] = metadata["plane_widths"].astype(np.uint16)

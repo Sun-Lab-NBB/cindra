@@ -33,7 +33,7 @@ def discover_multi_recording_cells(configuration: MultiRecordingConfiguration, *
     # Resolves or reloads MultiRecordingRuntimeContext instances for all recordings. The outer pipeline entry
     # (run_multi_recording_pipeline) or the prepare_multi_recording_batch_tool already wrote the shared configuration
     # and every recording's multi_recording_runtime_data.yaml, so this call is load-only to avoid racing against
-    # peer worker threads on the same YAML files.
+    # peer worker processes on the same YAML files.
     contexts = resolve_multi_recording_contexts(configuration=configuration, persist=False)
 
     # Confines the linear-algebra backends to the allocated worker budget for the whole stage. The batch engine pins
@@ -95,7 +95,7 @@ def extract_multi_recording_fluorescence(
     # CombinedData and runtime arrays for every other recording in the dataset. The outer pipeline entry
     # (run_multi_recording_pipeline) or the prepare_multi_recording_batch_tool already wrote the shared configuration
     # and the target recording's multi_recording_runtime_data.yaml. This call is therefore load-only, so that peer
-    # worker threads do not race on the same YAML files, because every EXTRACT worker would otherwise re-save the
+    # worker processes do not race on the same YAML files, because every EXTRACT worker would otherwise re-save the
     # shared configuration.
     contexts = resolve_multi_recording_contexts(
         configuration=configuration,
@@ -112,7 +112,6 @@ def extract_multi_recording_fluorescence(
     if target_context.runtime.output_path is not None:  # pragma: no branch
         target_context.runtime.extraction.memory_map_arrays(output_path=target_context.runtime.output_path)
 
-    # Validates that backward-transformed ROI statistics exist from the discovery phase.
     if target_context.runtime.extraction.roi_statistics is None:
         message = (
             f"Unable to extract multi-recording fluorescence for recording "

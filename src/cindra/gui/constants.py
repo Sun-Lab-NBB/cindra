@@ -13,7 +13,7 @@ class ROIColorMode(IntEnum):
     """Assigns each ROI a random hue rendered at full HSV saturation and value, independent of the active colormap."""
 
     SKEWNESS = 1
-    """Colors ROIs by the skewness of their baseline-subtracted fluorescence time series."""
+    """Colors ROIs by the skewness of their neuropil-corrected fluorescence time series."""
 
     COMPACTNESS = 2
     """Colors ROIs by the compactness (circularity) of their spatial footprint."""

@@ -51,7 +51,7 @@ def apply_phase_correlation(
     # division, and the kernel multiplication into one Numba pass over the leading axis keeps the normalization free of
     # any full spectra temporary. The spectrum carries a per-block kernel axis whenever the caller correlates extracted
     # blocks, so the dispatch below selects the kernel broadcasting the reference over the axes the spectrum holds.
-    if frames_fft.ndim == 4:  # noqa: PLR2004
+    if frames_fft.ndim == 4:  # noqa: PLR2004 - the extracted-block spectrum rank, so a constant adds indirection.
         _normalize_block_spectra(spectra=frames_fft, kernel=kernel)
     else:
         _normalize_frame_spectra(spectra=frames_fft, kernel=kernel)
@@ -196,7 +196,7 @@ def apply_spatial_smoothing(data: NDArray[np.float32], window: int) -> NDArray[n
 
     # Promotes 2D input to 3D for uniform processing. The flag records the promotion so that the output drops only an
     # axis this function added, leaving a genuine single-frame stack three-dimensional.
-    promoted = data.ndim == 2  # noqa: PLR2004
+    promoted = data.ndim == 2  # noqa: PLR2004 - the single-image input rank, so a constant adds indirection.
     if promoted:
         data = data[np.newaxis, :, :]
 
@@ -238,7 +238,7 @@ def apply_spatial_high_pass(data: NDArray[np.float32], window: int) -> NDArray[n
     """
     # Promotes 2D input to 3D for uniform processing. The flag records the promotion so that the output drops only an
     # axis this function added, leaving a genuine single-frame stack three-dimensional.
-    promoted = data.ndim == 2  # noqa: PLR2004
+    promoted = data.ndim == 2  # noqa: PLR2004 - the single-image input rank, so a constant adds indirection.
     if promoted:
         data = data[np.newaxis, :, :]
 

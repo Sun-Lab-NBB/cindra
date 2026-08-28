@@ -48,7 +48,7 @@ from cindra.orchestration.allocation import (
 
 
 class TestStageDefaults:
-    """Tests the measured worker default each pipeline stage resolves to."""
+    """Tests the measured worker default to which each pipeline stage resolves."""
 
     @pytest.mark.parametrize(
         ("job_name", "expected_workers"),
@@ -111,13 +111,13 @@ class TestDevicePlannedDefaults:
         assert resolved == 9
 
     def test_unknown_stage_is_rejected_before_the_device_default_applies(self) -> None:
-        """Verifies that a name the stage map does not hold raises rather than reaching the device default."""
+        """Verifies that a name the stage map does not hold raises before the device default applies."""
         expected_message = (
             "Unable to resolve the worker count for the 'recording_denoise' processing stage. The input job name "
             "does not name a pipeline stage. Use one of the valid stage names: "
             f"{[stage.value for stage in _STAGE_WORKER_DEFAULTS]}."
         )
-        with pytest.raises(ValueError, match=error_format(expected_message)):
+        with pytest.raises(ValueError, match=error_format(message=expected_message)):
             resolve_stage_workers(job_name="recording_denoise", gpu_registration=True)  # type: ignore[arg-type]
 
 
@@ -151,7 +151,7 @@ class TestCombinationStage:
     """Tests the allocation of the stage whose merge is serial."""
 
     def test_combination_stage_resolves_to_its_single_core(self) -> None:
-        """Verifies that the combination stage resolves rather than forcing the caller to special-case it."""
+        """Verifies that the combination stage resolves to its single core."""
         assert resolve_stage_workers(job_name=SingleRecordingJobNames.COMBINE) == COMBINATION_WORKERS
 
     def test_combination_stage_honors_an_explicit_count(self) -> None:
@@ -163,13 +163,13 @@ class TestRejectedRequests:
     """Tests the requests the resolver rejects."""
 
     def test_unknown_stage_is_rejected(self) -> None:
-        """Verifies that a name that is not a pipeline stage raises rather than returning a count."""
+        """Verifies that a name that is not a pipeline stage raises."""
         expected_message = (
             "Unable to resolve the worker count for the 'recording_denoise' processing stage. The input job name "
             "does not name a pipeline stage. Use one of the valid stage names: "
             f"{[stage.value for stage in _STAGE_WORKER_DEFAULTS]}."
         )
-        with pytest.raises(ValueError, match=error_format(expected_message)):
+        with pytest.raises(ValueError, match=error_format(message=expected_message)):
             resolve_stage_workers(job_name="recording_denoise")  # type: ignore[arg-type]
 
     @pytest.mark.parametrize("requested_workers", [0, -2, -3, -100])
@@ -308,7 +308,7 @@ class TestResourceClasses:
         assert set(RESOURCE_CLASS_BY_JOB_NAME) == set(SingleRecordingJobNames) | set(MultiRecordingJobNames)
 
     def test_no_class_declares_a_memory_footprint(self) -> None:
-        """Verifies that memory bounds admission per job rather than concurrency per class."""
+        """Verifies that no resource class declares a memory footprint, because memory bounds admission per job."""
         assert not any(
             hasattr(resource_class, "memory_gigabytes_per_job")
             for resource_class in RESOURCE_CLASS_BY_JOB_NAME.values()
@@ -333,7 +333,7 @@ class TestDeviceResourceClass:
         ("gpu_registration", "expected_name"), [(True, "registration_gpu"), (False, "registration")]
     )
     def test_device_plan_selects_the_registration_class(self, gpu_registration: bool, expected_name: str) -> None:
-        """Verifies that planning the registration for a device selects the class its jobs run under."""
+        """Verifies that planning the registration for a device selects the class under which its jobs run."""
         assert resolve_registration_resource_class(gpu_registration=gpu_registration).name == expected_name
 
     def test_only_the_device_class_holds_a_device(self) -> None:
@@ -362,7 +362,7 @@ class TestDeviceResourceClass:
         assert capacity == max(1, min(resolve_device_budget(), job_count))
 
     def test_absent_resource_still_resolves_one_dispatch_slot(self) -> None:
-        """Verifies that a class whose counted resource is absent dispatches one job rather than holding its queue."""
+        """Verifies that a class whose counted resource is absent still dispatches one job."""
         absent = ResourceClass(
             name="absent",
             workers_per_job=2,
@@ -520,7 +520,7 @@ class TestDispatchWorkers:
         assert resolved == REGISTRATION_MAXIMUM_WORKERS
 
     def test_discovery_queue_resolves_to_its_own_narrower_ceiling(self) -> None:
-        """Verifies that each class stops at the ceiling it declares rather than at one shared across classes."""
+        """Verifies that each class stops at the ceiling it declares."""
         resolved = resolve_dispatch_workers(
             resource_class=_DISCOVERY_RESOURCES, free_cores=126, pending_jobs=1, running_jobs=0, concurrency_cap=8
         )
@@ -543,7 +543,7 @@ class TestDispatchWorkers:
         assert widths == [REGISTRATION_WORKERS, 8, 16, REGISTRATION_MAXIMUM_WORKERS, REGISTRATION_MAXIMUM_WORKERS]
 
     def test_running_peers_bound_the_jobs_that_still_start_alongside_the_dispatched_one(self) -> None:
-        """Verifies that the share divides the free cores by the concurrency the class has left rather than its cap."""
+        """Verifies that the share divides the free cores by the concurrency the class has left."""
         idle_class = resolve_dispatch_workers(
             resource_class=_REGISTRATION_RESOURCES, free_cores=32, pending_jobs=8, running_jobs=0, concurrency_cap=8
         )
@@ -555,7 +555,7 @@ class TestDispatchWorkers:
         assert loaded_class == 16
 
     def test_saturated_class_still_resolves_a_usable_width(self) -> None:
-        """Verifies that a class already holding its whole cap divides the free cores by one job rather than by zero."""
+        """Verifies that a class already holding its whole cap divides the free cores by one job."""
         resolved = resolve_dispatch_workers(
             resource_class=_REGISTRATION_RESOURCES, free_cores=2, pending_jobs=4, running_jobs=8, concurrency_cap=8
         )
@@ -622,13 +622,6 @@ class TestSummarizeClassAllocation:
     def test_session_without_jobs_reports_no_classes(self) -> None:
         """Verifies that a session carrying no jobs publishes an empty report."""
         assert summarize_class_allocation(class_workers={}, class_capacities={}, class_job_counts={}) == {}
-
-
-class _VirtualMemory:
-    """Stands in for the psutil memory record, carrying only the available-byte counter the resolver reads."""
-
-    def __init__(self, available: int) -> None:
-        self.available = available
 
 
 class TestExtractionCeiling:
@@ -700,3 +693,14 @@ class TestCompetingClasses:
         )
 
         assert resolved == REGISTRATION_WORKERS
+
+
+class _VirtualMemory:
+    """Stands in for the psutil memory record, carrying only the available-byte counter the resolver reads.
+
+    Attributes:
+        available: The number of memory bytes the stand-in reports as available to the host.
+    """
+
+    def __init__(self, available: int) -> None:
+        self.available = available

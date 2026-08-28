@@ -21,7 +21,7 @@ from cindra.registration.register import (
     _register_alignment_channel,
     _register_secondary_channel,
 )
-from cindra.registration.bidiphase_correction import apply_bidirectional_phase_correction
+from cindra.registration.bidirectional_phase_correction import apply_bidirectional_phase_correction
 
 if TYPE_CHECKING:
     from pathlib import Path

@@ -79,8 +79,8 @@ class TestDetectPlaneRois:
         assert roi_statistics is not None
         _assert_centroids_match_planted_centers(roi_statistics=roi_statistics, centers=_BLOB_CENTERS)
 
-        # The mask geometry is what extraction integrates over, so each ROI carries a non-empty, in-frame pixel set
-        # whose three arrays agree in length and whose reported pixel count matches them.
+        # Extraction integrates over the mask geometry, so each ROI carries a non-empty, in-frame pixel set whose three
+        # arrays agree in length and whose reported pixel count matches them.
         for roi in roi_statistics:
             pixel_count = roi.mask.y_pixels.size
             assert roi.mask.x_pixels.size == pixel_count
@@ -118,7 +118,7 @@ class TestDetectPlaneRois:
         # Persists bad_frames to disk and leaves the in-memory field unset to force the memory-map branch.
         registration_directory = tmp_path / "output" / "cindra" / "plane_0" / "registration_data"
         registration_directory.mkdir(parents=True, exist_ok=True)
-        np.save(registration_directory / "bad_frames.npy", np.zeros(_FRAME_COUNT, dtype=np.bool_))
+        np.save(file=registration_directory / "bad_frames.npy", arr=np.zeros(_FRAME_COUNT, dtype=np.bool_))
         context.runtime.registration.bad_frames = None
 
         detect_plane_rois(context=context, workers=1)

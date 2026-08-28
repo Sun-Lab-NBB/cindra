@@ -46,7 +46,6 @@ def diffuse(data: NDArray[np.float32], sigma: float | list[float]) -> NDArray[np
     """
     sigma_list = [sigma] * data.ndim if isinstance(sigma, float) else list(sigma)
 
-    # Applies 1D diffusion filtering along each dimension.
     result = data
     for dimension in range(data.ndim):
         kernel = _create_diffusion_kernel(sigma=sigma_list[dimension])
@@ -73,7 +72,6 @@ def zoom(
     """
     height, width = data.shape
 
-    # Normalizes factor to per-dimension values.
     if isinstance(factor, (float, int)):
         factor_y, factor_x = float(factor), float(factor)
     else:
@@ -313,7 +311,6 @@ class Deformation:
 
         samples_x, samples_y = _make_samples_absolute(delta_x=self._fields[1], delta_y=self._fields[0])
 
-        # Computes inverse fields using forward projection (splatting).
         inverse_y = np.zeros(samples_x.shape, dtype=np.float32)
         _project(data=-self._fields[0], result=inverse_y, samples_x=samples_x, samples_y=samples_y)
 
@@ -457,7 +454,6 @@ def _make_samples_absolute(
     """
     height, width = delta_x.shape
 
-    # Creates index grids and adds deltas to get absolute positions.
     indices_x = np.arange(width, dtype=np.float32).reshape(1, width)
     indices_y = np.arange(height, dtype=np.float32).reshape(height, 1)
 
@@ -496,7 +492,6 @@ def _warp(  # pragma: no cover
             coefficients_x = np.empty((4,), dtype=np.float32)
             coefficients_y = np.empty((4,), dtype=np.float32)
 
-            # Decomposes sample coordinates into integer indices and fractional offsets.
             sample_x = samples_x[sample_index]
             pixel_x = math.floor(sample_x)
             fraction_x = sample_x - pixel_x
@@ -575,7 +570,6 @@ def _warp(  # pragma: no cover
     # Applies bilinear interpolation (order=1) over a 2x2 neighborhood with weights from the fractional position.
     elif order == _BILINEAR_INTERPOLATION_ORDER:
         for sample_index in numba.prange(sample_count):
-            # Decomposes sample coordinates into integer indices and fractional offsets.
             sample_x = samples_x[sample_index]
             pixel_x = math.floor(sample_x)
             fraction_x = sample_x - pixel_x
@@ -628,7 +622,6 @@ def _warp(  # pragma: no cover
             sample_y = samples_y[sample_index]
             pixel_y = math.floor(sample_y + 0.5)
 
-            # Returns pixel value if in bounds, otherwise zero.
             if 0 <= pixel_x < width and 0 <= pixel_y < height:
                 result[sample_index] = data[pixel_y, pixel_x]
             else:
@@ -695,7 +688,6 @@ def _project(  # pragma: no cover
                         bounds_max_x = target_x + _UNBOUNDED_SPLAT_EXTENT
                         continue
 
-                    # Updates bounds based on neighbor's target position.
                     neighbor_target_x = samples_x[source_y + neighbor_offset_y, source_x + neighbor_offset_x]
                     bounds_min_x = min(bounds_min_x, neighbor_target_x)
                     bounds_max_x = max(bounds_max_x, neighbor_target_x)
@@ -727,7 +719,6 @@ def _project(  # pragma: no cover
 
             source_value = data[source_y, source_x]
 
-            # Splats the source value to all destination pixels in the bounding box.
             for destination_y in range(destination_start_y, destination_end_y + 1):
                 for destination_x in range(destination_start_x, destination_end_x + 1):
                     # Computes tent kernel weight (separable in x and y).

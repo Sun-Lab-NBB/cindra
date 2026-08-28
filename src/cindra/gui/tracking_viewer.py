@@ -341,7 +341,6 @@ class TrackingViewer(QMainWindow):
         dataset_layout.addWidget(self._dataset_combo)
         layout.addWidget(dataset_group)
 
-        # Assembles the recording navigation group.
         recording_group = QGroupBox("Recording Navigation")
         recording_group.setStyleSheet(STYLE.group_box)
         recording_layout = QVBoxLayout(recording_group)
@@ -388,7 +387,6 @@ class TrackingViewer(QMainWindow):
 
         layout.addWidget(recording_group)
 
-        # Assembles the background image group.
         background_group = QGroupBox("Background Image")
         background_group.setStyleSheet(STYLE.group_box)
         background_layout = QVBoxLayout(background_group)
@@ -412,15 +410,15 @@ class TrackingViewer(QMainWindow):
 
         layout.addWidget(background_group)
 
-        # Assembles the coordinate space group.
         space_group = QGroupBox("Coordinate Space")
         space_group.setStyleSheet(STYLE.group_box)
         space_layout = QVBoxLayout(space_group)
 
         self._space_combo = QComboBox()
         self._space_combo.setToolTip(
-            "Select the coordinate space. 'Native' shows masks in the recording's original coordinates. "
-            "'Transformed' shows masks in the template coordinate space."
+            "Select the coordinate space of the background image. 'Native' shows the recording's own reference "
+            "images. 'Transformed' shows those images warped into the template coordinate space. The Mask Layer "
+            "selector chooses the coordinate space of the masks."
         )
         self._space_combo.addItem("Native", userData=CoordinateSpace.NATIVE)
         self._space_combo.addItem("Transformed", userData=CoordinateSpace.TRANSFORMED)
@@ -429,7 +427,6 @@ class TrackingViewer(QMainWindow):
 
         layout.addWidget(space_group)
 
-        # Assembles the mask layer group.
         mask_group = QGroupBox("Mask Layer")
         mask_group.setStyleSheet(STYLE.group_box)
         mask_layout = QVBoxLayout(mask_group)
@@ -472,7 +469,6 @@ class TrackingViewer(QMainWindow):
         self._channel_group.setVisible(False)
         layout.addWidget(self._channel_group)
 
-        # Assembles the ROI selection group.
         roi_group = QGroupBox("ROI Selection")
         roi_group.setStyleSheet(STYLE.group_box)
         roi_layout = QVBoxLayout(roi_group)
@@ -637,7 +633,7 @@ class TrackingViewer(QMainWindow):
             and len(self._cached_mask_y) > 0
         ):
             if self._selected_rois is not None and self._cached_mask_roi_indices is not None:
-                selected_mask = np.isin(self._cached_mask_roi_indices, list(self._selected_rois))
+                selected_mask = np.isin(element=self._cached_mask_roi_indices, test_elements=list(self._selected_rois))
                 mask_y = self._cached_mask_y[selected_mask]
                 mask_x = self._cached_mask_x[selected_mask]
                 mask_colors = self._cached_mask_colors[selected_mask]

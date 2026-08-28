@@ -434,8 +434,8 @@ class MultiRecordingTrackingData:
     def memory_map_arrays(self, output_path: Path) -> None:
         """Loads template mask arrays from .npz files into this instance.
 
-        This method is identical to load_arrays() because template masks are stored as .npz archives, which do not
-        support memory mapping. It exists for API consistency with sibling dataclasses.
+        Delegates to ``load_arrays()``, because template masks are stored as .npz archives, which do not support memory
+        mapping.
 
         Args:
             output_path: The directory containing the tracking data files.

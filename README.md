@@ -20,31 +20,8 @@ a similarly reimplemented multi-recording ROI tracking pipeline from the
 [OSM manuscript](https://www.nature.com/articles/s41586-024-08548-w). The library maintains the algorithmic core of
 these projects with extensive architecture, documentation, and implementation enhancements focused on improving memory
 efficiency and runtime speed. Cindra offers CLI, GUI, and MCP server interfaces alongside the Python API to streamline
-user interaction with the library.
-
-___
-
-## Authorship Attribution
-
-The single-recording pipeline algorithms reimplemented in this library originate from the
-[suite2p](https://github.com/MouseLand/suite2p) project. All original algorithm rights belong to the original authors
-and fall under the following copyright notice:
-**Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu.**
-
-For the original suite2p algorithm documentation, see the
-[original suite2p settings reference](https://suite2p.readthedocs.io/en/latest/settings.html).
-
-The multi-recording ROI tracking pipeline algorithms reimplemented in this library originate from the
-[OSM Manuscript](https://www.nature.com/articles/s41586-024-08548-w). All original algorithm rights belong to the
-original authors.
-
-The diffeomorphic registration algorithms reimplemented in this library originate from the
-[pirt](https://github.com/almarklein/pirt) library. Copyright 2010-2017 Almar Klein, University of Twente.
-
-All implementation details in this library, including the complete reimplementation of the above algorithms, the
-codebase architecture, documentation, CLI, GUI, and MCP interfaces, belong to the original authors and fall under the
-following copyright notice:
-**Copyright © 2026 Sun (NeuroAI) lab, Authored by Ivan Kondratyev and Natalie Yeung.**
+user interaction with the library. The [License](#license) section names the upstream projects that supplied these
+algorithms, along with the copyright notices that cover them.
 
 ___
 
@@ -266,8 +243,8 @@ root.
 
 #### Binary Imaging Data
 
-Registration writes corrected frames back to the same binary files created during binarization. There are no separate
-"registered" binary files. `channel_1_data.bin` is overwritten in place with motion-corrected data.
+Registration writes corrected frames back to the same binary files created during binarization. `channel_1_data.bin`
+is overwritten in place with motion-corrected data.
 
 Each stage that writes frames into a binary guards the write with a marker file beside it, which it removes once every
 frame is in place. Binarization writes `channel_1_data.bin.binarizing` and registration writes
@@ -292,19 +269,19 @@ frame for frame.
 
 Stored under `plane_<i>/registration_data/`:
 
-| File                                     | Format                       | Description                                              |
-|------------------------------------------|------------------------------|----------------------------------------------------------|
-| `reference_image.npy`                    | float32 (h, w)               | Alignment target computed from the most stable frames    |
-| `rigid_y_offsets.npy`                    | int32 (frames,)              | Per-frame vertical translation from phase correlation    |
-| `rigid_x_offsets.npy`                    | int32 (frames,)              | Per-frame horizontal translation from phase correlation  |
-| `rigid_correlations.npy`                 | float32 (frames,)            | Phase correlation quality per frame                      |
-| `bad_frames.npy`                         | bool (frames,)               | Flags frames with excessive motion                       |
-| `nonrigid_y_offsets.npy`                 | float32 (frames, num_blocks) | Per-block vertical offsets (when nonrigid enabled)       |
-| `nonrigid_x_offsets.npy`                 | float32 (frames, num_blocks) | Per-block horizontal offsets (when nonrigid enabled)     |
-| `nonrigid_correlations.npy`              | float32 (frames, num_blocks) | Per-block correlation quality (when nonrigid enabled)    |
-| `principal_component_projections.npy`    | float32 (samples, n_pcs)     | Projections of subsampled frames onto PCs (when enabled) |
-| `principal_component_extreme_images.npy` | float32 (2, n_pcs, h, w)     | Mean images of low/high projection frames per PC         |
-| `principal_component_shift_metrics.npy`  | float32 (n_pcs, 3)           | Registration quality metrics per PC                      |
+| File                                     | Format                               | Description                                                                          |
+|------------------------------------------|--------------------------------------|--------------------------------------------------------------------------------------|
+| `reference_image.npy`                    | float32 (h, w)                       | Alignment target computed from the most stable frames                                |
+| `rigid_y_offsets.npy`                    | int32 (frames,)                      | Per-frame vertical translation from phase correlation                                |
+| `rigid_x_offsets.npy`                    | int32 (frames,)                      | Per-frame horizontal translation from phase correlation                              |
+| `rigid_correlations.npy`                 | float32 (frames,)                    | Phase correlation quality per frame                                                  |
+| `bad_frames.npy`                         | bool (frames,)                       | Flags frames with excessive motion                                                   |
+| `nonrigid_y_offsets.npy`                 | float32 (frames, num_blocks)         | Per-block vertical offsets (when nonrigid enabled)                                   |
+| `nonrigid_x_offsets.npy`                 | float32 (frames, num_blocks)         | Per-block horizontal offsets (when nonrigid enabled)                                 |
+| `nonrigid_correlations.npy`              | float32 (frames, num_blocks)         | Per-block correlation quality (when nonrigid enabled)                                |
+| `principal_component_projections.npy`    | float32 (samples, n_pcs)             | Projections of subsampled frames onto PCs (when enabled)                             |
+| `principal_component_extreme_images.npy` | float32 (2, n_pcs, valid_h, valid_w) | Mean images of low/high projection frames per PC, border-cropped to the valid ranges |
+| `principal_component_shift_metrics.npy`  | float32 (n_pcs, 3)                   | Registration quality metrics per PC                                                  |
 
 #### Per-Plane Detection Data
 
@@ -933,8 +910,9 @@ Every tool names a filesystem path by what that path holds, and the same name me
 `raw_data_path` names one recording's imaging directory, which holds its TIFF files beside its `cindra_parameters.json`
 file, or any parent of that directory. An `output_root` is the parent of the `cindra/` folder a pipeline writes that
 recording's results under, and a `root_directory` is a tree searched for recordings. The plural `raw_data_paths` and
-`output_roots` name lists of the same two concepts, and a `configuration_path`, a `tracker_path`, or a `file_path` names
-one specific file.
+`output_roots` name lists of the same two concepts, and a `configuration_path`, a `tracker_path`, an `output_path`, or a
+`file_path` names one specific file. An `output_path` is the configuration file `generate_config_file_tool` writes, and
+the `file_path` that tool returns is the same path with its suffix normalized to `.yaml`.
 
 #### Data Processing Server
 
@@ -1110,6 +1088,26 @@ ___
 ## License
 
 This project is licensed under the GPL-3.0-or-later License: see the [LICENSE](LICENSE) file for details.
+
+The single-recording pipeline algorithms reimplemented in this library originate from the
+[suite2p](https://github.com/MouseLand/suite2p) project. All original algorithm rights belong to the original authors
+and fall under the following copyright notice:
+**Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu.**
+
+For the original suite2p algorithm documentation, see the
+[original suite2p settings reference](https://suite2p.readthedocs.io/en/latest/settings.html).
+
+The multi-recording ROI tracking pipeline algorithms reimplemented in this library originate from the
+[OSM Manuscript](https://www.nature.com/articles/s41586-024-08548-w). All original algorithm rights belong to the
+original authors.
+
+The diffeomorphic registration algorithms reimplemented in this library originate from the
+[pirt](https://github.com/almarklein/pirt) library. Copyright 2010-2017 Almar Klein, University of Twente.
+
+All implementation details in this library, including the complete reimplementation of the above algorithms, the
+codebase architecture, documentation, CLI, GUI, and MCP interfaces, belong to the original authors and fall under the
+following copyright notice:
+**Copyright © 2026 Sun (NeuroAI) lab, Authored by Ivan Kondratyev and Natalie Yeung.**
 
 ___
 

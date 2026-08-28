@@ -4,7 +4,6 @@ State fields report the lowercase enum value (e.g. `maximum_projection`), while 
 label that is not always the title-cased value (e.g. `maximum_projection` shows as "Maximum Projection", `rois_only`
 shows as "ROIs"). When telling the user which control to operate, read the exact label from the Dropdown label column of
 the matching table below. This applies to `background_view`, `roi_color_mode`, `mask_layer`, and `coordinate_space`.
-This reference is loaded on demand by `/visualization`.
 
 ---
 
@@ -12,9 +11,9 @@ This reference is loaded on demand by `/visualization`.
 
 Reported in `background_view` state field. Values correspond to the background image behind ROI overlays. The ROI viewer
 offers all six values and hides `corrected_structural` unless the recording wrote a corrected structural mean image,
-which only the structural channel 2 extraction path produces, so a recording whose second channel is also functional
-never has it. The tracking viewer offers `rois_only`, `mean_image`, `enhanced_mean_image`, `maximum_projection`, and
-`correlation_map`.
+which only the structural channel 2 extraction path produces. A recording whose second channel is also functional
+therefore never has it. The tracking viewer offers `rois_only`, `mean_image`, `enhanced_mean_image`,
+`maximum_projection`, and `correlation_map`.
 
 | Value                  | Dropdown label        | Description                                           |
 |------------------------|-----------------------|-------------------------------------------------------|
@@ -43,7 +42,7 @@ tracked recordings reuse the backward-transformed source masks and carry no clas
 | `aspect_ratio`               | Aspect Ratio         | Bounding ellipse aspect ratio                               |
 | `solidity`                   | Solidity             | Soma-to-convex-hull area ratio                              |
 | `colocalization_probability` | Colocalization       | Channel 2 colocalization probability                        |
-| `recording_count`            | Recording Count      | Number of recordings the ROI was tracked across             |
+| `recording_count`            | Recording Count      | Number of recordings across which the ROI was tracked       |
 | `cell_probability`           | Cell Probability     | Classifier cell-probability gradient                        |
 | `correlations`               | Activity Correlation | Pairwise activity correlation with selected ROI             |
 | `cell_classification`        | Classification       | Binary cell/non-cell label mapped to colormap endpoints     |

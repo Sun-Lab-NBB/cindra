@@ -241,13 +241,16 @@ remedy. The supported resolution is the LLVM OpenMP runtime (`libomp.dylib`) lin
 **Check this before dispatching, on every platform.** `check_threading_runtime_tool` reports the host's readiness
 directly. Call it and gate on its `ready` flag, then follow its `remedy` command when the host is not ready. It reports
 `required_layer` as `omp` on macOS and `tbb` elsewhere, so it diagnoses a missing TBB runtime on Linux and Windows the
-same way it diagnoses a missing `libomp.dylib` here.
+same way it diagnoses a missing `libomp.dylib` here. The TBB case carries a `pip install tbb4py` remedy.
 
 Skipping that check leaves a signature worth recognizing. Neither the OpenMP nor the TBB failure reaches an MCP tool
-response, so `execute_processing_jobs_tool` returns `started: true` and then every job fails with the runtime error
-recorded as its tracker error message. A batch where every job fails immediately, with no partial progress, is a
-missing threading runtime rather than a data problem. Resolve it here rather than routing to a processing or
-acquisition skill.
+response, so `execute_processing_jobs_tool` returns `started: true` and every job then fails. The two failures record
+different tracker messages. A missing TBB runtime raises at the job's first parallelized call, inside the tracker's job
+block, so the job records that runtime error text as its failure reason. The macOS OpenMP check runs ahead of that
+block, as the first statement of both pipeline entry points. Its refusal therefore never reaches the block, and each job
+records the generic `Unable to complete job. Worker terminated without reaching a terminal state.` instead. A batch
+where every job fails immediately, with no partial progress, is a missing threading runtime rather than a data problem.
+Resolve it here rather than routing to a processing or acquisition skill.
 
 Report what the host carries with:
 
@@ -291,9 +294,7 @@ mamba install -c conda-forge llvm-openmp
 
 The `cindra omp` half of this step is macOS-only. Linux and Windows select Numba's TBB threading layer instead
 (`tbb4py` and `intel-cmplr-lib-rt` are declared as `sys_platform != 'darwin'` dependencies), so Numba never loads
-`omppool` and `cindra omp` errors when run there. Run `check_threading_runtime_tool` on every platform regardless,
-because a Linux or Windows host missing the TBB runtime fails every parallelized stage exactly as a macOS host missing
-`libomp.dylib` does. The tool reports that case with `required_layer: "tbb"` and a `pip install tbb4py` remedy.
+`omppool` and `cindra omp` errors when run there.
 
 ### Step 7: Verify the CUDA runtime for a device-backed batch
 

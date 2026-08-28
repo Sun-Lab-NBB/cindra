@@ -71,21 +71,10 @@ _TERMINAL_STATE_MESSAGE: str = "Unable to complete job. Worker terminated withou
 """The tracker error message the pipeline worker records when the pipeline returns without a terminal tracker state."""
 
 _DEVICE_INDICES: tuple[int, ...] = (0, 1)
-"""The CUDA device indices the device-assignment tests stock their session free list with."""
+"""The CUDA device indices with which the device-assignment tests stock their session free list."""
 
 _DEVICE_COUNT: int = len(_DEVICE_INDICES)
 """The number of devices the device-assignment tests hand their session."""
-
-
-@pytest.fixture(autouse=True)
-def _isolated_execution_state() -> Iterator[None]:
-    """Clears the module-global execution state around every test, so no session leaks between them."""
-    set_execution_state(state=None)
-    yield
-    state = get_execution_state()
-    set_execution_state(state=None)
-    if state is not None and state.manager_thread is not None:
-        state.manager_thread.join(timeout=_JOIN_TIMEOUT)
 
 
 class TestPendingJob:
@@ -347,7 +336,7 @@ class TestResolveJobOutcome:
 
     @pytest.mark.xdist_group(name="execution_state")
     def test_broken_pool_future_carries_the_killed_worker_reason(self) -> None:
-        """Verifies that a future the pool broke under reports an abandoned job with the killed worker reason."""
+        """Verifies that a future broken by the pool reports an abandoned job with the killed worker reason."""
         outcome, message = execution._resolve_job_outcome(future=_make_failed_future(error=BrokenProcessPool()))
 
         assert outcome == execution._JobOutcomes.ABANDONED
@@ -901,7 +890,7 @@ class TestDeviceAssignment:
 
     @pytest.mark.xdist_group(name="execution_state")
     def test_cancellation_leaves_a_running_job_holding_its_device(self, tmp_path: Path) -> None:
-        """Verifies that draining the queues never reclaims the device a job is still registering on."""
+        """Verifies that draining the queues never reclaims the device on which a job is still registering."""
         tracker_path = tmp_path / "single_recording_tracker.yaml"
         running = _make_device_job(tracker_path=tracker_path, specifier="plane_0")
         queued = _make_device_job(tracker_path=tracker_path, specifier="plane_1")
@@ -939,7 +928,7 @@ class TestDeviceAssignment:
 
 
 class TestSessionDeviceResolution:
-    """Tests the session device list the caller's request resolves to."""
+    """Tests the session device list to which the caller's request resolves."""
 
     def test_absent_request_registers_on_the_host_cpu(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Verifies that a session naming no device holds none, which is how a caller asks for the host CPU."""
@@ -1340,7 +1329,7 @@ class TestClearOwnedSession:
 
 
 class TestJobPool:
-    """Tests the worker pool one execution session dispatches its jobs into."""
+    """Tests the worker pool into which one execution session dispatches its jobs."""
 
     @pytest.mark.xdist_group(name="execution_state")
     def test_pool_runs_each_job_in_its_own_process(self) -> None:
@@ -1527,6 +1516,17 @@ class TestJobExecutionManager:
         assert state.admission_pool == []
         assert state.active_futures[job.resource_class.name] == {}
         assert tracker.get_job_status(job_id=job.job_id) == ProcessingStatus.SUCCEEDED
+
+
+@pytest.fixture(autouse=True)
+def _isolated_execution_state() -> Iterator[None]:
+    """Clears the module-global execution state around every test, so no session leaks between them."""
+    set_execution_state(state=None)
+    yield
+    state = get_execution_state()
+    set_execution_state(state=None)
+    if state is not None and state.manager_thread is not None:
+        state.manager_thread.join(timeout=_JOIN_TIMEOUT)
 
 
 def _build_single_recording_tracker(tracker_path: Path, *, plane_count: int = 1) -> ProcessingTracker:

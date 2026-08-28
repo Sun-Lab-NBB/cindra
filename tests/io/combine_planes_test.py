@@ -87,29 +87,29 @@ class TestCombinePlanes:
         assert combined.plane_count == 2
         assert combined.combined_height == _FRAME_HEIGHT
         assert combined.combined_width == _FRAME_WIDTH * 2
-        np.testing.assert_array_equal(combined.plane_x_offsets, [0, _FRAME_WIDTH])
-        np.testing.assert_array_equal(combined.plane_y_offsets, [0, 0])
+        np.testing.assert_array_equal(actual=combined.plane_x_offsets, desired=[0, _FRAME_WIDTH])
+        np.testing.assert_array_equal(actual=combined.plane_y_offsets, desired=[0, 0])
 
         rois = combined.extraction.roi_statistics
         assert rois is not None
         assert len(rois) == 2
         assert rois[0].plane_index == 0
         assert rois[1].plane_index == 1
-        np.testing.assert_array_equal(rois[1].mask.x_pixels, np.array([5, 6]) + _FRAME_WIDTH)
-        np.testing.assert_array_equal(rois[1].mask.y_pixels, np.array([3, 4]))
+        np.testing.assert_array_equal(actual=rois[1].mask.x_pixels, desired=np.array([5, 6]) + _FRAME_WIDTH)
+        np.testing.assert_array_equal(actual=rois[1].mask.y_pixels, desired=np.array([3, 4]))
 
         # The combined traces span the shortest plane's frames, so every column holds real data from both planes
         # instead of zeros substituted for the frames the shorter plane never recorded.
         fluorescence = combined.extraction.cell_fluorescence
         assert fluorescence is not None
         assert fluorescence.shape == (2, 4)
-        np.testing.assert_allclose(fluorescence[0], np.full(shape=4, fill_value=1.0, dtype=np.float32))
-        np.testing.assert_allclose(fluorescence[1], np.full(shape=4, fill_value=2.0, dtype=np.float32))
+        np.testing.assert_allclose(actual=fluorescence[0], desired=np.full(shape=4, fill_value=1.0, dtype=np.float32))
+        np.testing.assert_allclose(actual=fluorescence[1], desired=np.full(shape=4, fill_value=2.0, dtype=np.float32))
 
         # The metadata records both the trimmed combined count and the untrimmed per-plane counts, so a consumer can
         # tell that trimming happened.
         assert combined.frame_count == 4
-        np.testing.assert_array_equal(combined.plane_frame_counts, np.array([8, 4], dtype=np.uint32))
+        np.testing.assert_array_equal(actual=combined.plane_frame_counts, desired=np.array([8, 4], dtype=np.uint32))
 
         assert combined.extraction.cell_colocalization is None
 
@@ -219,11 +219,13 @@ class TestCombinePlanes:
         assert len(combined.extraction.roi_statistics) == 1
         assert combined.detection.mean_image is not None
         np.testing.assert_array_equal(
-            combined.detection.mean_image, np.zeros(shape=(_FRAME_HEIGHT, _FRAME_WIDTH), dtype=np.float32)
+            actual=combined.detection.mean_image,
+            desired=np.zeros(shape=(_FRAME_HEIGHT, _FRAME_WIDTH), dtype=np.float32),
         )
         assert combined.detection.correlation_map is not None
         np.testing.assert_array_equal(
-            combined.detection.correlation_map, np.zeros(shape=(_FRAME_HEIGHT, _FRAME_WIDTH), dtype=np.float32)
+            actual=combined.detection.correlation_map,
+            desired=np.zeros(shape=(_FRAME_HEIGHT, _FRAME_WIDTH), dtype=np.float32),
         )
 
     def test_plane_missing_traces_is_skipped(
@@ -350,12 +352,12 @@ class TestCombinePlanes:
 
         combined = combine_planes(plane_contexts=[plane_0, plane_1])
 
-        np.testing.assert_array_equal(combined.plane_x_offsets, [0, _FRAME_WIDTH])
+        np.testing.assert_array_equal(actual=combined.plane_x_offsets, desired=[0, _FRAME_WIDTH])
         assert combined.combined_width == _FRAME_WIDTH * 2
         rois = combined.extraction.roi_statistics
         assert rois is not None
         assert len(rois) == 2
-        np.testing.assert_array_equal(rois[1].mask.x_pixels, np.array([5, 6]) + _FRAME_WIDTH)
+        np.testing.assert_array_equal(actual=rois[1].mask.x_pixels, desired=np.array([5, 6]) + _FRAME_WIDTH)
 
     def test_mroi_multiple_z_planes(
         self, single_recording_context: Callable[..., RuntimeContext], tmp_path: Path
@@ -388,8 +390,8 @@ class TestCombinePlanes:
 
         # Each of the four virtual planes lands on its own rectangle, so no plane overwrites another in the combined
         # images or the stitched movie.
-        np.testing.assert_array_equal(combined.plane_x_offsets, [0, 0, _FRAME_WIDTH, _FRAME_WIDTH])
-        np.testing.assert_array_equal(combined.plane_y_offsets, [0, _FRAME_HEIGHT, 0, _FRAME_HEIGHT])
+        np.testing.assert_array_equal(actual=combined.plane_x_offsets, desired=[0, 0, _FRAME_WIDTH, _FRAME_WIDTH])
+        np.testing.assert_array_equal(actual=combined.plane_y_offsets, desired=[0, _FRAME_HEIGHT, 0, _FRAME_HEIGHT])
 
         rois = combined.extraction.roi_statistics
         assert rois is not None

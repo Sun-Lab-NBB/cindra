@@ -45,8 +45,8 @@ _TF32_VARIABLE: str = "CUPY_TF32"
 _MINIMUM_CORRELATION_RADIUS: int = 1
 """The smallest rigid correlation search radius the quadrant rearrangement can express."""
 
-_SNR_EPSILON: float = 1e-10
-"""The small epsilon value used to prevent division by zero in SNR calculations."""
+_SIGNAL_TO_NOISE_EPSILON: float = 1e-10
+"""The small epsilon value used to prevent division by zero in signal-to-noise ratio calculations."""
 
 _SUBPIXEL_FACTOR: int = 10
 """The upsampling factor for Gaussian RBF subpixel peak localization. A value of 10 provides 0.1 pixel precision."""
@@ -239,8 +239,8 @@ class GpuRegistrationBackend:
 
         Notes:
             The generator holds one batch ahead of the batch the device is working on. It pulls that batch from the
-            iterator and starts its upload while the current batch's kernels are still queued, so the caller's read of
-            the next batch and the bus transfer that follows it overlap the computation rather than trail it.
+            iterator and starts its upload while the current batch's kernels are still queued. The caller's read of the
+            next batch and the bus transfer that follows it therefore overlap the computation.
 
             The frames of a yielded result alias a page-locked buffer the backend reuses, and the backend cycles
             through two such buffers, so a result stays readable until the second result after it is produced. A
@@ -274,8 +274,9 @@ class GpuRegistrationBackend:
             contributes to the mean image, measured before the frames were clipped and narrowed.
 
         Raises:
-            ValueError: If a batch carries a dtype other than int16 or float32, or if nonrigid registration is enabled
-                and the backend holds no block reference data.
+            ValueError: If a batch carries a dtype other than int16 or float32, if nonrigid registration is enabled and
+                the backend holds no block reference data, or if one-photon preprocessing resolves a smoothing window
+                that is not a positive even integer.
         """
         batch_iterator = iter(batches)
         slot = self._staging_slot
@@ -490,7 +491,8 @@ class GpuRegistrationBackend:
             The registered frames and the offsets resolved from them, all held on the device.
 
         Raises:
-            ValueError: If nonrigid registration is enabled and the backend holds no block reference data.
+            ValueError: If nonrigid registration is enabled and the backend holds no block reference data, or if
+                one-photon preprocessing resolves a smoothing window that is not a positive even integer.
         """
         # Widens the storage dtype on the device, which is where the arithmetic runs.
         device_frames = staged_frames.astype(cupy.float32) if staged_frames.dtype == cupy.int16 else staged_frames
@@ -549,7 +551,7 @@ class GpuRegistrationBackend:
             y_offsets_nonrigid, x_offsets_nonrigid, correlations_nonrigid = self._compute_nonrigid_offsets(
                 nonrigid_data=nonrigid_data,
                 frames=frames_for_correlation,
-                snr_threshold=signal_to_noise_threshold,
+                signal_to_noise_threshold=signal_to_noise_threshold,
                 maximum_offset=maximum_block_offset,
             )
 
@@ -706,7 +708,7 @@ class GpuRegistrationBackend:
         self,
         nonrigid_data: _NonrigidDeviceData,
         frames: cupy.ndarray,
-        snr_threshold: float,
+        signal_to_noise_threshold: float,
         maximum_offset: float,
     ) -> tuple[cupy.ndarray, cupy.ndarray, cupy.ndarray]:
         """Computes nonrigid offsets using block-wise phase correlation.
@@ -720,7 +722,8 @@ class GpuRegistrationBackend:
         Args:
             nonrigid_data: The device copies of the per-block reference data and the block geometry.
             frames: The frame data with shape (frame_count, height, width) to be registered.
-            snr_threshold: The SNR threshold below which additional smoothing is applied to correlation peaks.
+            signal_to_noise_threshold: The signal-to-noise ratio threshold below which additional smoothing is applied
+                to correlation peaks.
             maximum_offset: The maximum allowed offset in pixels, constrained by the block dimensions.
 
         Returns:
@@ -771,13 +774,13 @@ class GpuRegistrationBackend:
         for block_index in range(block_count):
             signal_to_noise_ratio = cupy.ones(shape=frame_count, dtype=cupy.float32)
             for smoothing_index, smoothed_data in enumerate(smoothing_levels):
-                low_snr_mask = signal_to_noise_ratio < snr_threshold
-                if int(low_snr_mask.sum()) == 0:
+                low_signal_to_noise_mask = signal_to_noise_ratio < signal_to_noise_threshold
+                if int(low_signal_to_noise_mask.sum()) == 0:
                     break
-                block_correlation = smoothed_data[block_index][low_snr_mask]
+                block_correlation = smoothed_data[block_index][low_signal_to_noise_mask]
                 if smoothing_index > 0:
-                    smoothed_correlation[block_index][low_snr_mask] = block_correlation
-                signal_to_noise_ratio[low_snr_mask] = self._compute_correlation_snr(
+                    smoothed_correlation[block_index][low_signal_to_noise_mask] = block_correlation
+                signal_to_noise_ratio[low_signal_to_noise_mask] = self._compute_correlation_signal_to_noise_ratio(
                     correlation_data=block_correlation, padding=_UPSAMPLING_PADDING
                 )
 
@@ -1183,7 +1186,7 @@ class GpuRegistrationBackend:
         return output
 
     @staticmethod
-    def _compute_correlation_snr(correlation_data: cupy.ndarray, padding: int) -> cupy.ndarray:
+    def _compute_correlation_signal_to_noise_ratio(correlation_data: cupy.ndarray, padding: int) -> cupy.ndarray:
         """Computes the signal-to-noise ratio of the phase correlation peaks.
 
         Estimates the ratio by comparing the maximum correlation value inside the central region to the maximum
@@ -1224,7 +1227,7 @@ class GpuRegistrationBackend:
 
         # Keeps the ratio positive for an outlier frame whose background is vanishingly small or wholly masked.
         signal_to_noise_ratio: cupy.ndarray = (
-            peak_values / cupy.maximum(background.max(axis=(1, 2)), np.float32(_SNR_EPSILON))
+            peak_values / cupy.maximum(background.max(axis=(1, 2)), np.float32(_SIGNAL_TO_NOISE_EPSILON))
         ).astype(cupy.float32)
         return signal_to_noise_ratio
 

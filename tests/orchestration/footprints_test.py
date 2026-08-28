@@ -172,7 +172,7 @@ class TestDeviceBatchSize:
 
 
 class TestNonrigidBlockGeometry:
-    """Tests the block tiling the device memory model resolves its nonrigid terms over."""
+    """Tests the block tiling over which the device memory model resolves its nonrigid terms."""
 
     def test_disabled_nonrigid_registration_tiles_no_block(self) -> None:
         """Verifies that a configuration running rigid registration alone reports an empty block geometry."""
@@ -201,7 +201,7 @@ class TestNonrigidBlockGeometry:
         assert (blocks.count, blocks.height, blocks.width) == (1, 96, 96)
 
     def test_block_covering_one_axis_alone_tiles_the_other(self) -> None:
-        """Verifies that each axis resolves its own tiling from the block extent that axis was configured with."""
+        """Verifies that each axis resolves its own tiling from the block extent with which that axis was configured."""
         plane = PlaneGeometry(height=96, width=512, frame_count=20000, sampling_rate=30.0)
 
         blocks = _resolve_nonrigid_block_geometry(plane=plane, configuration=SingleRecordingConfiguration())
@@ -671,7 +671,7 @@ class TestMultiRecordingEstimates:
 
 
 class TestTrackedRecordingGeometry:
-    """Tests the reader every multi-recording model resolves one recording's shape through."""
+    """Tests the reader through which every multi-recording model resolves one recording's shape."""
 
     def test_region_count_is_read_from_the_trace_header(self, tmp_path: Path) -> None:
         """Verifies that the region count comes from the combined trace array's own header."""
@@ -1179,7 +1179,7 @@ class TestDualChannelRecordings:
 
 
 class TestPlannedRegionCount:
-    """Tests the region term the single-recording estimates are sized for."""
+    """Tests the region term for which the single-recording estimates are sized."""
 
     def test_ceiling_scales_with_the_plane_count(self) -> None:
         """Verifies that the provable ceiling is the per-plane detection bound taken across the planes."""

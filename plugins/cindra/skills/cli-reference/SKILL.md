@@ -2,9 +2,9 @@
 name: cli-reference
 description: >-
   Documents the human-facing cindra and cindra-gui command-line interfaces. Covers every command and option with its
-  short form, long form, type, default, and effect, the MCP tool each command maps to, its failure modes, and how the
-  CLI path diverges from the MCP path. Use when a user asks what a cindra or cindra-gui command or option does, or when
-  the MCP server is unavailable and the user must be told what to run by hand.
+  short form, long form, type, default, and effect, the MCP tool that each command maps onto, its failure modes, and how
+  the CLI path diverges from the MCP path. Use when a user asks what a cindra or cindra-gui command or option does, or
+  when the MCP server is unavailable and the user must be told what to run by hand.
 user-invocable: true
 ---
 
@@ -92,7 +92,7 @@ Both groups set a help width of 120 characters. Neither group declares options o
 | `-t`  | `--transport` | choice of `stdio`, `sse`, `streamable-http` | `stdio` | optional | Selects the transport to serve |
 
 The `stdio` transport disables the console, because that transport carries the JSON-RPC stream over stdout and a logged
-line renders the message it interleaves with unparsable.
+line leaves the surrounding message unparsable.
 
 ### `cindra omp`
 
@@ -139,7 +139,7 @@ set, only the matching job runs and every phase flag is ignored.
 | `-i`  | `--input-path`       | file path          | none    | required   | Names the configuration file to run            |
 | `-bw` | `--binarize-workers` | integer            | `None`  | optional   | Workers for the binarization stage             |
 | `-rw` | `--register-workers` | integer            | `None`  | optional   | Workers for the registration stage             |
-| `-rd` | `--register-device`  | integer            | `None`  | optional   | CUDA device the registration stage runs on     |
+| `-rd` | `--register-device`  | integer            | `None`  | optional   | CUDA device that runs the registration stage   |
 | `-pw` | `--process-workers`  | integer            | `None`  | optional   | Workers for the processing stage               |
 | `-dw` | `--discover-workers` | integer            | `None`  | optional   | Workers for the discovery stage                |
 | `-ew` | `--extract-workers`  | integer            | `None`  | optional   | Workers for the extraction stage               |
@@ -151,15 +151,17 @@ set, only the matching job runs and every phase flag is ignored.
 | `-c`  | `--combine`          | flag               | `False` | flag       | Runs the combination phase                     |
 | `-tp` | `--target-plane`     | integer            | `-1`    | optional   | Limits the run to one plane, `-1` meaning all  |
 | `-dp` | `--data-path`        | existing directory | `None`  | optional   | Overrides the configured raw data directory    |
-| `-s`  | `--output-path`      | directory          | `None`  | optional   | Overrides the configured output directory      |
+| `-s`  | `--output-path`      | directory          | `None`  | optional   | Overrides the configured output root           |
 | `-d`  | `--discover`         | flag               | `False` | flag       | Runs the discovery phase                       |
 | `-e`  | `--extract`          | flag               | `False` | flag       | Runs the extraction phase                      |
 | `-tr` | `--target-recording` | string             | `None`  | optional   | Limits the run to one recording of the dataset |
 | `-rp` | `--recording-path`   | existing directory | `()`    | repeatable | Overrides the configured recording directories |
 
-Two spellings invite a mistake. The output directory is `-s` here and `-od` on `cindra configure`, and `-p` is
-`--process` here while it is `--pipeline` on `cindra configure`. Quote the long form whenever you hand a user one of
-these.
+Five short forms invite a mistake. `-s` is `--output-path` here, while it is `--source` on `cindra omp`, and the long
+form `--output-path` itself is spelled `-od` on `cindra configure`. `-p` is `--process` here and `--pipeline` on
+`cindra configure`. `-r` is `--register` here and `--recording-path` on every `cindra-gui` viewer. `-d` is `--discover`
+here and `--dataset` on `cindra-gui roi` and `cindra-gui tracking`. `-t` is `--transport` on `cindra mcp` and on
+`cindra-gui mcp`, while it is `--target` on `cindra omp`. Quote the long form whenever you hand a user one of these.
 
 The five worker options follow the shared sentinel convention. Omitting the option accepts the measured default for
 that stage, `-1` requests every available core, and a positive integer is used exactly. Any other non-positive value is
@@ -180,11 +182,11 @@ field is set before omitting it.
 
 ### `cindra-gui roi`, `cindra-gui registration`, and `cindra-gui tracking`
 
-| Short | Long               | Type               | Default | Status   | Effect                                          |
-|-------|--------------------|--------------------|---------|----------|-------------------------------------------------|
-| `-r`  | `--recording-path` | existing directory | none    | required | Names the pipeline output root to open          |
-| `-d`  | `--dataset`        | string             | `None`  | optional | Selects the multi-recording dataset             |
-| `-sf` | `--state-file`     | file path          | `None`  | optional | Names the file the viewer writes its state into |
+| Short | Long               | Type               | Default | Status   | Effect                                        |
+|-------|--------------------|--------------------|---------|----------|-----------------------------------------------|
+| `-r`  | `--recording-path` | existing directory | none    | required | Names the pipeline output root to open        |
+| `-d`  | `--dataset`        | string             | `None`  | optional | Selects the multi-recording dataset           |
+| `-sf` | `--state-file`     | file path          | `None`  | optional | Names the file that receives the viewer state |
 
 `cindra-gui registration` declares no `--dataset`, so passing it there is a usage error. On `roi`, supplying
 `--dataset` switches the viewer into tracked ROI mode. `--recording-path` takes the pipeline output root, which is the
@@ -231,7 +233,7 @@ The failures a user hits most, and where each belongs:
 | No `combined_metadata.npz` under a recording            | A multi-recording input never finished single-recording | `/single-recording-processing`    |
 | No `configuration.yaml` under a viewer's output root    | The recording was never processed                       | `/single-recording-processing`    |
 | An OpenMP runtime that cannot be located, on macOS      | The threading runtime is not on the loader search path  | `/cindra-mcp-environment-setup`   |
-| No usable CUDA device, after --register-device          | The host reaches no device through the CuPy runtime     | `/cindra-mcp-environment-setup`   |
+| No usable CUDA device, after `--register-device`        | The host reaches no device through the CuPy runtime     | `/cindra-mcp-environment-setup`   |
 | A lock acquisition that timed out                       | Another cindra process holds the tracker                | See the contention warning below  |
 
 ---
@@ -261,13 +263,13 @@ paths, and the next batch the agent prepares inherits them. Tell the user to poi
 at a template the agent uses.
 
 **`cindra run` rewrites the shared bootstrap other workers read.** Invoked without `--job-id`, it persists the
-recording's configuration and every plane's runtime data from its own start-of-run snapshot. Run against an output
-directory a live MCP session is working on, it overwrites results those workers already recorded.
+recording's configuration and every plane's runtime data from its own start-of-run snapshot. Run against an output root
+that a live MCP session holds, it overwrites results those workers already recorded.
 
 **Nothing excludes the two paths from each other.** Both lock the same tracker file, and that lock serializes
 individual writes rather than whole jobs. A hand run against a directory the agent is executing can time out on the
 lock, or restart a job the engine is already running so that two processes write the same plane. Never start an MCP
-batch over a directory a user has a run in, and ask the user to wait for a session to drain before running anything.
+batch over a directory where a user has a run, and ask the user to wait for a session to drain before running anything.
 
 Two smaller mismatches shape the advice you give. `-bw` genuinely changes binarization, while the MCP binarization
 class is fixed and discards `workers_per_job`, so an agent has never changed it. The CLI's per-stage granularity has no
@@ -298,7 +300,7 @@ Two rows carry a condition the table cannot hold. The single-recording `cindra r
 aborts without a configured output path, and the multi-recording row omits it because that pipeline reads
 `recording_io.recording_directories` and `recording_io.dataset_name` from the file instead. The `cindra omp` row holds
 on macOS alone, so on Linux and Windows tell the user to check the TBB runtime with `python -c "import tbb"` in the
-environment cindra runs in, and to install `tbb4py` when that import fails.
+environment that runs cindra, and to install `tbb4py` when that import fails.
 
 Everything else blocks until the server is back. That covers acquisition parameter generation and validation, recording
 discovery, dataset name resolution, and configuration reading, validation, and modification. It also covers two of the
@@ -315,7 +317,7 @@ than improvising a substitute.
 |-----------------------------------|-------------------------------------------------------------------------------|
 | `/cindra-pipeline`                | Context: where each command sits in the end-to-end pipeline                   |
 | `/cindra-mcp-environment-setup`   | Owns the `--help` exemption, the `cindra omp` workflow, and MCP recovery      |
-| `/single-recording-processing`    | Owns the MCP batch workflow `cindra run` substitutes for                      |
+| `/single-recording-processing`    | Owns the MCP batch workflow that `cindra run` replaces                        |
 | `/multi-recording-processing`     | Owns the multi-recording batch workflow and its re-run semantics              |
 | `/single-recording-configuration` | Owns the file `cindra configure` generates and the worker sentinel convention |
 | `/multi-recording-configuration`  | Owns the multi-recording configuration file and its parameters                |
@@ -331,7 +333,7 @@ than improvising a substitute.
 ```text
 Answering a CLI question, tool-settled (run `cindra COMMAND --help`, the sole sanctioned invocation):
 - [ ] Answered from this skill or from `COMMAND --help`, never from memory
-- [ ] Quoted the long option form, since `-s`, `-p`, and `-od` differ in meaning between commands
+- [ ] Quoted the long option form, since `-s`, `-p`, `-r`, `-d`, and `-t` differ in meaning between commands
 
 Answering a CLI question, reader-judged:
 - [ ] Named the MCP equivalent alongside any command the agent could have run itself
@@ -346,7 +348,7 @@ Handing a user a CLI command, reader-judged:
 - [ ] Stated that `--register-device` takes a non-negative CUDA device index alone, since `-1` is a usage error there
 - [ ] Warned that `cindra run` rewrites the configuration file `-i` names
 - [ ] Warned about sequential dispatch and abort-on-first-failure before recommending `cindra run`
-- [ ] Confirmed no MCP session holds the tracker for that output directory
+- [ ] Confirmed no MCP session holds the tracker for that output root
 - [ ] Asked the user to paste the terminal output, since neither CLI reports machine-readable results
 - [ ] Read the pasted output for an ERROR line rather than treating a zero exit code as success
 ```

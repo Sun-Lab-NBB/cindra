@@ -74,8 +74,8 @@ def run_single_recording_pipeline(
             accept the stage default and -1 to request every available core.
         processing_workers: The number of parallel workers to allocate to each plane-processing job. Use None to accept
             the stage default and -1 to request every available core.
-        registration_device: The zero-based index of the CUDA device each plane-registration job runs on. Use None to
-            register every plane on the host CPU.
+        registration_device: The zero-based index of the CUDA device on which each plane-registration job runs. Use None
+            to register every plane on the host CPU.
 
     Raises:
         FileNotFoundError: If the single-recording configuration data cannot be loaded from the specified file.
@@ -156,7 +156,7 @@ def run_single_recording_pipeline(
 
         # Rejects a plane the recording does not hold before the tracker is aligned. Without this guard the
         # out-of-range job pair reaches align_jobs, which rejects it against the universe with a message naming job
-        # identifiers rather than the plane index the caller actually asked for.
+        # identifiers rather than the plane index for which the caller actually asked.
         if target_plane != -1 and target_plane not in range(plane_count):
             message = (
                 f"Unable to run the single-recording cindra processing pipeline. The requested 'target_plane' must be "
@@ -230,7 +230,9 @@ def run_multi_recording_pipeline(
 
     Raises:
         FileNotFoundError: If the multi-recording configuration data cannot be loaded from the specified file, or if a
-            recording directory holds no combined_metadata.npz file.
+            recording directory holds no combined_metadata.npz file. It is also raised when a job_id is supplied and a
+            recording carries no multi_recording_runtime_data.yaml file, which prepare_multi_recording_batch_tool writes
+            before any worker is dispatched.
         RuntimeError: If the host is macOS and carries no loadable OpenMP runtime for the Numba threading layer. It is
             also raised when a recording directory holds multiple combined_metadata.npz files, when the recording paths
             do not contain unique identifying components, or when a resolved identifying component contains a colon.
@@ -342,15 +344,15 @@ def run_multi_recording_pipeline(
 
 
 def _verify_registration_device(device: int | None, job_names: list[str]) -> None:
-    """Verifies that the host exposes the CUDA device a registration job of this invocation runs on.
+    """Verifies that the host exposes the CUDA device on which a registration job of this invocation runs.
 
     Notes:
         The verification precedes the first dispatch, so a host that exposes no such device aborts the invocation
         having done no work rather than at the point the registration reaches the device.
 
     Args:
-        device: The zero-based index of the CUDA device the registration jobs run on, or None while they run on the
-            host CPU.
+        device: The zero-based index of the CUDA device on which the registration jobs run, or None while they run on
+            the host CPU.
         job_names: The names of the jobs this invocation runs.
 
     Raises:

@@ -1,9 +1,4 @@
-"""Provides the offscreen Qt application and the synthetic viewer-data fixtures shared by the GUI tests.
-
-The Qt platform plugin name is read when the Qt GUI library initializes, so the environment assignment below has to
-precede every PySide6 import. Pytest imports this module before the test modules that build widgets, which is what
-keeps the assignment effective for the whole package.
-"""
+"""Provides the offscreen Qt application and the synthetic viewer-data fixtures shared by the GUI tests."""
 
 from __future__ import annotations
 
@@ -37,6 +32,67 @@ _DATASET_RECORDING_ROOTS: tuple[Path, ...] = (
 
 _DATASET_RECORDING_IDS: tuple[str, ...] = ("a", "b", "c")
 """The recording identifiers of the three recordings the synthetic tracked dataset holds."""
+
+
+@pytest.fixture(scope="session")
+def qt_application() -> QApplication:
+    """Returns the process-wide offscreen QApplication that every widget-building test needs."""
+    application = QApplication.instance()
+    if application is None:
+        application = QApplication([])
+    return application
+
+
+@pytest.fixture
+def single_recording_stub() -> Callable[..., object]:
+    """Returns a factory that builds a synthetic stand-in for a loaded SingleRecordingData instance."""
+
+    def _make(**overrides: object) -> _StubSingleRecording:
+        return _StubSingleRecording(**overrides)
+
+    return _make
+
+
+@pytest.fixture
+def tracked_viewer_data() -> Callable[..., ViewerData]:
+    """Returns a factory that builds viewer data over a three-recording tracked dataset anchored on the third one."""
+
+    def _make(anchor_root: Path = _DATASET_RECORDING_ROOTS[2]) -> ViewerData:
+        recordings = [
+            _StubMultiRecording(data_path=root, recording_id=identifier)
+            for root, identifier in zip(_DATASET_RECORDING_ROOTS, _DATASET_RECORDING_IDS, strict=True)
+        ]
+        return ViewerData(
+            single_recording=_StubSingleRecording(output_path=anchor_root),
+            _recordings=recordings,
+            _available_datasets=("d",),
+            _active_dataset_name="d",
+            _current_recording_index=2,
+            _loaded_dataset_name="d",
+            dataset_name="d",
+        )
+
+    return _make
+
+
+@pytest.fixture
+def registration_recording_stub() -> Callable[..., object]:
+    """Returns a factory that builds a synthetic stand-in for a registered recording's binary and offset data."""
+
+    def _make(**overrides: object) -> _StubRegistrationRecording:
+        return _StubRegistrationRecording(**overrides)
+
+    return _make
+
+
+@pytest.fixture
+def principal_component_stub() -> Callable[..., object]:
+    """Returns a factory that builds a synthetic stand-in for a recording's principal component metrics."""
+
+    def _make(**overrides: object) -> _StubPrincipalComponentData:
+        return _StubPrincipalComponentData(**overrides)
+
+    return _make
 
 
 class _StubSingleRecording:
@@ -101,11 +157,11 @@ class _StubMultiRecording:
 
 
 class _StubPlaneBinary:
-    """Stands in for one plane's BinaryFile, serving the subsampled movie the binary viewer scales its display by."""
+    """Stands in for one plane's BinaryFile, serving the subsampled movie that scales the binary viewer's display."""
 
     def __init__(self, frame_count: int, frame_size: int) -> None:
         generator = np.random.default_rng(seed=11)
-        self._movie = generator.integers(0, 4096, size=(frame_count, frame_size, frame_size)).astype(np.int16)
+        self._movie = generator.integers(low=0, high=4096, size=(frame_count, frame_size, frame_size)).astype(np.int16)
 
     def subsample_movie(self, sample_count: int) -> NDArray[np.int16]:
         """Returns the leading frames of the synthetic movie, capped at the requested sample count."""
@@ -154,7 +210,7 @@ class _StubRegistrationRecording:
 
     def read_stitched_frame(self, frame_index: int) -> NDArray[np.int16]:
         """Returns a synthetic stitched frame for the requested frame index."""
-        return np.full((self._frame_size * self.plane_count, self._frame_size), frame_index, dtype=np.int16)
+        return np.full((self._frame_size * self.plane_count, self._frame_size), fill_value=frame_index, dtype=np.int16)
 
 
 class _StubPrincipalComponentData:
@@ -186,7 +242,7 @@ class _StubPrincipalComponentData:
 
 
 def _make_roi_statistics(roi_index: int, frame_width: int) -> ROIStatistics:
-    """Builds a two-pixel ROIStatistics instance placed on a row unique to the requested ROI index."""
+    """Builds a two-pixel ROIStatistics instance placed on the pair of rows unique to the requested ROI index."""
     y_pixels = np.array([roi_index * 2, roi_index * 2 + 1], dtype=np.int32)
     x_pixels = np.array([1, 2], dtype=np.int32)
     mask = ROIMask(
@@ -207,64 +263,3 @@ def _make_roi_statistics(roi_index: int, frame_width: int) -> ROIStatistics:
         normalized_pixel_count=1.0,
         skewness=0.5,
     )
-
-
-@pytest.fixture(scope="session")
-def qt_application() -> QApplication:
-    """Returns the process-wide offscreen QApplication that every widget-building test needs."""
-    application = QApplication.instance()
-    if application is None:
-        application = QApplication([])
-    return application
-
-
-@pytest.fixture
-def single_recording_stub() -> Callable[..., object]:
-    """Returns a factory that builds a synthetic stand-in for a loaded SingleRecordingData instance."""
-
-    def _make(**overrides: object) -> _StubSingleRecording:
-        return _StubSingleRecording(**overrides)
-
-    return _make
-
-
-@pytest.fixture
-def tracked_viewer_data() -> Callable[..., ViewerData]:
-    """Returns a factory that builds viewer data over a three-recording tracked dataset anchored on the third one."""
-
-    def _make(anchor_root: Path = _DATASET_RECORDING_ROOTS[2]) -> ViewerData:
-        recordings = [
-            _StubMultiRecording(data_path=root, recording_id=identifier)
-            for root, identifier in zip(_DATASET_RECORDING_ROOTS, _DATASET_RECORDING_IDS, strict=True)
-        ]
-        return ViewerData(
-            single_recording=_StubSingleRecording(output_path=anchor_root),
-            _recordings=recordings,
-            _available_datasets=("d",),
-            _active_dataset_name="d",
-            _current_recording_index=2,
-            _loaded_dataset_name="d",
-            dataset_name="d",
-        )
-
-    return _make
-
-
-@pytest.fixture
-def registration_recording_stub() -> Callable[..., object]:
-    """Returns a factory that builds a synthetic stand-in for a registered recording's binary and offset data."""
-
-    def _make(**overrides: object) -> _StubRegistrationRecording:
-        return _StubRegistrationRecording(**overrides)
-
-    return _make
-
-
-@pytest.fixture
-def principal_component_stub() -> Callable[..., object]:
-    """Returns a factory that builds a synthetic stand-in for a recording's principal component metrics."""
-
-    def _make(**overrides: object) -> _StubPrincipalComponentData:
-        return _StubPrincipalComponentData(**overrides)
-
-    return _make

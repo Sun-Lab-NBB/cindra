@@ -40,7 +40,7 @@ from ..dataclasses import (
     IOData as IOData,
     RuntimeContext as RuntimeContext,
 )
-from .bidiphase_correction import (
+from .bidirectional_phase_correction import (
     compute_bidirectional_phase_offset as compute_bidirectional_phase_offset,
     apply_bidirectional_phase_correction as apply_bidirectional_phase_correction,
 )

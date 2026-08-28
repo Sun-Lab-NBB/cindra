@@ -35,7 +35,7 @@ class PCViewer(QMainWindow):
         data: Pre-loaded registration data to display on startup.
 
     Attributes:
-        data: The SingleRecordingData instance that stores the visualized recording's data.
+        _data: The SingleRecordingData instance that stores the visualized recording's data.
         _loaded: Determines whether PC data has been loaded and is ready for display.
         _current_frame: Animation toggle state for PC extreme image cycling.
         _pc_count: Number of principal components available.
@@ -79,7 +79,7 @@ class PCViewer(QMainWindow):
         self._central_widget.setLayout(self._layout)
 
         # Initializes state and data.
-        self.data: SingleRecordingData = data
+        self._data: SingleRecordingData = data
         self._loaded: bool = False
         self._current_frame: int = 0
         self._pc_count: int = data.principal_component_count
@@ -177,7 +177,6 @@ class PCViewer(QMainWindow):
             bottom_label="Sampled Frame",
         )
 
-        # Builds the bottom control panel with the PC selector, metric labels, title labels, and playback controls.
         self._create_bottom_panel()
         self._pc_edit.setValidator(QtGui.QIntValidator(1, self._pc_count))
         self._update_timer: QtCore.QTimer = QtCore.QTimer()
@@ -194,7 +193,7 @@ class PCViewer(QMainWindow):
         Args:
             data: The SingleRecordingData instance that stores the visualized recording's data.
         """
-        self.data = data
+        self._data = data
 
         # Populates the plane selector without triggering _on_plane_changed yet.
         self._plane_selector.blockSignals(True)
@@ -219,7 +218,7 @@ class PCViewer(QMainWindow):
         return {
             "current_plane": self._plane_selector.currentIndex(),
             "current_plane_label": self._plane_selector.currentText(),
-            "plane_count": self.data.plane_count,
+            "plane_count": self._data.plane_count,
             "current_pc": self._current_pc_number(),
             "pc_count": self._pc_count,
             "playing": self._update_timer.isActive(),
@@ -293,15 +292,15 @@ class PCViewer(QMainWindow):
         """
         if index < 0:
             return
-        self.data.switch_view(view_index=index)
+        self._data.switch_view(view_index=index)
         self._reload_pc_data()
 
     def _reload_pc_data(self) -> None:
         """Loads and renders PC registration data for the currently selected plane."""
-        self.setWindowTitle(f"Registration Quality Metrics — {self.data.recording_label}")
-        pc_images = self.data.principal_component_extreme_images
-        pc_metrics = self.data.principal_component_shift_metrics
-        pc_projections = self.data.principal_component_projections
+        self.setWindowTitle(f"Registration Quality Metrics — {self._data.recording_label}")
+        pc_images = self._data.principal_component_extreme_images
+        pc_metrics = self._data.principal_component_shift_metrics
+        pc_projections = self._data.principal_component_projections
 
         # Aborts if the recording has no PC registration metrics (e.g. registration was skipped).
         if pc_images is None or pc_metrics is None:
@@ -375,7 +374,6 @@ class PCViewer(QMainWindow):
             self._metric_labels.append(metric_label)
         panel.addSpacing(group_spacing)
 
-        # Adds the playback controls.
         playback = create_play_pause_group(
             parent=self,
             play_tooltip="Start automatic PC cycling.",

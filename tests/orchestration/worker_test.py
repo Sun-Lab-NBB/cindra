@@ -9,7 +9,7 @@ from ataraxis_base_utilities import console, error_format
 from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 
 from cindra.dataclasses import SingleRecordingConfiguration
-from cindra.orchestration import SingleRecordingJobNames, worker
+from cindra.orchestration import SingleRecordingJobNames
 from cindra.orchestration.worker import _resolve_job_plane_index, dispatch_single_recording_job
 
 if TYPE_CHECKING:
@@ -51,11 +51,11 @@ class TestRegistrationDeviceGate:
         tracker.align_jobs(jobs=jobs, universe=jobs)
 
         def _refuse_device(device: int | None) -> None:
-            """Refuses the device index the dispatch branch asked about."""
+            """Refuses the device index the dispatch branch names."""
             assert device == 7
             console.error(message=_DEVICE_REFUSAL_MESSAGE, error=ValueError)
 
-        monkeypatch.setattr(worker, "verify_gpu_runtime", _refuse_device)
+        monkeypatch.setattr("cindra.orchestration.worker.verify_gpu_runtime", _refuse_device)
 
         with pytest.raises(ValueError, match=error_format(message=_DEVICE_REFUSAL_MESSAGE)):
             dispatch_single_recording_job(

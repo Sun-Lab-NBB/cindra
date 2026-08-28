@@ -116,10 +116,10 @@ def resolve_single_recording_contexts(
         instance with IOData fields initialized.
 
     Raises:
-        ValueError: If output_path is not configured, if no processed data exists at output_path while data_path is
-            also not configured, if data_path is not a directory, if the acquisition parameters file omits a required
-            field or carries a non-positive frame rate, plane count, channel count, or ROI count, or if the
-            acquisition parameters specify more than 2 channels.
+        ValueError: If output_path is not configured, or if no processed data exists at output_path while data_path
+            is also not configured. Also raised when data_path is not a directory, when the acquisition parameters
+            file omits a required field, when it carries a non-positive frame rate, plane count, channel count, or
+            ROI count, or when it specifies more than 2 channels.
         FileNotFoundError: If the acquisition parameters file is not found under data_path, or if ``persist=False``
             and any plane's runtime_data.yaml does not already exist on disk.
     """

@@ -87,8 +87,8 @@ class RuntimeSettings:
 class AcquisitionParameters(YamlConfig):
     """Stores the data acquisition parameters used by the system that recorded the processed ROI activity data.
 
-    This dataclass describes the acquisition parameters of the input TIFF files, supporting both single-ROI (standard
-    imaging) and multi-ROI (MROI line-scanning) data.
+    Describes the acquisition parameters of the input TIFF files, supporting both single-ROI (standard imaging) and
+    multi-ROI (MROI line-scanning) data.
 
     Notes:
         For single-ROI data, only frame_rate, plane_number, and channel_number are required. For MROI data, additional
@@ -258,8 +258,9 @@ class Registration:
 
     gpu_batch_size: int = 0
     """The number of frames to keep in device memory at the same time while registration runs on a CUDA device. This
-    overrides batch_size on that path, where the device memory budget bounds the batch instead of the host RAM budget.
-    Setting this to 0 uses batch_size on the device as well."""
+    overrides batch_size for the alignment pass on that path, where the device memory budget bounds the batch instead of
+    the host RAM budget, while the secondary channel pass reads batch_size. Setting this to 0 uses batch_size on the
+    device as well."""
 
     bad_frame_threshold: float = 1.0
     """The threshold for identifying frames with excessive motion or poor correlation quality. The algorithm computes a
@@ -499,8 +500,8 @@ class SingleRecordingConfiguration(YamlConfig):
     The pipeline reads these parameters and treats them as immutable for the duration of processing.
 
     Notes:
-        This class is based on the 'default_ops' dictionary from the original suite2p package. The default parameters
-        are tuned for working with GCaMP6F fluorescence data recorded using 2-Photon Random Access Mesoscope (2P-RAM).
+        Derives from the 'default_ops' dictionary of the original suite2p package. The default parameters are tuned
+        for working with GCaMP6F fluorescence data recorded using 2-Photon Random Access Mesoscope (2P-RAM).
 
         For runtime data (computed by the pipeline), see SingleRecordingRuntimeData.
     """

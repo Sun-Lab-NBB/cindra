@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from importlib.metadata import PackageMetadata
 
 _PACKAGE_METADATA: PackageMetadata = _metadata("cindra")
-"""The distribution metadata cindra was installed with, read once at import time."""
+"""The distribution metadata of the installed cindra package, read once at import time."""
 
 VERSION: str = _PACKAGE_METADATA["version"]
 """The cindra library version string, resolved from package metadata at import time."""

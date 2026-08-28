@@ -324,5 +324,5 @@ def _reference_bspline_basis(interpolation_factor: float) -> NDArray[np.float64]
     for basis_index in range(4):
         coefficients = np.zeros(len(_UNIFORM_BSPLINE_KNOTS) - 4, dtype=np.float64)
         coefficients[basis_index] = 1.0
-        values.append(float(BSpline(_UNIFORM_BSPLINE_KNOTS, coefficients, 3)(interpolation_factor)))
+        values.append(float(BSpline(t=_UNIFORM_BSPLINE_KNOTS, c=coefficients, k=3)(interpolation_factor)))
     return np.array(values, dtype=np.float64)

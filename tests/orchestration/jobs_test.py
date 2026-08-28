@@ -745,7 +745,7 @@ class TestValidateJobPrerequisites:
 
 
 def _job_id(job_name: str, specifier: str = "") -> str:
-    """Returns the tracker identifier that the job with the given name and specifier is registered under."""
+    """Returns the tracker identifier under which the job with the given name and specifier is registered."""
     return ProcessingTracker.generate_job_id(job_name=str(job_name), specifier=specifier)
 
 

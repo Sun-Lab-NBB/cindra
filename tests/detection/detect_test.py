@@ -72,16 +72,16 @@ class TestCreateEnhancedMeanImage:
         minimum_interior_value = valid_region.min()
 
         top_border = result[: valid_y_range[0], :]
-        np.testing.assert_allclose(top_border, minimum_interior_value)
+        np.testing.assert_allclose(actual=top_border, desired=minimum_interior_value)
 
         bottom_border = result[valid_y_range[1] :, :]
-        np.testing.assert_allclose(bottom_border, minimum_interior_value)
+        np.testing.assert_allclose(actual=bottom_border, desired=minimum_interior_value)
 
         left_border = result[valid_y_range[0] : valid_y_range[1], : valid_x_range[0]]
-        np.testing.assert_allclose(left_border, minimum_interior_value)
+        np.testing.assert_allclose(actual=left_border, desired=minimum_interior_value)
 
         right_border = result[valid_y_range[0] : valid_y_range[1], valid_x_range[1] :]
-        np.testing.assert_allclose(right_border, minimum_interior_value)
+        np.testing.assert_allclose(actual=right_border, desired=minimum_interior_value)
 
     def test_cropped_valid_range(self) -> None:
         """Verifies correct behavior when the valid range crops a significant portion of the frame."""
