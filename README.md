@@ -19,8 +19,9 @@ Cindra is a ground-up reimplementation of the [suite2p](https://github.com/Mouse
 a similarly reimplemented multi-recording ROI tracking pipeline from the
 [OSM manuscript](https://www.nature.com/articles/s41586-024-08548-w). The library maintains the algorithmic core of
 these projects with extensive architecture, documentation, and implementation enhancements focused on improving memory
-efficiency and runtime speed. Cindra offers CLI, GUI, and MCP server interfaces alongside the Python API to streamline
-user interaction with the library. The [License](#license) section names the upstream projects that supplied these
+efficiency and runtime speed. Single-recording registration runs on a CUDA device when the run names one, and on the
+host CPU otherwise. Cindra offers CLI, GUI, and MCP server interfaces alongside the Python API to streamline user
+interaction with the library. The [License](#license) section names the upstream projects that supplied these
 algorithms, along with the copyright notices that cover them.
 
 ___
@@ -44,7 +45,8 @@ ___
 - Natively supports two-channel functional imaging with independent ROI detection, colocalization analysis, and
   fluorescence extraction per channel.
 - Uses Numba JIT compilation with Intel TBB threading (OpenMP on macOS) for parallelized frame-level computation.
-- Runs single-recording registration on the CUDA devices a run names, through CuPy on Linux and Windows.
+- Supports GPU registration, running single-recording motion correction on a CUDA device through CuPy on Linux and
+  Windows. The host CPU is the default, and every other pipeline stage runs on it whatever device a run names.
 - GPL-3.0-or-later License.
 
 ___
@@ -89,10 +91,10 @@ or carried inside an installed Python package. Install one with `brew install li
 Without a loadable runtime, processing fails once it reaches a parallelized stage. Linux and Windows run the TBB
 threading layer, which needs no additional steps, so `cindra omp` errors when run on them.
 
-Single-recording registration runs on a CUDA device when the run names one, through [CuPy](https://cupy.dev/). Linux
-and Windows install `cupy-cuda13x[ctk]`, the build targeting CUDA 13, automatically. A host whose driver runs CUDA 12
-installs `cupy-cuda12x[ctk]` over that pin, because one CuPy build targets one CUDA major version. The CuPy project
-publishes no macOS wheel, so registration on macOS runs on the host CPU.
+Single-recording registration runs on a CUDA device through [CuPy](https://cupy.dev/) when the run names one, and on
+the host CPU otherwise. Linux and Windows install `cupy-cuda13x[ctk]`, the build targeting CUDA 13, automatically. A
+host whose driver runs CUDA 12 installs `cupy-cuda12x[ctk]` over that pin, because one CuPy build targets one CUDA
+major version. The CuPy project publishes no macOS wheel, so registration on macOS runs on the host CPU.
 
 Run `cindra gpu` to report the devices the host exposes, along with the memory and compute capability of each. The
 command transforms a small array on a device before reporting it, so a host carrying CuPy without the CUDA math
@@ -804,11 +806,12 @@ job whose ceiling stands above its stage default over the cores no running job h
 draining queue hands its last jobs more cores than its first. The widening applies in a session that accepted the stage
 defaults, because a session naming its own worker count gives every job that count.
 
-The CUDA device a registration job runs on is threaded through the same way. `run_single_recording_pipeline()` takes
+The device a registration job uses is threaded through the same way. `run_single_recording_pipeline()` takes
 `registration_device`, where None registers every plane on the host CPU and a zero-based index registers them on that
 device. The entry point verifies that index before its first dispatch, so a run naming a device the host does not expose
 aborts having done no work. `resolve_gpu_devices()` reports the devices a host exposes, and `REGISTRATION_GPU_WORKERS`
-is the core count one device-backed registration job holds. Both are exported from `cindra.orchestration`.
+is the core count a device-backed registration job takes in place of `REGISTRATION_WORKERS`, holding it at every queue
+depth, because the devices rather than the cores bound its concurrency. Both are exported from `cindra.orchestration`.
 
 External schedulers that need to enumerate a recording's jobs and their dependencies without driving the pipeline
 themselves can read the phase model exported from `cindra.orchestration`. `SINGLE_RECORDING_PHASES` and
