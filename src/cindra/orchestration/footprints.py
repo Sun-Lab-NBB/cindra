@@ -243,6 +243,18 @@ Notes:
     thinned, which overstates rather than understates the stage it sizes.
 """
 
+_TRACKED_REGION_HEADROOM: float = 1.5
+"""The multiple of the most populated recording's region count the templates a tracked dataset holds are assumed not
+to exceed.
+
+Notes:
+    This is a domain assumption about how a dataset's recordings overlap rather than a figure derived from the
+    pipeline: a tracked dataset holds at most every region of its most populated recording, plus about half that
+    count again contributed by regions the other recordings hold and it does not. Because it is an assumption rather
+    than a proof, the bound that carries it is taken alongside the combinatorial ceiling the pooled region count
+    sets, and the smaller of the two is used.
+"""
+
 
 @dataclass(frozen=True, slots=True)
 class PlaneGeometry:
@@ -408,6 +420,45 @@ def resolve_recording_geometry(
     )
 
 
+def read_tracked_recording_geometry(cindra_root: Path) -> RecordingGeometry:
+    """Reads the geometry every multi-recording model reads from one recording of a tracked dataset.
+
+    Notes:
+        Reads a recording's processed output rather than its raw acquisition, so the caller has already run the
+        single-recording pipeline over the recording to completion. The sibling resolve_recording_geometry reads the
+        raw acquisition instead and reports no region count, because no region exists before the pipeline runs.
+
+        Covers the combined field extent, the combined frame count, the second channel the metadata archive records,
+        and the regions the combined trace array's own header reports. The per-plane geometry and the raw frame
+        extent stay unread, because every multi-recording stage works at the combined view. Only headers are parsed,
+        so a recording of any length costs a pair of small reads and no array is mapped.
+
+        The region count this reports is the regions one recording holds on its own. It is not the templates a
+        tracked dataset holds, which only the cross-recording discovery stage produces, so it does not make the
+        tracked count readable and a caller planning a dataset whose discovery has not yet run must not read it as
+        one.
+
+    Args:
+        cindra_root: The recording's pipeline output directory, which carries the combined metadata archive.
+
+    Returns:
+        The recording's geometry, whose resolved flag is False when the recording carries no combined output.
+    """
+    metadata_path = cindra_root / COMBINED_METADATA_FILENAME
+    if not metadata_path.is_file():
+        return RecordingGeometry()
+    combined_pixels, combined_frame_count, two_channels = _read_combined_geometry(metadata_path=metadata_path)
+    return RecordingGeometry(
+        combined_pixels=combined_pixels,
+        combined_frame_count=combined_frame_count,
+        two_channels=two_channels,
+        region_count=_read_region_count(
+            array_path=resolve_array_path(root_path=cindra_root, array=RecordingArrays.CELL_FLUORESCENCE)
+        ),
+        resolved=combined_pixels > 0,
+    )
+
+
 def resolve_maximum_roi_count(plane_count: int, configuration: SingleRecordingConfiguration) -> int:
     """Resolves the regions a recording can provably not exceed.
 
@@ -547,12 +598,20 @@ def estimate_multi_recording_job_memory_mb(
     specifier: str,
     recording_directories: Sequence[Path],
     configuration: MultiRecordingConfiguration,
+    *,
+    planned_roi_count: int | None = None,
 ) -> int:
     """Estimates the memory one multi-recording job occupies at its peak.
 
     Notes:
         A discovery job spans every recording of the dataset, so it is estimated from all of them. An extraction job
         runs on one recording, which its specifier names, and is estimated from that recording alone.
+
+        The templates the tracking stage produces are the one figure the completed single-recording output does not
+        report, and they do not exist when a plan covering the discovery stage is built. A caller that knows them
+        passes them through planned_roi_count, and the bound the per-recording region counts provide covers them
+        otherwise. Only the extraction stage reads the figure, because the discovery stage scales with the regions
+        each recording reports rather than with the templates it produces.
 
     Args:
         job_name: The pipeline stage the job runs.
@@ -561,6 +620,8 @@ def estimate_multi_recording_job_memory_mb(
             recording_directories field holds them. Each is either the recording's pipeline output directory or a
             directory containing it, matching the latitude the context resolver allows.
         configuration: The dataset's processing configuration.
+        planned_roi_count: The tracked templates to plan for, counting the dataset as a whole. Use None to accept
+            the bound the per-recording region counts provide. Must be a positive integer when supplied.
 
     Returns:
         The memory the job occupies in megabytes.
@@ -569,17 +630,26 @@ def estimate_multi_recording_job_memory_mb(
         FileNotFoundError: If the dataset names no recording directory, if any recording carries no combined metadata
             archive, or if any recording reports no regions in its combined trace array, in which case neither
             multi-recording stage can run.
+        ValueError: If planned_roi_count is supplied and is not a positive integer.
     """
+    if planned_roi_count is not None and planned_roi_count <= 0:
+        message = (
+            f"Unable to estimate the memory of the '{job_name}' job. The planned region count must be a positive "
+            f"integer counting the templates the dataset tracks, or None to accept the bound the per-recording "
+            f"region counts provide, but encountered {planned_roi_count}."
+        )
+        console.error(message=message, error=ValueError)
+
     cindra_roots = _resolve_cindra_directories(recording_directories=recording_directories)
     geometries = _resolve_dataset_geometries(job_name=job_name, cindra_roots=cindra_roots)
 
     if job_name == MultiRecordingJobNames.DISCOVER:
         return _apply_tolerance(memory_mb=_estimate_discovery_mb(geometries=geometries))
 
-    # A template gathers regions that co-locate across recordings, and no recording contributes more than one region
-    # to one template, so the regions any single recording holds bound the templates the dataset can track.
     geometry = _resolve_target_geometry(cindra_roots=cindra_roots, geometries=geometries, specifier=specifier)
-    tracked_regions = max(entry.region_count for entry in geometries)
+    tracked_regions = _resolve_tracked_regions(
+        geometries=geometries, configuration=configuration, planned_roi_count=planned_roi_count
+    )
     return _apply_tolerance(
         memory_mb=_estimate_extraction_mb(
             geometry=geometry, tracked_regions=tracked_regions, configuration=configuration
@@ -650,6 +720,8 @@ def size_multi_recording_job(
     specifier: str,
     recording_directories: Sequence[Path],
     configuration: MultiRecordingConfiguration,
+    *,
+    planned_roi_count: int | None = None,
 ) -> JobSizing:
     """Sizes one multi-recording job from the dataset it processes.
 
@@ -659,6 +731,8 @@ def size_multi_recording_job(
         recording_directories: The root directory of every recording the dataset spans, as the configuration's
             recording_directories field holds them.
         configuration: The dataset's processing configuration.
+        planned_roi_count: The tracked templates to plan for, counting the dataset as a whole. Use None to accept
+            the bound the per-recording region counts provide. Must be a positive integer when supplied.
 
     Returns:
         The cores the job occupies and the memory it holds, alongside a device memory of zero, because no
@@ -668,12 +742,14 @@ def size_multi_recording_job(
         FileNotFoundError: If the dataset names no recording directory, if any recording carries no combined metadata
             archive, or if any recording reports no regions in its combined trace array, in which case neither
             multi-recording stage can run.
+        ValueError: If planned_roi_count is supplied and is not a positive integer.
     """
     memory_mb = estimate_multi_recording_job_memory_mb(
         job_name=job_name,
         specifier=specifier,
         recording_directories=recording_directories,
         configuration=configuration,
+        planned_roi_count=planned_roi_count,
     )
 
     return JobSizing(cores=resolve_stage_workers(job_name=job_name), memory_mb=memory_mb, device_memory_mb=0)
@@ -1073,6 +1149,48 @@ def _resolve_planned_regions(
     return resolve_maximum_roi_count(plane_count=len(geometry.planes), configuration=configuration)
 
 
+def _resolve_tracked_regions(
+    geometries: Sequence[RecordingGeometry],
+    configuration: MultiRecordingConfiguration,
+    planned_roi_count: int | None,
+) -> int:
+    """Resolves the tracked templates the extraction estimate is sized for.
+
+    Notes:
+        The templates tracking produces do not exist when a dataset is sized, because one planning pass covers the
+        discovery stage that produces them and the extraction jobs that read them together. The count is therefore
+        estimated from the regions each recording reports on its own, which the completed single-recording pipeline
+        already wrote, and a caller that knows the count it expects supplies it instead.
+
+        Two bounds are taken and the smaller is used, because neither follows from the other. The headroom bound is
+        the domain assumption _TRACKED_REGION_HEADROOM states: a tracked dataset holds at most every region of its
+        most populated recording plus about half that count again, contributed by regions the other recordings hold
+        and it does not. The pooled bound is a combinatorial ceiling: every template consumes at least
+        minimum_recordings regions and consumes each of them exclusively, so the pooled region count divided by that
+        demand is a count no dataset can exceed. The pooled bound is the tighter of the two whenever a dataset spans
+        few recordings, and the headroom bound is the tighter one whenever it spans many, so the pooled bound is not
+        taken alone.
+
+    Args:
+        geometries: The geometry of every recording the dataset spans.
+        configuration: The dataset's processing configuration.
+        planned_roi_count: The tracked templates the caller asked to plan for, or None to accept the bound.
+
+    Returns:
+        The tracked templates to size the extraction estimate for.
+    """
+    if planned_roi_count is not None:
+        return planned_roi_count
+
+    # Mirrors the recording count the tracking stage converts its mask prevalence into, which is the recordings a
+    # cluster must appear in before it is kept as a template. The floor of one keeps a prevalence of zero, which the
+    # configuration admits, from dividing the pooled count by nothing.
+    minimum_recordings = max(1, math.ceil(configuration.roi_tracking.mask_prevalence / 100 * len(geometries)))
+    pooled_ceiling = sum(entry.region_count for entry in geometries) // minimum_recordings
+    headroom_bound = math.ceil(max(entry.region_count for entry in geometries) * _TRACKED_REGION_HEADROOM)
+    return min(pooled_ceiling, headroom_bound)
+
+
 def _resolve_target_geometry(
     cindra_roots: Sequence[Path], geometries: Sequence[RecordingGeometry], specifier: str
 ) -> RecordingGeometry:
@@ -1198,35 +1316,6 @@ def _read_source_geometry(data_path: Path | None, ignored_file_names: tuple[str,
         return None
 
 
-def _read_tracked_recording_geometry(cindra_root: Path) -> RecordingGeometry:
-    """Reads the geometry every multi-recording model reads from one recording of a tracked dataset.
-
-    Notes:
-        Covers the combined field extent, the combined frame count, and the second channel the metadata archive
-        records. The per-plane geometry and the raw frame extent stay unread, because every multi-recording stage
-        works at the combined view.
-
-    Args:
-        cindra_root: The recording's pipeline output directory, which carries the combined metadata archive.
-
-    Returns:
-        The recording's geometry, whose resolved flag is False when the recording carries no combined output.
-    """
-    metadata_path = cindra_root / COMBINED_METADATA_FILENAME
-    if not metadata_path.is_file():
-        return RecordingGeometry()
-    combined_pixels, combined_frame_count, two_channels = _read_combined_geometry(metadata_path=metadata_path)
-    return RecordingGeometry(
-        combined_pixels=combined_pixels,
-        combined_frame_count=combined_frame_count,
-        two_channels=two_channels,
-        region_count=_read_region_count(
-            array_path=resolve_array_path(root_path=cindra_root, array=RecordingArrays.CELL_FLUORESCENCE)
-        ),
-        resolved=combined_pixels > 0,
-    )
-
-
 def _resolve_cindra_directories(recording_directories: Sequence[Path]) -> tuple[Path, ...]:
     """Resolves the pipeline output directory of every recording a dataset names.
 
@@ -1300,7 +1389,7 @@ def _resolve_dataset_geometries(
         )
         console.error(message=message, error=FileNotFoundError)
 
-    geometries = tuple(_read_tracked_recording_geometry(cindra_root=root) for root in cindra_roots)
+    geometries = tuple(read_tracked_recording_geometry(cindra_root=root) for root in cindra_roots)
     incomplete = [
         str(root) for root, geometry in zip(cindra_roots, geometries, strict=True) if geometry.combined_pixels <= 0
     ]
