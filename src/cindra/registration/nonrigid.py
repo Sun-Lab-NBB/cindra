@@ -39,6 +39,7 @@ def compute_nonrigid_reference_data(
     smoothing_sigma: float,
     y_blocks: list[NDArray[np.int32]],
     x_blocks: list[NDArray[np.int32]],
+    workers: int,
 ) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.complex64]]:
     """Computes edge taper masks and FFT reference kernel for nonrigid phase correlation.
 
@@ -52,6 +53,7 @@ def compute_nonrigid_reference_data(
             sets the falloff of the per-block spatial taper mask.
         y_blocks: The list of y-coordinate ranges for each block.
         x_blocks: The list of x-coordinate ranges for each block.
+        workers: The number of threads each transform may use.
 
     Returns:
         A tuple of (taper_mask, mean_offset, reference_kernel). The taper_mask and mean_offset arrays have shape
@@ -64,7 +66,9 @@ def compute_nonrigid_reference_data(
 
     # Real FFT output has shape (height, width // 2 + 1) for the frequency dimension.
     real_fft_width = block_width // 2 + 1
-    gaussian_filter = compute_gaussian_frequency_filter(sigma=smoothing_sigma, height=block_height, width=block_width)
+    gaussian_filter = compute_gaussian_frequency_filter(
+        sigma=smoothing_sigma, height=block_height, width=block_width, workers=workers
+    )
     reference_kernel = np.empty((block_count, block_height, real_fft_width), dtype=np.complex64)
 
     global_taper = compute_spatial_taper_mask(
@@ -86,7 +90,7 @@ def compute_nonrigid_reference_data(
         mean_offset[block_index] = reference_block.mean() * (np.float32(1.0) - taper_mask[block_index])
 
         # Computes the phase-normalized FFT kernel with Gaussian smoothing.
-        block_fft = np.conj(rfft2(reference_block))
+        block_fft = np.conj(rfft2(reference_block, workers=workers))
         block_fft /= NORMALIZATION_EPSILON + np.absolute(block_fft)
         block_fft *= gaussian_filter
         reference_kernel[block_index] = block_fft
