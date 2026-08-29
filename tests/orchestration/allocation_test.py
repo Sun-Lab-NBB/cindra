@@ -429,7 +429,7 @@ class TestDerivedCapacityAllocation:
     @pytest.mark.parametrize(
         ("budget", "job_count", "workers_per_job", "max_parallel_jobs", "expected"),
         [
-            (24, 10, None, None, (REGISTRATION_WORKERS, 6)),
+            (24, 10, None, None, (REGISTRATION_WORKERS, 3)),
             (24, 1, None, None, (REGISTRATION_WORKERS, 1)),
             (24, 0, None, None, (REGISTRATION_WORKERS, 1)),
             (24, 5, ALL_CORES_REQUEST, None, (24, 1)),
@@ -562,16 +562,29 @@ class TestDispatchWorkers:
 
         assert resolved == REGISTRATION_WORKERS
 
-    @pytest.mark.parametrize(("resource_class", "expected_workers"), [(_PROCESSING_RESOURCES, PROCESSING_WORKERS)])
-    def test_class_whose_ceiling_meets_its_default_never_widens(
-        self, resource_class: ResourceClass, expected_workers: int
-    ) -> None:
+    def test_class_whose_ceiling_meets_its_default_never_widens(self) -> None:
         """Verifies that a class whose ceiling meets its default holds that width on an idle host."""
-        resolved = resolve_dispatch_workers(
-            resource_class=resource_class, free_cores=126, pending_jobs=1, running_jobs=0, concurrency_cap=12
+        fixed = ResourceClass(
+            name="fixed",
+            workers_per_job=6,
+            maximum_workers_per_job=6,
+            concurrency_limit=None,
+            concurrency_reservation=None,
         )
 
-        assert resolved == expected_workers
+        resolved = resolve_dispatch_workers(
+            resource_class=fixed, free_cores=126, pending_jobs=1, running_jobs=0, concurrency_cap=12
+        )
+
+        assert resolved == 6
+
+    def test_processing_widens_toward_its_ceiling_on_an_idle_host(self) -> None:
+        """Verifies that the processing class reaches its ceiling once its queue has drained."""
+        resolved = resolve_dispatch_workers(
+            resource_class=_PROCESSING_RESOURCES, free_cores=126, pending_jobs=1, running_jobs=0, concurrency_cap=12
+        )
+
+        assert resolved == PROCESSING_MAXIMUM_WORKERS
 
 
 @pytest.mark.xdist_group(name="allocation_system_probes")

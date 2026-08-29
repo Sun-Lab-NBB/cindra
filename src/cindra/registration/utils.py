@@ -133,7 +133,7 @@ def combine_nonrigid_offsets(
 
 
 @lru_cache(maxsize=5)
-def compute_gaussian_frequency_filter(sigma: float, height: int, width: int) -> NDArray[np.complex64]:
+def compute_gaussian_frequency_filter(sigma: float, height: int, width: int, workers: int) -> NDArray[np.complex64]:
     """Creates a Gaussian smoothing filter in the Fourier domain using real FFT.
 
     Constructs a 2D Gaussian kernel in spatial domain, then transforms it to frequency domain for use with phase
@@ -143,6 +143,7 @@ def compute_gaussian_frequency_filter(sigma: float, height: int, width: int) -> 
         sigma: The standard deviation of the Gaussian kernel in pixels.
         height: The height of the frames or images to be filtered, in pixels.
         width: The width of the frames or images to be filtered, in pixels.
+        workers: The number of threads the transform may use.
 
     Returns:
         The smoothing filter in the Fourier domain with shape (height, width // 2 + 1) for real FFT compatibility.
@@ -158,7 +159,7 @@ def compute_gaussian_frequency_filter(sigma: float, height: int, width: int) -> 
     gaussian_kernel = np.outer(a=gaussian_row, b=gaussian_column)
 
     gaussian_kernel /= gaussian_kernel.sum()
-    return scipy_rfft2(x=ifftshift(x=gaussian_kernel), axes=(-2, -1)).astype(np.complex64)
+    return scipy_rfft2(x=ifftshift(x=gaussian_kernel), axes=(-2, -1), workers=workers).astype(np.complex64)
 
 
 def apply_temporal_smoothing(frames: NDArray[np.float32], sigma: float) -> NDArray[np.float32]:
@@ -255,7 +256,7 @@ def apply_spatial_high_pass(data: NDArray[np.float32], window: int) -> NDArray[n
     return result
 
 
-def compute_reference_fft(reference_image: NDArray[np.float32]) -> NDArray[np.complex64]:
+def compute_reference_fft(reference_image: NDArray[np.float32], workers: int) -> NDArray[np.complex64]:
     """Computes the complex conjugate of the real FFT for a reference image.
 
     The complex conjugate is taken because phase correlation requires multiplication by the conjugate of the reference
@@ -263,11 +264,12 @@ def compute_reference_fft(reference_image: NDArray[np.float32]) -> NDArray[np.co
 
     Args:
         reference_image: The 2D reference image with shape (height, width).
+        workers: The number of threads the transform may use.
 
     Returns:
         The complex conjugate of the FFT with shape (height, width // 2 + 1).
     """
-    return np.conj(scipy_rfft2(x=reference_image, axes=(-2, -1))).astype(np.complex64)
+    return np.conj(scipy_rfft2(x=reference_image, axes=(-2, -1), workers=workers)).astype(np.complex64)
 
 
 @lru_cache(maxsize=5)

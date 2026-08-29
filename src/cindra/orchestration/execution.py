@@ -50,13 +50,16 @@ _DISPATCH_POLL_MILLISECONDS: int = 1000
 """The interval at which the manager re-examines the queues for freed capacity."""
 
 _WORKER_THREAD_CEILING: int = 1
-"""The number of threads every pool worker pins its numeric backends to while it starts.
+"""The number of threads every pool worker pins its resizable numeric backends to while it starts.
 
 Notes:
     A spawned worker re-imports the numeric backends rather than inheriting the parent's, and each of them sizes its
     thread pool to the whole host at import unless the environment says otherwise. A pool running one worker per core
     would therefore hold the square of the core count in threads while using one of them. The ceiling of one is the
     floor each job raises from, not the width it runs at, because every stage sets its own budget once it starts.
+
+    The backends that fix their width while loading take the session's widest job width instead, because no runtime
+    setter reaches them once a worker has started.
 """
 
 _POOL_START_METHOD: str = "spawn"
@@ -434,9 +437,11 @@ def _job_execution_manager(state: JobExecutionState) -> None:
     """
     timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
+    maximum_job_workers = _resolve_maximum_job_workers(state=state)
+
     with (
-        limit_worker_threads(thread_count=_WORKER_THREAD_CEILING),
-        _create_job_pool(max_workers=_resolve_pool_size(state=state)) as pool,
+        limit_worker_threads(thread_count=_WORKER_THREAD_CEILING, maximum_thread_count=maximum_job_workers),
+        _create_job_pool(max_workers=_resolve_pool_size(state=state), maximum_thread_count=maximum_job_workers) as pool,
     ):
         while True:
             if get_execution_state() is not state:
@@ -871,7 +876,7 @@ def _device_memory_admits(device: int, required_megabytes: int) -> bool:
     return free_megabytes >= required_megabytes
 
 
-def _create_job_pool(max_workers: int) -> Executor:
+def _create_job_pool(max_workers: int, maximum_thread_count: int) -> Executor:
     """Creates the worker pool one execution session dispatches its jobs into.
 
     Notes:
@@ -885,10 +890,14 @@ def _create_job_pool(max_workers: int) -> Executor:
         backends under the pinned environment the manager holds. That is what makes the pin reach a backend sizing
         itself at import, and it gives every supported platform the same worker semantics. Each worker then pins its
         backends again as it starts, which reaches the backends that read their variable the first time they are
-        asked to do work rather than while they are imported.
+        asked to do work rather than while they are imported. That initializer runs before the worker unpickles its
+        first work item, so it carries the same pair of counts the manager holds and the latched backends keep the
+        wider one.
 
     Args:
         max_workers: The number of worker processes the pool may hold.
+        maximum_thread_count: The threads each backend that fixes its width while loading may open, which is the
+            widest count any job of the session runs at.
 
     Returns:
         The pool to dispatch the session's jobs into.
@@ -897,7 +906,7 @@ def _create_job_pool(max_workers: int) -> Executor:
         max_workers=max_workers,
         mp_context=get_context(method=_POOL_START_METHOD),
         initializer=initialize_worker_threads,
-        initargs=(_WORKER_THREAD_CEILING,),
+        initargs=(_WORKER_THREAD_CEILING, maximum_thread_count),
     )
 
 
@@ -916,6 +925,36 @@ def _resolve_pool_size(state: JobExecutionState) -> int:
         The number of worker processes the pool may hold, always at least one.
     """
     return max(1, sum(state.class_capacities.values()))
+
+
+def _resolve_maximum_job_workers(state: JobExecutionState) -> int:
+    """Resolves the widest worker count any job of one execution session runs at.
+
+    Notes:
+        The numeric backends that fix their pool width while loading read the environment their worker inherits, and
+        no runtime setter reaches them once that worker has started. They therefore take this count rather than the
+        width a worker starts at, which leaves a job free to spend the cores its dispatch allocated.
+
+        An elastic class widens its jobs toward its own ceiling as its queue drains, so that ceiling is the width its
+        jobs may reach. Every other class takes the width the session resolved for it. The core budget bounds neither
+        of them, because a class default stands whatever the host holds, so this count is not bounded by it either.
+
+    Args:
+        state: The execution state whose resource classes and resolved widths bound the count.
+
+    Returns:
+        The widest worker count a job of this session runs at, always at least one.
+    """
+    if not state.elastic_workers:
+        return max(state.class_workers.values(), default=1)
+
+    return max(
+        (
+            job.resource_class.maximum_workers_per_job or state.class_workers[job.resource_class.name]
+            for job in state.all_jobs.values()
+        ),
+        default=1,
+    )
 
 
 def _committed_memory(state: JobExecutionState) -> int:
