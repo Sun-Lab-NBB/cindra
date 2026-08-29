@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Any
+from pathlib import Path
 from concurrent.futures import Future, ThreadPoolExecutor, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 
@@ -56,7 +58,6 @@ from cindra.orchestration.allocation import (
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
     from collections.abc import Callable, Iterator, Sequence
 
 _JOIN_TIMEOUT: float = 30.0
@@ -1384,7 +1385,7 @@ class TestJobPool:
     @pytest.mark.xdist_group(name="execution_state")
     def test_pool_runs_each_job_in_its_own_process(self) -> None:
         """Verifies that the session pool is a process pool, so a job holds its own numeric-backend budget."""
-        pool = execution._create_job_pool(max_workers=1)
+        pool = execution._create_job_pool(max_workers=1, maximum_thread_count=1)
         try:
             assert isinstance(pool, ProcessPoolExecutor)
         finally:
@@ -1393,7 +1394,7 @@ class TestJobPool:
     @pytest.mark.xdist_group(name="execution_state")
     def test_pool_spawns_its_workers_on_every_platform(self) -> None:
         """Verifies that the session pool requests the spawn start method rather than the host default."""
-        pool = execution._create_job_pool(max_workers=1)
+        pool = execution._create_job_pool(max_workers=1, maximum_thread_count=1)
         try:
             assert pool._mp_context.get_start_method() == "spawn"
         finally:
@@ -1409,6 +1410,74 @@ class TestJobPool:
         state = JobExecutionState(class_capacities=capacities)
 
         assert execution._resolve_pool_size(state=state) == expected_size
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_maximum_job_workers_takes_the_widest_resolved_width(self) -> None:
+        """Verifies that a session pinning its jobs to one width reports the widest width it resolved."""
+        state = JobExecutionState(class_workers={"registration": 8, "processing": 10}, elastic_workers=False)
+
+        assert execution._resolve_maximum_job_workers(state=state) == 10
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_maximum_job_workers_takes_the_class_ceiling_when_jobs_widen(self) -> None:
+        """Verifies that an elastic session reports the ceiling its jobs widen toward rather than the class default."""
+        job = _make_bare_job(job_name=SingleRecordingJobNames.REGISTER, specifier="plane_0")
+        state = JobExecutionState(
+            all_jobs={job.dispatch_key: job},
+            class_workers={job.resource_class.name: job.resource_class.workers_per_job},
+            elastic_workers=True,
+        )
+
+        assert job.resource_class.maximum_workers_per_job is not None
+        assert execution._resolve_maximum_job_workers(state=state) == job.resource_class.maximum_workers_per_job
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_maximum_job_workers_holds_at_one_for_an_empty_session(self) -> None:
+        """Verifies that a session carrying no jobs reports a width of one rather than raising."""
+        assert execution._resolve_maximum_job_workers(state=JobExecutionState()) == 1
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_pool_worker_loads_its_latched_backends_at_the_session_width(self) -> None:
+        """Verifies that a spawned pool worker carries the session width into the moment a late import sizes the
+        backends fixing their pool width while loading, which no runtime setter reaches afterward.
+        """
+        pool = execution._create_job_pool(max_workers=1, maximum_thread_count=6)
+        try:
+            observed = pool.submit(_read_thread_variables).result()
+        finally:
+            pool.shutdown(wait=True, cancel_futures=True)
+
+        # The transform backend registration leans on reads these two and holds the width for the worker's life.
+        assert observed["DUCC0_NUM_THREADS"] == "6"
+        assert observed["OMP_NUM_THREADS"] == "6"
+        # The BLAS backends stay narrow, because every stage raises them through their own runtime setter.
+        assert observed["OPENBLAS_NUM_THREADS"] == "1"
+        assert observed["MKL_NUM_THREADS"] == "1"
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_manager_pins_the_pool_at_the_session_width(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verifies that the manager hands its pool the width its own jobs reach rather than the worker start
+        ceiling, which is what leaves the latched backends wide enough for a job to spend its cores.
+        """
+        widths: list[int] = []
+
+        def _record_pool(max_workers: int, maximum_thread_count: int) -> ThreadPoolExecutor:
+            """Records the width the manager requested and stands in for the session's process pool."""
+            widths.append(maximum_thread_count)
+            return ThreadPoolExecutor(max_workers=max_workers)
+
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        _build_single_recording_tracker(tracker_path=tracker_path)
+        job = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.BINARIZE)
+        monkeypatch.setattr(execution, "_pipeline_worker", _make_completing_worker(observed=[]))
+        monkeypatch.setattr(execution, "_create_job_pool", _record_pool)
+
+        start_execution_session(
+            all_jobs={job.dispatch_key: job}, workers_per_job=None, max_parallel_jobs=None, gpu_devices=None
+        )
+        _wait_for_session_end()
+
+        assert widths == [RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.BINARIZE].workers_per_job]
 
 
 class TestBrokenPool:
@@ -1688,7 +1757,11 @@ def _start_drained_session(
 
 def _use_same_process_pool(monkeypatch: pytest.MonkeyPatch) -> None:
     """Replaces the session's worker pool with a same-process one, so a patched worker stays reachable."""
-    monkeypatch.setattr(execution, "_create_job_pool", lambda max_workers: ThreadPoolExecutor(max_workers=max_workers))
+    monkeypatch.setattr(
+        execution,
+        "_create_job_pool",
+        lambda max_workers, maximum_thread_count: ThreadPoolExecutor(max_workers=max_workers),
+    )
 
 
 def _make_completing_worker(observed: list[str]) -> Callable[..., None]:
@@ -1757,3 +1830,22 @@ def _wait_for_session_end() -> None:
     timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
     while get_execution_state() is not None and not timeout.expired:
         timer.delay(delay=_DRAIN_POLL_MILLISECONDS, allow_sleep=True)
+
+
+def _make_bare_job(job_name: SingleRecordingJobNames, specifier: str) -> PendingJob:
+    """Builds a queued job whose paths are never read, for tests that only inspect its resource class."""
+    return PendingJob(
+        configuration_path=Path("configuration.yaml"),
+        tracker_path=Path(f"{specifier}.yaml"),
+        job_id=ProcessingTracker.generate_job_id(job_name=job_name, specifier=specifier),
+        single_recording=True,
+        resource_class=RESOURCE_CLASS_BY_JOB_NAME[job_name],
+    )
+
+
+def _read_thread_variables() -> dict[str, str]:
+    """Reports the threading variables its process carries, standing in for a backend that reads them as it loads."""
+    return {
+        variable: os.environ.get(variable, "")
+        for variable in ("DUCC0_NUM_THREADS", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
+    }
