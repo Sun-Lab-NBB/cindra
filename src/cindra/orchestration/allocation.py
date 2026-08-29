@@ -22,14 +22,14 @@ if TYPE_CHECKING:
 BINARIZATION_WORKERS: int = 3
 """The number of CPU cores one binarization job holds."""
 
-REGISTRATION_WORKERS: int = 4
+REGISTRATION_WORKERS: int = 8
 """The number of CPU cores one registration job holds while the session dispatches at its full concurrency."""
 
 REGISTRATION_GPU_WORKERS: int = 2
 """The number of CPU cores one device-backed registration job holds. The job builds its reference image, computes its
 crop, and runs its median filters on the host, so it occupies cores alongside the device it registers on."""
 
-PROCESSING_WORKERS: int = 10
+PROCESSING_WORKERS: int = 8
 """The number of CPU cores one processing job holds while the session dispatches at its full concurrency."""
 
 DISCOVERY_WORKERS: int = 2
@@ -47,9 +47,9 @@ whatever the budget supplies."""
 REGISTRATION_MAXIMUM_WORKERS: int = 32
 """The most CPU cores one registration job holds when the host has capacity to spare."""
 
-PROCESSING_MAXIMUM_WORKERS: int = 10
-"""The most CPU cores one processing job holds when the host has capacity to spare. The figure meets the stage
-default, so a processing job holds one width whatever the host holds free."""
+PROCESSING_MAXIMUM_WORKERS: int = 16
+"""The most CPU cores one processing job holds when the host has capacity to spare. The extra cores reach the trace
+extraction, because the detection the stage runs first spends its budget through its own block pool."""
 
 DISCOVERY_MAXIMUM_WORKERS: int = 8
 """The most CPU cores one multi-recording discovery job holds when the host has capacity to spare."""

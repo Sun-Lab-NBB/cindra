@@ -116,8 +116,8 @@
   once nothing else can use the room. Every other class derives its concurrency from the session CPU budget alone.
   Memory bounds admission rather than concurrency, because the memory one job holds follows the recording it processes
   rather than the class that owns it. A class is elastic where its `maximum_workers_per_job` ceiling stands strictly
-  above its `workers_per_job` default, which covers registration, discovery, and extraction and leaves processing at one
-  width. An elastic class widens its jobs at dispatch as the queue drains, and only in a session that accepted the class
+  above its `workers_per_job` default, which covers registration, processing, discovery, and extraction. Binarization
+  and combination carry no ceiling, so each takes its default whatever the host holds free. An elastic class widens its jobs at dispatch as the queue drains, and only in a session that accepted the class
   defaults, because an explicit `workers_per_job` reaches every job unchanged. The free cores divide among the elastic
   classes holding queued work before the share divides among the jobs, so a full queue resolves to the class default
   while a queue holding one job resolves toward the ceiling. A class carrying no ceiling takes its default whatever the
