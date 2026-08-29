@@ -32,7 +32,7 @@ class TestApplyPhaseCorrelation:
         generator = np.random.default_rng(42)
         frames = generator.standard_normal((5, 32, 32)).astype(np.float32)
         reference = generator.standard_normal((32, 32)).astype(np.float32)
-        kernel = compute_reference_fft(reference_image=reference)
+        kernel = compute_reference_fft(reference_image=reference, workers=1)
         result = apply_phase_correlation(frames=frames, kernel=kernel, workers=1)
         assert result.shape == frames.shape
 
@@ -41,7 +41,7 @@ class TestApplyPhaseCorrelation:
         generator = np.random.default_rng(42)
         frames = generator.standard_normal((3, 16, 16)).astype(np.float32)
         reference = generator.standard_normal((16, 16)).astype(np.float32)
-        kernel = compute_reference_fft(reference_image=reference)
+        kernel = compute_reference_fft(reference_image=reference, workers=1)
         result = apply_phase_correlation(frames=frames, kernel=kernel, workers=1)
         assert result.dtype == np.float32
 
@@ -49,7 +49,7 @@ class TestApplyPhaseCorrelation:
         """Verifies that correlating a frame with itself produces a peak at the origin."""
         generator = np.random.default_rng(42)
         reference = generator.standard_normal((32, 32)).astype(np.float32)
-        kernel = compute_reference_fft(reference_image=reference)
+        kernel = compute_reference_fft(reference_image=reference, workers=1)
         kernel /= NORMALIZATION_EPSILON + np.abs(kernel)
         frames = reference[np.newaxis, :, :]
         result = apply_phase_correlation(frames=frames, kernel=kernel, workers=1)
@@ -63,7 +63,7 @@ class TestApplyPhaseCorrelation:
         if zero_frame:
             frames[2] = 0.0
         reference = generator.standard_normal((32, 32)).astype(np.float32)
-        kernel = compute_reference_fft(reference_image=reference)
+        kernel = compute_reference_fft(reference_image=reference, workers=1)
 
         expected_fft = rfft2(frames, axes=(-2, -1))
         expected_fft /= NORMALIZATION_EPSILON + np.abs(expected_fft)
@@ -84,7 +84,7 @@ class TestApplyPhaseCorrelation:
         reference = generator.standard_normal((64, 64)).astype(np.float32)
         shifts = [(0, 0), (1, -2), (-3, 4), (5, 5), (-6, -1)]
         frames = np.stack([np.roll(reference, shift=shift, axis=(0, 1)) for shift in shifts]).astype(np.float32)
-        kernel = compute_reference_fft(reference_image=reference)
+        kernel = compute_reference_fft(reference_image=reference, workers=1)
 
         expected_fft = rfft2(frames, axes=(-2, -1))
         expected_fft /= NORMALIZATION_EPSILON + np.abs(expected_fft)
@@ -253,28 +253,28 @@ class TestComputeGaussianFrequencyFilter:
 
     def test_shape(self) -> None:
         """Verifies the filter shape matches rfft2 output dimensions."""
-        result = compute_gaussian_frequency_filter(sigma=1.5, height=32, width=32)
+        result = compute_gaussian_frequency_filter(sigma=1.5, height=32, width=32, workers=1)
         assert result.shape == (32, 32 // 2 + 1)
 
     def test_dtype(self) -> None:
         """Verifies the filter dtype is complex64."""
-        result = compute_gaussian_frequency_filter(sigma=1.5, height=16, width=16)
+        result = compute_gaussian_frequency_filter(sigma=1.5, height=16, width=16, workers=1)
         assert result.dtype == np.complex64
 
     def test_dc_component_near_one(self) -> None:
         """Verifies the DC component is approximately 1.0 (normalized Gaussian)."""
-        result = compute_gaussian_frequency_filter(sigma=2.0, height=32, width=32)
+        result = compute_gaussian_frequency_filter(sigma=2.0, height=32, width=32, workers=1)
         np.testing.assert_allclose(np.abs(result[0, 0]), 1.0, atol=1e-4)
 
     def test_carries_no_phase_on_even_dimensions(self) -> None:
         """Verifies the filter is zero-phase, so smoothing leaves the correlation peaks on which it acts in place."""
-        result = compute_gaussian_frequency_filter(sigma=1.15, height=48, width=38)
+        result = compute_gaussian_frequency_filter(sigma=1.15, height=48, width=38, workers=1)
         np.testing.assert_allclose(np.imag(result), 0.0, atol=1e-6)
 
     def test_cache_returns_same_object(self) -> None:
         """Verifies the lru_cache returns the same object for identical parameters."""
-        first_result = compute_gaussian_frequency_filter(sigma=3.0, height=64, width=64)
-        second_result = compute_gaussian_frequency_filter(sigma=3.0, height=64, width=64)
+        first_result = compute_gaussian_frequency_filter(sigma=3.0, height=64, width=64, workers=1)
+        second_result = compute_gaussian_frequency_filter(sigma=3.0, height=64, width=64, workers=1)
         assert first_result is second_result
 
 
@@ -453,19 +453,19 @@ class TestComputeReferenceFft:
     def test_shape(self) -> None:
         """Verifies the output shape matches rfft2 dimensions."""
         image = np.ones((32, 32), dtype=np.float32)
-        result = compute_reference_fft(reference_image=image)
+        result = compute_reference_fft(reference_image=image, workers=1)
         assert result.shape == (32, 32 // 2 + 1)
 
     def test_dtype(self) -> None:
         """Verifies the output dtype is complex64."""
         image = np.ones((16, 16), dtype=np.float32)
-        result = compute_reference_fft(reference_image=image)
+        result = compute_reference_fft(reference_image=image, workers=1)
         assert result.dtype == np.complex64
 
     def test_conjugate_property(self) -> None:
         """Verifies the result is the complex conjugate of the rfft2."""
         image = np.random.default_rng(42).standard_normal((16, 16)).astype(np.float32)
-        result = compute_reference_fft(reference_image=image)
+        result = compute_reference_fft(reference_image=image, workers=1)
         expected = np.conj(rfft2(image, axes=(-2, -1))).astype(np.complex64)
         np.testing.assert_allclose(result, expected, atol=1e-5)
 

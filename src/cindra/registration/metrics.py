@@ -326,6 +326,7 @@ def _register_pc_extremes(
         taper_mask, mean_offset = compute_edge_taper(reference_image=reference_image, taper_slope=taper_slope)
         reference_kernel = compute_phase_correlation_kernel(
             reference_image=reference_image,
+            workers=workers,
             smoothing_sigma=smoothing_sigma,
         )
 
@@ -370,6 +371,7 @@ def _register_pc_extremes(
                 smoothing_sigma=smoothing_sigma,
                 y_blocks=y_blocks,
                 x_blocks=x_blocks,
+                workers=workers,
             )
 
             y_nonrigid, x_nonrigid, _ = compute_nonrigid_offsets(

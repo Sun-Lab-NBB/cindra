@@ -618,7 +618,9 @@ def _build_reference_data(reference_image: NDArray[np.float32], *, nonrigid: boo
     """Builds the reference data both backends consume, through the CPU helpers the pipeline uses."""
     taper_slope = 3 * _SMOOTHING_SIGMA
     taper_mask, mean_offset = compute_edge_taper(reference_image=reference_image, taper_slope=taper_slope)
-    kernel = compute_phase_correlation_kernel(reference_image=reference_image, smoothing_sigma=_SMOOTHING_SIGMA)
+    kernel = compute_phase_correlation_kernel(
+        reference_image=reference_image, smoothing_sigma=_SMOOTHING_SIGMA, workers=1
+    )
     if not nonrigid:
         return ReferenceData(
             taper_mask=taper_mask,
@@ -637,6 +639,7 @@ def _build_reference_data(reference_image: NDArray[np.float32], *, nonrigid: boo
         smoothing_sigma=_SMOOTHING_SIGMA,
         y_blocks=blocks[0],
         x_blocks=blocks[1],
+        workers=1,
     )
     return ReferenceData(
         taper_mask=taper_mask,

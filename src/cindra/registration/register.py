@@ -495,6 +495,7 @@ def _compute_reference(
             frames=apply_edge_taper(frames=frames, taper_mask=taper_mask, mean_offset=mean_offset),
             reference_kernel=compute_phase_correlation_kernel(
                 reference_image=reference_image,
+                workers=workers,
                 smoothing_sigma=spatial_smoothing_sigma,
             ),
             maximum_offset_fraction=maximum_offset_fraction,
@@ -925,6 +926,7 @@ def _register_alignment_channel(
         )
         reference_kernel = compute_phase_correlation_kernel(
             reference_image=reference_image,
+            workers=workers,
             smoothing_sigma=spatial_smoothing_sigma,
         )
 
@@ -936,6 +938,7 @@ def _register_alignment_channel(
                 smoothing_sigma=spatial_smoothing_sigma,
                 y_blocks=blocks[0],
                 x_blocks=blocks[1],
+                workers=workers,
             )
         else:
             blocks = None

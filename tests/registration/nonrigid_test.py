@@ -203,6 +203,7 @@ class TestComputeNonrigidReferenceData:
             smoothing_sigma=1.15,
             y_blocks=y_blocks,
             x_blocks=x_blocks,
+            workers=1,
         )
 
         block_count = 2
@@ -225,6 +226,7 @@ class TestComputeNonrigidReferenceData:
             smoothing_sigma=1.15,
             y_blocks=y_blocks,
             x_blocks=x_blocks,
+            workers=1,
         )
 
         assert taper.dtype == np.float32
@@ -243,6 +245,7 @@ class TestComputeNonrigidReferenceData:
             smoothing_sigma=1.15,
             y_blocks=y_blocks,
             x_blocks=x_blocks,
+            workers=1,
         )
 
         assert np.all(taper >= 0.0)
@@ -266,6 +269,7 @@ class TestComputeNonrigidOffsets:
             smoothing_sigma=1.15,
             y_blocks=y_blocks,
             x_blocks=x_blocks,
+            workers=1,
         )
 
         frames = np.tile(A=reference, reps=(2, 1, 1))
@@ -306,6 +310,7 @@ class TestComputeNonrigidOffsets:
             smoothing_sigma=1.15,
             y_blocks=y_blocks,
             x_blocks=x_blocks,
+            workers=1,
         )
 
         # Shifting the second frame by a known amount moves every block's peak off center.
@@ -349,6 +354,7 @@ class TestComputeNonrigidOffsets:
             smoothing_sigma=1.15,
             y_blocks=y_blocks,
             x_blocks=x_blocks,
+            workers=1,
         )
 
         frames = np.tile(A=reference, reps=(1, 1, 1))
@@ -383,6 +389,7 @@ class TestComputeNonrigidOffsets:
             smoothing_sigma=1.15,
             y_blocks=y_blocks,
             x_blocks=x_blocks,
+            workers=1,
         )
 
         frames = np.tile(A=reference, reps=(2, 1, 1))
@@ -425,6 +432,7 @@ class TestAdaptiveCorrelationSmoothing:
             smoothing_sigma=1.15,
             y_blocks=y_blocks,
             x_blocks=x_blocks,
+            workers=1,
         )
 
         # Shifts the whole frame, so all 36 blocks share one true offset, then replaces one block's content with

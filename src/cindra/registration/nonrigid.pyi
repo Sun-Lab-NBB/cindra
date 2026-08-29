@@ -21,6 +21,7 @@ def compute_nonrigid_reference_data(
     smoothing_sigma: float,
     y_blocks: list[NDArray[np.int32]],
     x_blocks: list[NDArray[np.int32]],
+    workers: int,
 ) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.complex64]]: ...
 def compute_nonrigid_offsets(
     frames: NDArray[np.float32],
