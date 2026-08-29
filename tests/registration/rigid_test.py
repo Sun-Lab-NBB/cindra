@@ -81,35 +81,35 @@ class TestComputePhaseCorrelationKernel:
     def test_shape(self) -> None:
         """Verifies the kernel shape matches rfft2 output dimensions."""
         reference = np.ones((32, 32), dtype=np.float32)
-        kernel = compute_phase_correlation_kernel(reference_image=reference)
+        kernel = compute_phase_correlation_kernel(reference_image=reference, workers=1)
         assert kernel.shape == (32, 32 // 2 + 1)
 
     def test_dtype(self) -> None:
         """Verifies the kernel dtype is complex64."""
         reference = np.ones((16, 16), dtype=np.float32)
-        kernel = compute_phase_correlation_kernel(reference_image=reference)
+        kernel = compute_phase_correlation_kernel(reference_image=reference, workers=1)
         assert kernel.dtype == np.complex64
 
     def test_no_smoothing(self) -> None:
         """Verifies the kernel works without Gaussian smoothing."""
         generator = np.random.default_rng(seed=42)
         reference = generator.standard_normal((32, 32)).astype(np.float32)
-        kernel = compute_phase_correlation_kernel(reference_image=reference, smoothing_sigma=0.0)
+        kernel = compute_phase_correlation_kernel(reference_image=reference, smoothing_sigma=0.0, workers=1)
         assert kernel.shape == (32, 32 // 2 + 1)
 
     def test_with_smoothing(self) -> None:
         """Verifies the kernel works with Gaussian smoothing."""
         generator = np.random.default_rng(seed=42)
         reference = generator.standard_normal((32, 32)).astype(np.float32)
-        kernel_no_smooth = compute_phase_correlation_kernel(reference_image=reference, smoothing_sigma=0.0)
-        kernel_smooth = compute_phase_correlation_kernel(reference_image=reference, smoothing_sigma=1.5)
+        kernel_no_smooth = compute_phase_correlation_kernel(reference_image=reference, smoothing_sigma=0.0, workers=1)
+        kernel_smooth = compute_phase_correlation_kernel(reference_image=reference, smoothing_sigma=1.5, workers=1)
         assert not np.allclose(kernel_no_smooth, kernel_smooth)
 
     def test_normalized_magnitude(self) -> None:
         """Verifies the kernel magnitudes are approximately normalized."""
         generator = np.random.default_rng(seed=42)
         reference = generator.standard_normal((32, 32)).astype(np.float32)
-        kernel = compute_phase_correlation_kernel(reference_image=reference, smoothing_sigma=0.0)
+        kernel = compute_phase_correlation_kernel(reference_image=reference, smoothing_sigma=0.0, workers=1)
         magnitudes = np.abs(kernel)
         np.testing.assert_allclose(magnitudes, 1.0, atol=0.15)
 
@@ -121,7 +121,7 @@ class TestComputeRigidOffsets:
         """Verifies zero offsets when frames match the reference."""
         generator = np.random.default_rng(seed=42)
         reference = generator.standard_normal((64, 64)).astype(np.float32)
-        kernel = compute_phase_correlation_kernel(reference_image=reference)
+        kernel = compute_phase_correlation_kernel(reference_image=reference, workers=1)
         frames = np.tile(A=reference, reps=(3, 1, 1))
         y_offsets, x_offsets, _correlation = compute_rigid_offsets(
             frames=frames,
@@ -139,7 +139,7 @@ class TestComputeRigidOffsets:
         """Verifies detection of a known rigid translation."""
         generator = np.random.default_rng(seed=42)
         reference = generator.standard_normal((64, 64)).astype(np.float32)
-        kernel = compute_phase_correlation_kernel(reference_image=reference)
+        kernel = compute_phase_correlation_kernel(reference_image=reference, workers=1)
         shifted = np.roll(a=reference, shift=(3, -2), axis=(0, 1))
         frames = shifted[np.newaxis, :, :]
         y_offsets, x_offsets, _correlation = compute_rigid_offsets(
@@ -156,7 +156,7 @@ class TestComputeRigidOffsets:
         """Verifies the output dtypes are correct."""
         generator = np.random.default_rng(seed=42)
         reference = generator.standard_normal((32, 32)).astype(np.float32)
-        kernel = compute_phase_correlation_kernel(reference_image=reference)
+        kernel = compute_phase_correlation_kernel(reference_image=reference, workers=1)
         frames = np.tile(A=reference, reps=(2, 1, 1))
         y_offsets, x_offsets, correlation = compute_rigid_offsets(
             frames=frames,
@@ -173,7 +173,7 @@ class TestComputeRigidOffsets:
         """Verifies offsets can be computed with temporal smoothing enabled."""
         generator = np.random.default_rng(seed=42)
         reference = generator.standard_normal((32, 32)).astype(np.float32)
-        kernel = compute_phase_correlation_kernel(reference_image=reference)
+        kernel = compute_phase_correlation_kernel(reference_image=reference, workers=1)
         frames = np.tile(A=reference, reps=(10, 1, 1))
         y_offsets, x_offsets, _correlation = compute_rigid_offsets(
             frames=frames,
@@ -190,7 +190,7 @@ class TestComputeRigidOffsets:
         """Verifies that matching frames produce high positive correlation values."""
         generator = np.random.default_rng(seed=42)
         reference = generator.standard_normal((32, 32)).astype(np.float32)
-        kernel = compute_phase_correlation_kernel(reference_image=reference)
+        kernel = compute_phase_correlation_kernel(reference_image=reference, workers=1)
         frames = np.tile(A=reference, reps=(2, 1, 1))
         _, _, correlation = compute_rigid_offsets(
             frames=frames,
@@ -205,7 +205,7 @@ class TestComputeRigidOffsets:
         """Verifies an offset fraction that rounds to a zero-pixel radius still returns bounded pixel offsets."""
         generator = np.random.default_rng(seed=42)
         reference = generator.standard_normal((64, 64)).astype(np.float32)
-        kernel = compute_phase_correlation_kernel(reference_image=reference)
+        kernel = compute_phase_correlation_kernel(reference_image=reference, workers=1)
         frames = np.stack(
             [np.roll(a=reference, shift=(3, -2), axis=(0, 1)), np.roll(a=reference, shift=(-5, 4), axis=(0, 1))]
         ).astype(np.float32)

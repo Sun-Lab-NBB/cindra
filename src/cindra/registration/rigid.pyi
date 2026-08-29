@@ -20,7 +20,7 @@ def apply_edge_taper(
     frames: NDArray[np.float32], taper_mask: NDArray[np.float32], mean_offset: NDArray[np.float32]
 ) -> NDArray[np.float32]: ...
 def compute_phase_correlation_kernel(
-    reference_image: NDArray[np.float32], smoothing_sigma: float = 0.0
+    reference_image: NDArray[np.float32], workers: int, smoothing_sigma: float = 0.0
 ) -> NDArray[np.complex64]: ...
 def compute_rigid_offsets(
     frames: NDArray[np.float32],

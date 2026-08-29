@@ -70,6 +70,7 @@ def apply_edge_taper(
 
 def compute_phase_correlation_kernel(
     reference_image: NDArray[np.float32],
+    workers: int,
     smoothing_sigma: float = 0.0,
 ) -> NDArray[np.complex64]:
     """Computes the phase correlation kernel from a reference image.
@@ -80,6 +81,7 @@ def compute_phase_correlation_kernel(
 
     Args:
         reference_image: The reference image with shape (height, width).
+        workers: The number of threads each transform may use.
         smoothing_sigma: The standard deviation of Gaussian smoothing in pixels. Defaults to 0.0. Values <= 0
             disable smoothing.
 
@@ -87,7 +89,7 @@ def compute_phase_correlation_kernel(
         The phase correlation kernel with shape (height, width // 2 + 1) from real FFT.
     """
     height, width = reference_image.shape
-    reference_fft = compute_reference_fft(reference_image=reference_image)
+    reference_fft = compute_reference_fft(reference_image=reference_image, workers=workers)
     reference_fft /= NORMALIZATION_EPSILON + np.absolute(reference_fft)
 
     if smoothing_sigma > 0:
@@ -95,6 +97,7 @@ def compute_phase_correlation_kernel(
             sigma=smoothing_sigma,
             height=height,
             width=width,
+            workers=workers,
         )
 
     return reference_fft.astype(np.complex64)
