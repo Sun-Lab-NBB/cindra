@@ -652,8 +652,9 @@ def prepare_multi_recording_batch_tool(
         existed. The dataset_name field is the resolved lowercased dataset name. To verify a dataset, call
         verify_multi_recording_output_tool with the dataset_name plus any output_root belonging to the dataset (one of
         the input output_roots, whose cindra/ subdirectory is resolved automatically). A job_id is derived from the job
-        name and specifier alone, so the same phase carries the same identifier in every dataset and (tracker_path,
-        job_id) is the only key that identifies a job across the batch. Keying a dictionary by job_id alone merges
+        name and specifier alone, so the discovery phase carries the same identifier in every dataset and an extraction
+        job carries the identifier of its own recording, and (tracker_path, job_id) is the only key that identifies a
+        job across the batch. Keying a dictionary by job_id alone merges
         datasets. Also includes 'total_datasets' and 'total_jobs' counts, plus 'invalid_configurations' listing every
         rejected dataset entry with its reason. A dataset whose existing configuration records output roots other than
         the ones passed here is reported under 'path_conflicts', naming the dataset, the stored value, and the passed
@@ -1260,11 +1261,11 @@ def execute_processing_jobs_tool(
 
         Each job runs under the resource class of its phase. Binarization holds 3 cores per job at a fixed concurrency
         of 4. Combination holds 1 core per job, because it merges result files serially, and its concurrency is bounded
-        by the CPU budget alone. Registration holds 4 cores per job as its floor and widens toward its ceiling of 32,
-        while processing holds 10 at a ceiling that meets that default, so every processing job holds one width. Both
+        by the CPU budget alone. Registration holds 8 cores per job as its floor and widens toward its ceiling of 32,
+        while processing holds 8 and widens toward its ceiling of 16. Both
         classes carry a concurrency bounded by the CPU budget. The session memory budget bounds dispatch for every class
-        alike rather than the concurrency cap of any one of them. The binarization class alone ignores both worker
-        parameters below.
+        alike rather than the concurrency cap of any one of them. The binarization class ignores both worker
+        parameters below, as does the device-backed registration class described next.
 
         A registration job of a session that names a CUDA device runs under a separate class instead, holding 2 cores
         and one CUDA device for its whole duration. The devices the session holds are what bound that class, so it
@@ -1281,14 +1282,14 @@ def execute_processing_jobs_tool(
             hexadecimal job identifier from the prepare manifest), and 'pipeline_type' ('single-recording' or
             'multi-recording').
         workers_per_job: CPU cores per job, overriding the measured default of every class that carries no hard
-            concurrency ceiling. Leave as None to accept the measured defaults, which are 3 cores for binarization, 4
-            for registration, 10 for processing, 1 for combination, 2 for multi-recording discovery, and 16 for
+            concurrency ceiling. Leave as None to accept the measured defaults, which are 3 cores for binarization, 8
+            for registration, 8 for processing, 1 for combination, 2 for multi-recording discovery, and 16 for
             multi-recording extraction. Those figures are the floor each class runs at while the session dispatches at
             its full concurrency. A None request also lets a job of an elastic class widen at dispatch toward its class
-            ceiling as the queue drains. That ceiling is 32 cores for registration, 8 for multi-recording discovery, and
-            32 for multi-recording extraction, and the processing ceiling meets its default, so a processing job holds
-            one width. Set to -1 to give every job the whole session core budget. The override is a single scalar
-            applied to every non-fixed class alike, and it reaches every job of those classes unchanged.
+            ceiling as the queue drains. That ceiling is 32 cores for registration, 16 for processing, 8 for
+            multi-recording discovery, and 32 for multi-recording extraction. Set to -1 to give every job the whole
+            session core budget. The override is a single scalar applied to every non-fixed class alike, and it
+            reaches every job of those classes unchanged.
         max_parallel_jobs: Maximum concurrent jobs per resource class, overriding the derived concurrency cap of every
             non-fixed resource class. Leave as None to accept the derived caps, or set to -1 to lift them so that only
             the job count bounds concurrency.
@@ -1782,13 +1783,12 @@ def execute_full_pipeline_tool(
             single-recording runs the dataset spans), and 'dataset_name'.
         workers_per_job: CPU cores per job, overriding the measured default of every class that carries no hard
             concurrency ceiling. Leave as None to accept the measured defaults of 3 cores for binarization, 1 for
-            combination, 4 for registration, 10 for processing, 2 for multi-recording discovery, and 16 for
+            combination, 8 for registration, 8 for processing, 2 for multi-recording discovery, and 16 for
             multi-recording extraction. Those figures are the floor each class runs at while the session dispatches at
             its full concurrency. A None request also lets a job of an elastic class widen at dispatch toward its class
-            ceiling as the queue drains. That ceiling is 32 cores for registration, 8 for multi-recording discovery, and
-            32 for multi-recording extraction, and the processing ceiling meets its default, so a processing job holds
-            one width. Set to -1 to give every job the whole session core budget. An explicit count reaches every job of
-            every non-fixed class unchanged.
+            ceiling as the queue drains. That ceiling is 32 cores for registration, 16 for processing, 8 for
+            multi-recording discovery, and 32 for multi-recording extraction. Set to -1 to give every job the whole
+            session core budget. An explicit count reaches every job of every non-fixed class unchanged.
         max_parallel_jobs: Maximum concurrent jobs per resource class, overriding the derived concurrency cap of every
             non-fixed resource class. Leave as None to accept the derived caps, or set to -1 to lift them so that only
             the job count bounds concurrency.
