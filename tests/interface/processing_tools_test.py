@@ -649,7 +649,8 @@ def _build_execution_state(tmp_path: Path, tracker_path: Path, job_id: str) -> J
 
 
 def _prepare_recording(tmp_path: Path) -> tuple[dict[str, object], Path]:
-    """Prepares one recording through the batch tool, returning its manifest entry and its output root."""
+    """Prepares one recording through the batch tool, returning its manifest entry and its cindra output
+    directory."""
     configuration_path = tmp_path / "template.yaml"
     SingleRecordingConfiguration().save(file_path=configuration_path)
 

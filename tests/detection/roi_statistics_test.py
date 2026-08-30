@@ -247,7 +247,7 @@ class TestROI:
 
     def test_flat_weight_gradient_keeps_every_pixel(self) -> None:
         """Verifies that an ROI whose weights carry no radial gradient keeps all of its pixels in the soma."""
-        # A 3x4 block plus one distant outlier gives 13 pixels, clearing the ten-pixel crop shortcut. With every
+        # A 4x3 block plus one distant outlier gives 13 pixels, clearing the ten-pixel crop shortcut. With every
         # weight at zero, the cumulative radial weight never rises, so the gradient is flat and the crop radius is
         # undefined. The soma must then fall back to the whole ROI rather than to an arbitrary radius.
         block_y = [5, 5, 5, 6, 6, 6, 7, 7, 7, 8, 8, 8]
