@@ -47,6 +47,9 @@ def compute_delta_fluorescence(
 
     Returns:
         The neuropil-and-baseline-corrected delta fluorescence traces with shape (roi_count, frame_count).
+
+    Raises:
+        ValueError: If baseline_method is not 'maximin', 'constant', or 'constant_percentile'.
     """
     # Subtracts the scaled neuropil fluorescence from the ROI fluorescence. Casts the coefficient to float32 to
     # prevent Python's native float64 from promoting the entire computation chain to double precision. Scaling by the

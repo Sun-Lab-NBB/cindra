@@ -32,7 +32,8 @@ def extract_traces(context: RuntimeContext | MultiRecordingRuntimeContext, *, wo
     Notes:
         Dispatches to the appropriate internal handler based on the runtime context type. For single-recording contexts,
         the full extraction pipeline runs including classification and interleaved extraction statistics. For
-        multi-recording contexts, backward-transformed tracked ROI masks are used without reclassification.
+        multi-recording contexts, backward-transformed tracked ROI masks are used without reclassification, and the
+        extraction statistics are computed after the traces rather than between them.
 
         Extraction and deconvolution run entirely inside Numba kernels parallelized over ROIs, so the worker count is
         applied as the Numba thread mask before dispatch and covers both branches. The mask is thread-local, so
@@ -625,7 +626,8 @@ def _extract_functional_channel_2(
     Args:
         context: The RuntimeContext containing configuration and mutable runtime data. Modified in-place to store
             channel 2 extraction results and colocalization data.
-        batch_size: The number of frames to process at the same time.
+        batch_size: The number of frames to process at the same time during fluorescence extraction. The same value
+            is reused as the number of ROIs per batch during OASIS spike deconvolution.
 
     Raises:
         RuntimeError: If the registered binary file path is not set for channel 2 or if channel 2 ROI detection has not

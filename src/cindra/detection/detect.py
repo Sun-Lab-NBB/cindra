@@ -1,4 +1,4 @@
-"""Provides the ROI detection entry point for the single-recording and the multi-recording processing pipelines."""
+"""Provides the ROI detection entry point for the single-recording processing pipeline."""
 
 from __future__ import annotations
 

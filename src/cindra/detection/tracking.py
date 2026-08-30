@@ -297,8 +297,8 @@ def _create_template_roi(
         cluster_rois: The ROIs from the cluster representing the same ROI across recordings.
         cluster_id: The unique identifier for this cluster.
         image_shape: The height and width of the deformed visual space as a tuple.
-        pixel_prevalence: The minimum percentage of recordings a pixel must appear in for it to be included in the
-            generated template mask.
+        pixel_prevalence: The minimum percentage of the cluster's member ROIs a pixel must appear in for it to be
+            included in the generated template mask.
 
     Returns:
         A new ROIMask instance representing the template, or None if the template would be empty.
