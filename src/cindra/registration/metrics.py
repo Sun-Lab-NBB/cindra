@@ -158,7 +158,6 @@ def compute_pc_metrics(context: RuntimeContext, *, workers: int) -> None:
         level=LogLevel.SUCCESS,
     )
 
-    # Stores PC extreme images in the runtime context. Stacks low and high projections along axis 0.
     principal_component_extreme_images = np.stack(arrays=(pc_low, pc_high), axis=0)
 
     console.echo(
@@ -230,11 +229,10 @@ def _compute_pc_extremes(
     mean_image = frames_flat.mean(axis=0)
     frames_centered = frames_flat - mean_image
 
-    # Fits PCA on transposed data to get frame-wise projections.
+    # The transpose puts frames on the feature axis, so the components come back as per-frame projections.
     pca = PCA(n_components=component_count).fit(frames_centered.T)
     projections: NDArray[np.float32] = pca.components_.T.astype(np.float32)
 
-    # Pre-computes sorted indices for all components at once.
     sorted_indices = np.argsort(a=projections, axis=0)
 
     # Computes mean images from extreme frames for each PC. Indexes directly into the original frames array to avoid
@@ -299,7 +297,6 @@ def _register_pc_extremes(
     """
     component_count, height, width = pc_low.shape
 
-    # Computes constants that do not change across components.
     taper_slope = edge_taper_slope if one_photon_mode else 3.0 * smoothing_sigma
 
     y_blocks, x_blocks, _, _, smoothing_kernel = compute_registration_blocks(
@@ -379,7 +376,7 @@ def _register_pc_extremes(
                 taper_mask=nonrigid_taper,
                 mean_offset=nonrigid_offset,
                 reference_kernel=nonrigid_kernel,
-                snr_threshold=signal_to_noise_threshold,
+                signal_to_noise_threshold=signal_to_noise_threshold,
                 smoothing_kernel=smoothing_kernel,
                 x_blocks=x_blocks,
                 y_blocks=y_blocks,
