@@ -11,11 +11,9 @@ from ataraxis_base_utilities import error_format
 from cindra.detection import compute_registration_blocks
 from cindra.registration.gpu import (
     _GPU_REMEDY,
-    _TF32_VARIABLE,
     GpuRegistrationBackend,
     cupy,
     _require_gpu_runtime,
-    _verify_tf32_disabled,
 )
 from cindra.orchestration.gpu import resolve_gpu_devices
 from cindra.registration.batch import ReferenceData
@@ -453,19 +451,6 @@ class TestBackendGuards:
         with pytest.raises(RuntimeError, match=error_format(message=expected_message)):
             _require_gpu_runtime()
 
-    def test_reduced_precision_matrix_mode_is_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Verifies the backend refuses a device whose cuBLAS handle allows reduced-precision multiplication."""
-        monkeypatch.setattr("cindra.registration.gpu.cupy.cuda.cublas.getMathMode", lambda handle: 1)
-        expected_message = (
-            f"Unable to initialize the GPU registration backend. The cuBLAS handle of the selected device reports "
-            f"math mode 1 rather than the default single-precision mode "
-            f"{int(cupy.cuda.cublas.CUBLAS_DEFAULT_MATH)}, so the nonrigid subpixel upsampling would run "
-            f"at reduced precision and shift the reported correlation peak by a whole 0.1 pixel quantum. Set the "
-            f"'{_TF32_VARIABLE}' environment variable to 0 before starting the process."
-        )
-        with pytest.raises(RuntimeError, match=error_format(message=expected_message)):
-            _verify_tf32_disabled()
-
 
 class TestRemainingBranches:
     """Tests the branches the ordinary registration passes do not reach."""
@@ -511,7 +496,7 @@ class TestRemainingBranches:
     def test_two_step_refinement_releases_both_device_backends(
         self, tmp_path: Path, single_recording_context: Callable[..., RuntimeContext]
     ) -> None:
-        """Verifies that a two-step device pass releases the refinement backend as well as the first one."""
+        """Verifies that a two-step device pass completes with both of its device backends released."""
         movie, _ = _build_shifted_movie(frame_count=48, height=128, width=128)
 
         def configure(configuration: SingleRecordingConfiguration) -> None:

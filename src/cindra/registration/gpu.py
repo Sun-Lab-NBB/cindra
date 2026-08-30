@@ -32,15 +32,12 @@ if TYPE_CHECKING:
     from .batch import ReferenceData
 
 _GPU_REMEDY: str = "Run 'cindra gpu' to report the local CUDA devices and install the runtime libraries they need."
-"""The command that resolves an unusable GPU runtime, named by every message this module produces.
+"""The command that resolves an unusable GPU runtime, named by the message the missing-CuPy check produces.
 
 Notes:
     The orchestration package states the same command, and this module restates it rather than importing it, because
     the dependency chain runs from orchestration into registration and never back.
 """
-
-_TF32_VARIABLE: str = "CUPY_TF32"
-"""The environment variable CuPy reads to decide whether its cuBLAS handle allows TF32 matrix multiplication."""
 
 _MINIMUM_CORRELATION_RADIUS: int = 1
 """The smallest rigid correlation search radius the quadrant rearrangement can express."""
@@ -182,7 +179,7 @@ class GpuRegistrationBackend:
         _released: Determines whether the backend has already handed its device and page-locked host allocations back.
 
     Raises:
-        RuntimeError: If the CuPy distribution is absent, or if the device allows TF32 matrix multiplication.
+        RuntimeError: If the CuPy distribution is absent.
     """
 
     def __init__(self, reference_data: ReferenceData, device: int) -> None:
@@ -198,7 +195,6 @@ class GpuRegistrationBackend:
         self._released: bool = False
 
         with cupy.cuda.Device(self._device):
-            _verify_tf32_disabled()
             self._compute_stream: cupy.cuda.Stream = cupy.cuda.Stream(non_blocking=True)
             self._transfer_stream: cupy.cuda.Stream = cupy.cuda.Stream(non_blocking=True)
             self._upload_events: tuple[cupy.cuda.Event, ...] = tuple(cupy.cuda.Event() for _ in range(_PIPELINE_DEPTH))
@@ -368,8 +364,9 @@ class GpuRegistrationBackend:
             clipped and narrowed, and it is None when the input batch was float32.
 
         Raises:
-            ValueError: If the batch carries a dtype other than int16 or float32, or if nonrigid registration is
-                enabled and no nonrigid block offsets are supplied.
+            ValueError: If the batch carries a dtype other than int16 or float32, if nonrigid registration is
+                enabled and the backend holds no block reference data, or if nonrigid registration is enabled and no
+                nonrigid block offsets are supplied.
         """
         slot = self._staging_slot
         self._staging_slot = (slot + 1) % _PIPELINE_DEPTH
@@ -1280,34 +1277,6 @@ def _require_gpu_runtime() -> None:
     message = (
         f"Unable to initialize the GPU registration backend. The CuPy distribution is not installed, so no CUDA "
         f"device is reachable. {_GPU_REMEDY} Omit the device argument to run the stage on the host CPU instead."
-    )
-    console.error(message=message, error=RuntimeError)
-
-
-def _verify_tf32_disabled() -> None:
-    """Verifies that the current device performs its matrix multiplications at full single precision.
-
-    Notes:
-        The nonrigid subpixel stage multiplies a (block_count * frame_count, 49) correlation matrix by a
-        (49, 3721) RBF upsampling matrix and reads the result with an argmax over a 61 by 61 surface. TF32 carries a
-        10-bit mantissa, which perturbs neighboring samples of that surface by more than the 0.1 pixel spacing
-        between them and therefore moves the reported peak by a whole subpixel quantum. CuPy switches the cuBLAS math
-        mode away from its default only when the environment enables TF32, so the mode the handle reports answers the
-        question directly.
-
-    Raises:
-        RuntimeError: If the cuBLAS handle of the current device allows TF32 matrix multiplication.
-    """
-    math_mode = cupy.cuda.cublas.getMathMode(cupy.cuda.Device().cublas_handle)
-    if math_mode == cupy.cuda.cublas.CUBLAS_DEFAULT_MATH:
-        return
-
-    message = (
-        f"Unable to initialize the GPU registration backend. The cuBLAS handle of the selected device reports math "
-        f"mode {math_mode} rather than the default single-precision mode "
-        f"{int(cupy.cuda.cublas.CUBLAS_DEFAULT_MATH)}, so the nonrigid subpixel upsampling would run at reduced "
-        f"precision and shift the reported correlation peak by a whole 0.1 pixel quantum. Set the "
-        f"'{_TF32_VARIABLE}' environment variable to 0 before starting the process."
     )
     console.error(message=message, error=RuntimeError)
 

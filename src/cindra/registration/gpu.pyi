@@ -15,7 +15,6 @@ from .utils import (
 )
 
 _GPU_REMEDY: str
-_TF32_VARIABLE: str
 _MINIMUM_CORRELATION_RADIUS: int
 _SIGNAL_TO_NOISE_EPSILON: float
 _SUBPIXEL_FACTOR: int
@@ -181,7 +180,6 @@ class GpuRegistrationBackend:
     def _compute_correlation_signal_to_noise_ratio(correlation_data: cupy.ndarray, padding: int) -> cupy.ndarray: ...
 
 def _require_gpu_runtime() -> None: ...
-def _verify_tf32_disabled() -> None: ...
 def _upload_nonrigid_data(
     reference_data: ReferenceData, frame_height: int, frame_width: int
 ) -> _NonrigidDeviceData | None: ...
