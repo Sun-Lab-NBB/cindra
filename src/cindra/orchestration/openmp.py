@@ -77,7 +77,8 @@ class OpenMPSummary:
     link_path: Path | None
     """The absolute path to the link that makes the runtime loadable, or None when no runtime was found."""
     searched_paths: tuple[Path, ...]
-    """The paths examined while discovering the runtime, in the order they were examined."""
+    """The candidate paths discovery walked, in the order it walks them, which stops at the first one holding a
+    runtime."""
     loadable: bool
     """Determines whether the OpenMP runtime loads from a fresh interpreter once the call returns."""
 
@@ -335,13 +336,20 @@ def _link_openmp_runtime(runtime_path: Path, link_path: Path) -> None:
 def _verify_runtime_loadable() -> bool:
     """Determines whether the OpenMP runtime loads from a fresh interpreter, which rereads the loader search path.
 
+    Notes:
+        A probe that outlives the verification timeout is treated as a runtime that does not load, because a load
+        stalling that long signals a broken runtime rather than a slow one.
+
     Returns:
-        True when the fresh interpreter loads the runtime, and False when it does not.
+        True when the fresh interpreter loads the runtime, and False when it does not or when the probe times out.
     """
-    result = subprocess.run(  # noqa: S603 - a fresh interpreter runs a module constant with no shell.
-        args=[sys.executable, "-c", _VERIFICATION_SCRIPT],
-        capture_output=True,
-        check=False,
-        timeout=_VERIFICATION_TIMEOUT,
-    )
+    try:
+        result = subprocess.run(  # noqa: S603 - a fresh interpreter runs a module constant with no shell.
+            args=[sys.executable, "-c", _VERIFICATION_SCRIPT],
+            capture_output=True,
+            check=False,
+            timeout=_VERIFICATION_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return False
     return result.returncode == 0
