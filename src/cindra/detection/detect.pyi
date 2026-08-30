@@ -15,7 +15,7 @@ from .roi_statistics import compute_roi_statistics as compute_roi_statistics
 from ..classification import classify as classify
 
 _ITERATION_MULTIPLIER: int
-_BACKGROUND_SCALE: int
+_BACKGROUND_SCALE: float
 _ENHANCED_MINIMUM_INTENSITY: float
 _ENHANCED_MAXIMUM_INTENSITY: float
 _VARIANCE_EPSILON: float
