@@ -1,4 +1,6 @@
-"""Provides the ROI viewer window for inspecting and reclassifying single-recording pipeline results."""
+"""Provides the ROI viewer window for inspecting and reclassifying single-recording and multi-recording pipeline
+results.
+"""
 
 from __future__ import annotations
 
@@ -86,7 +88,8 @@ _STATISTICS_TO_SHOW: tuple[str, ...] = (
 
 
 class ROIViewer(QMainWindow):
-    """Displays a UI window for inspecting and reclassifying single-recording pipeline results.
+    """Displays a UI window for inspecting and reclassifying single-recording pipeline results and multi-recording
+    tracked ROIs.
 
     Displays ROI overlays, background images, and fluorescence traces. Supports left-click ROI selection,
     shift/ctrl multi-select, a Classify toggle that flips the clicked ROI's cell/non-cell label on any click

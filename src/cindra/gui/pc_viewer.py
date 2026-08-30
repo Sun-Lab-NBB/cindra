@@ -43,7 +43,8 @@ class PCViewer(QMainWindow):
         _image_height: Height of PC images in pixels.
         _image_width: Width of PC images in pixels.
         _pc_metrics: Registration offset metrics array with shape (principal_component_count, 3), or None.
-        _pc_projections: Per-frame PC projection array with shape (frame_count, principal_component_count), or None.
+        _pc_projections: Sampled-frame PC projection array with shape (sampled_frames,
+            principal_component_count), or None.
         _central_widget: Central widget container.
         _layout: Grid layout for arranging all controls and views.
         _graphics_widget: PyQtGraph graphics layout for image and plot views.
@@ -119,7 +120,8 @@ class PCViewer(QMainWindow):
         self._layout.setRowStretch(1, 1)
         self._layout.setRowStretch(2, 0)
 
-        # Configures pixel offset metrics plot. Top content margin provides space for the legend row.
+        # Configures pixel offset metrics plot. The y-range headroom applied in _reload_pc_data provides space
+        # for the legend row.
         self._metrics_plot: pg.PlotItem = self._graphics_widget.addPlot(row=0, col=0)
         configure_plot(
             plot=self._metrics_plot,
@@ -315,7 +317,7 @@ class PCViewer(QMainWindow):
         )
         self._image_height, self._image_width = self._pc_images.shape[2:]
         self._pc_metrics = pc_metrics
-        # Falls back to a zero array when the recording has no per-frame PC projections.
+        # Falls back to a zero array when the recording has no sampled-frame PC projections.
         if pc_projections is not None:
             self._pc_projections = pc_projections
         else:
@@ -332,7 +334,7 @@ class PCViewer(QMainWindow):
         self._metrics_y_range = (metrics_min, metrics_max)
         self._projection_y_range = (float(self._pc_projections.min()), float(self._pc_projections.max()))
 
-        # Renders the first PC and enables playback controls.
+        # Renders the selected PC and enables playback controls.
         self._plot_frame()
         self._play_button.setEnabled(True)
 
@@ -495,7 +497,7 @@ class PCViewer(QMainWindow):
         self._metrics_plot.setXRange(1, self._pc_count, padding=0.0)
         self._metrics_plot.setYRange(*self._metrics_y_range, padding=0.0)
 
-        # Projection plot: shows the per-frame projection onto the selected PC over time.
+        # Projection plot: shows the per-sampled-frame projection onto the selected PC.
         self._projection_plot.clear()
         self._projection_plot.plot(self._pc_projections[:, pc_index])
         self._projection_plot.setXRange(0, self._pc_projections.shape[0] - 1)
