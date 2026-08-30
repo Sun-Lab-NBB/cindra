@@ -10,7 +10,7 @@ from .utils import (
 )
 from ..detection import compute_spatial_taper_mask as compute_spatial_taper_mask
 
-_SNR_EPSILON: float
+_SIGNAL_TO_NOISE_EPSILON: float
 _SUBPIXEL_FACTOR: int
 _UPSAMPLING_PADDING: int
 _CORRELATION_BATCH_SIZE: int
@@ -28,7 +28,7 @@ def compute_nonrigid_offsets(
     taper_mask: NDArray[np.float32],
     mean_offset: NDArray[np.float32],
     reference_kernel: NDArray[np.complex64],
-    snr_threshold: float,
+    signal_to_noise_threshold: float,
     smoothing_kernel: NDArray[np.float32],
     x_blocks: list[NDArray[np.int32]],
     y_blocks: list[NDArray[np.int32]],
@@ -43,7 +43,9 @@ def apply_nonrigid_correction(
     y_block_offsets: NDArray[np.float32],
     x_block_offsets: NDArray[np.float32],
 ) -> NDArray[np.float32]: ...
-def _compute_correlation_snr(correlation_data: NDArray[np.float32], padding: int) -> NDArray[np.float32]: ...
+def _compute_correlation_signal_to_noise_ratio(
+    correlation_data: NDArray[np.float32], padding: int
+) -> NDArray[np.float32]: ...
 def _apply_bilinear_interpolation(
     source: NDArray[np.float32],
     y_coordinates: NDArray[np.float32],

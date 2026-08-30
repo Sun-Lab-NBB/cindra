@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 
 class TestTrackRoisAcrossRecordings:
-    """Tests track_rois_across_recordings."""
+    """Tests the cross-recording clustering end to end, from its bin partitioning to its prevalence filter."""
 
     def test_returns_early_for_empty_contexts(self) -> None:
         """Verifies that an empty context list returns without error."""

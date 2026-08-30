@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 
 class TestSelectRecordingRois:
-    """Tests select_recording_rois."""
+    """Tests the ROI filters recording selection applies, the indices it persists, and its skip and repeat paths."""
 
     def test_empty_contexts_returns_without_error(self) -> None:
         """Verifies that an empty context list returns without raising."""

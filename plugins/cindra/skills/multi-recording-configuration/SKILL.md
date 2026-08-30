@@ -139,8 +139,10 @@ create, because concurrent jobs sharing a terminal interleave their bars.
 
 Worker allocation reaches the discovery and extraction stages as an invocation argument, as described in the
 Configuration overview section. Omitting a worker option applies the measured default of 2 workers for discovery and 16
-for extraction, published as `DISCOVERY_WORKERS` and `EXTRACTION_WORKERS` in `cindra.orchestration`. Setting a worker
-option to -1 requests every available core.
+for extraction, published as `DISCOVERY_WORKERS` and `EXTRACTION_WORKERS` in `cindra.orchestration`. On the MCP execute
+tools that default is a floor. A session that leaves `workers_per_job` as None widens each discovery and extraction job
+at dispatch as its queue drains, up to the 8 and 32 core ceilings the classes declare. Setting a worker option to -1
+requests every available core.
 
 ---
 
@@ -341,80 +343,21 @@ See `/single-recording-configuration` Section 9 for full tuning guidance. The sa
 
 ## Configuration file format
 
-### Minimal configuration (required fields only)
-
-```yaml
-pipeline_type: multi-recording
-
-recording_io:
-  dataset_name: "animal_A_learning_task"
-```
-
-The `pipeline_type: multi-recording` discriminator must be present at the top level of every multi-recording
-configuration file. `generate_config_file_tool` writes it automatically, and both `validate_config_file_tool` and
-`cindra run` reject a file that omits it. The examples below show only the sections being customized and assume the
-discriminator is already present.
-
-### Typical configuration
-
-```yaml
-recording_io:
-  dataset_name: "animal_A_learning_task"
-
-roi_selection:
-  probability_threshold: 0.85
-  maximum_size: 1000
-
-diffeomorphic_registration:
-  speed_factor: 3.0
-
-roi_tracking:
-  threshold: 0.75
-  mask_prevalence: 50
-```
-
-### Full configuration with MROI region filtering
-
-```yaml
-runtime:
-  display_progress_bars: false
-
-recording_io:
-  dataset_name: "animal_A_vr_navigation"
-
-roi_selection:
-  probability_threshold: 0.85
-  maximum_size: 1000
-  mroi_region_margin: 30
-
-diffeomorphic_registration:
-  image_type: "enhanced_mean"
-  grid_sampling_factor: 1.0
-  final_grid_sampling: 16.0
-  scale_sampling: 30
-  speed_factor: 3.0
-
-roi_tracking:
-  threshold: 0.75
-  mask_prevalence: 50
-  pixel_prevalence: 50
-  step_sizes: [200, 200]
-  bin_size: 50
-  maximum_distance: 20
-  minimum_size: 25
-```
-
-The `signal_extraction` and `spike_deconvolution` sections take the same keys and defaults their tables above list,
-and both are left at those defaults in the common case.
+The minimal, typical, and full configuration files, along with the top-level `pipeline_type` discriminator every one of
+them carries, are in [config-examples.md](references/config-examples.md).
 
 ---
 
 ## Configuration lifecycle
 
 1. **Template configs**: De-novo configurations generated via `generate_config_file_tool` or manually created. Templates
-   can live anywhere (e.g., `/Data/CA1_GCaMP6f_MD.yaml`) and are reusable across datasets. Templates are never modified
-   by the pipeline. One template can serve multiple datasets that share the same processing parameters (only
-   `dataset_name` differs, and this is handled by the batch tool).
+   can live anywhere (e.g., `/Data/CA1_GCaMP6f_MD.yaml`) and are reusable across datasets. The batch MCP tools never
+   modify a template, but `cindra run -i <file>` DOES write back into the file it is given, saving
+   `runtime.display_progress_bars` and any `-rp/--recording-path` override into it before dispatching. Never pass a
+   shared template to `cindra run`, because the first run stamps one dataset's output roots into the file every other
+   dataset shares. Pass a per-dataset copy, or the resolved copy the prepare tool already wrote. One template can serve
+   multiple datasets that share the same processing parameters (only `dataset_name` differs, and this is handled by the
+   batch tool).
 
 2. **Resolved copies**: When `prepare_multi_recording_batch_tool` runs, it loads the template and applies
    runtime-specific overrides (`recording_io.dataset_name` lowercased to a filesystem-safe key,

@@ -70,7 +70,8 @@ def downsample(data: NDArray[np.float32], *, taper_edge: bool = True) -> NDArray
             (num_frames, height, width) or spatial coordinate grids with shape (num_axes, height, width).
         taper_edge: Determines whether to taper edge elements when dimensions are odd. If True, edge elements are
             multiplied by 0.5 to maintain consistent intensity scaling. If False, edge elements retain their
-            original values.
+            original values. The bottom-right corner takes the factor once per odd axis, so it is multiplied by 0.25
+            when both dimensions are odd.
 
     Returns:
         A downsampled array with shape (depth, ceil(height/2), ceil(width/2)).
@@ -143,8 +144,8 @@ def compute_spatial_taper_mask(sigma: float, height: int, width: int) -> NDArray
     """
     column_distances, row_distances = _mean_centered_meshgrid(height=height, width=width)
 
-    # Computes where taper begins: 2*sigma pixels inward from the edge. This ensures the sigmoid reaches
-    # ~0.12 at the edge (when distance equals half-width).
+    # Computes where taper begins: 2*sigma pixels inward from the edge. Ensures the sigmoid reaches ~0.12 at the edge
+    # (when distance equals half-width).
     taper_start_row = np.float32(((height - 1) / 2) - 2 * sigma)
     taper_start_column = np.float32(((width - 1) / 2) - 2 * sigma)
 
@@ -167,7 +168,8 @@ def compute_registration_blocks(
 
     Notes:
         Divides the field of view into overlapping blocks that are registered independently. The blocks are arranged
-        in a regular grid with positions computed to provide approximately 50% overlap between adjacent blocks.
+        in a regular grid with positions computed so that adjacent blocks overlap by roughly a third of a block,
+        reaching half a block only where the field is twice the block size.
 
     Args:
         height: The imaging field height in pixels.
@@ -182,8 +184,8 @@ def compute_registration_blocks(
         for SNR-based adaptive smoothing of correlation peaks across neighboring blocks.
     """
     # Computes block dimensions and counts for each axis. If the requested block size exceeds the image dimension, uses
-    # the full dimension as a single block. Otherwise, the 1.5x multiplier produces approximately 50% overlap between
-    # adjacent blocks.
+    # the full dimension as a single block. Otherwise, the 1.5x multiplier makes adjacent blocks overlap by roughly a
+    # third of a block, reaching half a block only where the field is twice the block size.
     if block_size[0] >= height:
         block_size_y, y_block_count = height, 1
     else:
@@ -223,9 +225,6 @@ def compute_registration_blocks(
 
 def _mean_centered_meshgrid(height: int, width: int) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
     """Creates a mean-centered distance meshgrid of the specified dimensions.
-
-    Notes:
-        Each coordinate value represents the absolute distance from the center of that axis.
 
     Args:
         height: The height of the frames or images to generate the meshgrid for, in pixels.
@@ -280,7 +279,7 @@ def _apply_rolling_mean_high_pass(frames: NDArray[np.float32], kernel_size: int)
         complete_window_count - 1 if remainder > 0 and complete_window_count > 0 else complete_window_count
     )
 
-    # Reshapes to (num_windows, kernel_size, height, width). This creates a view, not a copy.
+    # Reshapes to (num_windows, kernel_size, height, width). Creates a view, not a copy.
     if batched_windows > 0:
         complete = frames[: batched_windows * kernel_size].reshape(batched_windows, kernel_size, height, width)
         complete -= complete.mean(axis=1, keepdims=True)
@@ -297,8 +296,7 @@ def _compute_block_smoothing_kernel(x_block_count: int, y_block_count: int) -> N
     """Computes a normalized Gaussian kernel matrix for smoothing nonrigid block offsets.
 
     Notes:
-        Creates a kernel that weights neighboring blocks based on their spatial distance. Results are cached since
-        block counts don't change during a recording.
+        Results are cached since block counts don't change during a recording.
 
     Args:
         x_block_count: Number of blocks along the x-axis.

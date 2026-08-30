@@ -234,8 +234,6 @@ def register_recording_plane(
 
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
-
-    # Runs registration (motion correction) and the registration quality metrics computation.
     register_plane(context=context, workers=workers, device=device)
 
     if registration_skipped:
@@ -361,7 +359,7 @@ def save_combined_data(contexts: list[RuntimeContext]) -> None:
 
     output_path = resolve_output_path(output_root=root_path)
     combined_data.save(root_path=output_path)
-    console.echo(message=f"Combined data saved to: {output_path}", level=LogLevel.SUCCESS)
+    console.echo(message=f"Combined data saved to: {output_path}.", level=LogLevel.SUCCESS)
 
 
 def _validate_binaries_are_unmarked(contexts: list[RuntimeContext]) -> None:
@@ -516,7 +514,8 @@ def _resolve_second_channel_binary(context: RuntimeContext) -> Path | None:
         context: The plane context whose second channel binary is resolved.
 
     Returns:
-        The path of the plane's second channel binary, or None when the recording declares a single channel.
+        The path of the plane's second channel binary, or None when the recording declares a single channel or the
+        plane record carries no output path.
     """
     if context.acquisition.channel_number <= 1:
         return None
@@ -535,8 +534,8 @@ def _clear_downstream_data(output_root: Path) -> None:
     Notes:
         The conversion replaces every plane binary of the recording, so the offsets, images, traces, and combined
         dataset that earlier runs measured describe frames that no longer exist. Removing the registration reference
-        image is what makes the registration stage run again, because that image is the marker it reads before
-        skipping an already registered plane.
+        image is what makes the registration stage run again, because that image is one of the three arrays it reads
+        before skipping an already registered plane, alongside both rigid offset arrays.
 
         The combined outputs belong to the recording rather than to one plane, and the combination stage merges every
         plane into them, so rebuilding any plane voids them. The completion marker goes first, which leaves an

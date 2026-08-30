@@ -55,8 +55,9 @@ plus `total_jobs`, `peak_memory_mb` and `peak_device_memory_mb` for the single l
 job at once, and `pipeline_type`. Every device figure is zero here, because no multi-recording stage runs on a CUDA
 device, and the `gpu_registration` argument leaves them at zero as well. Like the universe tool, it fails when the
 dataset names fewer than two recording directories, because both load through the same loader. Unlike the universe tool,
-it also fails when any recording carries no combined metadata archive, or when any recording reports no regions in its
-combined trace array, both of which the universe tool reports as `ready: false` instead.
+it also fails when any recording carries no combined metadata archive, which the universe tool reports as `ready: false`
+instead, and when any recording reports no regions in its combined trace array, which the universe tool does not read at
+all and still reports as `ready: true`.
 
 ### check_threading_runtime_tool
 
@@ -81,8 +82,10 @@ loads one runs no discovery.
 
 `execute_full_pipeline_tool` returns `pipeline_type` on every outcome, including every argument rejection and every
 failure, so a caller can attribute a response to the pipeline it asked for without tracking the request itself. It
-additionally returns `phase_count` and a per-phase `phases` list on every outcome reached after the arguments validate,
-and returns `started: false` with a `message` and a `next_step` when every phase is already complete.
+additionally returns `phase_count` and a per-phase `phases` list on every outcome that reached the phase-grouping step,
+which covers a dispatched session and the already-complete case. A response whose preparation step accepted no input
+carries `pipeline_type`, `total_jobs`, and the rejection lists alone. It returns `started: false` with a `message` and a
+`next_step` when every phase is already complete.
 
 `execute_processing_jobs_tool` forwards `invalid_jobs` whenever validation rejected a submitted job, which covers the
 response for a session whose `workers_per_job` or `max_parallel_jobs` override was itself rejected. Read that list on a
@@ -122,8 +125,9 @@ on every entry before dispatching the reset phase.
 ### clean_processing_output_tool
 
 Returns `cleaned`, `output_root`, `deleted_files`, `deleted_dirs`, `total_deleted`, `requested_phases`, and
-`effective_phases`, plus `errors` when a deletion failed. The `cleaned` flag reports that the tool ran rather than that
-every deletion succeeded, so gate on an empty `errors` list.
+`effective_phases`, plus `cleared_selections` counting the dataset region selections a `discovery` clean cleared, and
+`errors` when a deletion failed. Both extra keys are present only when non-empty. The `cleaned` flag reports that the
+tool ran rather than that every deletion succeeded, so gate on an empty `errors` list.
 
 ### get_batch_status_overview_tool
 
@@ -152,8 +156,10 @@ and no upstream skill resolves them.
 A job aborted because its prerequisite phase is absent from the tracker records a message naming that phase and asking
 for the prepare tool to be re-run, because no phase failed in that case.
 
-The unreachable-prerequisite message is the ordinary outcome of submitting an extraction job whose discovery job was
-neither part of the submission nor already succeeded, so treat it as a submission-shape problem rather than a data one.
+The unreachable-prerequisite message is a backstop the manager writes when a session drains while a job still waits in
+the admission pool. Submitting an extraction job whose discovery job is neither in the submission nor already succeeded
+does not produce it, because `execute_processing_jobs_tool` rejects that job into `invalid_jobs` before the session
+starts.
 
 Extraction is the widest class in the library at 16 cores per job and holds whole-dataset trace arrays, so it is the
 class most likely to meet a pool termination. Every job runs in its own spawned process, so the kill takes down that

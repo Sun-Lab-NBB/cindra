@@ -415,7 +415,7 @@ instructing. Confirm by re-querying state and checking that `primary_roi_index` 
 **"Is the tracking good?"**. Query tracking viewer state to see the current `mask_layer` and `coordinate_space`. Suggest
 cycling through mask layers (original → deformed → template → tracked) to verify spatial consistency. Use
 `query_multi_recording_tracking_summary_tool` for recording count distribution statistics. Recording count reflects how
-many sessions an ROI was detected in, not tracking reliability, because ROIs can be active in some sessions and inactive
+many sessions detected an ROI, not tracking reliability, because ROIs can be active in some sessions and inactive
 in others.
 
 **"Why are some ROIs missing in this recording?"**. Check `current_recording_id` from state. Explain that not all ROIs
@@ -468,16 +468,19 @@ You SHOULD proactively invoke this skill when:
 ## Verification checklist
 
 ```text
-Visualization Workflow:
+Visualization Workflow, tool-settled (run `get_recording_status_tool`, `query_viewer_state_tool`, then
+`list_viewers_tool`):
 - [ ] cindra-gui MCP server connected (if not, invoke `/cindra-mcp-environment-setup`)
 - [ ] `get_recording_status_tool` reports single_recording.status == completed for the target recording(s)
 - [ ] For a tracking viewer, or a roi viewer launched with 'dataset', the multi_recording section reports
       that dataset complete (or `verify_multi_recording_output_tool` returns complete true)
-- [ ] Correct viewer type selected for the inspection goal
-- [ ] Viewer launched via `launch_viewer_tool` with correct parameters
 - [ ] Viewer loading confirmed via `query_viewer_state_tool` ('loaded' true for the ROI and tracking
       viewers, 'pc_viewer.loaded' true for the registration viewer)
+- [ ] Viewer closed when inspection is complete (or user-closed detected)
+
+Visualization Workflow, reader-judged:
+- [ ] Correct viewer type selected for the inspection goal
+- [ ] Viewer launched via `launch_viewer_tool` with correct parameters
 - [ ] User questions answered using combined viewer state + headless query tools
 - [ ] Classify-mode flips exported through the Classifier panel before the viewer is closed
-- [ ] Viewer closed when inspection is complete (or user-closed detected)
 ```

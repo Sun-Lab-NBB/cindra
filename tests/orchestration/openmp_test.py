@@ -15,6 +15,7 @@ from cindra.orchestration import (
 from cindra.orchestration.openmp import (
     _LINK_DIRECTORY,
     _OPENMP_LIBRARY_NAME,
+    _VERIFICATION_TIMEOUT,
     _PACKAGE_MANAGER_DIRECTORIES,
     OpenMPSummary,
     _link_openmp_runtime,
@@ -51,6 +52,15 @@ class TestRuntimeProbe:
             lambda *args, **kwargs: subprocess.CompletedProcess(args=[], returncode=return_code),
         )
         assert _verify_runtime_loadable() is expected
+
+    def test_verification_reports_false_when_the_fresh_interpreter_times_out(self, monkeypatch):
+        """Verifies that the post-link verification treats a probe that outlives its timeout as unloadable."""
+
+        def _raise(*args, **kwargs):
+            raise subprocess.TimeoutExpired(cmd=[], timeout=_VERIFICATION_TIMEOUT)
+
+        monkeypatch.setattr("cindra.orchestration.openmp.subprocess.run", _raise)
+        assert _verify_runtime_loadable() is False
 
 
 class TestRuntimeDiscovery:
@@ -340,4 +350,4 @@ def _summary(status: OpenMPStatus, **overrides: object) -> OpenMPSummary:
         "loadable": False,
     }
     fields.update(overrides)
-    return OpenMPSummary(**fields)  # type: ignore[arg-type]
+    return OpenMPSummary(**fields)  # type: ignore[arg-type]  # The override mapping erases the per-field types.

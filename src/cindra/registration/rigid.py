@@ -121,11 +121,11 @@ def compute_rigid_offsets(
         maximum_offset_fraction: The maximum allowed offset as a fraction of the minimum spatial dimension. The
             correlation search radius is min(height, width) * maximum_offset_fraction, rounded to the nearest pixel and
             then clamped to the [1, min(height, width) // 2] range. A fraction that rounds to a zero-pixel radius
-            describes a search window no offset fits in. A radius above half the minimum dimension exceeds the wrapped
+            describes a search window that fits no offset. A radius above half the minimum dimension exceeds the wrapped
             correlation surface the quadrant rearrangement reads.
         temporal_smoothing_sigma: The standard deviation for temporal Gaussian smoothing of correlation
             maps. If 0, no smoothing is applied.
-        workers: The number of parallel workers for FFT computation. Use -1 for all available cores.
+        workers: The number of parallel workers for FFT computation. Must be a positive integer.
 
     Returns:
         A tuple of (y_offsets, x_offsets, correlation_maxima) arrays with shape (num_frames,). The offsets
@@ -142,9 +142,9 @@ def compute_rigid_offsets(
 
     correlation_data = apply_phase_correlation(frames=frames, kernel=reference_kernel, workers=workers)
 
-    # Extracts the central region containing valid correlation peaks. The correlation surface wraps around,
-    # so negative offsets appear at the end of each axis. This block rearranges the four quadrants into a
-    # contiguous window centered at zero offset.
+    # Extracts the central region containing valid correlation peaks. The correlation surface wraps around, so negative
+    # offsets appear at the end of each axis. Rearranges the four quadrants into a contiguous window centered at zero
+    # offset.
     correlation_window = np.real(
         np.block(
             [

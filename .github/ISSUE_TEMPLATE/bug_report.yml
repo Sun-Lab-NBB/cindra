@@ -20,7 +20,7 @@ body:
         project.
       placeholder: |-
         OS: Ubuntu 24.04
-        Python: 3.13
+        Python: 3.14
     validations:
       required: true
 

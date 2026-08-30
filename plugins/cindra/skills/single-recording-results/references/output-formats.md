@@ -1,7 +1,6 @@
 # Single-recording output formats
 
-Documents every file, array shape, dtype, and NPZ key the single-recording pipeline writes. This reference is loaded on
-demand by `/single-recording-results`.
+Documents every file, array shape, dtype, and NPZ key the single-recording pipeline writes.
 
 ---
 
@@ -9,21 +8,21 @@ demand by `/single-recording-results`.
 
 **File:** `combined_metadata.npz`
 
-| NPZ key                             | Dtype   | Shape | Description                                            |
-|-------------------------------------|---------|-------|--------------------------------------------------------|
-| `plane_count`                       | uint32  | (1,)  | Number of planes combined                              |
-| `frame_count`                       | uint32  | (1,)  | Frames the combined traces span                        |
-| `plane_frame_counts`                | uint32  | (N,)  | Per-plane frame counts recorded during binarization    |
-| `combined_height`                   | uint32  | (1,)  | Height of combined field of view in pixels             |
-| `combined_width`                    | uint32  | (1,)  | Width of combined field of view in pixels              |
-| `tau`                               | float32 | (1,)  | Calcium indicator timescale in seconds                 |
-| `sampling_rate`                     | float32 | (1,)  | Per-plane sampling rate in Hz                          |
-| `plane_heights`                     | uint16  | (N,)  | Per-plane frame heights                                |
-| `plane_widths`                      | uint16  | (N,)  | Per-plane frame widths                                 |
-| `plane_y_offsets`                   | int32   | (N,)  | Per-plane Y displacement for combined view             |
-| `plane_x_offsets`                   | int32   | (N,)  | Per-plane X displacement for combined view             |
-| `registered_binary_paths`           | str     | (N,)  | Relative paths to channel 1 registered binaries        |
-| `registered_binary_paths_channel_2` | str     | (N,)  | Channel 2 paths, when both channels are functional     |
+| NPZ key                             | Dtype   | Shape | Description                                         |
+|-------------------------------------|---------|-------|-----------------------------------------------------|
+| `plane_count`                       | uint32  | (1,)  | Number of planes combined                           |
+| `frame_count`                       | uint32  | (1,)  | Frames the combined traces span                     |
+| `plane_frame_counts`                | uint32  | (N,)  | Per-plane frame counts recorded during binarization |
+| `combined_height`                   | uint32  | (1,)  | Height of combined field of view in pixels          |
+| `combined_width`                    | uint32  | (1,)  | Width of combined field of view in pixels           |
+| `tau`                               | float32 | (1,)  | Calcium indicator timescale in seconds              |
+| `sampling_rate`                     | float32 | (1,)  | Per-plane sampling rate in Hz                       |
+| `plane_heights`                     | uint16  | (N,)  | Per-plane frame heights                             |
+| `plane_widths`                      | uint16  | (N,)  | Per-plane frame widths                              |
+| `plane_y_offsets`                   | int32   | (N,)  | Per-plane Y displacement for combined view          |
+| `plane_x_offsets`                   | int32   | (N,)  | Per-plane X displacement for combined view          |
+| `registered_binary_paths`           | str     | (N,)  | Relative paths to channel 1 registered binaries     |
+| `registered_binary_paths_channel_2` | str     | (N,)  | Channel 2 paths, when both channels are functional  |
 
 `plane_frame_counts` holds each plane's own count, which binarization makes identical across the planes of the
 recording, so every entry equals `frame_count` once every plane has completed.
@@ -37,12 +36,12 @@ float32 dtype, with shape `(height, width)`.
 
 **Channel 1 (always present):**
 
-| File                      | Description                                               |
-|---------------------------|-----------------------------------------------------------|
-| `mean_image.npy`          | Mean of the binned frames in the valid range              |
-| `enhanced_mean_image.npy` | High-pass filtered mean for enhanced ROI visibility       |
-| `maximum_projection.npy`  | Per-pixel max of the temporally filtered binned movie     |
-| `correlation_map.npy`     | Per-pixel maximum across the detection scale pyramid      |
+| File                      | Description                                           |
+|---------------------------|-------------------------------------------------------|
+| `mean_image.npy`          | Mean of the binned frames in the valid range          |
+| `enhanced_mean_image.npy` | High-pass filtered mean for enhanced ROI visibility   |
+| `maximum_projection.npy`  | Per-pixel max of the temporally filtered binned movie |
+| `correlation_map.npy`     | Per-pixel maximum across the detection scale pyramid  |
 
 **Channel 2 (two-channel only, same shape and dtype):**
 

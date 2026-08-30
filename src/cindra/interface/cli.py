@@ -36,11 +36,14 @@ def report_command_failure[**P](command: Callable[P, None]) -> Callable[P, None]
         exit status Click gives its own parameter validation. A caller therefore reads one exit status for every
         malformed invocation, whether Click or a command body detected it.
 
+        A SystemExit also passes through, so a command that reports its own outcome and then raises SystemExit sets
+        the process exit status the caller reads.
+
     Args:
         command: The command function to wrap.
 
     Returns:
-        The wrapped command, which reports any other exception its body raises and returns normally.
+        The wrapped command, which reports any other Exception its body raises and returns normally.
     """
 
     @wraps(command)
@@ -247,9 +250,9 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     default=None,
     help=(
         "[Single-recording] The number of parallel workers to allocate to the binarization step. When this option is "
-        "omitted, the step receives its measured default allocation of 3 workers. The allocated cores become the "
-        "TIFF image decode threads, capped at the TIFF_DECODE_CEILING of 4. Setting this to -1 uses every available "
-        "core, minus the cores reserved for system use."
+        "omitted, the step receives its measured default allocation of 3 workers. The allocated count is capped at "
+        "4, because added decode threads stop shortening the conversion past that point. Setting this to -1 uses "
+        "every available core, minus the cores reserved for system use."
     ),
 )
 @click.option(
@@ -260,10 +263,9 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     default=None,
     help=(
         "[Single-recording] The number of parallel workers to allocate to each plane-registration step. When this "
-        "option is omitted, the step receives its measured default allocation of 4 workers on the host CPU, or 2 "
-        "workers when --register-device names a CUDA device. A device-backed job keeps only its reference, crop, and "
-        "median-filter work on the host. The 4-worker figure is the knee of the measured registration scaling curve. "
-        "Setting this to -1 uses every available core, minus the cores reserved for system use."
+        "option is omitted, the step receives its measured default allocation of 8 workers on the host CPU, or 2 "
+        "workers when --register-device names a CUDA device. Setting this to -1 uses every available core, minus "
+        "the cores reserved for system use."
     ),
 )
 @click.option(
@@ -285,9 +287,8 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     default=None,
     help=(
         "[Single-recording] The number of parallel workers to allocate to each plane-processing step. When this option "
-        "is omitted, the step receives its measured default allocation of 10 workers, where detection reaches its "
-        "measured throughput plateau. Setting this to -1 uses every available core, minus the cores reserved for "
-        "system use."
+        "is omitted, the step receives its measured default allocation of 8 workers. Setting this to -1 uses every "
+        "available core, minus the cores reserved for system use."
     ),
 )
 @click.option(
@@ -298,9 +299,8 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     default=None,
     help=(
         "[Multi-recording] The number of parallel workers to allocate to the discovery step. When this option is "
-        "omitted, the step receives its measured default allocation of 2 workers, which covers the deformation pool "
-        "alone, because the stage has no parallel critical path. Setting this to -1 uses every available core, minus "
-        "the cores reserved for system use."
+        "omitted, the step receives its measured default allocation of 2 workers. Setting this to -1 uses every "
+        "available core, minus the cores reserved for system use."
     ),
 )
 @click.option(
@@ -311,9 +311,8 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     default=None,
     help=(
         "[Multi-recording] The number of parallel workers to allocate to each per-recording extraction step. When this "
-        "option is omitted, the step receives its measured default allocation of 16 workers, which leaves room for "
-        "the six to eight datasets a compute node extracts at once while still reaching a sevenfold single-job "
-        "speedup. Setting this to -1 uses every available core, minus the cores reserved for system use."
+        "option is omitted, the step receives its measured default allocation of 16 workers. Setting this to -1 "
+        "uses every available core, minus the cores reserved for system use."
     ),
 )
 @click.option(

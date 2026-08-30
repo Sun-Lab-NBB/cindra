@@ -55,7 +55,7 @@ _SPLIT_TAIL_STRENGTH: float = 0.25
 
 
 class TestCheckSplitComponents:
-    """Tests _check_split_components."""
+    """Tests the explained-variance ratio that decides whether an ROI holds two separable spatial components."""
 
     def test_two_component_signal_yields_high_variance_ratio(self) -> None:
         """Verifies that data with two distinct spatial components produces a variance ratio above 1."""
@@ -129,7 +129,7 @@ class TestCheckSplitComponents:
 
 
 class TestExtendIteratively:
-    """Tests _extend_iteratively."""
+    """Tests the activity-driven growth, its retention fraction, its pixel cap, and its degenerate residuals."""
 
     def test_bright_center_extends_outward(self) -> None:
         """Verifies that a bright center pixel in a small frame extends outward into neighboring pixels."""
@@ -372,7 +372,7 @@ class TestExtendIteratively:
 
 
 class TestFindBestScale:
-    """Tests _find_best_scale."""
+    """Tests the scale selection for structured projections and the default a featureless one returns."""
 
     def test_returns_positive_scale_for_structured_images(self) -> None:
         """Verifies that structured scale images produce a positive scale index."""
@@ -403,7 +403,7 @@ class TestFindBestScale:
 
 
 class TestDetectRoisInFrames:
-    """Tests detect_rois_in_frames."""
+    """Tests the iteration limit that bounds how many ROIs a movie holding excess activity yields."""
 
     def test_iteration_limit_truncates_the_unlimited_detection_sequence(self) -> None:
         """Verifies that a movie holding more activity than the iteration limit returns exactly the limit."""

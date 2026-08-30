@@ -30,7 +30,14 @@ if TYPE_CHECKING:
 
 
 def is_memory_mapped(array: NDArray[np.generic] | None) -> bool:
-    """Checks whether the input array is a memory-mapped numpy array."""
+    """Checks whether the input array is a memory-mapped numpy array.
+
+    Args:
+        array: The array to check, or None when the field holding it is unset.
+
+    Returns:
+        True if the array is a memory-mapped numpy array and False otherwise.
+    """
     return isinstance(array, np.memmap)
 
 
@@ -45,9 +52,9 @@ def _save_optional_array_field(
     """Saves an optional variable-length array field to the provided save dictionary.
 
     Notes:
-        This function handles the serialization pattern for optional array fields in dataclasses. It stores two arrays
-        in the save dictionary: a counts array with the length of each item's array (0 if None), and a concatenated data
-        array containing only the non-None values. This enables pickle-free serialization of variable-length arrays.
+        Handles the serialization pattern for optional array fields in dataclasses. Stores two arrays in the save
+        dictionary: a counts array with the length of each item's array (0 if None), and a concatenated data array
+        containing only the non-None values. This enables pickle-free serialization of variable-length arrays.
 
     Args:
         field_name: The base name for the field. The function stores '{field_name}_counts' and '{field_name}' keys.
@@ -76,8 +83,8 @@ def _load_optional_array_field(
     """Loads an optional variable-length array field from a numpy NpzFile.
 
     Notes:
-        This function reverses the serialization pattern used by ``_save_optional_array_field``. It reads the counts
-        array and concatenated data array, then splits the data back into per-item arrays based on the stored counts.
+        Reverses the serialization pattern used by ``_save_optional_array_field``. Reads the counts array and
+        concatenated data array, then splits the data back into per-item arrays based on the stored counts.
 
     Args:
         field_name: The base name for the field. The function reads '{field_name}_counts' and '{field_name}' keys.
@@ -142,7 +149,9 @@ class IOData:
     recordings."""
 
     plane_index: int | None = None
-    """The zero-based index identifying this plane's position in a multi-plane volumetric recording."""
+    """The zero-based index of this virtual imaging plane. For single-ROI data it is the physical plane's position in
+    the volume. For MROI data it enumerates every ROI and physical plane combination, so the physical plane is this
+    index modulo the acquisition plane count."""
 
 
 @dataclass(slots=True)
@@ -195,8 +204,7 @@ class RegistrationData:
     principal_component_extreme_images: NDArray[np.float32] | None = None
     """The mean images from frames at extreme ends of each principal component of the registered recording movie, with
     shape (2, num_components, valid_height, valid_width), where the spatial dimensions are the border-cropped valid
-    ranges. Index 0 contains low-projection means, index 1 contains high-projection means. Used for visualizing
-    registration quality in the GUI."""
+    ranges. Index 0 contains low-projection means, index 1 contains high-projection means."""
 
     principal_component_projections: NDArray[np.float32] | None = None
     """The projection of each sampled frame onto the principal components of the registered recording movie, with shape
@@ -484,8 +492,8 @@ class DetectionData:
     registration crop."""
 
     correlation_map: NDArray[np.float32] | None = None
-    """The maximum activity of every pixel across the detection scale pyramid, zero outside the valid registration crop,
-    retained for visualization and detection-quality assessment."""
+    """The maximum activity of every pixel across the detection scale pyramid, zero outside the valid registration
+    crop."""
 
     roi_diameter_channel_2: int = 0
     """The estimated ROI diameter for the second imaging channel in pixels. Computed independently because channel 2 may
@@ -671,11 +679,7 @@ class DetectionData:
 
 @dataclass
 class ROIMask:
-    """Stores lightweight spatial ROI data for pipeline processing.
-
-    Stores pixel coordinates, weights, and tracking metadata. Used as the working type throughout the multi-recording
-    pipeline and as the on-disk format for spatial data in both single-recording and multi-recording outputs.
-    """
+    """Stores lightweight spatial ROI data for pipeline processing."""
 
     y_pixels: NDArray[np.int32]
     """The y-coordinates (row indices) of all pixels belonging to this ROI."""
@@ -805,11 +809,8 @@ class ROIMask:
 class ROIStatistics:
     """Stores spatial and statistical properties for a single region of interest (ROI).
 
-    This dataclass represents the complete set of properties computed for each detected ROI during the detection,
-    extraction, and optional multi-recording processing stages. The fields are organized into required core properties
-    (always present after detection), shape statistics (computed during ROI detection, with defaults for staged
-    construction), optional extraction properties (added during signal extraction), and multi-plane/multi-recording
-    properties.
+    Represents the complete set of properties computed for each detected ROI during the detection, extraction, and
+    optional multi-recording processing stages.
 
     Notes:
         Shape statistics fields have default values to support staged construction where ROIStatistics is first created
@@ -817,16 +818,15 @@ class ROIStatistics:
     """
 
     mask: ROIMask
-    """The underlying ROIMask containing pixel coordinates, weights, centroid, frame dimensions, and tracking
-    metadata."""
+    """The spatial data of the ROI these statistics describe."""
 
     footprint: int = 0
     """The index of the multiscale detection level at which this ROI was found during sparse detection. Zero for tracked
     multi-recording ROIs, which bypass multiscale detection."""
 
-    # Defines the shape statistics computed during ROI detection, which carry defaults for staged construction.
     compactness: float = 0.0
-    """The ratio of actual to expected mean radius, where values near 1 indicate compact circular ROIs."""
+    """The ratio of actual to expected mean radius, floored at 1.0, where values near 1 indicate compact circular
+    ROIs."""
 
     solidity: float = 0.0
     """The ratio of soma pixels to convex hull area, measuring how solid/filled the ROI is."""
@@ -843,7 +843,6 @@ class ROIStatistics:
     normalized_pixel_count: float = 0.0
     """The pixel count normalized by expected ROI size (soma region only)."""
 
-    # Defines the optional properties that signal extraction adds.
     skewness: float | None = None
     """The skewness of the neuropil-corrected fluorescence time series."""
 
@@ -981,7 +980,7 @@ class ExtractionData:
     """Stores runtime data from the extraction stage."""
 
     roi_statistics: list[ROIStatistics] | None = None
-    """The list of ROIStatistics instances containing spatial and shape statistics for each detected ROI."""
+    """The statistics of every ROI detected on channel 1."""
 
     cell_fluorescence: NDArray[np.float32] | None = None
     """The cell fluorescence traces with shape (cells, frames)."""
@@ -998,10 +997,8 @@ class ExtractionData:
     cell_classification: NDArray[np.float32] | None = None
     """The cell classification results with shape (cells, 2) containing (is_cell_label, probability)."""
 
-    # Defines the channel 2 extraction data, which is populated when both channels are functional.
     roi_statistics_channel_2: list[ROIStatistics] | None = None
-    """The list of ROIStatistics instances containing spatial and shape statistics for each detected ROI for channel 2
-    when both channels are functional."""
+    """The statistics of every ROI detected on channel 2, present when both channels are functional."""
 
     cell_fluorescence_channel_2: NDArray[np.float32] | None = None
     """The cell fluorescence traces for channel 2."""
@@ -1018,7 +1015,6 @@ class ExtractionData:
     cell_classification_channel_2: NDArray[np.float32] | None = None
     """The cell classification results for channel 2."""
 
-    # Defines the colocalization data that relates channel 1 ROIs to channel 2.
     cell_colocalization: NDArray[np.float32] | None = None
     """The colocalization results relating channel 1 ROIs to channel 2, with shape (cells, 2). When channel 2 is
     structural, column 0 holds the is-colocalized flag and column 1 the colocalization probability. When both channels
@@ -1170,9 +1166,8 @@ class ExtractionData:
     def load_arrays(self, output_path: Path) -> None:
         """Loads ROI statistics and classification results from disk.
 
-        This method loads only ROI statistics and cell classification arrays. Fluorescence traces and colocalization
-        data are excluded, because they consume significant memory and are acquired through ``load_results()`` or
-        ``memory_map_results()``.
+        Fluorescence traces and colocalization data are excluded, because they consume significant memory and are
+        acquired through ``load_results()`` or ``memory_map_results()``.
 
         Args:
             output_path: The directory containing the extraction data files.
@@ -1218,9 +1213,9 @@ class ExtractionData:
     def load_results(self, output_path: Path) -> None:
         """Loads all extraction result arrays from disk.
 
-        This method loads fluorescence traces, classification results, and colocalization data. Classification arrays
-        may already be loaded by ``load_arrays()``, in which case the guarded loading here is a no-op. Fluorescence
-        traces and colocalization data are not loaded by ``load_arrays()``, because they consume significant memory.
+        Classification arrays may already be loaded by ``load_arrays()``, in which case the guarded loading here is a
+        no-op. Fluorescence traces and colocalization data are not loaded by ``load_arrays()``, because they consume
+        significant memory.
 
         Args:
             output_path: The directory containing the result .npy files.
@@ -1318,9 +1313,8 @@ class ExtractionData:
     def memory_map_arrays(self, output_path: Path) -> None:
         """Memory-maps ROI statistics and classification results from disk.
 
-        This method mirrors ``load_arrays()`` but uses read-only ``r`` memory mapping for .npy files instead of eager
-        loading. ROI statistics (.npz) are still eagerly loaded because NumPy does not support memory mapping for .npz
-        archives.
+        Mirrors ``load_arrays()`` but uses read-only ``r`` memory mapping for .npy files instead of eager loading. ROI
+        statistics (.npz) are still eagerly loaded because NumPy does not support memory mapping for .npz archives.
 
         Args:
             output_path: The directory containing the extraction data files.
@@ -1362,9 +1356,8 @@ class ExtractionData:
     def memory_map_results(self, output_path: Path) -> None:
         """Memory-maps all extraction result arrays from disk.
 
-        This method mirrors ``load_results()`` but uses read-only ``r`` memory mapping for all .npy files instead of
-        eager loading. This avoids loading the full array contents into memory, which is useful when reusing
-        previously-generated data.
+        Mirrors ``load_results()`` but uses read-only ``r`` memory mapping for all .npy files instead of eager loading.
+        This avoids loading the full array contents into memory, which is useful when reusing previously-generated data.
 
         Args:
             output_path: The directory containing the result .npy files.
@@ -1430,7 +1423,8 @@ class ExtractionData:
 class TimingData:
     """Stores pipeline timing and version data.
 
-    All time durations are stored as integers representing seconds.
+    Notes:
+        All time durations are stored as integers representing seconds.
     """
 
     binarization_time: int = 0
@@ -1487,10 +1481,10 @@ class TimingData:
     """The timestamp when processing completed in ataraxis-time format (yyyy-mm-dd-hh-mm-ss-us)."""
 
     python_version: str = PYTHON_VERSION
-    """Python version used for processing."""
+    """The Python version used for processing."""
 
     cindra_version: str = VERSION
-    """cindra version used for processing."""
+    """The cindra version used for processing."""
 
 
 @dataclass
@@ -1527,8 +1521,8 @@ class SingleRecordingRuntimeData(YamlConfig):
     def load_arrays(self) -> None:
         """Eagerly loads the registration, detection, and extraction arrays that the pipeline stages need.
 
-        This method reads each array file in full and copies it into a contiguous in-memory buffer. Extraction
-        fluorescence traces and colocalization arrays are excluded, and ``extraction.load_results()`` acquires them.
+        Reads each array file in full and copies it into a contiguous in-memory buffer. Extraction fluorescence traces
+        and colocalization arrays are excluded, and ``extraction.load_results()`` acquires them.
         """
         if self.output_path is None:
             return
@@ -1539,9 +1533,9 @@ class SingleRecordingRuntimeData(YamlConfig):
     def memory_map_arrays(self) -> None:
         """Memory-maps the registration, detection, and extraction arrays the pipeline stages need, in ``r`` mode.
 
-        This method opens each .npy file as a read-only memory-mapped array, avoiding full materialization in RAM. ROI
-        statistics are eagerly loaded instead, because NumPy cannot memory-map .npz archives. Extraction fluorescence
-        traces and colocalization arrays are excluded, and ``extraction.memory_map_results()`` maps them.
+        Opens each .npy file as a read-only memory-mapped array, avoiding full materialization in RAM. ROI statistics
+        are eagerly loaded instead, because NumPy cannot memory-map .npz archives. Extraction fluorescence traces and
+        colocalization arrays are excluded, and ``extraction.memory_map_results()`` maps them.
         """
         if self.output_path is None:
             return
@@ -1552,9 +1546,9 @@ class SingleRecordingRuntimeData(YamlConfig):
     def save(self, output_path: Path) -> None:
         """Saves the runtime data to a YAML file and arrays to .npz/.npy files.
 
-        This method saves all NumPy arrays as separate .npz/.npy files in the output directory, then creates a shallow
-        copy of the instance and of each child dataclass, with arrays set to None, before writing the YAML file.
-        ``to_yaml()`` performs the Path-to-string conversion.
+        Saves all NumPy arrays as separate .npz/.npy files in the output directory, then creates a shallow copy of the
+        instance and of each child dataclass, with arrays set to None, before writing the YAML file. ``to_yaml()``
+        performs the Path-to-string conversion.
 
         Notes:
             This storage form avoids pickle serialization in favor of safer YAML and NumPy serialization.
@@ -1605,9 +1599,8 @@ class SingleRecordingRuntimeData(YamlConfig):
 class CombinedData:
     """Stores combined multi-plane detection and extraction data.
 
-    This class provides a container for the results of combining processed data from multiple imaging planes into a
-    unified dataset. It holds DetectionData (combined images) and ExtractionData (combined ROI statistics, fluorescence
-    traces, and classification results) along with metadata about the combined field of view.
+    Provides a container for the results of combining processed data from multiple imaging planes into a unified
+    dataset.
 
     Notes:
         Combined data is saved to the root cindra directory alongside configuration.yaml and
@@ -1669,8 +1662,7 @@ class CombinedData:
     def save(self, root_path: Path) -> None:
         """Saves combined data to the root cindra directory.
 
-        This method saves all combined detection and extraction arrays to the root cindra directory. Metadata (plane
-        count, dimensions) is saved to combined_metadata.npz.
+        Metadata (plane count, dimensions) is saved to combined_metadata.npz.
 
         Notes:
             The combined_metadata.npz file doubles as the marker consumers check to decide whether the single-recording
@@ -1749,6 +1741,9 @@ class CombinedData:
 
         Returns:
             A dictionary of keyword arguments for CombinedData construction (excludes detection and extraction).
+
+        Raises:
+            FileNotFoundError: If the combined metadata file does not exist.
         """
         metadata_path = root_path / COMBINED_METADATA_FILENAME
         if not metadata_path.exists():

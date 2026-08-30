@@ -32,15 +32,12 @@ if TYPE_CHECKING:
     from .batch import ReferenceData
 
 _GPU_REMEDY: str = "Run 'cindra gpu' to report the local CUDA devices and install the runtime libraries they need."
-"""The command that resolves an unusable GPU runtime, named by every message this module produces.
+"""The command that resolves an unusable GPU runtime, named by the message the missing-CuPy check produces.
 
 Notes:
     The orchestration package states the same command, and this module restates it rather than importing it, because
     the dependency chain runs from orchestration into registration and never back.
 """
-
-_TF32_VARIABLE: str = "CUPY_TF32"
-"""The environment variable CuPy reads to decide whether its cuBLAS handle allows TF32 matrix multiplication."""
 
 _MINIMUM_CORRELATION_RADIUS: int = 1
 """The smallest rigid correlation search radius the quadrant rearrangement can express."""
@@ -58,8 +55,8 @@ _CORRELATION_BATCH_SIZE: int = 64
 """The maximum number of blocks transformed in a single nonrigid phase correlation call. Limits device memory use."""
 
 _PIPELINE_DEPTH: int = 2
-"""The number of staging slots the backend cycles through, which is one slot for the batch the device is working on
-and one for the batch being staged behind it.
+"""The number of staging slots the backend rotates, which is one slot for the batch the device is processing and one for
+the batch staged behind it.
 """
 
 _INT16_MINIMUM: int = int(np.iinfo(np.int16).min)
@@ -71,7 +68,7 @@ _INT16_MAXIMUM: int = int(np.iinfo(np.int16).max)
 
 @dataclass(slots=True)
 class _StagingSlot:
-    """Stores the reusable buffers one pipeline slot stages a frame batch through.
+    """Stores the reusable buffers one pipeline slot uses to stage a frame batch.
 
     Notes:
         A slot serving the download direction asks for its host buffer alone, because the device side of that
@@ -83,7 +80,7 @@ class _StagingSlot:
     )
     """The page-locked host buffers the slot holds, keyed by the shape and the dtype of the batch each one stages."""
     device_buffers: dict[tuple[tuple[int, ...], str], cupy.ndarray] = field(default_factory=dict)
-    """The device buffers the slot uploads into, keyed by the shape and the dtype of the batch each one stages."""
+    """The device buffers the slot's uploads fill, keyed by the shape and the dtype of the batch each one stages."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,7 +122,7 @@ class _NonrigidDeviceData:
     upsampling_kernel: cupy.ndarray
     """The Gaussian RBF upsampling matrix with shape (region_size squared, upsampled_size squared)."""
     upsampled_size: int
-    """The side length of the upsampled correlation surface the subpixel peak is located on."""
+    """The side length of the upsampled correlation surface that carries the subpixel peak."""
     block_counts: tuple[int, int]
     """The number of blocks along the y and x axes."""
     block_row_grid: cupy.ndarray
@@ -154,17 +151,17 @@ class GpuRegistrationBackend:
         precision. A sample the two backends disagree on sits one storage unit from the value the host writes, and never
         further. The rigid path carries no interpolation, so its frames match the host exactly.
 
-        A batch crosses the bus in the dtype the caller supplies it in. An int16 batch is widened to float32 on the
-        device and narrowed back to int16 there. Both directions stage through page-locked host buffers the backend
-        allocates on first use and reuses for every batch of the same geometry that follows.
+        A batch crosses the bus in the caller's supplied dtype. An int16 batch is widened to float32 on the device and
+        narrowed back to int16 there. Both directions stage through page-locked host buffers the backend allocates on
+        first use and reuses for every batch of the same geometry that follows.
 
     Args:
         reference_data: The precomputed reference data holding the rigid taper mask, mean offset, and FFT kernel,
             together with the per-block nonrigid equivalents and the block geometry.
-        device: The zero-based index of the CUDA device every operation runs on.
+        device: The zero-based index of the CUDA device every operation uses.
 
     Attributes:
-        _device: Cached index of the CUDA device every operation runs on.
+        _device: Cached index of the CUDA device every operation uses.
         _frame_height: Cached frame height, in pixels, read from the rigid taper mask.
         _frame_width: Cached frame width, in pixels, read from the rigid taper mask.
         _taper_mask: Device copy of the rigid edge taper mask.
@@ -173,16 +170,16 @@ class GpuRegistrationBackend:
         _nonrigid_data: Device copies of the nonrigid reference data and block geometry, None when the reference data
             carries no blocks.
         _normalization_weights: Device high-pass normalization weights, keyed by the smoothing window they correct.
-        _input_slots: Staging slots the upload direction cycles through, one per pipeline slot.
-        _output_slots: Staging slots the download direction cycles through, one per pipeline slot.
+        _input_slots: Staging slots the upload direction rotates, one per pipeline slot.
+        _output_slots: Staging slots the download direction rotates, one per pipeline slot.
         _upload_events: One CUDA event per pipeline slot, recorded when that slot's upload finishes.
-        _staging_slot: Index of the pipeline slot the next batch stages through, advanced by every entry point.
-        _compute_stream: The CUDA stream every registration kernel and every download runs on.
-        _transfer_stream: The CUDA stream every upload runs on, which is what lets an upload overlap a computation.
+        _staging_slot: Index of the pipeline slot that stages the next batch, advanced by every entry point.
+        _compute_stream: The CUDA stream that runs every registration kernel and every download.
+        _transfer_stream: The CUDA stream that runs every upload, which is what lets an upload overlap a computation.
         _released: Determines whether the backend has already handed its device and page-locked host allocations back.
 
     Raises:
-        RuntimeError: If the CuPy distribution is absent, or if the device allows TF32 matrix multiplication.
+        RuntimeError: If the CuPy distribution is absent.
     """
 
     def __init__(self, reference_data: ReferenceData, device: int) -> None:
@@ -198,7 +195,6 @@ class GpuRegistrationBackend:
         self._released: bool = False
 
         with cupy.cuda.Device(self._device):
-            _verify_tf32_disabled()
             self._compute_stream: cupy.cuda.Stream = cupy.cuda.Stream(non_blocking=True)
             self._transfer_stream: cupy.cuda.Stream = cupy.cuda.Stream(non_blocking=True)
             self._upload_events: tuple[cupy.cuda.Event, ...] = tuple(cupy.cuda.Event() for _ in range(_PIPELINE_DEPTH))
@@ -240,7 +236,7 @@ class GpuRegistrationBackend:
         here instead of once per batch. Every batch of the stream carries the same frame geometry and the same dtype.
 
         Notes:
-            The generator holds one batch ahead of the batch the device is working on. It pulls that batch from the
+            The generator holds one batch ahead of the batch the device is processing. It pulls that batch from the
             iterator and starts its upload while the current batch's kernels are still queued. The caller's read of the
             next batch and the bus transfer that follows it therefore overlap the computation.
 
@@ -368,8 +364,9 @@ class GpuRegistrationBackend:
             clipped and narrowed, and it is None when the input batch was float32.
 
         Raises:
-            ValueError: If the batch carries a dtype other than int16 or float32, or if nonrigid registration is
-                enabled and no nonrigid block offsets are supplied.
+            ValueError: If the batch carries a dtype other than int16 or float32, if nonrigid registration is
+                enabled and the backend holds no block reference data, or if nonrigid registration is enabled and no
+                nonrigid block offsets are supplied.
         """
         slot = self._staging_slot
         self._staging_slot = (slot + 1) % _PIPELINE_DEPTH
@@ -460,10 +457,10 @@ class GpuRegistrationBackend:
 
         Args:
             frames: The batch to stage, with a dtype of either int16 or float32.
-            slot: The index of the pipeline slot the batch is staged through.
+            slot: The index of the pipeline slot that stages the batch.
 
         Returns:
-            The device buffer the batch is being uploaded into, which carries the dtype of the input batch.
+            The device buffer that receives the batch's upload, which carries the dtype of the input batch.
 
         Raises:
             ValueError: If the batch carries a dtype other than int16 or float32.
@@ -1049,9 +1046,9 @@ class GpuRegistrationBackend:
             )
             console.error(message=message, error=ValueError)
 
-        # Pads spatial dimensions with zeros to handle window edges. Border pixels are summed over partial
-        # (zero-filled) windows but still divided by the full window squared, so their means are under-estimated and
-        # corrected later through the normalization weights the high-pass filter divides by.
+        # Pads spatial dimensions with zeros to handle window edges. Border pixels are summed over partial (zero-filled)
+        # windows but still divided by the full window squared, so their means are under-estimated and corrected later
+        # by the normalization weights that divide the high-pass filter's low-pass component.
         half_pad = window // 2
         data_padded = cupy.pad(
             array=data,
@@ -1284,34 +1281,6 @@ def _require_gpu_runtime() -> None:
     console.error(message=message, error=RuntimeError)
 
 
-def _verify_tf32_disabled() -> None:
-    """Verifies that the current device performs its matrix multiplications at full single precision.
-
-    Notes:
-        The nonrigid subpixel stage multiplies a (block_count * frame_count, 49) correlation matrix by a
-        (49, 3721) RBF upsampling matrix and reads the result with an argmax over a 61 by 61 surface. TF32 carries a
-        10-bit mantissa, which perturbs neighboring samples of that surface by more than the 0.1 pixel spacing
-        between them and therefore moves the reported peak by a whole subpixel quantum. CuPy switches the cuBLAS math
-        mode away from its default only when the environment enables TF32, so the mode the handle reports answers the
-        question directly.
-
-    Raises:
-        RuntimeError: If the cuBLAS handle of the current device allows TF32 matrix multiplication.
-    """
-    math_mode = cupy.cuda.cublas.getMathMode(cupy.cuda.Device().cublas_handle)
-    if math_mode == cupy.cuda.cublas.CUBLAS_DEFAULT_MATH:
-        return
-
-    message = (
-        f"Unable to initialize the GPU registration backend. The cuBLAS handle of the selected device reports math "
-        f"mode {math_mode} rather than the default single-precision mode "
-        f"{int(cupy.cuda.cublas.CUBLAS_DEFAULT_MATH)}, so the nonrigid subpixel upsampling would run at reduced "
-        f"precision and shift the reported correlation peak by a whole 0.1 pixel quantum. Set the "
-        f"'{_TF32_VARIABLE}' environment variable to 0 before starting the process."
-    )
-    console.error(message=message, error=RuntimeError)
-
-
 def _upload_nonrigid_data(
     reference_data: ReferenceData, frame_height: int, frame_width: int
 ) -> _NonrigidDeviceData | None:
@@ -1322,7 +1291,7 @@ def _upload_nonrigid_data(
         alone, so they are derived once on the host and held on the device for the lifetime of the backend.
 
     Args:
-        reference_data: The precomputed reference data the backend was constructed from.
+        reference_data: The precomputed reference data the backend received at construction.
         frame_height: The frame height, in pixels.
         frame_width: The frame width, in pixels.
 
@@ -1382,7 +1351,7 @@ def _resolve_pinned_buffer(
         backend and reused by every batch of the same geometry the slot stages afterwards.
 
     Args:
-        slot: The staging slot the buffer belongs to.
+        slot: The staging slot that owns the buffer.
         shape: The shape of the batch the buffer stages.
         dtype: The dtype of the batch the buffer stages.
 
@@ -1413,11 +1382,11 @@ def _resolve_device_buffer(
     """Returns the slot's device buffer for one batch geometry, allocating it on the first request.
 
     Notes:
-        The buffer is held rather than allocated per batch, because the device memory pool sorts its free blocks by
-        the stream that released them and the upload stream differs from the stream every computation runs on.
+        The buffer is held rather than allocated per batch, because the device memory pool sorts its free blocks by the
+        stream that released them and the upload stream differs from the stream every computation uses.
 
     Args:
-        slot: The staging slot the buffer belongs to.
+        slot: The staging slot that owns the buffer.
         shape: The shape of the batch the buffer receives.
         dtype: The dtype of the batch the buffer receives.
 

@@ -21,9 +21,10 @@ if TYPE_CHECKING:
 def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
     """Combines processed data from multiple planes into a unified dataset.
 
-    The combined product carries the detection images, the extraction data of both channels, the per-plane geometry,
-    the registered binary paths, tau, and the sampling rate. Planes that did not complete detection or extraction
-    contribute nothing, and the combined traces are trimmed to the frame count of the shortest contributing plane,
+    The combined product carries the detection images, the extraction data of both channels, the per-plane geometry, the
+    registered binary paths, tau, and the sampling rate. Planes that did not complete detection or extraction contribute
+    no traces, ROI statistics, or summary images, while their frame geometry, frame count, and registered binary path
+    still reach the product. The combined traces are trimmed to the frame count of the shortest contributing plane,
     which is stored as CombinedData.frame_count alongside each plane's own count in CombinedData.plane_frame_counts.
 
     Args:

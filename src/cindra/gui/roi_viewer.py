@@ -1,4 +1,6 @@
-"""Provides the ROI viewer window for inspecting and reclassifying single-recording pipeline results."""
+"""Provides the ROI viewer window for inspecting and reclassifying single-recording and multi-recording pipeline
+results.
+"""
 
 from __future__ import annotations
 
@@ -86,7 +88,8 @@ _STATISTICS_TO_SHOW: tuple[str, ...] = (
 
 
 class ROIViewer(QMainWindow):
-    """Displays a UI window for inspecting and reclassifying single-recording pipeline results.
+    """Displays a UI window for inspecting and reclassifying single-recording pipeline results and multi-recording
+    tracked ROIs.
 
     Displays ROI overlays, background images, and fluorescence traces. Supports left-click ROI selection,
     shift/ctrl multi-select, a Classify toggle that flips the clicked ROI's cell/non-cell label on any click
@@ -168,7 +171,6 @@ class ROIViewer(QMainWindow):
         super().__init__()
         pg.setConfigOptions(imageAxisOrder="row-major")
 
-        # Initializes the display state fields.
         self._roi_color_mode: int = ROIColorMode.RANDOM
         self._background_view: int = BackgroundView.ROIS_ONLY
         self._roi_colormap: str = Colormap.HSV
@@ -184,7 +186,6 @@ class ROIViewer(QMainWindow):
         # Initializes the multi-recording state. _reset_state returns it to False on every data load.
         self._all_recordings_visible: bool = False
 
-        # Initializes the core data objects.
         self._context_data: ViewerData | None = None
         self._color_arrays: ColorArrays | None = None
         self._roi_maps: ROIIndexMaps | None = None
@@ -221,7 +222,6 @@ class ROIViewer(QMainWindow):
         outer_layout.setSpacing(0)
         self.setCentralWidget(central_widget)
 
-        # Adds the toolbar row with the File menu button.
         self._build_toolbar(parent_layout=outer_layout)
 
         content_widget = QWidget()
@@ -238,11 +238,9 @@ class ROIViewer(QMainWindow):
         self._graphics_splitter.setStretchFactor(1, 1)
         main_layout.addWidget(self._graphics_splitter, stretch=3)
 
-        # Adds the control panel on the right.
         control_panel = self._build_control_panel()
         main_layout.addWidget(control_panel, stretch=0)
 
-        # Adds the selected ROI info bar between the main content and the status bar.
         self._build_roi_info_bar(parent_layout=outer_layout)
 
         self._status_bar = QStatusBar(self)
@@ -268,55 +266,6 @@ class ROIViewer(QMainWindow):
         self.show()
         self._image_widget.show()
         self._trace_widget.show()
-
-    def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802
-        """Handles keyboard controls for mask opacity, color mode, and colormap cycling.
-
-        Space toggles opacity between zero and the previous slider value. Left/right arrow keys cycle through enabled
-        color modes. Up/down arrow keys cycle through colormaps.
-
-        Notes:
-            Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
-        """
-        slider = self._color_controls.opacity_slider
-        if event.key() == QtCore.Qt.Key.Key_Space:
-            if slider.value() > 0:
-                self._saved_opacity = slider.value()
-                slider.setValue(0)
-            else:
-                slider.setValue(self._saved_opacity)
-        elif event.key() in (QtCore.Qt.Key.Key_Up, QtCore.Qt.Key.Key_Down):
-            chooser = self._color_controls.colormap_chooser
-            count = chooser.count()
-            if count > 0:
-                step = -1 if event.key() == QtCore.Qt.Key.Key_Up else 1
-                chooser.setCurrentIndex((chooser.currentIndex() + step) % count)
-                self._on_color_changed(index=self._roi_color_mode)
-        elif event.key() in (QtCore.Qt.Key.Key_Left, QtCore.Qt.Key.Key_Right):
-            combo = self._color_controls.color_combo
-            if not combo.isEnabled():
-                return
-            count = combo.count()
-            step = 1 if event.key() == QtCore.Qt.Key.Key_Right else -1
-            model = combo.model()
-            current = combo.currentIndex()
-            for _ in range(count):
-                current = (current + step) % count
-                item = model.item(current) if isinstance(model, QStandardItemModel) else None
-                if item is None or item.isEnabled():
-                    combo.setCurrentIndex(current)
-                    self._on_color_changed(index=current)
-                    break
-
-    def eventFilter(self, source: QtCore.QObject, event: QtCore.QEvent) -> bool:  # noqa: N802
-        """Returns focus to the main window when Escape is pressed inside an edit field.
-
-        Notes:
-            Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
-        """
-        if escape_returns_focus(window=self, event=event):
-            return True
-        return super().eventFilter(source, event)
 
     def load_data(self, data: ViewerData) -> None:
         """Caches the input ViewerData instance and uses it to populate the managed UI window.
@@ -381,6 +330,55 @@ class ROIViewer(QMainWindow):
             ),
         }
 
+    def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802
+        """Handles keyboard controls for mask opacity, color mode, and colormap cycling.
+
+        Space toggles opacity between zero and the previous slider value. Left/right arrow keys cycle through enabled
+        color modes. Up/down arrow keys cycle through colormaps.
+
+        Notes:
+            Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
+        """
+        slider = self._color_controls.opacity_slider
+        if event.key() == QtCore.Qt.Key.Key_Space:
+            if slider.value() > 0:
+                self._saved_opacity = slider.value()
+                slider.setValue(0)
+            else:
+                slider.setValue(self._saved_opacity)
+        elif event.key() in (QtCore.Qt.Key.Key_Up, QtCore.Qt.Key.Key_Down):
+            chooser = self._color_controls.colormap_chooser
+            count = chooser.count()
+            if count > 0:
+                step = -1 if event.key() == QtCore.Qt.Key.Key_Up else 1
+                chooser.setCurrentIndex((chooser.currentIndex() + step) % count)
+                self._on_color_changed(index=self._roi_color_mode)
+        elif event.key() in (QtCore.Qt.Key.Key_Left, QtCore.Qt.Key.Key_Right):
+            combo = self._color_controls.color_combo
+            if not combo.isEnabled():
+                return
+            count = combo.count()
+            step = 1 if event.key() == QtCore.Qt.Key.Key_Right else -1
+            model = combo.model()
+            current = combo.currentIndex()
+            for _ in range(count):
+                current = (current + step) % count
+                item = model.item(current) if isinstance(model, QStandardItemModel) else None
+                if item is None or item.isEnabled():
+                    combo.setCurrentIndex(current)
+                    self._on_color_changed(index=current)
+                    break
+
+    def eventFilter(self, source: QtCore.QObject, event: QtCore.QEvent) -> bool:  # noqa: N802
+        """Returns focus to the main window when Escape is pressed inside an edit field.
+
+        Notes:
+            Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
+        """
+        if escape_returns_focus(window=self, event=event):
+            return True
+        return super().eventFilter(source, event)
+
     @property
     def _is_multi_recording(self) -> bool:
         """Returns True when the viewer is displaying multi-recording tracked ROI data."""
@@ -394,7 +392,6 @@ class ROIViewer(QMainWindow):
         """
         toolbar = QHBoxLayout()
 
-        # Adds the File menu button with its dropdown for loading recordings.
         file_button = QPushButton("File")
         file_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         file_button.setToolTip("Load a recording for visualization.")
@@ -445,7 +442,6 @@ class ROIViewer(QMainWindow):
         roi_group.setToolTip("Click an ROI to select it. Ctrl-click or Shift-click to toggle individual ROIs.")
         roi_layout = QVBoxLayout(roi_group)
 
-        # Adds the editable fields row with the ROI index selector and the ranked selection count.
         fields_row = QHBoxLayout()
         fields_row.addWidget(QLabel("ROI:"))
         self._roi_index_edit = QLineEdit()
@@ -470,7 +466,6 @@ class ROIViewer(QMainWindow):
         fields_row.addStretch()
         roi_layout.addLayout(fields_row)
 
-        # Adds the selection buttons, All/None on the first row and Top/Bottom on the second.
         all_button = QPushButton("All")
         all_button.setToolTip("Select all ROIs.")
         all_button.clicked.connect(self._select_all_rois)
@@ -513,7 +508,6 @@ class ROIViewer(QMainWindow):
         self._channel_group.setVisible(False)
         layout.addWidget(self._channel_group)
 
-        # Adds the ROI color controls and the colorbar.
         self._colors_group, self._color_controls = self._create_color_controls()
         colors_box = self._colors_group
         self._colorbar_widgets = self._create_colorbar()
@@ -550,7 +544,7 @@ class ROIViewer(QMainWindow):
         """Creates the background image dropdown.
 
         Returns:
-            A tuple of the group box and the background view combo box.
+            The Background Image group box and the combo box that selects the displayed view.
         """
         group_box = QGroupBox("Background Image")
         group_box.setStyleSheet(STYLE.group_box)
@@ -573,13 +567,12 @@ class ROIViewer(QMainWindow):
         """Creates the mask color controls including opacity, color mode, colormap, and classification toggles.
 
         Returns:
-            A tuple of the group box and the populated ColorControls dataclass.
+            The Mask Colors group box and the color mode, colormap, threshold, binning, and opacity widgets it holds.
         """
         group_box = QGroupBox("Mask Colors")
         group_box.setStyleSheet(STYLE.group_box)
         layout = QVBoxLayout(group_box)
 
-        # Adds the opacity label and slider on one row.
         opacity_row = QHBoxLayout()
         opacity_label = QLabel("Opacity:")
         opacity_label.setStyleSheet(STYLE.white_label)
@@ -676,7 +669,7 @@ class ROIViewer(QMainWindow):
         """Creates the colorbar widget displaying the current color mapping.
 
         Returns:
-            The populated ColorbarWidgets dataclass.
+            The colorbar container widget, its gradient image, and its three boundary labels.
         """
         # Builds the container widget on a two-row grid: the color gradient image on top and numeric boundary labels on
         # the bottom. Row 0 gets a higher stretch factor so the gradient occupies most of the vertical space.
@@ -709,7 +702,8 @@ class ROIViewer(QMainWindow):
         """Creates the classifier builder panel with New and Add to Existing buttons.
 
         Returns:
-            A tuple of the group box and the populated ClassifierControls dataclass.
+            The Classifier group box and the classify toggle, the New and Add to Existing buttons, and the status label
+            it holds.
         """
         group_box = QGroupBox("Classifier")
         group_box.setStyleSheet(STYLE.group_box)
@@ -765,7 +759,8 @@ class ROIViewer(QMainWindow):
         """Creates the trace panel controls inside a group box.
 
         Returns:
-            A tuple of the group box and the populated TraceControls dataclass.
+            The Trace Display group box and the fluorescence, neuropil, corrected, and spikes checkboxes and the maximum
+            trace count field it holds.
         """
         group_box = QGroupBox("Trace Display")
         group_box.setStyleSheet(STYLE.group_box)

@@ -14,6 +14,30 @@ if TYPE_CHECKING:
 
     from ..dataclasses import ROIMask, ROIStatistics
 
+_DEFAULT_DIAMETER: int = 10
+"""The ROI diameter in pixels assumed when the caller provides no diameter or provides a zero diameter."""
+
+_NORMALIZATION_COUNT: int = 100
+"""The number of leading ROIs whose mean soma pixel count normalizes the pixel count of every ROI."""
+
+_COMPACTNESS_EPSILON: float = 1e-10
+"""The small constant added to the baseline mean radius to prevent division by zero during compactness computation."""
+
+_MINIMUM_PIXELS_FOR_HULL: int = 10
+"""The soma pixel count at or below which solidity uses the fixed default area instead of a convex hull."""
+
+_DEFAULT_AREA: float = 10.0
+"""The fixed area substituted for the convex hull area of a small or degenerate ROI."""
+
+_SIGMA_MULTIPLIER: float = 2.5
+"""The number of standard deviations the fitted ellipse radii span, which captures ~99% of a Gaussian distribution."""
+
+_MINIMUM_PIXELS_FOR_CROP: int = 10
+"""The ROI pixel count at or below which soma cropping is skipped as too small for meaningful gradient analysis."""
+
+_GRADIENT_THRESHOLD_DIVISOR: int = 3
+"""The divisor applied to the peak radial weight gradient to derive the soma boundary threshold."""
+
 
 @dataclass(frozen=True, slots=True)
 class _EllipseData:
@@ -40,7 +64,7 @@ class _EllipseData:
         return 2 * major / (major + minor + 0.01)
 
 
-def estimate_diameter_from_rois(rois: list[ROIMask], default_diameter: int = 10) -> int:
+def estimate_diameter_from_rois(rois: list[ROIMask], default_diameter: int = _DEFAULT_DIAMETER) -> int:
     """Estimates the ROI diameter from the pixel counts of a list of ROIs.
 
     Args:
@@ -95,8 +119,8 @@ def compute_roi_statistics(
         frame_width: The width of the recording frames from which ROIs are segmented, in pixels.
         aspect: The aspect ratio of the recording. If provided, adjusts ROI ellipse fitting. Ignored in lightweight
             mode.
-        diameter: The expected ROI diameter in pixels. Used for ROI ellipse fitting normalization. Ignored in
-            lightweight mode.
+        diameter: The expected ROI diameter in pixels. Used for ROI ellipse fitting normalization and for distance
+            normalization in compactness. Applies in both full and lightweight modes.
         maximum_overlap_fraction: The maximum fraction of pixels that can overlap with other ROIs. If specified, ROIs
             exceeding this threshold are removed from the list in-place. Ignored in lightweight mode.
         crop: Determines whether to crop processed ROIs to the soma region before computing statistics.
@@ -117,14 +141,10 @@ def compute_roi_statistics(
             roi.mask.centroid = _compute_median_pixel_position(y_pixels=roi.mask.y_pixels, x_pixels=roi.mask.x_pixels)
 
     # Resolves the ROI diameter for distance normalization. A sensible default is used when no diameter is provided.
-    default_diameter = 10
-    effective_diameter = default_diameter if diameter is None or diameter == 0 else diameter
+    effective_diameter = _DEFAULT_DIAMETER if diameter is None or diameter == 0 else diameter
 
-    # Wraps each ROIStatistics in an _ROI processing object to compute derived statistics.
     roi_wrappers = [_ROI(data=roi, diameter=effective_diameter, crop=crop) for roi in rois]
 
-    # Resolves aspect correction and overlap image only when full statistics are needed. Lightweight mode skips these
-    # because ellipse fitting and overlap filtering are not performed.
     if not lightweight:
         if aspect is not None:
             y_scale, x_scale = int(aspect * effective_diameter), effective_diameter
@@ -137,8 +157,6 @@ def compute_roi_statistics(
     roi_count = len(rois)
     soma_pixel_count_values = np.empty(roi_count, dtype=np.float32)
 
-    # Computes shape statistics for each ROI and writes them back to the ROIStatistics instances. In lightweight mode,
-    # skips the expensive ellipse fitting, convex hull solidity, and overlap mask computations.
     for roi_index, wrapper in enumerate(roi_wrappers):
         data = wrapper.data
         data.compactness = wrapper.compactness
@@ -158,14 +176,12 @@ def compute_roi_statistics(
 
     # Normalizes soma pixel count relative to the first 100 ROIs. Detection algorithms typically find high-confidence
     # ROIs first, so early ROIs serve as a reliable baseline for comparing later, lower-confidence detections.
-    normalization_count = 100
-    soma_pixel_count_normalized = soma_pixel_count_values / np.mean(soma_pixel_count_values[:normalization_count])
+    soma_pixel_count_normalized = soma_pixel_count_values / np.mean(soma_pixel_count_values[:_NORMALIZATION_COUNT])
 
     for roi, soma_count_normalized in zip(rois, soma_pixel_count_normalized, strict=True):
         roi.normalized_pixel_count = float(soma_count_normalized)
 
     # Removes ROIs with excessive overlap. High overlap often indicates over-segmentation or neuropil contamination.
-    # Skipped in lightweight mode since overlap computation is not performed.
     if not lightweight and maximum_overlap_fraction is not None and maximum_overlap_fraction < 1.0:
         keep_flags = _ROI.remove_overlapping_rois(
             rois=roi_wrappers, overlap_image=overlap_counts, maximum_overlap_fraction=maximum_overlap_fraction
@@ -214,10 +230,8 @@ class _ROI:
     """Wraps the ROIStatistics dataclass with methods to compute additional ROI properties.
 
     Notes:
-        The class uses a shared class variable caching sorted baseline distances (keyed by diameter) to avoid
-        recomputation across instances. The soma mask is cached after first computation to avoid redundant calculations
-        when accessing dependent properties. Distance-based statistics (mean_radius, compactness) are normalized by the
-        ROI diameter to make them scale-invariant across different ROI sizes and imaging magnifications.
+        Distance-based statistics (mean_radius, compactness) are normalized by the ROI diameter to make them
+        scale-invariant across different ROI sizes and imaging magnifications.
 
     Attributes:
         _data: The underlying ROIStatistics instance.
@@ -313,7 +327,7 @@ class _ROI:
 
     @property
     def mean_radius(self) -> float:
-        """Returns the mean diameter-normalized distance from ROI pixels to their median center."""
+        """Returns the mean diameter-normalized distance from the ROI's soma pixels to their median center."""
         y_pixels = self.soma_y_pixels
         x_pixels = self.soma_x_pixels
         # Normalizes distances by ROI diameter for scale-invariance, matching the original suite2p approach.
@@ -325,7 +339,9 @@ class _ROI:
 
     @property
     def baseline_mean_radius(self) -> float:
-        """Returns the expected mean radius for a uniformly distributed set of pixels of the same count as the ROI."""
+        """Returns the expected mean radius for a uniformly distributed set of pixels of the same count as the ROI's
+        soma region.
+        """
         # Uses a diameter-dependent kernel. The kernel is computed from a meshgrid spanning 2*diameter in each
         # direction, with distances normalized by diameter, matching the original suite2p approach.
         diameter = self._diameter
@@ -338,27 +354,26 @@ class _ROI:
 
     @property
     def compactness(self) -> float:
-        """Returns the ratio of actual to expected mean radius, where values near 1 indicate compact circular ROIs."""
-        return max(1.0, self.mean_radius / (1e-10 + self.baseline_mean_radius))
+        """Returns the ratio of actual to expected mean radius, floored at 1.0, where values near 1 indicate compact
+        circular ROIs.
+        """
+        return max(1.0, self.mean_radius / (_COMPACTNESS_EPSILON + self.baseline_mean_radius))
 
     @property
     def solidity(self) -> float:
         """Returns the ROI solidity as the ratio of soma pixel count to convex hull area, substituting a fixed area
         of 10.0 for ROIs of 10 or fewer pixels and for degenerate hulls.
         """
-        minimum_pixels_for_hull = 10
-        default_area = 10.0
-
         pixel_count = self.soma_pixel_count
-        if pixel_count <= minimum_pixels_for_hull:
-            return pixel_count / default_area
+        if pixel_count <= _MINIMUM_PIXELS_FOR_HULL:
+            return pixel_count / _DEFAULT_AREA
 
         # ConvexHull requires (N, 2) array of points.
         points = np.column_stack((self.soma_y_pixels, self.soma_x_pixels))
         try:
             area = ConvexHull(points).volume
         except ValueError, QhullError:
-            area = default_area
+            area = _DEFAULT_AREA
 
         return pixel_count / area
 
@@ -415,8 +430,7 @@ class _ROI:
         eigenvalue_2 = (trace - discriminant) / 2.0
 
         # Converts eigenvalues to radii (2.5 sigma boundary captures ~99% of Gaussian distribution).
-        sigma_multiplier = 2.5
-        radii = sigma_multiplier * np.sqrt(np.maximum(0.0, np.array([eigenvalue_1, eigenvalue_2])))
+        radii = _SIGMA_MULTIPLIER * np.sqrt(np.maximum(0.0, np.array([eigenvalue_1, eigenvalue_2])))
 
         # Orders radii as (semi-major, semi-minor) for consistent access.
         sorted_radii = (max(radii[0], radii[1]), min(radii[0], radii[1]))
@@ -490,10 +504,8 @@ class _ROI:
         Returns:
             A boolean mask indicating soma pixels.
         """
-        minimum_pixels_for_crop = 10
-
         # Returns all-True mask if cropping is disabled or ROI is too small for meaningful gradient analysis.
-        if not self._crop or self.y_pixels.size <= minimum_pixels_for_crop:
+        if not self._crop or self.y_pixels.size <= _MINIMUM_PIXELS_FOR_CROP:
             return np.ones(self.y_pixels.size, dtype=np.bool_)
 
         distances = np.hypot(self.y_pixels - self.centroid[0], self.x_pixels - self.centroid[1])
@@ -519,8 +531,7 @@ class _ROI:
             return np.ones(self.y_pixels.size, dtype=np.bool_)
 
         # Finds the radius where gradient first drops below 1/3 of its peak after rising above threshold.
-        gradient_threshold_divisor = 3
-        threshold = weight_gradient.max() / gradient_threshold_divisor
+        threshold = weight_gradient.max() / _GRADIENT_THRESHOLD_DIVISOR
         crop_radius = radii[-1]
 
         above_threshold_indices = np.nonzero(weight_gradient > threshold)[0]

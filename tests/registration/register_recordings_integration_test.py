@@ -44,7 +44,7 @@ _BASE_CENTERS: tuple[tuple[int, int], ...] = ((18, 18), (40, 22), (24, 44), (46,
 
 
 class TestRegisterRecordings:
-    """Tests register_recordings."""
+    """Tests the deformation outputs cross-recording alignment writes, plus its skip, repeat, and failure paths."""
 
     def test_serial_path_writes_deformation_outputs(
         self, gaussian_blob_image: Callable[..., NDArray[np.float64]], tmp_path: Path
@@ -362,7 +362,7 @@ class TestProjectTemplatesParallelPath:
 
 
 class TestApplyForwardDeformation:
-    """Tests _apply_forward_deformation."""
+    """Tests the loaded-data and selection preconditions that the forward mask deformation requires."""
 
     def test_raises_without_combined_data(self) -> None:
         """Verifies that forward deformation raises a ValueError when combined data is not loaded."""
@@ -395,8 +395,8 @@ class TestApplyForwardDeformation:
         )
         ROIMask.save_list(
             mask_list=[
-                _make_circle_mask(centroid=(8, 8), radius=2, frame_width=_FRAME_SIZE),
-                _make_circle_mask(centroid=(16, 16), radius=2, frame_width=_FRAME_SIZE),
+                _make_roi_mask(centroid=(8, 8), radius=2, frame_width=_FRAME_SIZE),
+                _make_roi_mask(centroid=(16, 16), radius=2, frame_width=_FRAME_SIZE),
             ],
             file_path=tmp_path / RecordingArrays.ROI_MASKS,
         )
@@ -415,7 +415,7 @@ class TestApplyForwardDeformation:
 
 
 class TestProjectTemplatesToRecordings:
-    """Tests project_templates_to_recordings."""
+    """Tests the per-channel template projection outputs and the completeness check that triggers re-projection."""
 
     def test_projects_channel_1_templates(self, tmp_path: Path) -> None:
         """Verifies that backward projection writes channel 1 ROI statistics for the tracked templates."""
@@ -540,7 +540,7 @@ class TestProjectTemplatesToRecordings:
 
 
 class TestApplyBackwardDeformation:
-    """Tests _apply_backward_deformation."""
+    """Tests the loaded-data and deformation-field preconditions that the backward projection requires."""
 
     def test_raises_without_combined_data(self) -> None:
         """Verifies that backward deformation raises a ValueError when combined data is not loaded."""
@@ -593,7 +593,7 @@ def _build_blob_image(
     return image.astype(np.float32)
 
 
-def _make_circle_mask(
+def _make_roi_mask(
     centroid: tuple[int, int],
     radius: int,
     frame_width: int,
@@ -686,7 +686,7 @@ def _build_recording_context(
         sampling_rate=30.0,
     ).save(root_path=data_path)
 
-    masks = [_make_circle_mask(centroid=center, radius=4, frame_width=_FRAME_SIZE) for center in centers]
+    masks = [_make_roi_mask(centroid=center, radius=4, frame_width=_FRAME_SIZE) for center in centers]
     if write_channel_1_masks:
         ROIMask.save_list(mask_list=masks, file_path=data_path / "roi_masks.npz")
     if write_channel_2_masks:
@@ -772,13 +772,13 @@ def _build_projection_context(
 
     if channel_1_templates:
         runtime.tracking.template_masks = [
-            _make_circle_mask(centroid=(20, 20), radius=4, frame_width=_FRAME_SIZE, cluster_id=1, recording_count=2),
-            _make_circle_mask(centroid=(42, 24), radius=4, frame_width=_FRAME_SIZE, cluster_id=2, recording_count=2),
+            _make_roi_mask(centroid=(20, 20), radius=4, frame_width=_FRAME_SIZE, cluster_id=1, recording_count=2),
+            _make_roi_mask(centroid=(42, 24), radius=4, frame_width=_FRAME_SIZE, cluster_id=2, recording_count=2),
         ]
         runtime.tracking.template_diameter = 8
     if channel_2_templates:
         runtime.tracking.template_masks_channel_2 = [
-            _make_circle_mask(centroid=(30, 30), radius=4, frame_width=_FRAME_SIZE, cluster_id=3, recording_count=2),
+            _make_roi_mask(centroid=(30, 30), radius=4, frame_width=_FRAME_SIZE, cluster_id=3, recording_count=2),
         ]
         runtime.tracking.template_diameter_channel_2 = 8
 

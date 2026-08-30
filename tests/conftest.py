@@ -140,7 +140,6 @@ def _write_binary_movie(file_path: Path, movie: NDArray[np.int16]) -> None:
     """Writes a synthetic movie array to a raw int16 binary file readable by BinaryFile.
 
     Args:
-        file_path: The destination path for the binary file.
         movie: The synthetic movie with shape (frames, height, width). Cast to int16 before writing.
     """
     movie.astype(np.int16).tofile(file_path)

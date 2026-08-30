@@ -118,7 +118,10 @@ class TestDevicePlannedDefaults:
             f"{[stage.value for stage in _STAGE_WORKER_DEFAULTS]}."
         )
         with pytest.raises(ValueError, match=error_format(message=expected_message)):
-            resolve_stage_workers(job_name="recording_denoise", gpu_registration=True)  # type: ignore[arg-type]
+            resolve_stage_workers(
+                job_name="recording_denoise",  # type: ignore[arg-type]  # The invalid name is the input under test.
+                gpu_registration=True,
+            )
 
 
 class TestExplicitRequests:
@@ -170,7 +173,9 @@ class TestRejectedRequests:
             f"{[stage.value for stage in _STAGE_WORKER_DEFAULTS]}."
         )
         with pytest.raises(ValueError, match=error_format(message=expected_message)):
-            resolve_stage_workers(job_name="recording_denoise")  # type: ignore[arg-type]
+            resolve_stage_workers(
+                job_name="recording_denoise",  # type: ignore[arg-type]  # The invalid name is the input under test.
+            )
 
     @pytest.mark.parametrize("requested_workers", [0, -2, -3, -100])
     def test_invalid_worker_count_is_rejected(self, requested_workers: int) -> None:

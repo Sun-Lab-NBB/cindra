@@ -47,6 +47,9 @@ def compute_delta_fluorescence(
 
     Returns:
         The neuropil-and-baseline-corrected delta fluorescence traces with shape (roi_count, frame_count).
+
+    Raises:
+        ValueError: If baseline_method is not 'maximin', 'constant', or 'constant_percentile'.
     """
     # Subtracts the scaled neuropil fluorescence from the ROI fluorescence. Casts the coefficient to float32 to
     # prevent Python's native float64 from promoting the entire computation chain to double precision. Scaling by the
@@ -122,7 +125,7 @@ def apply_oasis_deconvolution(
         pool_length = np.empty((batch_count, frame_count), dtype=np.float32)
 
         # Runs the OASIS algorithm that modifies spike_traces in-place.
-        _oasis_matrix(
+        _deconvolve_roi_batch(
             cell_fluorescence=cell_fluorescence[start_index:end_index],
             pool_amplitude=pool_amplitude,
             pool_weight=pool_weight,
@@ -137,7 +140,7 @@ def apply_oasis_deconvolution(
 
 
 @njit(cache=True, parallel=True)
-def _oasis_matrix(  # pragma: no cover
+def _deconvolve_roi_batch(  # pragma: no cover
     cell_fluorescence: NDArray[np.float32],
     pool_amplitude: NDArray[np.float32],
     pool_weight: NDArray[np.float32],

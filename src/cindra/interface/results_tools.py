@@ -94,7 +94,8 @@ def verify_single_recording_output_tool(output_root: str) -> dict[str, object]:
             automatically, falling back to a recursive search for configuration.yaml.
 
     Returns:
-        On success, contains 'complete' flag, 'plane_count', 'two_channels' indicator, total check counts
+        On success, contains 'complete' flag, the echoed 'output_root', the resolved 'cindra_path' the checks ran
+        against, 'plane_count', 'two_channels' indicator, total check counts
         ('total_checks', 'passed', 'failed'), 'missing' list of absent required files, and optional 'warnings'. On
         failure, contains an 'error' message. Both cases include a 'success' flag. A 'success' value of True only means
         the tool ran. Callers MUST gate downstream steps on the 'complete' field, which is False whenever 'missing' is
@@ -357,7 +358,8 @@ def verify_multi_recording_output_tool(output_root: str, dataset: str) -> dict[s
             or prepare_multi_recording_batch_tool.
 
     Returns:
-        On success, contains 'complete' flag, 'recording_count', per-recording verification summaries, check counts
+        On success, contains 'complete' flag, the echoed 'output_root' and 'dataset', 'recording_count', the
+        'recordings' list of per-recording verification summaries, check counts
         ('total_checks', 'passed', 'failed'), 'missing' files, and optional 'warnings'. On failure, contains an
         'error' message. Both cases include a 'success' flag. A 'success' value of True only means the tool ran.
         Callers MUST gate downstream steps on the 'complete' field, which is False whenever 'missing' is non-empty.
@@ -1294,7 +1296,9 @@ def query_multi_recording_registration_quality_tool(
             or prepare_multi_recording_batch_tool.
 
     Returns:
-        On success, contains per-recording deformation field statistics and image availability. Each 'deform_field_y'
+        On success, contains 'recording_count' and a 'recordings' list, each entry holding 'index', 'recording_id',
+        a 'registration_available' flag, its deformation field statistics, and the 'transformed_images' and
+        'channel_2_images' presence maps. Each 'deform_field_y'
         and 'deform_field_x' entry adds 'abs_mean' and 'abs_max', the mean and maximum absolute displacement in
         pixels, to its {min, max, mean, std, shape} summary. A 'displacement_magnitude' {min, max, mean, std} summary
         combines both fields. On failure, contains an 'error' message. Both cases include a 'success' flag.
@@ -1510,8 +1514,11 @@ def query_cross_recording_traces_tool(
         roi_indices: List of ROI indices to retrieve traces for across all recordings (maximum 50). These are 0-based
             positional per-recording row indices, not the multi-recording tracking cluster_id, which is a separate
             concept. An out-of-range ROI yields an empty 'recordings' list for that ROI with success True.
-        trace_type: The type of fluorescence trace to return. 'fluorescence' for raw cell fluorescence,
-            'neuropil' for neuropil fluorescence, 'corrected' for neuropil-subtracted, 'spikes' for deconvolved.
+        trace_type: The type of fluorescence trace to return. 'fluorescence' for raw cell fluorescence, 'neuropil' for
+            neuropil fluorescence, 'corrected' for neuropil-subtracted, 'spikes' for deconvolved. For 'spikes' and
+            'corrected', spikes.npy and subtracted_fluorescence.npy are written but zero-filled when
+            spike_deconvolution.extract_spikes was disabled at processing time, so an all-zero returned trace can mean
+            deconvolution was off rather than absence of activity.
         downsample_factor: Factor by which to downsample traces (1 = no downsampling, 10 = every 10th sample). A
             value below 1 is silently raised to 1 and the clamped value is echoed back.
         start_frame: The first frame index (inclusive) of the window to return, applied per recording before

@@ -88,7 +88,7 @@ class TestClassifierDiscrimination:
 
 
 class TestClassifier:
-    """Tests the Classifier class."""
+    """Tests the training-file loading and its rejections, plus the probability output the fitted model returns."""
 
     def test_representation_reports_the_loaded_file_and_its_fitted_feature_set(self, tmp_path: Path) -> None:
         """Verifies that the representation reports the path, the features kept, and the training sample count."""
@@ -239,7 +239,7 @@ class TestClassifier:
         assert "skewness" not in classifier._available_features
 
     def test_handles_none_skewness(self, tmp_path: Path) -> None:
-        """Verifies that ROIs with None skewness are handled correctly."""
+        """Verifies that an ROI carrying no skewness still scores a finite probability pair."""
         path = tmp_path / "test_classifier.npz"
         _create_classifier_file(path=path)
         classifier = Classifier(classifier_path=path)
@@ -266,7 +266,7 @@ class TestClassifier:
 
 
 class TestCreateTrainingDataset:
-    """Tests Classifier.create_training_dataset."""
+    """Tests the dataset file the helper writes, its Classifier round-trip, and the sample counts it enforces."""
 
     def test_creates_file(self, tmp_path: Path) -> None:
         """Verifies that the training dataset file is created."""
@@ -319,7 +319,7 @@ class TestClassifyFunction:
     """Tests the module-level classify function."""
 
     def test_builtin_classifier(self) -> None:
-        """Verifies that the built-in classifier works."""
+        """Verifies that the built-in classifier scores every ROI it receives as float32."""
         rois = [_make_roi() for _ in range(3)]
         result = classify(roi_statistics=rois)
         assert result.shape == (3, 2)

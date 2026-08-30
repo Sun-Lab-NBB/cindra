@@ -160,7 +160,7 @@ class Classifier:
             holding fewer samples than that when it loads the file.
 
         Args:
-            file_path: The path where the classifier file will be saved. Should have .npz extension.
+            file_path: The path the classifier file is saved to, which should carry the .npz extension.
             training_labels: The label of every training sample, False for an artifact and True for a cell, with
                 shape (n_samples,).
             normalized_pixel_count: The normalized pixel count values with shape (n_samples,).
@@ -224,7 +224,7 @@ class Classifier:
         """Extracts classification features supported by the model from ROIStatistics instances.
 
         Args:
-            roi_statistics: The ROIs to extract the features from.
+            roi_statistics: The ROIs whose features are extracted.
 
         Returns:
             The extracted features with shape (n_rois, n_features).
@@ -286,7 +286,7 @@ class Classifier:
         """Predicts the probability that each ROI in the input list is a cell.
 
         Args:
-            roi_statistics: The ROIs to predict the probabilities for.
+            roi_statistics: The ROIs whose cell probabilities are predicted.
 
         Returns:
             The probability that each ROI is a cell, with shape (n_rois,).

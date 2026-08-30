@@ -3,10 +3,10 @@ from pathlib import Path
 
 from ..io import (
     TIFF_EXTENSIONS as TIFF_EXTENSIONS,
-    PARAMETERS_FILENAME as PARAMETERS_FILENAME,
     MAXIMUM_CHANNEL_COUNT as MAXIMUM_CHANNEL_COUNT,
     find_data_directory as find_data_directory,
 )
+from ..layout import PARAMETERS_FILENAME as PARAMETERS_FILENAME
 from .mcp_instance import mcp as mcp
 
 _MINIMUM_RECOMMENDED_FRAMES_PER_PLANE: int

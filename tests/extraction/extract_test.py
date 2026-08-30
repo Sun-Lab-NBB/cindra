@@ -16,7 +16,7 @@ from cindra.dataclasses.single_recording_data import ROIMask, ROIStatistics
 
 
 class TestExtractCellFluorescence:
-    """Tests _extract_cell_fluorescence."""
+    """Tests the weighted pixel gather over ragged ROI masks, including the zero trace an empty mask reports."""
 
     def test_ragged_masks_with_non_uniform_weights(self) -> None:
         """Verifies the weighted gather against a hand-written reference over ragged masks and uneven weights."""
@@ -85,7 +85,7 @@ class TestExtractCellFluorescence:
 
 
 class TestExtractNeuropilFluorescence:
-    """Tests _extract_neuropil_fluorescence."""
+    """Tests the surround averaging over ragged masks, including the zeros an empty neuropil mask reports."""
 
     def test_ragged_masks_average_against_reference(self) -> None:
         """Verifies the neuropil average against a hand-written reference over ragged masks."""
@@ -144,7 +144,7 @@ class TestExtractNeuropilFluorescence:
 
 
 class TestUpdateRoiExtractionStatistics:
-    """Tests _update_roi_extraction_statistics."""
+    """Tests the neuropil-corrected skewness written in place onto each ROI, and the coefficient that scales it."""
 
     def test_skewness_set_on_all_rois(self) -> None:
         """Verifies that skewness is set on every ROIStatistics instance."""
@@ -222,7 +222,7 @@ class TestUpdateRoiExtractionStatistics:
         assert differences_found
 
     def test_updates_in_place(self) -> None:
-        """Verifies that skewness values are written in place onto the ROIStatistics instances passed in."""
+        """Verifies that skewness values are written in place onto the supplied ROIStatistics instances."""
         roi_count = 2
         frame_count = 100
         generator = np.random.default_rng(seed=42)

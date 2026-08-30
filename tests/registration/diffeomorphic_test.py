@@ -114,7 +114,7 @@ class TestComputeDemonsForce:
 
 
 class TestDiffeomorphicDemonsRegistration:
-    """Tests DiffeomorphicDemonsRegistration."""
+    """Tests the construction, level filtering, caching, and groupwise averaging of the cross-day alignment run."""
 
     def test_constructor_stores_images(self) -> None:
         """Verifies that the constructor stores images as float32."""
@@ -530,14 +530,14 @@ class TestRegisterProgressState:
             def _record(**keyword_arguments: object) -> None:
                 """Records the progress state the console holds while the scale loop is running."""
                 observed_states.append(console.progress_enabled)
-                original_iteration(**keyword_arguments)  # type: ignore[arg-type]
+                original_iteration(**keyword_arguments)  # type: ignore[arg-type]  # The kwargs are typed as object.
 
             monkeypatch.setattr(registration, "_perform_iteration", _record)
 
             registration.register(progress=progress)
 
-            # The argument governs the state the run itself works under, so the loop must see exactly what it asked
-            # for rather than whatever the caller happened to hold.
+            # The argument governs the run's own working state, so the loop must see exactly the state it requested
+            # rather than whatever the caller happened to hold.
             assert observed_states
             assert set(observed_states) == {progress}
 
@@ -591,13 +591,6 @@ def _prepare_level_registration(
     Notes:
         The level filter reads the working resolution of a scale from the pyramids, so a test that queries a single
         level directly has to stand them up itself.
-
-    Args:
-        images: The images to register against their common mean.
-        final_grid_sampling: The B-spline grid spacing at the finest scale level.
-
-    Returns:
-        The registration instance, with its pyramids initialized and no deformation resolved yet.
     """
     registration = DiffeomorphicDemonsRegistration(
         images=images, final_scale=1.0, final_grid_sampling=final_grid_sampling
@@ -607,15 +600,7 @@ def _prepare_level_registration(
 
 
 def _build_blob_image(builder: Callable[..., NDArray[np.float64]], translation: tuple[int, int]) -> NDArray[np.float32]:
-    """Builds the synthetic accuracy-test image with its blob centers offset by the requested translation.
-
-    Args:
-        builder: The gaussian_blob_image fixture factory used to render the image.
-        translation: The vertical and horizontal offset in pixels applied to every blob center.
-
-    Returns:
-        The rendered image as a float32 array.
-    """
+    """Builds the synthetic accuracy-test image with its blob centers offset by the requested translation."""
     translation_y, translation_x = translation
     centers = tuple((row + translation_y, column + translation_x) for row, column in _ACCURACY_BLOB_CENTERS)
     image = builder(
@@ -633,12 +618,6 @@ def _register_accuracy_images(images: list[NDArray[np.float32]]) -> Diffeomorphi
     Notes:
         The images are copied before registration, so that repeated runs over the same inputs stay independent of
         each other.
-
-    Args:
-        images: The images to register against their common mean.
-
-    Returns:
-        The registration instance, with its deformations already resolved.
     """
     registration = DiffeomorphicDemonsRegistration(
         images=[image.copy() for image in images],
@@ -651,14 +630,7 @@ def _register_accuracy_images(images: list[NDArray[np.float32]]) -> Diffeomorphi
 
 
 def _mean_field_displacement(deformation: Deformation) -> tuple[float, float]:
-    """Returns the mean vertical and horizontal displacement over the interior of a deformation field.
-
-    Args:
-        deformation: The deformation whose displacement fields are measured.
-
-    Returns:
-        A tuple storing the mean vertical displacement followed by the mean horizontal displacement, in pixels.
-    """
+    """Returns the mean vertical and horizontal displacement over the interior of a deformation field."""
     interior = slice(_ACCURACY_FIELD_MARGIN, -_ACCURACY_FIELD_MARGIN)
     return (
         float(deformation.get_field(dimension=0)[interior, interior].mean()),
@@ -669,16 +641,7 @@ def _mean_field_displacement(deformation: Deformation) -> tuple[float, float]:
 def _warped_interior(
     registration: DiffeomorphicDemonsRegistration, image: NDArray[np.float32], image_index: int
 ) -> NDArray[np.float32]:
-    """Returns the interior of an image after applying the deformation resolved for it.
-
-    Args:
-        registration: The registration instance holding the resolved deformations.
-        image: The image to warp into the group's common space.
-        image_index: The index identifying which resolved deformation applies to the image.
-
-    Returns:
-        The warped image with its border margin removed.
-    """
+    """Returns the interior of an image after applying the deformation resolved for it."""
     deformation = registration.get_deformation(image_index=image_index)
     warped = deformation.apply_deformation(data=image)
     interior = slice(_ACCURACY_FIELD_MARGIN, -_ACCURACY_FIELD_MARGIN)
@@ -686,15 +649,7 @@ def _warped_interior(
 
 
 def _image_correlation(first: NDArray[np.float32], second: NDArray[np.float32]) -> float:
-    """Returns the Pearson correlation coefficient between two images of matching shape.
-
-    Args:
-        first: The first image to correlate.
-        second: The second image to correlate.
-
-    Returns:
-        The correlation coefficient, ranging from -1.0 for anticorrelated images to 1.0 for identical images.
-    """
+    """Returns the Pearson correlation coefficient between two images of matching shape."""
     first_centered = first.ravel() - first.mean()
     second_centered = second.ravel() - second.mean()
     return float(

@@ -1,4 +1,4 @@
-"""Provides the ROI detection entry point for the single-recording and the multi-recording processing pipelines."""
+"""Provides the ROI detection entry point for the single-recording processing pipeline."""
 
 from __future__ import annotations
 
@@ -97,7 +97,6 @@ def detect_plane_rois(context: RuntimeContext, *, workers: int) -> None:
     frame_height = io_data.frame_height
     frame_width = io_data.frame_width
 
-    # Computes the bin size for temporal averaging.
     bin_size = int(
         max(
             1,
@@ -109,8 +108,8 @@ def detect_plane_rois(context: RuntimeContext, *, workers: int) -> None:
     valid_y_range = registration_data.valid_y_range
     valid_x_range = registration_data.valid_x_range
 
-    # Validates that the registered binary path exists. This is always satisfied when called from the processing
-    # pipeline, since binarization creates the binary file and sets its path before registration rewrites it in place.
+    # Validates that the registered binary path exists. Holds whenever the processing pipeline runs this stage,
+    # because binarization creates the binary file and sets its path before registration rewrites it in place.
     channel_1_path = io_data.registered_binary_path
     if channel_1_path is None:
         message = "Unable to run ROI detection. The registered binary file path is not set for channel 1."
@@ -208,130 +207,6 @@ def detect_plane_rois(context: RuntimeContext, *, workers: int) -> None:
     # because the caller checks them to decide whether to run trace extraction.
     context.runtime.registration.release_arrays()
     context.runtime.detection.release_arrays()
-
-
-def _create_enhanced_mean_image(
-    mean_image: NDArray[np.float32],
-    roi_diameter: int,
-    valid_y_range: tuple[int, int],
-    valid_x_range: tuple[int, int],
-    frame_height: int,
-    frame_width: int,
-) -> NDArray[np.float32]:
-    """Creates an enhanced version of the mean image by removing background fluorescence and normalizing local contrast.
-
-    Notes:
-        The enhancement pipeline applies a median filter at a scale proportional to the ROI diameter to estimate and
-        subtract the slowly varying background. The residual is then divided by its local absolute median to normalize
-        contrast across the field of view. Finally, the result is clipped and rescaled to the [0, 1] range. Border
-        regions outside the valid registration crop are filled with the minimum value of the enhanced interior.
-
-    Args:
-        mean_image: The mean image to enhance, already cropped to the valid registration region.
-        roi_diameter: The estimated ROI diameter in pixels, used to compute the median filter kernel size.
-        valid_y_range: The valid Y pixel range (start, end) after registration cropping.
-        valid_x_range: The valid X pixel range (start, end) after registration cropping.
-        frame_height: The height of the full frame in pixels.
-        frame_width: The width of the full frame in pixels.
-
-    Returns:
-        The enhanced mean image with shape (frame_height, frame_width), background-subtracted and contrast-normalized
-        with values in [0, 1] inside the valid region.
-    """
-    spatial_scale_pixels = roi_diameter if roi_diameter > 0 else _DEFAULT_CELL_DIAMETER
-    kernel_dimension = int(_BACKGROUND_SCALE * np.ceil(spatial_scale_pixels) + 1)
-    filter_kernel_size = (kernel_dimension, kernel_dimension)
-
-    # Subtracts background fluorescence using a median filter. Casts medfilt2d output to float32 to prevent float64
-    # promotion of the entire downstream chain. Reuses the background array for the result.
-    background_removed = medfilt2d(input=mean_image, kernel_size=filter_kernel_size).astype(np.float32)
-    np.subtract(mean_image, background_removed, out=background_removed)
-
-    # Normalizes ROI contrast by dividing by local absolute median.
-    absolute_background_removed = np.abs(background_removed)
-    local_variance = medfilt2d(input=absolute_background_removed, kernel_size=filter_kernel_size).astype(np.float32)
-    np.add(local_variance, _VARIANCE_EPSILON, out=local_variance)
-    np.divide(background_removed, local_variance, out=background_removed)
-
-    # Clips intensities and scales to [0, 1] range. The mean_image is already cropped to the valid region, so no
-    # additional slicing is needed.
-    clipped_roi = np.clip(a=background_removed, a_min=_ENHANCED_MINIMUM_INTENSITY, a_max=_ENHANCED_MAXIMUM_INTENSITY)
-    scaled_roi = (clipped_roi - _ENHANCED_MINIMUM_INTENSITY) / (
-        _ENHANCED_MAXIMUM_INTENSITY - _ENHANCED_MINIMUM_INTENSITY
-    )
-
-    # Places the enhanced image into a full-size array with border set to the minimum value.
-    y_start, y_end = valid_y_range
-    x_start, x_end = valid_x_range
-    enhanced_image = np.full(shape=(frame_height, frame_width), fill_value=scaled_roi.min(), dtype=np.float32)
-    enhanced_image[y_start:y_end, x_start:x_end] = scaled_roi
-
-    return enhanced_image
-
-
-def _apply_preclassification(
-    roi_statistics: list[ROIStatistics],
-    frame_height: int,
-    frame_width: int,
-    preclassification_threshold: float,
-    *,
-    crop_to_soma: bool,
-    custom_classifier_path: Path | None,
-    plane_index: int,
-    channel_label: str,
-    diameter: int = 10,
-) -> list[ROIStatistics]:
-    """Filters detected ROIs using a lightweight pre-classification model before signal extraction.
-
-    Notes:
-        Computes the minimal shape statistics needed for classification (compactness and normalized pixel
-        count), runs a 2-feature logistic regression model, and removes ROIs whose cell probability falls below the
-        threshold. The model operates on shape statistics alone, so it runs before fluorescence traces are
-        extracted.
-
-    Args:
-        roi_statistics: The list of ROIStatistics instances to filter.
-        frame_height: The height of the frame that contains the processed ROIs, in pixels.
-        frame_width: The width of the frame that contains the processed ROIs, in pixels.
-        preclassification_threshold: The minimum classifier probability for an ROI to be kept.
-        crop_to_soma: Determines whether to crop dendritic regions before computing classification features.
-        custom_classifier_path: The path to a custom classifier file, or None to use the built-in classifier.
-        plane_index: The index of the imaging plane being processed, used for logging.
-        channel_label: The channel identifier string used in log messages (e.g., "channel 1" or "channel 2").
-        diameter: The estimated ROI diameter in pixels, used for distance normalization in compactness computation.
-
-    Returns:
-        The filtered list of ROIStatistics instances that passed the preclassification threshold.
-    """
-    # Computes only the minimal statistics (compactness and normalized_pixel_count) needed by the pre-classifier,
-    # skipping the expensive ellipse fitting, convex hull, and overlap computations.
-    compute_roi_statistics(
-        rois=roi_statistics,
-        frame_height=frame_height,
-        frame_width=frame_width,
-        diameter=diameter,
-        crop=crop_to_soma,
-        lightweight=True,
-    )
-
-    is_cell = classify(
-        roi_statistics=roi_statistics,
-        custom_classifier_path=custom_classifier_path,
-        preclassification=True,
-    )
-
-    # Vectorizes the threshold comparison in numpy, then filters with C-level itertools.compress.
-    pass_mask = is_cell[:, 1] > preclassification_threshold
-    kept = list(compress(roi_statistics, pass_mask))
-    removed_count = len(roi_statistics) - len(kept)
-
-    message = (
-        f"Plane {plane_index} {channel_label} preclassification pass with confidence threshold "
-        f"{preclassification_threshold}: complete. Removed {removed_count} ROIs."
-    )
-    console.echo(message=message, level=LogLevel.SUCCESS)
-
-    return kept
 
 
 def _detect_channel(
@@ -531,3 +406,124 @@ def _detect_channel(
     console.echo(message=message, level=LogLevel.SUCCESS)
 
     return mean_image, enhanced_mean_image, maximum_projection, correlation_map, roi_diameter, roi_statistics
+
+
+def _create_enhanced_mean_image(
+    mean_image: NDArray[np.float32],
+    roi_diameter: int,
+    valid_y_range: tuple[int, int],
+    valid_x_range: tuple[int, int],
+    frame_height: int,
+    frame_width: int,
+) -> NDArray[np.float32]:
+    """Creates an enhanced version of the mean image by removing background fluorescence and normalizing local contrast.
+
+    Notes:
+        The enhancement pipeline applies a median filter at a scale proportional to the ROI diameter to estimate and
+        subtract the slowly varying background. The residual is then divided by its local absolute median to normalize
+        contrast across the field of view. Finally, the result is clipped and rescaled to the [0, 1] range. Border
+        regions outside the valid registration crop are filled with the minimum value of the enhanced interior.
+
+    Args:
+        mean_image: The mean image to enhance, already cropped to the valid registration region.
+        roi_diameter: The estimated ROI diameter in pixels, used to compute the median filter kernel size.
+        valid_y_range: The valid Y pixel range (start, end) after registration cropping.
+        valid_x_range: The valid X pixel range (start, end) after registration cropping.
+        frame_height: The height of the full frame in pixels.
+        frame_width: The width of the full frame in pixels.
+
+    Returns:
+        The enhanced mean image with shape (frame_height, frame_width), background-subtracted and contrast-normalized
+        with values in [0, 1] inside the valid region.
+    """
+    spatial_scale_pixels = roi_diameter if roi_diameter > 0 else _DEFAULT_CELL_DIAMETER
+    kernel_dimension = int(_BACKGROUND_SCALE * np.ceil(spatial_scale_pixels) + 1)
+    filter_kernel_size = (kernel_dimension, kernel_dimension)
+
+    # Subtracts background fluorescence using a median filter. Casts medfilt2d output to float32 to prevent float64
+    # promotion of the entire downstream chain. Reuses the background array for the result.
+    background_removed = medfilt2d(input=mean_image, kernel_size=filter_kernel_size).astype(np.float32)
+    np.subtract(mean_image, background_removed, out=background_removed)
+
+    absolute_background_removed = np.abs(background_removed)
+    local_variance = medfilt2d(input=absolute_background_removed, kernel_size=filter_kernel_size).astype(np.float32)
+    np.add(local_variance, _VARIANCE_EPSILON, out=local_variance)
+    np.divide(background_removed, local_variance, out=background_removed)
+
+    # Clips intensities and scales to [0, 1] range. The mean_image is already cropped to the valid region, so no
+    # additional slicing is needed.
+    clipped_roi = np.clip(a=background_removed, a_min=_ENHANCED_MINIMUM_INTENSITY, a_max=_ENHANCED_MAXIMUM_INTENSITY)
+    scaled_roi = (clipped_roi - _ENHANCED_MINIMUM_INTENSITY) / (
+        _ENHANCED_MAXIMUM_INTENSITY - _ENHANCED_MINIMUM_INTENSITY
+    )
+
+    # Places the enhanced image into a full-size array with border set to the minimum value.
+    y_start, y_end = valid_y_range
+    x_start, x_end = valid_x_range
+    enhanced_image = np.full(shape=(frame_height, frame_width), fill_value=scaled_roi.min(), dtype=np.float32)
+    enhanced_image[y_start:y_end, x_start:x_end] = scaled_roi
+
+    return enhanced_image
+
+
+def _apply_preclassification(
+    roi_statistics: list[ROIStatistics],
+    frame_height: int,
+    frame_width: int,
+    preclassification_threshold: float,
+    *,
+    crop_to_soma: bool,
+    custom_classifier_path: Path | None,
+    plane_index: int,
+    channel_label: str,
+    diameter: int = 10,
+) -> list[ROIStatistics]:
+    """Filters detected ROIs using a lightweight pre-classification model before signal extraction.
+
+    Notes:
+        Computes the minimal shape statistics needed for classification (compactness and normalized pixel
+        count), runs a 2-feature logistic regression model, and removes ROIs whose cell probability falls below the
+        threshold. The model operates on shape statistics alone, so it runs before fluorescence traces are
+        extracted.
+
+    Args:
+        roi_statistics: The list of ROIStatistics instances to filter.
+        frame_height: The height of the frame that contains the processed ROIs, in pixels.
+        frame_width: The width of the frame that contains the processed ROIs, in pixels.
+        preclassification_threshold: The minimum classifier probability for an ROI to be kept.
+        crop_to_soma: Determines whether to crop dendritic regions before computing classification features.
+        custom_classifier_path: The path to a custom classifier file, or None to use the built-in classifier.
+        plane_index: The index of the imaging plane being processed, used for logging.
+        channel_label: The channel identifier string used in log messages (e.g., "channel 1" or "channel 2").
+        diameter: The estimated ROI diameter in pixels, used for distance normalization in compactness computation.
+
+    Returns:
+        The filtered list of ROIStatistics instances that passed the preclassification threshold.
+    """
+    compute_roi_statistics(
+        rois=roi_statistics,
+        frame_height=frame_height,
+        frame_width=frame_width,
+        diameter=diameter,
+        crop=crop_to_soma,
+        lightweight=True,
+    )
+
+    is_cell = classify(
+        roi_statistics=roi_statistics,
+        custom_classifier_path=custom_classifier_path,
+        preclassification=True,
+    )
+
+    # Vectorizes the threshold comparison in numpy, then filters with C-level itertools.compress.
+    pass_mask = is_cell[:, 1] > preclassification_threshold
+    kept = list(compress(roi_statistics, pass_mask))
+    removed_count = len(roi_statistics) - len(kept)
+
+    message = (
+        f"Plane {plane_index} {channel_label} preclassification pass with confidence threshold "
+        f"{preclassification_threshold}: complete. Removed {removed_count} ROIs."
+    )
+    console.echo(message=message, level=LogLevel.SUCCESS)
+
+    return kept

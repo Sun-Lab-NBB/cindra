@@ -40,6 +40,8 @@ if TYPE_CHECKING:
     from pathlib import Path
     from collections.abc import Sequence
 
+    from cindra.orchestration import PipelinePhase
+
 
 class TestJobModelConstants:
     """Tests the module-level constants the trackers and the execution engine consume."""
@@ -83,10 +85,10 @@ class TestPhaseModel:
         ]
 
     @pytest.mark.parametrize("phases", [SINGLE_RECORDING_PHASES, MULTI_RECORDING_PHASES])
-    def test_only_the_first_phase_lacks_a_prerequisite(self, phases: tuple[object, ...]) -> None:
+    def test_only_the_first_phase_lacks_a_prerequisite(self, phases: tuple[PipelinePhase, ...]) -> None:
         """Verifies that each phase after the first names its immediate predecessor as its prerequisite."""
-        job_names = [phase.job_name for phase in phases]  # type: ignore[attr-defined]
-        prerequisites = [phase.prerequisite for phase in phases]  # type: ignore[attr-defined]
+        job_names = [phase.job_name for phase in phases]
+        prerequisites = [phase.prerequisite for phase in phases]
 
         assert prerequisites[0] is None
         assert prerequisites[1:] == job_names[:-1]
@@ -403,7 +405,7 @@ class TestOrderPhasesByExecution:
     def test_single_recording_names_follow_the_single_recording_chain(
         self, requested: list[str], expected: list[str]
     ) -> None:
-        """Verifies that single-recording phase names order by execution rather than alphabetically."""
+        """Verifies that single-recording phase names order by execution."""
         assert order_phases_by_execution(phase_names=requested, single_recording=True) == expected
 
     def test_execution_order_differs_from_alphabetical_order(self) -> None:
@@ -558,7 +560,7 @@ class TestResolvePrerequisiteJobIds:
         assert message is None
 
     def test_absent_prerequisite_phase_reports_an_error(self) -> None:
-        """Verifies that a registry missing the prerequisite phase reports an error rather than an empty list."""
+        """Verifies that a registry missing the prerequisite phase pairs its empty prerequisite list with an error."""
         registry = _build_registry(jobs=[(SingleRecordingJobNames.PROCESS, "plane_0", ProcessingStatus.SCHEDULED)])
 
         prerequisite_ids, message = resolve_prerequisite_job_ids(

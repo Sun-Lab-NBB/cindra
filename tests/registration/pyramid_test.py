@@ -8,7 +8,7 @@ from cindra.registration.pyramid import ScaleSpacePyramid
 
 
 class TestScaleSpacePyramid:
-    """Tests ScaleSpacePyramid."""
+    """Tests the on-demand level construction and the downsampling that the pyramid's minimum scale triggers."""
 
     def test_base_level_created(self) -> None:
         """Verifies that the pyramid has at least one level after initialization."""
@@ -22,7 +22,7 @@ class TestScaleSpacePyramid:
         data = np.ones((64, 64), dtype=np.float32)
         pyramid = ScaleSpacePyramid(data=data, minimum_scale=1.0)
 
-        # A fresh pyramid holds only its base level, whose scale is the minimum scale it was built at.
+        # A fresh pyramid holds only its base level, whose scale is the requested minimum scale.
         assert repr(pyramid) == "ScaleSpacePyramid(level_count=1, level_scales=[1.0])"
 
         pyramid.get_scale(scale=4.0)

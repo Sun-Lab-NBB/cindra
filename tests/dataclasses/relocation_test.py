@@ -11,7 +11,7 @@ from cindra.dataclasses.runtime_contexts import _compute_relocation_prefixes, _r
 
 
 class TestComputeRelocationPrefixes:
-    """Tests _compute_relocation_prefixes."""
+    """Tests the diverging prefixes the helper reports after stripping the trailing components two paths share."""
 
     def test_paths_with_shared_suffix_returns_diverging_prefixes(self) -> None:
         """Verifies that paths sharing a common suffix produce the correct diverging prefixes."""
@@ -64,7 +64,7 @@ class TestComputeRelocationPrefixes:
 
 
 class TestRelocateCrossRecordingPath:
-    """Tests _relocate_cross_recording_path."""
+    """Tests the cross-recording path rebased onto the new prefix and the refusal of a path shorter than the prefix."""
 
     def test_simple_path_relocation(self) -> None:
         """Verifies that a cross-recording path with the same base structure is correctly relocated."""
@@ -88,7 +88,7 @@ class TestRelocateCrossRecordingPath:
 
         relocated = _relocate_cross_recording_path(path=path, old_prefix=old_prefix, new_prefix=new_prefix)
 
-        # The differing segment "root_other" should be substituted into the new prefix at the corresponding position.
+        # The differing segment "root_other" replaces the corresponding segment of the new prefix.
         assert relocated == Path("/new/root_other/recording_2/cindra/plane_0")
 
     def test_raises_error_for_path_shorter_than_prefix(self) -> None:

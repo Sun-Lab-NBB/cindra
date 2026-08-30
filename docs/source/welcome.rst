@@ -5,8 +5,8 @@ Provides pipelines for processing neural imaging data and tracking Regions of In
 
 This library is developed in the `Sun (NeuroAI) lab <https://neuroai.github.io/sunlab/>`_ at Cornell University. It is
 a ground-up reimplementation of the `suite2p <https://github.com/MouseLand/suite2p>`_ library that features a novel
-multi-recording ROI tracking pipeline, optimized algorithms, expanded documentation, and an agentic interface based on
-Claude.
+multi-recording ROI tracking pipeline, optimized algorithms, expanded documentation, and MCP servers for AI agent
+integration.
 
 This website contains the API documentation for the classes and methods offered by this library, together with the
 reference for every command exposed by the 'cindra' and 'cindra-gui' command-line interfaces. See the project GitHub

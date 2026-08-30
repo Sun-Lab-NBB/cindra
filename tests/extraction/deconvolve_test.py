@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 
 class TestComputeDeltaFluorescence:
-    """Tests compute_delta_fluorescence."""
+    """Tests the neuropil subtraction, the three baseline methods, and the window parity the maximin filter needs."""
 
     def test_output_shape_and_dtype(self) -> None:
         """Verifies the output shape and dtype match expectations."""
@@ -262,7 +262,7 @@ class TestComputeDeltaFluorescence:
 
 
 class TestApplyOasisDeconvolution:
-    """Tests apply_oasis_deconvolution."""
+    """Tests the spike amplitudes and frames the pool-merge kernel recovers, and its invariance to the batch size."""
 
     def test_output_shape_and_dtype(self) -> None:
         """Verifies the output shape and dtype match expectations."""

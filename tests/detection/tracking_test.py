@@ -24,32 +24,32 @@ if TYPE_CHECKING:
 
 
 class TestComputeOverlap:
-    """Tests _compute_overlap."""
+    """Tests the per-ROI shared-pixel masks the overlap pass writes back, including the empty input case."""
 
     def test_no_overlap(self) -> None:
         """Verifies that non-overlapping ROIs have all-False overlap masks."""
-        roi1 = _make_mask(y_pixels=[0, 0], x_pixels=[0, 1], weights=[1.0, 1.0], frame_width=20)
-        roi2 = _make_mask(y_pixels=[10, 10], x_pixels=[10, 11], weights=[1.0, 1.0], frame_width=20)
-        _compute_overlap(rois=[roi1, roi2])
-        assert not np.any(roi1.overlap_mask)
-        assert not np.any(roi2.overlap_mask)
+        first_roi = _make_mask(y_pixels=[0, 0], x_pixels=[0, 1], weights=[1.0, 1.0], frame_width=20)
+        second_roi = _make_mask(y_pixels=[10, 10], x_pixels=[10, 11], weights=[1.0, 1.0], frame_width=20)
+        _compute_overlap(rois=[first_roi, second_roi])
+        assert not np.any(first_roi.overlap_mask)
+        assert not np.any(second_roi.overlap_mask)
 
     def test_full_overlap(self) -> None:
         """Verifies that identical ROIs have all-True overlap masks."""
-        roi1 = _make_mask(y_pixels=[5, 5], x_pixels=[5, 6], weights=[1.0, 1.0], frame_width=20)
-        roi2 = _make_mask(y_pixels=[5, 5], x_pixels=[5, 6], weights=[1.0, 1.0], frame_width=20)
-        _compute_overlap(rois=[roi1, roi2])
-        assert np.all(roi1.overlap_mask)
-        assert np.all(roi2.overlap_mask)
+        first_roi = _make_mask(y_pixels=[5, 5], x_pixels=[5, 6], weights=[1.0, 1.0], frame_width=20)
+        second_roi = _make_mask(y_pixels=[5, 5], x_pixels=[5, 6], weights=[1.0, 1.0], frame_width=20)
+        _compute_overlap(rois=[first_roi, second_roi])
+        assert np.all(first_roi.overlap_mask)
+        assert np.all(second_roi.overlap_mask)
 
     def test_partial_overlap(self) -> None:
         """Verifies that partially overlapping ROIs have correct overlap masks."""
-        roi1 = _make_mask(y_pixels=[5, 5], x_pixels=[5, 6], weights=[1.0, 1.0], frame_width=20)
-        roi2 = _make_mask(y_pixels=[5, 5], x_pixels=[6, 7], weights=[1.0, 1.0], frame_width=20)
-        _compute_overlap(rois=[roi1, roi2])
-        # roi1 pixel (5,6) overlaps, pixel (5,5) does not.
-        assert roi1.overlap_mask[1]
-        assert not roi1.overlap_mask[0]
+        first_roi = _make_mask(y_pixels=[5, 5], x_pixels=[5, 6], weights=[1.0, 1.0], frame_width=20)
+        second_roi = _make_mask(y_pixels=[5, 5], x_pixels=[6, 7], weights=[1.0, 1.0], frame_width=20)
+        _compute_overlap(rois=[first_roi, second_roi])
+        # first_roi pixel (5,6) overlaps, pixel (5,5) does not.
+        assert first_roi.overlap_mask[1]
+        assert not first_roi.overlap_mask[0]
 
     def test_empty_list(self) -> None:
         """Verifies that an empty list is handled without error."""
@@ -57,7 +57,7 @@ class TestComputeOverlap:
 
 
 class TestComputeCondensedIndex:
-    """Tests _compute_condensed_index."""
+    """Tests the square-to-condensed index arithmetic that the pairwise distance lookup requires."""
 
     def test_known_values(self) -> None:
         """Verifies correct condensed indices for known square matrix positions."""
@@ -81,7 +81,7 @@ class TestComputeCondensedIndex:
 
 
 class TestBuildRoiGrid:
-    """Tests _build_roi_grid."""
+    """Tests the spatial cell assignment that indexes ROIs by location for neighbor lookup."""
 
     def test_single_roi(self) -> None:
         """Verifies that a single ROI is placed in the correct grid cell."""
@@ -92,9 +92,9 @@ class TestBuildRoiGrid:
 
     def test_multiple_cells(self) -> None:
         """Verifies that ROIs in different spatial locations map to different grid cells."""
-        roi1 = _make_mask(y_pixels=[10], x_pixels=[10], weights=[1.0], frame_width=100, centroid=(10, 10))
-        roi2 = _make_mask(y_pixels=[60], x_pixels=[60], weights=[1.0], frame_width=100, centroid=(60, 60))
-        grid = _build_roi_grid(rois=[roi1, roi2], recordings=[0, 1], grid_size=50)
+        first_roi = _make_mask(y_pixels=[10], x_pixels=[10], weights=[1.0], frame_width=100, centroid=(10, 10))
+        second_roi = _make_mask(y_pixels=[60], x_pixels=[60], weights=[1.0], frame_width=100, centroid=(60, 60))
+        grid = _build_roi_grid(rois=[first_roi, second_roi], recordings=[0, 1], grid_size=50)
         assert (0, 0) in grid
         assert (1, 1) in grid
         assert len(grid[(0, 0)]) == 1
@@ -102,14 +102,14 @@ class TestBuildRoiGrid:
 
 
 class TestCreateTemplateRoi:
-    """Tests _create_template_roi."""
+    """Tests the prevalence threshold and the weight and radius averaging that build a cluster's template."""
 
     def test_identical_rois(self) -> None:
         """Verifies that identical ROIs produce a template with the same pixels."""
-        roi1 = _make_mask(y_pixels=[5, 5, 6, 6], x_pixels=[5, 6, 5, 6], weights=[1.0] * 4, frame_width=20)
-        roi2 = _make_mask(y_pixels=[5, 5, 6, 6], x_pixels=[5, 6, 5, 6], weights=[1.0] * 4, frame_width=20)
+        first_roi = _make_mask(y_pixels=[5, 5, 6, 6], x_pixels=[5, 6, 5, 6], weights=[1.0] * 4, frame_width=20)
+        second_roi = _make_mask(y_pixels=[5, 5, 6, 6], x_pixels=[5, 6, 5, 6], weights=[1.0] * 4, frame_width=20)
         template = _create_template_roi(
-            cluster_rois=[roi1, roi2], cluster_id=1, image_shape=(20, 20), pixel_prevalence=50
+            cluster_rois=[first_roi, second_roi], cluster_id=1, image_shape=(20, 20), pixel_prevalence=50
         )
         assert template is not None
         assert template.cluster_id == 1
@@ -118,38 +118,38 @@ class TestCreateTemplateRoi:
 
     def test_no_surviving_pixels(self) -> None:
         """Verifies that None is returned when no pixels meet the prevalence threshold."""
-        roi1 = _make_mask(y_pixels=[5], x_pixels=[5], weights=[1.0], frame_width=20)
-        roi2 = _make_mask(y_pixels=[10], x_pixels=[10], weights=[1.0], frame_width=20)
+        first_roi = _make_mask(y_pixels=[5], x_pixels=[5], weights=[1.0], frame_width=20)
+        second_roi = _make_mask(y_pixels=[10], x_pixels=[10], weights=[1.0], frame_width=20)
         # 100% prevalence means a pixel must appear in ALL ROIs.
         template = _create_template_roi(
-            cluster_rois=[roi1, roi2], cluster_id=1, image_shape=(20, 20), pixel_prevalence=100
+            cluster_rois=[first_roi, second_roi], cluster_id=1, image_shape=(20, 20), pixel_prevalence=100
         )
         # Each pixel appears in only 1/2 = 50% of ROIs, below 100% threshold.
         assert template is None
 
     def test_weights_averaged(self) -> None:
         """Verifies that template weights are averaged across contributing ROIs."""
-        roi1 = _make_mask(y_pixels=[5], x_pixels=[5], weights=[2.0], frame_width=20)
-        roi2 = _make_mask(y_pixels=[5], x_pixels=[5], weights=[4.0], frame_width=20)
+        first_roi = _make_mask(y_pixels=[5], x_pixels=[5], weights=[2.0], frame_width=20)
+        second_roi = _make_mask(y_pixels=[5], x_pixels=[5], weights=[4.0], frame_width=20)
         template = _create_template_roi(
-            cluster_rois=[roi1, roi2], cluster_id=1, image_shape=(20, 20), pixel_prevalence=0
+            cluster_rois=[first_roi, second_roi], cluster_id=1, image_shape=(20, 20), pixel_prevalence=0
         )
         assert template is not None
         np.testing.assert_allclose(template.pixel_weights[0], 3.0, atol=1e-5)
 
     def test_radius_averaged(self) -> None:
         """Verifies that the template radius is the mean of input radii."""
-        roi1 = _make_mask(y_pixels=[5], x_pixels=[5], weights=[1.0], frame_width=20, radius=4.0)
-        roi2 = _make_mask(y_pixels=[5], x_pixels=[5], weights=[1.0], frame_width=20, radius=6.0)
+        first_roi = _make_mask(y_pixels=[5], x_pixels=[5], weights=[1.0], frame_width=20, radius=4.0)
+        second_roi = _make_mask(y_pixels=[5], x_pixels=[5], weights=[1.0], frame_width=20, radius=6.0)
         template = _create_template_roi(
-            cluster_rois=[roi1, roi2], cluster_id=1, image_shape=(20, 20), pixel_prevalence=0
+            cluster_rois=[first_roi, second_roi], cluster_id=1, image_shape=(20, 20), pixel_prevalence=0
         )
         assert template is not None
         np.testing.assert_allclose(template.radius, 5.0, atol=1e-5)
 
 
 class TestCountSharedPixels:
-    """Tests _count_shared_pixels."""
+    """Tests the two-cursor intersection count against set intersection over ascending, duplicate-free inputs."""
 
     def test_matches_the_set_intersection_over_unique_inputs(self) -> None:
         """Verifies the merge count equals the set intersection size for ascending, duplicate-free inputs."""
@@ -199,7 +199,7 @@ class TestCountSharedPixels:
 
 
 class TestClusterRoisInBin:
-    """Tests _cluster_rois_in_bin."""
+    """Tests the Jaccard threshold, the union denominator, and the same-recording exclusion of the bin clustering."""
 
     def test_empty_input(self) -> None:
         """Verifies that empty input returns empty output."""
@@ -208,19 +208,22 @@ class TestClusterRoisInBin:
 
     def test_identical_rois_from_different_recordings(self) -> None:
         """Verifies that identical ROIs from different recordings are clustered together."""
-        roi1 = _make_mask(y_pixels=[5, 5, 6, 6], x_pixels=[5, 6, 5, 6], weights=[1.0] * 4, frame_width=20)
-        roi2 = _make_mask(y_pixels=[5, 5, 6, 6], x_pixels=[5, 6, 5, 6], weights=[1.0] * 4, frame_width=20)
-        result = _cluster_rois_in_bin(rois=[roi1, roi2], roi_recordings=[0, 1], threshold=0.5, maximum_distance=50)
+        first_roi = _make_mask(y_pixels=[5, 5, 6, 6], x_pixels=[5, 6, 5, 6], weights=[1.0] * 4, frame_width=20)
+        second_roi = _make_mask(y_pixels=[5, 5, 6, 6], x_pixels=[5, 6, 5, 6], weights=[1.0] * 4, frame_width=20)
+        result = _cluster_rois_in_bin(
+            rois=[first_roi, second_roi], roi_recordings=[0, 1], threshold=0.5, maximum_distance=50
+        )
         assert result
-        # The two ROIs should be in the same cluster.
         total_rois = sum(len(rois) for rois, _ in result)
         assert total_rois == 2
 
     def test_distant_rois_not_clustered(self) -> None:
         """Verifies that spatially distant ROIs are not clustered together."""
-        roi1 = _make_mask(y_pixels=[5], x_pixels=[5], weights=[1.0], frame_width=200, centroid=(5, 5))
-        roi2 = _make_mask(y_pixels=[100], x_pixels=[100], weights=[1.0], frame_width=200, centroid=(100, 100))
-        result = _cluster_rois_in_bin(rois=[roi1, roi2], roi_recordings=[0, 1], threshold=0.5, maximum_distance=10)
+        first_roi = _make_mask(y_pixels=[5], x_pixels=[5], weights=[1.0], frame_width=200, centroid=(5, 5))
+        second_roi = _make_mask(y_pixels=[100], x_pixels=[100], weights=[1.0], frame_width=200, centroid=(100, 100))
+        result = _cluster_rois_in_bin(
+            rois=[first_roi, second_roi], roi_recordings=[0, 1], threshold=0.5, maximum_distance=10
+        )
         # No candidates within distance threshold.
         assert result == []
 
@@ -262,15 +265,17 @@ class TestClusterRoisInBin:
 
     def test_same_recording_not_clustered(self) -> None:
         """Verifies that ROIs from the same recording are not clustered."""
-        roi1 = _make_mask(y_pixels=[5, 5], x_pixels=[5, 6], weights=[1.0, 1.0], frame_width=20)
-        roi2 = _make_mask(y_pixels=[5, 5], x_pixels=[5, 6], weights=[1.0, 1.0], frame_width=20)
-        result = _cluster_rois_in_bin(rois=[roi1, roi2], roi_recordings=[0, 0], threshold=0.5, maximum_distance=50)
+        first_roi = _make_mask(y_pixels=[5, 5], x_pixels=[5, 6], weights=[1.0, 1.0], frame_width=20)
+        second_roi = _make_mask(y_pixels=[5, 5], x_pixels=[5, 6], weights=[1.0, 1.0], frame_width=20)
+        result = _cluster_rois_in_bin(
+            rois=[first_roi, second_roi], roi_recordings=[0, 0], threshold=0.5, maximum_distance=50
+        )
         # Both are from recording 0, so no valid cross-recording pairs.
         assert result == []
 
 
 class TestFilterTemplates:
-    """Tests _filter_templates."""
+    """Tests the minimum non-overlapping pixel count that decides which template masks survive."""
 
     def test_keeps_large_masks(self) -> None:
         """Verifies that masks with enough non-overlapping pixels are kept."""
@@ -302,7 +307,7 @@ def _make_mask(
     radius: float = 5.0,
     cluster_id: int = 0,
 ) -> ROIMask:
-    """Creates a minimal ROIMask instance for testing."""
+    """Creates an ROIMask instance from explicit pixel coordinates and weights."""
     y_array = np.array(y_pixels, dtype=np.int32)
     x_array = np.array(x_pixels, dtype=np.int32)
     weight_array = np.array(weights, dtype=np.float32)

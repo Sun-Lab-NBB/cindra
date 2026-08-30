@@ -9,7 +9,7 @@ from cindra.detection.denoise import pca_denoise, _fit_and_reconstruct_block
 
 
 class TestFitAndReconstructBlock:
-    """Tests _fit_and_reconstruct_block."""
+    """Tests the truncated component reconstruction of one spatial block and the noise its rank limit removes."""
 
     def test_output_shape(self) -> None:
         """Verifies that the reconstructed block has the same shape as the input."""
@@ -59,7 +59,7 @@ class TestFitAndReconstructBlock:
 
 
 class TestPcaDenoise:
-    """Tests pca_denoise."""
+    """Tests the in-place block blend, its worker count validation, and its parallel-to-sequential agreement."""
 
     def test_in_place_modification(self) -> None:
         """Verifies that pca_denoise modifies frames in-place."""
@@ -116,8 +116,8 @@ class TestPcaDenoise:
         pca_denoise(frames=denoised, block_size=(16, 16), component_fraction=0.5)
 
         # The 16x16 blocks overlap, so most pixels accumulate a taper-weighted sum over several reconstructions.
-        # Recovering the input to six digits requires the taper to be accumulated into the normalizer exactly as it
-        # is into the reconstruction, and requires the running total to be divided by that normalizer.
+        # Recovering the input to four decimal places requires the taper to be accumulated into the normalizer
+        # exactly as it is into the reconstruction, and requires the running total to be divided by that normalizer.
         np.testing.assert_allclose(denoised, movie, atol=1e-4)
 
     def test_parallel_workers(self) -> None:

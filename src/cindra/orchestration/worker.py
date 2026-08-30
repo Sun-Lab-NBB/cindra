@@ -71,16 +71,16 @@ def execute_single_recording_job(
         tracker: The caller-owned ProcessingTracker onto which this job's start, completion, or failure is recorded.
         workers: The number of parallel workers to allocate to this job. Use None to accept the stage default and -1
             to request every available core. The combination job ignores this parameter.
-        device: The zero-based index of the CUDA device on which a registration job runs. Use None to run the
+        device: The zero-based index of the CUDA device a registration job uses. Use None to run the
             registration on the host CPU. Every other job ignores this parameter.
 
     Raises:
         FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid single-recording
             configuration.
         RuntimeError: If device names a CUDA device on a host that exposes no usable one.
-        ValueError: If the configuration does not configure an output path, if job_name is not a recognized
-            single-recording job, if workers is zero or a negative value other than -1, or if device names an index
-            the host does not expose.
+        ValueError: If the configuration does not configure an output path, or if job_name is not a recognized
+            single-recording job. Also raised if specifier does not name an imaging plane for a REGISTER or PROCESS job,
+            if workers is zero or a negative value other than -1, or if device names an index the host does not expose.
     """
     configuration, _ = load_single_recording_configuration(configuration_path=configuration_path)
 
@@ -228,7 +228,7 @@ def load_multi_recording_configuration(configuration_path: Path) -> MultiRecordi
         )
         console.error(message=message, error=FileNotFoundError)
 
-    # Validates that the configuration names enough recordings to track ROIs across. Tracking compares each
+    # Validates that the configuration names enough recordings for cross-recording ROI tracking. Tracking compares each
     # recording's ROIs against those of the other recordings, so a lone recording resolves nothing.
     if len(configuration.recording_io.recording_directories) < _MINIMUM_DATASET_RECORDINGS:
         message = (
@@ -276,13 +276,14 @@ def dispatch_single_recording_job(
         tracker: The tracker that records this job's state transitions.
         workers: The number of parallel workers to allocate to this job. Use None to accept the stage default and -1
             to request every available core. The combination job ignores this parameter.
-        device: The zero-based index of the CUDA device on which a registration job runs. Use None to run the
+        device: The zero-based index of the CUDA device a registration job uses. Use None to run the
             registration on the host CPU. Every other job ignores it.
 
     Raises:
         RuntimeError: If a registration job names a CUDA device on a host that exposes no usable one.
-        ValueError: If the job_name is not recognized, if the requested worker count is invalid, or if a registration
-            job names a device index the host does not expose.
+        ValueError: If the job_name is not recognized, or if the configuration does not configure an output path. Also
+            raised if a per-plane job's specifier names no imaging plane, if the requested worker count is invalid, or
+            if a registration job names a device index the host does not expose.
     """
     console.echo(message=f"Running '{job_name}' job (specifier='{specifier}') with ID {job_id}...")
 
@@ -332,10 +333,9 @@ def dispatch_single_recording_job(
                 )
                 console.error(message=message, error=ValueError)
 
-            # Loads contexts from disk and combines all processed planes into a dataset. Arrays are not
-            # loaded automatically due to their memory footprint, so they must be loaded explicitly before
-            # combining. Detection arrays provide background images. Extraction arrays provide ROI statistics
-            # and fluorescence traces.
+            # Arrays are not loaded automatically due to their memory footprint, so they must be loaded explicitly
+            # before combining. Detection arrays provide background images. Extraction arrays provide ROI statistics and
+            # fluorescence traces.
             root_path = configuration.file_io.output_path / OUTPUT_DIRECTORY_NAME
             contexts = RuntimeContext.load(root_path=root_path, plane_index=-1)
             if not isinstance(contexts, list):  # pragma: no cover - load with plane_index=-1 always returns a list
@@ -422,9 +422,11 @@ def prime_recording(configuration_path: Path) -> RecordingPlanes:
         The recording's plane inventory.
 
     Raises:
-        FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid
-            single-recording configuration.
-        ValueError: If the configuration does not configure an output path.
+        FileNotFoundError: If the configuration file is missing, is not a .yaml file, is not a valid
+            single-recording configuration, or if no acquisition parameters file is found under the configured data
+            path.
+        ValueError: If the configuration does not configure an output path, if the recording holds neither processed
+            data nor a configured data path, or if the acquisition parameters file fails validation.
     """
     configuration, output_path = load_single_recording_configuration(configuration_path=configuration_path)
     resolve_single_recording_contexts(configuration=configuration, persist=True)
