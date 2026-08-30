@@ -224,7 +224,7 @@ On macOS, cindra selects Numba's OpenMP threading layer because the Numba macOS 
 leaves the TBB layer unavailable there whatever runtime is installed. That layer loads `libomp.dylib` from the dynamic
 loader's default search path, and the file ships with neither Numba nor macOS. When it is missing, `import cindra` emits
 nothing, because the library runs no import-time check, and `cindra --help` and `cindra mcp` still succeed. Both
-pipeline entry points call the check before dispatching any stage, so a run aborts having done no work with:
+pipeline entry points call the check before dispatching any stage, so a run aborts having done no work, reporting:
 
 ```text
 RuntimeError: Unable to locate the OpenMP runtime (libomp.dylib) that the Numba threading layer loads on macOS.
@@ -250,7 +250,7 @@ records the generic `Unable to complete job. Worker terminated without reaching 
 where every job fails immediately, with no partial progress, is a missing threading runtime rather than a data problem.
 Resolve it here rather than routing to a processing or acquisition skill.
 
-Report what the host carries with:
+Report what the host carries by running:
 
 ```bash
 cindra omp
@@ -383,16 +383,19 @@ You SHOULD proactively invoke this skill when:
 ## Verification checklist
 
 ```text
-MCP Environment Setup:
+MCP Environment Setup, tool-settled (run `/mcp`, `which cindra`, `which cindra-gui`, `python --version`, and
+`pip list | grep cindra`, plus `cindra omp` on macOS and `check_gpu_runtime_tool` for a device-backed batch):
 - [ ] Checked MCP server connection status (cindra-mcp and/or cindra-gui)
 - [ ] Verified 'cindra' command is on PATH (which cindra)
 - [ ] Verified 'cindra-gui' command is on PATH if GUI tools are needed (which cindra-gui)
 - [ ] Confirmed Python version matches >=3.14,<3.15
 - [ ] Confirmed the installed cindra version is 2.0.0 or later
-- [ ] Identified environment type (conda, venv, system)
-- [ ] Provided environment-specific resolution steps
+- [ ] Verified cindra plugin is installed (provides both server registrations)
 - [ ] On macOS, reported the OpenMP runtime state with 'cindra omp' and linked one with 'sudo cindra omp --yes'
 - [ ] For a batch naming a CUDA device, gated on check_gpu_runtime_tool 'ready' and surfaced its remedy
-- [ ] Verified cindra plugin is installed (provides both server registrations)
+
+MCP Environment Setup, reader-judged:
+- [ ] Identified environment type (conda, venv, system)
+- [ ] Provided environment-specific resolution steps
 - [ ] Informed user that Claude Code must be restarted after environment changes
 ```
