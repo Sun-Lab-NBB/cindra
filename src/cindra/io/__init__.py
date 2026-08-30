@@ -1,6 +1,4 @@
-"""Provides assets for converting imaging data, reading and marking plane binaries, resolving runtime contexts,
-combining plane results, inventorying outputs, and selecting ROIs.
-"""
+"""Provides assets for converting, reading, inventorying, and combining a recording's imaging data on disk."""
 
 from .tiff import (
     TIFF_EXTENSIONS,
@@ -20,7 +18,6 @@ from .binary import (
 from .select import select_recording_rois, clear_dataset_selection, clear_recording_selections
 from .combine import combine_planes
 from .context import (
-    PARAMETERS_FILENAME,
     MAXIMUM_CHANNEL_COUNT,
     find_data_directory,
     find_cindra_directory,
@@ -45,7 +42,6 @@ from .inventory import (
 
 __all__ = [
     "MAXIMUM_CHANNEL_COUNT",
-    "PARAMETERS_FILENAME",
     "TIFF_DECODE_CEILING",
     "TIFF_EXTENSIONS",
     "BinaryFile",

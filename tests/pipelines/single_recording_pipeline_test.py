@@ -17,8 +17,8 @@ from cindra.io import (
     resolve_active_binary_marker,
     resolve_single_recording_contexts,
 )
+from cindra.layout import PARAMETERS_FILENAME
 from cindra.io.binary import create_binarization_marker
-from cindra.io.context import PARAMETERS_FILENAME
 from cindra.dataclasses import RuntimeContext, AcquisitionParameters, SingleRecordingConfiguration
 from cindra.orchestration import (
     REGISTRATION_WORKERS,
@@ -85,7 +85,7 @@ _NO_DEVICE_MESSAGE: str = "Unable to run the registration stage on a CUDA device
 
 
 class TestRunSingleRecordingPipeline:
-    """Tests run_single_recording_pipeline."""
+    """Tests the phases a single-recording run dispatches, the planes it targets, and its configuration guards."""
 
     def test_runs_all_phases_when_no_flags_set(self, tmp_path: Path) -> None:
         """Verifies that omitting every phase flag runs the four phases end-to-end in their dependency order."""
@@ -346,7 +346,7 @@ class TestRegistrationDeviceVerification:
 
 
 class TestBinarizeRecording:
-    """Tests binarize_recording."""
+    """Tests the binaries the conversion writes or skips, the refusals it raises, and the results a rebuild clears."""
 
     def test_missing_data_path_raises(self, tmp_path: Path) -> None:
         """Verifies that a configuration without a data path raises a ValueError."""
@@ -799,7 +799,7 @@ class TestBinarizeRecording:
 
 
 class TestRegisterRecordingPlane:
-    """Tests register_recording_plane."""
+    """Tests the planes the registration stage skips, the guards it applies, and the output a completed run records."""
 
     def test_skips_flyback_plane(self, tmp_path: Path) -> None:
         """Verifies that a plane listed as a flyback plane returns early without loading any runtime data."""
@@ -883,7 +883,7 @@ class TestRegisterRecordingPlane:
 
 
 class TestProcessPlane:
-    """Tests process_plane."""
+    """Tests the planes the processing stage skips, the guards it applies, and the ROIs a registered plane yields."""
 
     def test_skips_flyback_plane(self, tmp_path: Path) -> None:
         """Verifies that a plane listed as a flyback plane returns early without loading any runtime data."""
@@ -986,7 +986,7 @@ class TestProcessPlane:
 
 
 class TestSaveCombinedData:
-    """Tests save_combined_data."""
+    """Tests the guards the combination stage applies to its context list and to the configured output path."""
 
     def test_empty_contexts_raises(self) -> None:
         """Verifies that combining an empty context list raises a ValueError."""
@@ -1061,8 +1061,8 @@ class TestAlignJobs:
         assert tracker.get_job_status(job_id=binarize_id) == ProcessingStatus.SUCCEEDED
 
 
-class TestExecuteSingleRecordingJob:
-    """Tests dispatch_single_recording_job."""
+class TestDispatchSingleRecordingJob:
+    """Tests the failed status the dispatcher records for each rejected job whose error it re-raises."""
 
     def test_unknown_job_fails_and_reraises(self, tmp_path: Path) -> None:
         """Verifies that an unrecognized job name marks the job failed and re-raises the ValueError."""
@@ -1078,7 +1078,7 @@ class TestExecuteSingleRecordingJob:
         with pytest.raises(ValueError, match=error_format(expected_message)):
             dispatch_single_recording_job(
                 configuration=configuration,
-                job_name="unrecognized_job",  # type: ignore[arg-type]
+                job_name="unrecognized_job",  # type: ignore[arg-type]  # The invalid name is the input under test.
                 specifier="",
                 job_id=job_id,
                 tracker=tracker,
