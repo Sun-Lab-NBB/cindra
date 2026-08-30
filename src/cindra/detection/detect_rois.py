@@ -33,6 +33,36 @@ _NORMALIZATION_EPSILON: float = 1e-6
 """The small epsilon added to denominators during alternating least squares normalization to prevent division by
 zero."""
 
+_SCALE_COUNT: int = 5
+"""The number of spatial scales that make up the multiscale detection pyramid."""
+
+_BASE_FILTER_SIZE: int = 3
+"""The side length of the square convolution kernel applied at the finest spatial scale."""
+
+_BASE_THRESHOLD_MULTIPLIER: float = 5.0
+"""The base multiplier combined with the user-provided threshold scaling to derive the peak acceptance threshold."""
+
+_EXTENSION_ITERATIONS: int = 3
+"""The number of boundary extension passes applied to each seeded ROI before its weights are finalized."""
+
+_SPLIT_VARIANCE_THRESHOLD: float = 1.25
+"""The explained variance ratio above which the two-component model replaces the single-component ROI model."""
+
+_REFERENCE_FRAME_COUNT: int = 1200
+"""The binned frame count the detection threshold is scaled against, which keeps longer recordings comparable."""
+
+_PEAK_DETECTION_WINDOW: int = 11
+"""The side length of the neighborhood that identifies local maxima during spatial scale estimation."""
+
+_PEAK_TOLERANCE: float = 1e-4
+"""The largest difference between a pixel and its neighborhood maximum that still counts the pixel as a local peak."""
+
+_PEAK_COUNT: int = 50
+"""The number of brightest local peaks that vote for the dominant spatial scale."""
+
+_MAXIMUM_PIXEL_COUNT: int = 10000
+"""The ROI pixel count above which iterative mask growth terminates."""
+
 
 def extend_roi(
     y_pixels: NDArray[np.int32],
@@ -44,9 +74,7 @@ def extend_roi(
     """Uniformly extends the input ROI by iteratively adding cardinal neighbors to all boundary pixels.
 
     Notes:
-        The expansion follows a Manhattan distance pattern, producing diamond-shaped growth rather than square
-        expansion. Each iteration adds one layer of cardinal (up, down, left, right) neighbors to the existing
-        pixel set.
+        The expansion follows a Manhattan distance pattern, producing diamond-shaped growth.
 
     Args:
         y_pixels: The y-coordinates of the ROI pixels.
@@ -108,13 +136,6 @@ def detect_rois_in_frames(
         A tuple of the maximum intensity projection, the pixel-wise correlation map, the estimated spatial scale in
         pixels, and a list of ROIStatistics instances for each detected ROI.
     """
-    scale_count = 5
-    base_filter_size = 3
-    base_threshold_multiplier = 5.0
-    extension_iterations = 3
-    split_variance_threshold = 1.25
-    reference_frame_count = 1200
-
     # Removes slow temporal drift so that transient calcium events dominate the signal.
     apply_temporal_high_pass_filter(frames=frames, kernel_size=int(temporal_highpass_window))
 
@@ -139,10 +160,10 @@ def detect_rois_in_frames(
 
     # Constructs the scale pyramid by alternating convolution (to aggregate local activity) and downsampling (to
     # capture progressively larger spatial features). Each scale doubles the effective receptive field.
-    scale_heights = np.zeros(scale_count, dtype=np.uint16)
-    scale_widths = np.zeros(scale_count, dtype=np.uint16)
-    for scale_index in range(scale_count):
-        convolved_scale = _convolve_square_2d(frames=downsampled_frames, filter_size=base_filter_size)
+    scale_heights = np.zeros(_SCALE_COUNT, dtype=np.uint16)
+    scale_widths = np.zeros(_SCALE_COUNT, dtype=np.uint16)
+    for scale_index in range(_SCALE_COUNT):
+        convolved_scale = _convolve_square_2d(frames=downsampled_frames, filter_size=_BASE_FILTER_SIZE)
         downsampled_frames = (2 * downsample(data=downsampled_frames)).astype(np.float32)
         scale_coordinates = downsample(data=grid_coordinates[scale_index], taper_edge=False)
         grid_coordinates.append(scale_coordinates)
@@ -162,9 +183,9 @@ def detect_rois_in_frames(
         strict=False,
     ):
         spline_model = RectBivariateSpline(
-            scale_coordinates[1, :, 0],
-            scale_coordinates[0, 0, :],
-            convolved_scale.max(axis=0),
+            x=scale_coordinates[1, :, 0],
+            y=scale_coordinates[0, 0, :],
+            z=convolved_scale.max(axis=0),
             kx=min(3, scale_coordinates.shape[1] - 1),
             ky=min(3, scale_coordinates.shape[2] - 1),
         )
@@ -176,11 +197,11 @@ def detect_rois_in_frames(
 
     scale = _find_best_scale(scale_images=scale_images)
 
-    spatial_scale_pixels = base_filter_size * 2**scale
-    peak_threshold = threshold_scaling * base_threshold_multiplier * max(1, scale)
+    spatial_scale_pixels = _BASE_FILTER_SIZE * 2**scale
+    peak_threshold = threshold_scaling * _BASE_THRESHOLD_MULTIPLIER * max(1, scale)
     # Scales the threshold by the ratio of actual to reference frame count so that longer recordings, which
     # accumulate more variance, do not produce artificially many detections.
-    time_multiplier = max(1, frames.shape[0] / reference_frame_count)
+    time_multiplier = max(1, frames.shape[0] / _REFERENCE_FRAME_COUNT)
     # Precomputes the effective detection threshold since both factors are constant across iterations.
     scaled_threshold = time_multiplier * peak_threshold
     message = (
@@ -199,7 +220,7 @@ def detect_rois_in_frames(
     # Flattens the spatial dimensions so that pixel indexing uses 1D flat indices throughout the detection loop.
     convolved_scales = [convolved_scale.reshape(convolved_scale.shape[0], -1) for convolved_scale in convolved_scales]
     frames = frames.reshape(-1, height * width)
-    filter_sizes = base_filter_size * 2 ** np.arange(scale_count)
+    filter_sizes = _BASE_FILTER_SIZE * 2 ** np.arange(_SCALE_COUNT)
 
     peak_magnitude = 0.0
     exhausted_activity = False
@@ -207,7 +228,7 @@ def detect_rois_in_frames(
     for _ in range(maximum_iterations):
         # Selects the globally strongest peak across all spatial scales, then maps it back to the finest grid so that
         # the ROI is grown in full-resolution coordinates.
-        scale_maxima = np.array([variance_maps[scale_index].max() for scale_index in range(scale_count)])
+        scale_maxima = np.array([variance_maps[scale_index].max() for scale_index in range(_SCALE_COUNT)])
         best_scale_index = np.argmax(scale_maxima)
         peak_index = np.argmax(variance_maps[best_scale_index])
         peak_y, peak_x = np.unravel_index(
@@ -245,7 +266,7 @@ def detect_rois_in_frames(
 
         # Repeatedly extends the ROI boundary and re-estimates weights from the residual. Multiple passes allow the
         # mask to converge to the ROI's true spatial extent by incorporating increasingly distant correlated pixels.
-        for _extension_pass in range(extension_iterations):
+        for _extension_pass in range(_EXTENSION_ITERATIONS):
             y_pixels, x_pixels, pixel_weights = _extend_iteratively(
                 y_pixels=y_pixels,
                 x_pixels=x_pixels,
@@ -275,7 +296,7 @@ def detect_rois_in_frames(
                 scale_heights=scale_heights,
                 scale_widths=scale_widths,
             )
-            for scale_index in range(scale_count):
+            for scale_index in range(_SCALE_COUNT):
                 variance_maps[scale_index][dead_y[scale_index], dead_x[scale_index]] = 0.0
             continue
 
@@ -286,7 +307,7 @@ def detect_rois_in_frames(
             weights=pixel_weights,
             intensity_threshold=peak_threshold,
         )
-        if split_ratio > split_variance_threshold:
+        if split_ratio > _SPLIT_VARIANCE_THRESHOLD:
             pixel_weights, temporal_projections, active_frame_mask = component_pack
             active_frame_indices = np.nonzero(active_frame_mask)[0]
             time_projection[active_frame_indices] = temporal_projections
@@ -317,7 +338,7 @@ def detect_rois_in_frames(
             scale_heights=scale_heights,
             scale_widths=scale_widths,
         )
-        for scale_index in range(scale_count):
+        for scale_index in range(_SCALE_COUNT):
             scale_flat_indices = multiscale_x[scale_index] + scale_widths[scale_index] * multiscale_y[scale_index]
             convolved_scales[scale_index][np.ix_(active_frame_indices, scale_flat_indices)] -= np.outer(
                 a=time_projection[active_frame_indices], b=multiscale_weights[scale_index]
@@ -604,13 +625,36 @@ def _extend_mask(
     return extended_y, extended_x, accumulator[nonzero_y, nonzero_x]
 
 
+def _find_best_scale(
+    scale_images: NDArray[np.float32],
+) -> int:
+    """Determines the best spatial scale for ROI detection by estimating it from the multiscale projection data.
+
+    Notes:
+        If the automatic estimation fails (returns 0), the scale defaults to 1 with a warning.
+
+    Args:
+        scale_images: The multiscale projection images with shape (num_scales, height, width).
+
+    Returns:
+        The selected spatial scale index.
+    """
+    scale = _estimate_spatial_scale(scale_images=scale_images)
+    if scale > 0:
+        return scale
+    console.echo(
+        message="Spatial scale estimation failed. Setting spatial scale to 1 in order to continue.",
+        level=LogLevel.WARNING,
+    )
+    return _MINIMUM_SPATIAL_SCALE
+
+
 def _estimate_spatial_scale(scale_images: NDArray[np.float32]) -> int:
     """Estimates the dominant spatial scale from multiscale projection images.
 
     Notes:
         The dominant scale is determined by finding the mode of the best scale index across the top peaks in the
-        maximum projection image. This approach identifies which downsampling level captures the most prominent
-        features.
+        maximum projection image.
 
     Args:
         scale_images: The multiscale projection images with shape (num_scales, height, width).
@@ -618,24 +662,20 @@ def _estimate_spatial_scale(scale_images: NDArray[np.float32]) -> int:
     Returns:
         The estimated spatial scale index corresponding to the dominant feature size.
     """
-    peak_detection_window = 11
-    peak_tolerance = 1e-4
-    peak_count = 50
-
     maximum_projection = scale_images.max(axis=0)
     scale_map = np.argmax(scale_images, axis=0).ravel()
 
     # Restricts scale voting to local maxima so that broad bright regions do not dominate the vote count.
     flat_projection = maximum_projection.ravel()
-    neighborhood_max = maximum_filter(input=maximum_projection, size=peak_detection_window).ravel()
-    is_peak = np.abs(flat_projection - neighborhood_max) < peak_tolerance
+    neighborhood_max = maximum_filter(input=maximum_projection, size=_PEAK_DETECTION_WINDOW).ravel()
+    is_peak = np.abs(flat_projection - neighborhood_max) < _PEAK_TOLERANCE
     peak_values = flat_projection[is_peak]
     peak_scales = scale_map[is_peak]
 
     # Focuses on the brightest peaks because they correspond to the most reliable feature detections. Uses partial
     # sort to select the top-k in O(n) instead of a full O(n log n) sort.
-    if len(peak_values) > peak_count:
-        top_indices = np.argpartition(a=peak_values, kth=-peak_count)[-peak_count:]
+    if len(peak_values) > _PEAK_COUNT:
+        top_indices = np.argpartition(a=peak_values, kth=-_PEAK_COUNT)[-_PEAK_COUNT:]
     else:
         top_indices = np.arange(len(peak_values))
 
@@ -654,8 +694,7 @@ def _compute_multiscale_masks(
 
     Notes:
         Starting from the finest scale, each subsequent scale is computed by mapping pixel coordinates to the
-        downsampled grid and accumulating weights. The masks at each scale are then extended into neighboring pixels
-        using _extend_mask.
+        downsampled grid and accumulating weights.
 
     Args:
         y_pixels: The y-coordinates of the ROI pixels at the finest scale.
@@ -727,13 +766,12 @@ def _extend_iteratively(
         the grown ROI. An ROI whose residual is uniformly zero returns its zero weight vector unnormalized, which the
         caller rejects on its own activity threshold.
     """
-    maximum_pixel_count = 10000
     previous_count = 0
 
     # Initializes weights as a placeholder for static analysis. The loop runs at least once, so it is overwritten.
     weights = np.empty(y_pixels.size, dtype=np.float32)
 
-    while previous_count < maximum_pixel_count:
+    while previous_count < _MAXIMUM_PIXEL_COUNT:
         previous_count = y_pixels.size
 
         y_pixels, x_pixels = extend_roi(
@@ -769,27 +807,3 @@ def _extend_iteratively(
         weights = weights / weight_norm
 
     return y_pixels, x_pixels, weights
-
-
-def _find_best_scale(
-    scale_images: NDArray[np.float32],
-) -> int:
-    """Determines the best spatial scale for ROI detection by estimating it from the multiscale projection data.
-
-    Notes:
-        If the automatic estimation fails (returns 0), the scale defaults to 1 with a warning.
-
-    Args:
-        scale_images: The multiscale projection images with shape (num_scales, height, width).
-
-    Returns:
-        The selected spatial scale index.
-    """
-    scale = _estimate_spatial_scale(scale_images=scale_images)
-    if scale > 0:
-        return scale
-    console.echo(
-        message="Spatial scale estimation failed. Setting spatial scale to 1 in order to continue.",
-        level=LogLevel.WARNING,
-    )
-    return _MINIMUM_SPATIAL_SCALE

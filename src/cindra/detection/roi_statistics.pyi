@@ -9,6 +9,15 @@ from ..dataclasses import (
     ROIStatistics as ROIStatistics,
 )
 
+_DEFAULT_DIAMETER: int
+_NORMALIZATION_COUNT: int
+_COMPACTNESS_EPSILON: float
+_MINIMUM_PIXELS_FOR_HULL: int
+_DEFAULT_AREA: float
+_SIGMA_MULTIPLIER: float
+_MINIMUM_PIXELS_FOR_CROP: int
+_GRADIENT_THRESHOLD_DIVISOR: int
+
 @dataclass(frozen=True, slots=True)
 class _EllipseData:
     radii: tuple[float, float]
@@ -19,7 +28,7 @@ class _EllipseData:
     @property
     def aspect_ratio(self) -> float: ...
 
-def estimate_diameter_from_rois(rois: list[ROIMask], default_diameter: int = 10) -> int: ...
+def estimate_diameter_from_rois(rois: list[ROIMask], default_diameter: int = ...) -> int: ...
 def compute_roi_statistics(
     rois: list[ROIStatistics],
     frame_height: int,
