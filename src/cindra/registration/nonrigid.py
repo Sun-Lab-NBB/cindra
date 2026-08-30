@@ -20,8 +20,8 @@ from ..detection import compute_spatial_taper_mask
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-_SNR_EPSILON: float = 1e-10
-"""The small epsilon value used to prevent division by zero in SNR calculations."""
+_SIGNAL_TO_NOISE_EPSILON: float = 1e-10
+"""The small epsilon value used to prevent division by zero in signal-to-noise ratio calculations."""
 
 _SUBPIXEL_FACTOR: int = 10
 """The upsampling factor for Gaussian RBF subpixel peak localization. A value of 10 provides 0.1 pixel precision."""
@@ -90,7 +90,7 @@ def compute_nonrigid_reference_data(
         mean_offset[block_index] = reference_block.mean() * (np.float32(1.0) - taper_mask[block_index])
 
         # Computes the phase-normalized FFT kernel with Gaussian smoothing.
-        block_fft = np.conj(rfft2(reference_block, workers=workers))
+        block_fft = np.conj(rfft2(x=reference_block, workers=workers))
         block_fft /= NORMALIZATION_EPSILON + np.absolute(block_fft)
         block_fft *= gaussian_filter
         reference_kernel[block_index] = block_fft
@@ -103,7 +103,7 @@ def compute_nonrigid_offsets(
     taper_mask: NDArray[np.float32],
     mean_offset: NDArray[np.float32],
     reference_kernel: NDArray[np.complex64],
-    snr_threshold: float,
+    signal_to_noise_threshold: float,
     smoothing_kernel: NDArray[np.float32],
     x_blocks: list[NDArray[np.int32]],
     y_blocks: list[NDArray[np.int32]],
@@ -125,7 +125,7 @@ def compute_nonrigid_offsets(
             compute_nonrigid_reference_data. Fills tapered regions with uniform intensity.
         reference_kernel: The phase-normalized FFT kernel with shape (block_count, block_height, real_fft_width)
             from compute_nonrigid_reference_data. Used for cross-correlation with frame blocks.
-        snr_threshold: The SNR threshold below which additional smoothing is applied to correlation peaks.
+        signal_to_noise_threshold: The SNR threshold below which additional smoothing is applied to correlation peaks.
             Higher values apply more smoothing. Typical values range from 1.0 to 1.5.
         smoothing_kernel: The block smoothing kernel from compute_registration_blocks. Used for SNR-based
             adaptive smoothing of correlation peaks across neighboring blocks.
@@ -143,7 +143,6 @@ def compute_nonrigid_offsets(
     frame_count = frames.shape[0]
     block_height, block_width = taper_mask.shape[-2], taper_mask.shape[-1]
 
-    # Computes maximum registration offset, constrained by block dimensions.
     maximum_block_radius = np.floor(np.minimum(block_height, block_width) / 2.0) - _UPSAMPLING_PADDING
     correlation_radius = int(np.minimum(np.round(maximum_offset), maximum_block_radius))
     block_count = len(y_blocks)
@@ -163,7 +162,6 @@ def compute_nonrigid_offsets(
             workers=workers,
         )
 
-    # Extracts the central correlation window containing valid peaks.
     half_window = correlation_radius + _UPSAMPLING_PADDING
     correlation_window = np.real(
         np.block(
@@ -182,7 +180,7 @@ def compute_nonrigid_offsets(
     correlation_window = correlation_window.transpose(1, 0, 2, 3)
     correlation_window = correlation_window.reshape(correlation_window.shape[0], -1)
 
-    # Applies progressive smoothing based on SNR.
+    # Each level squares the neighbor kernel again, so a block whose peak already clears the threshold pays for none.
     smoothing_levels = [
         correlation_window,
         smoothing_kernel @ correlation_window,
@@ -195,18 +193,17 @@ def compute_nonrigid_offsets(
     for block_index in range(block_count):
         signal_to_noise_ratio = np.ones(frame_count, dtype=np.float32)
         for smoothing_index, smoothed_data in enumerate(smoothing_levels):
-            low_snr_mask = signal_to_noise_ratio < snr_threshold
+            low_snr_mask = signal_to_noise_ratio < signal_to_noise_threshold
             if np.sum(low_snr_mask) == 0:
                 break
             block_correlation = smoothed_data[block_index, low_snr_mask, :, :]
             if smoothing_index > 0:
                 smoothed_correlation[block_index, low_snr_mask, :, :] = block_correlation
-            signal_to_noise_ratio[low_snr_mask] = _compute_correlation_snr(
+            signal_to_noise_ratio[low_snr_mask] = _compute_correlation_signal_to_noise_ratio(
                 correlation_data=block_correlation,
                 padding=_UPSAMPLING_PADDING,
             )
 
-    # Computes subpixel offsets using Gaussian RBF upsampling (vectorized over all blocks and frames).
     midpoint = upsampled_size // 2
     region_size = 2 * _UPSAMPLING_PADDING + 1
     central_size = 2 * correlation_radius + 1
@@ -306,7 +303,7 @@ def apply_nonrigid_correction(
 
 
 @njit(parallel=True, cache=True)
-def _compute_correlation_snr(  # pragma: no cover
+def _compute_correlation_signal_to_noise_ratio(  # pragma: no cover
     correlation_data: NDArray[np.float32],
     padding: int,
 ) -> NDArray[np.float32]:
@@ -352,7 +349,8 @@ def _compute_correlation_snr(  # pragma: no cover
                 background_value = max(background_value, value)
 
         # Ensures positivity for outlier cases with very low background.
-        signal_to_noise_ratio[frame_index] = peak_value / max(background_value, _SNR_EPSILON)  # type: ignore[operator]
+        background_floor = max(background_value, _SIGNAL_TO_NOISE_EPSILON)
+        signal_to_noise_ratio[frame_index] = peak_value / background_floor  # type: ignore[operator]
 
     return signal_to_noise_ratio
 

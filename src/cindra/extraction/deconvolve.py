@@ -125,7 +125,7 @@ def apply_oasis_deconvolution(
         pool_length = np.empty((batch_count, frame_count), dtype=np.float32)
 
         # Runs the OASIS algorithm that modifies spike_traces in-place.
-        _oasis_matrix(
+        _deconvolve_roi_batch(
             cell_fluorescence=cell_fluorescence[start_index:end_index],
             pool_amplitude=pool_amplitude,
             pool_weight=pool_weight,
@@ -140,7 +140,7 @@ def apply_oasis_deconvolution(
 
 
 @njit(cache=True, parallel=True)
-def _oasis_matrix(  # pragma: no cover
+def _deconvolve_roi_batch(  # pragma: no cover
     cell_fluorescence: NDArray[np.float32],
     pool_amplitude: NDArray[np.float32],
     pool_weight: NDArray[np.float32],

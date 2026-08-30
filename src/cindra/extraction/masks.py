@@ -194,7 +194,6 @@ def _create_neuropil_masks(
         # Determines the number of non-cell pixels within the inner neuropil border.
         exclude_count = int(np.sum(a=roi_pixels[inner_y_pixels, inner_x_pixels] == 0))
 
-        # Iteratively expands the neuropil mask until it accumulates the requested number of pixels.
         current_y_pixels, current_x_pixels = inner_y_pixels.copy(), inner_x_pixels.copy()
         for _ in range(_MAXIMUM_NEUROPIL_EXPANSION_ITERATIONS):
             # Determines the number of neuropil region pixels at the start of the current iteration. Discounts the
@@ -207,13 +206,13 @@ def _create_neuropil_masks(
 
             # Expands the neuropil mask by uniformly extending the neuropil's bounding box to include additional pixels
             # on each side. Clamps to frame boundaries to prevent out-of-bounds indices.
-            y_min = max(0, int(current_y_pixels.min()) - _NEUROPIL_EXPANSION_STEP)
-            y_max = min(height, int(current_y_pixels.max()) + _NEUROPIL_EXPANSION_STEP + 1)
-            x_min = max(0, int(current_x_pixels.min()) - _NEUROPIL_EXPANSION_STEP)
-            x_max = min(width, int(current_x_pixels.max()) + _NEUROPIL_EXPANSION_STEP + 1)
+            minimum_y = max(0, int(current_y_pixels.min()) - _NEUROPIL_EXPANSION_STEP)
+            maximum_y = min(height, int(current_y_pixels.max()) + _NEUROPIL_EXPANSION_STEP + 1)
+            minimum_x = max(0, int(current_x_pixels.min()) - _NEUROPIL_EXPANSION_STEP)
+            maximum_x = min(width, int(current_x_pixels.max()) + _NEUROPIL_EXPANSION_STEP + 1)
             current_y_pixels, current_x_pixels = np.meshgrid(
-                np.arange(y_min, y_max, dtype=np.int32),
-                np.arange(x_min, x_max, dtype=np.int32),
+                np.arange(minimum_y, maximum_y, dtype=np.int32),
+                np.arange(minimum_x, maximum_x, dtype=np.int32),
                 indexing="ij",
             )
 
