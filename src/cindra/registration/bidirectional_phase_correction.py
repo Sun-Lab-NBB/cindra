@@ -23,7 +23,7 @@ def compute_bidirectional_phase_offset(frames: NDArray[np.float32], workers: int
     Args:
         frames: A 3D array of imaging frames with shape (frame_count, height, width). The frames should be a
             representative sample from the recording, typically selected at regular intervals throughout the recording.
-        workers: The number of parallel workers for FFT computation. Use -1 for all available cores.
+        workers: The number of parallel workers for FFT computation. Must be a positive integer.
 
     Returns:
         The estimated bidirectional phase offset in pixels. Positive values indicate that odd lines should be shifted

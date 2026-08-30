@@ -73,7 +73,8 @@ def register_plane(context: RuntimeContext, *, workers: int, device: int | None 
 
     Computes registration offsets from the alignment channel (determined by
     config.registration.align_by_first_channel), then applies those offsets to both channels. If two-step registration
-    is enabled, a refinement pass is performed using the mean of registered frames as the reference.
+    is enabled, a refinement pass is performed, which recomputes the reference from a fresh
+    sample of the registered frames and re-registers them against it.
 
     All configuration is read from context.configuration, file paths from context.runtime.io, and results are stored in
     context.runtime.registration, context.runtime.detection, and context.runtime.timing. The registered frames are
@@ -83,8 +84,8 @@ def register_plane(context: RuntimeContext, *, workers: int, device: int | None 
 
     Notes:
         The worker count drives both the FFT thread pool used by phase correlation and the Numba thread mask used by
-        the nonrigid warping kernels. The Numba mask is thread-local, so concurrently dispatched planes can hold
-        different worker budgets inside a single process.
+        the edge-taper, spectrum-normalization, and nonrigid kernels. The Numba mask is thread-local, so
+        concurrently dispatched planes can hold different worker budgets inside a single process.
 
         The device argument selects where both channels are registered, running the pass on a CUDA device when the
         caller names one and on the host CPU otherwise. Only the alignment channel resolves offsets against a
@@ -462,7 +463,7 @@ def _compute_reference(
             The search window is limited to min(height, width) * maximum_offset_fraction pixels.
         temporal_smoothing_sigma: The standard deviation for temporal Gaussian smoothing of correlation maps.
             If 0, no smoothing is applied.
-        workers: The number of parallel workers for FFT computation. Use -1 for all available cores.
+        workers: The number of parallel workers for FFT computation. Must be a positive integer.
         one_photon_enabled: Determines whether to apply one-photon preprocessing, which includes spatial smoothing
             followed by high-pass filtering.
 
@@ -561,7 +562,7 @@ def _register_frames_batch(
         signal_to_noise_threshold: The SNR threshold below which additional smoothing is applied to correlation
             peaks. Higher values apply more smoothing. Typical values range from 1.0 to 1.5.
         maximum_block_offset: The maximum allowed offset for nonrigid blocks in pixels.
-        workers: The number of parallel workers for FFT computation. Use -1 for all available cores.
+        workers: The number of parallel workers for FFT computation. Must be a positive integer.
         one_photon_enabled: Determines whether to apply one-photon preprocessing, which includes spatial smoothing
             followed by high-pass filtering.
         nonrigid_enabled: Determines whether to apply nonrigid (piecewise) registration after rigid alignment.
