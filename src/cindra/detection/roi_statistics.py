@@ -95,8 +95,8 @@ def compute_roi_statistics(
         frame_width: The width of the recording frames from which ROIs are segmented, in pixels.
         aspect: The aspect ratio of the recording. If provided, adjusts ROI ellipse fitting. Ignored in lightweight
             mode.
-        diameter: The expected ROI diameter in pixels. Used for ROI ellipse fitting normalization. Ignored in
-            lightweight mode.
+        diameter: The expected ROI diameter in pixels. Used for ROI ellipse fitting normalization and for distance
+            normalization in compactness. Applies in both full and lightweight modes.
         maximum_overlap_fraction: The maximum fraction of pixels that can overlap with other ROIs. If specified, ROIs
             exceeding this threshold are removed from the list in-place. Ignored in lightweight mode.
         crop: Determines whether to crop processed ROIs to the soma region before computing statistics.
@@ -313,7 +313,7 @@ class _ROI:
 
     @property
     def mean_radius(self) -> float:
-        """Returns the mean diameter-normalized distance from ROI pixels to their median center."""
+        """Returns the mean diameter-normalized distance from the ROI's soma pixels to their median center."""
         y_pixels = self.soma_y_pixels
         x_pixels = self.soma_x_pixels
         # Normalizes distances by ROI diameter for scale-invariance, matching the original suite2p approach.
@@ -325,7 +325,9 @@ class _ROI:
 
     @property
     def baseline_mean_radius(self) -> float:
-        """Returns the expected mean radius for a uniformly distributed set of pixels of the same count as the ROI."""
+        """Returns the expected mean radius for a uniformly distributed set of pixels of the same count as the ROI's
+        soma region.
+        """
         # Uses a diameter-dependent kernel. The kernel is computed from a meshgrid spanning 2*diameter in each
         # direction, with distances normalized by diameter, matching the original suite2p approach.
         diameter = self._diameter
@@ -338,7 +340,9 @@ class _ROI:
 
     @property
     def compactness(self) -> float:
-        """Returns the ratio of actual to expected mean radius, where values near 1 indicate compact circular ROIs."""
+        """Returns the ratio of actual to expected mean radius, floored at 1.0, where values near 1 indicate compact
+        circular ROIs.
+        """
         return max(1.0, self.mean_radius / (1e-10 + self.baseline_mean_radius))
 
     @property

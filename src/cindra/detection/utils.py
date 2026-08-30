@@ -70,7 +70,8 @@ def downsample(data: NDArray[np.float32], *, taper_edge: bool = True) -> NDArray
             (num_frames, height, width) or spatial coordinate grids with shape (num_axes, height, width).
         taper_edge: Determines whether to taper edge elements when dimensions are odd. If True, edge elements are
             multiplied by 0.5 to maintain consistent intensity scaling. If False, edge elements retain their
-            original values.
+            original values. The bottom-right corner takes the factor once per odd axis, so it is multiplied by 0.25
+            when both dimensions are odd.
 
     Returns:
         A downsampled array with shape (depth, ceil(height/2), ceil(width/2)).
@@ -167,7 +168,8 @@ def compute_registration_blocks(
 
     Notes:
         Divides the field of view into overlapping blocks that are registered independently. The blocks are arranged
-        in a regular grid with positions computed to provide approximately 50% overlap between adjacent blocks.
+        in a regular grid with positions computed so that adjacent blocks overlap by roughly a third of a block,
+        reaching half a block only where the field is twice the block size.
 
     Args:
         height: The imaging field height in pixels.
@@ -182,8 +184,8 @@ def compute_registration_blocks(
         for SNR-based adaptive smoothing of correlation peaks across neighboring blocks.
     """
     # Computes block dimensions and counts for each axis. If the requested block size exceeds the image dimension, uses
-    # the full dimension as a single block. Otherwise, the 1.5x multiplier produces approximately 50% overlap between
-    # adjacent blocks.
+    # the full dimension as a single block. Otherwise, the 1.5x multiplier makes adjacent blocks overlap by roughly a
+    # third of a block, reaching half a block only where the field is twice the block size.
     if block_size[0] >= height:
         block_size_y, y_block_count = height, 1
     else:
