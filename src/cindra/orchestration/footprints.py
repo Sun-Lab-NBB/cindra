@@ -48,8 +48,8 @@ MEMORY_ESTIMATE_TOLERANCE: float = 1.15
 Notes:
     The margin covers the working sets a model does not enumerate and the variation between recordings of the same
     shape. Understating is the asymmetric failure, since a local batch overcommits its host and a scheduled job is
-    killed outright, so every estimate rounds up. The value matches the margin the sibling ataraxis libraries apply,
-    which is what lets a scheduler weigh a cindra job against theirs on one scale.
+    killed outright, so every estimate rounds up. The value matches the margin ataraxis-video-system applies,
+    which is what lets a scheduler weigh a cindra job against its jobs on one scale.
 """
 
 WORKER_MEMORY_MB: int = 384
@@ -60,9 +60,9 @@ SPAWNED_CHILD_MEMORY_MB: int = 200
 """The resident memory each child of a job's own process pool occupies before it touches data.
 
 Notes:
-    Carried at the value the sibling ataraxis libraries use, so a scheduler composing a batch across them charges one
-    scale. No cindra stage opens a process pool of its own, so no estimate here applies the term. It is exported for a
-    scheduler that wraps a cindra job in a pool it owns.
+    Carried on the same scale as the sibling ataraxis libraries, so a scheduler composing a batch across them prices a
+    child the same way. No cindra stage opens a process pool of its own, so no estimate here applies the term. It is
+    exported for a scheduler that wraps a cindra job in a pool it owns.
 """
 
 _BYTES_PER_MEGABYTE: int = 1024 * 1024
@@ -891,11 +891,10 @@ def _estimate_registration_device_mb(plane: PlaneGeometry, configuration: Single
         The frame-shaped, block-shaped, and per-block terms are summed rather than maxed. The device memory pool
         retains a freed block rather than returning it to the driver, and the three phases request different shapes.
 
-        A configuration enabling two-step registration is charged for two backends. The refinement pass builds its
-        own backend while the first pass's backend is still bound, so both hold their staging buffers and their
-        reference uploads. The device memory pool keys its free lists by stream, so the blocks the first pass
-        released stay on the device and the refinement pass allocates its working set beside them. The context term
-        is charged once, because one process holds one primary context per device.
+        A configuration enabling two-step registration is charged for two backends as a margin. One backend is live
+        at a time, because each pass releases its allocations before the next pass builds its own, and the pool sorts
+        its free blocks by size, so a pass whose geometry differs allocates fresh blocks rather than reusing the
+        cached ones. The context term is charged once, because one process holds one primary context per device.
 
     Args:
         plane: The plane's geometry.
@@ -914,7 +913,7 @@ def _estimate_registration_device_mb(plane: PlaneGeometry, configuration: Single
     frame_bytes = _DEVICE_NONRIGID_BATCH_PIXEL_BYTES if blocks.count else _DEVICE_RIGID_BATCH_PIXEL_BYTES
 
     # The staging buffers, the reference uploads, and the upsampling matrix belong to one backend and stay on the
-    # device for its whole lifetime, so a pass that keeps a second backend alive holds them twice.
+    # device for its whole lifetime, so the two-backend margin charges them twice.
     resident_bytes = (
         _DEVICE_STAGING_BATCH_PIXEL_BYTES * batch * plane_pixels
         + _DEVICE_REFERENCE_FRAME_PIXEL_BYTES * plane_pixels

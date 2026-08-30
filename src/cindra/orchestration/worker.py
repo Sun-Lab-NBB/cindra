@@ -79,8 +79,8 @@ def execute_single_recording_job(
             configuration.
         RuntimeError: If device names a CUDA device on a host that exposes no usable one.
         ValueError: If the configuration does not configure an output path, if job_name is not a recognized
-            single-recording job, if workers is zero or a negative value other than -1, or if device names an index
-            the host does not expose.
+            single-recording job, if specifier does not name an imaging plane for a REGISTER or PROCESS job, if
+            workers is zero or a negative value other than -1, or if device names an index the host does not expose.
     """
     configuration, _ = load_single_recording_configuration(configuration_path=configuration_path)
 
@@ -281,8 +281,9 @@ def dispatch_single_recording_job(
 
     Raises:
         RuntimeError: If a registration job names a CUDA device on a host that exposes no usable one.
-        ValueError: If the job_name is not recognized, if the requested worker count is invalid, or if a registration
-            job names a device index the host does not expose.
+        ValueError: If the job_name is not recognized, if the configuration does not configure an output path, if a
+            per-plane job's specifier names no imaging plane, if the requested worker count is invalid, or if a
+            registration job names a device index the host does not expose.
     """
     console.echo(message=f"Running '{job_name}' job (specifier='{specifier}') with ID {job_id}...")
 
@@ -422,9 +423,11 @@ def prime_recording(configuration_path: Path) -> RecordingPlanes:
         The recording's plane inventory.
 
     Raises:
-        FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid
-            single-recording configuration.
-        ValueError: If the configuration does not configure an output path.
+        FileNotFoundError: If the configuration file is missing, is not a .yaml file, is not a valid
+            single-recording configuration, or if no acquisition parameters file is found under the configured data
+            path.
+        ValueError: If the configuration does not configure an output path, if the recording holds neither processed
+            data nor a configured data path, or if the acquisition parameters file fails validation.
     """
     configuration, output_path = load_single_recording_configuration(configuration_path=configuration_path)
     resolve_single_recording_contexts(configuration=configuration, persist=True)

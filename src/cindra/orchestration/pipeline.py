@@ -54,7 +54,8 @@ def run_single_recording_pipeline(
     ``runtime.display_progress_bars`` flag into the configuration file before invoking this function. The pipeline
     reads these values from the file at ``configuration_path`` and does not accept them as direct parameters. Each
     stage takes its worker count as a direct parameter, which keeps the configuration file immutable and therefore
-    safe to share between concurrently dispatched jobs.
+    safe to share between concurrently dispatched jobs. An invocation that sets none of the four stage flags runs
+    every stage in phase order.
 
     Args:
         configuration_path: The path to the single-recording configuration YAML file.
@@ -212,7 +213,8 @@ def run_multi_recording_pipeline(
     ``runtime.display_progress_bars``) into the configuration file before invoking this function. The pipeline reads
     these values from the file at ``configuration_path`` and does not accept them as direct parameters. Each stage
     takes its worker count as a direct parameter, which keeps the configuration file immutable and therefore safe to
-    share between concurrently dispatched jobs.
+    share between concurrently dispatched jobs. An invocation that sets neither stage flag runs both stages in phase
+    order.
 
     Args:
         configuration_path: The path to the multi-recording configuration YAML file. The configuration must include the

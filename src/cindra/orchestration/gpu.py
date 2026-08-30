@@ -11,7 +11,7 @@ try:
 except ImportError:  # pragma: no cover
     # The CuPy distribution publishes no macOS wheel, so the dependency marker excludes darwin and this module has to
     # stay importable there. Guarding the import also covers a Linux or Windows host whose installation was trimmed.
-    # Every entry point that reaches a device calls verify_gpu_runtime() before touching the name below, and
+    # Every entry point that reaches a device either calls verify_gpu_runtime() or guards on the name below itself, and
     # resolve_gpu_devices() reports RUNTIME_MISSING while the name is None. Only one of the two branches runs on any
     # single host, so the fallback stays out of coverage measurement.
     cupy = None
@@ -20,7 +20,7 @@ GPU_REMEDY: str = (
     "Install the CuPy build matching the CUDA version the local driver runs, as 'cupy-cuda13x[ctk]' for CUDA 13 or "
     "'cupy-cuda12x[ctk]' for CUDA 12, and run 'cindra gpu' to report what the host exposes."
 )
-"""The remedy an unusable GPU runtime reports, named by every message this module produces.
+"""The remedy an unusable GPU runtime reports, named by every message that a CuPy installation would resolve.
 
 Notes:
     The 'ctk' extra carries the CUDA math libraries CuPy resolves on first use. A bare CuPy installation imports and
@@ -56,7 +56,7 @@ class GpuStatus(StrEnum):
     LIBRARIES_MISSING = "libraries_missing"
     """The CuPy distribution is present, and the CUDA math libraries it loads on first use are absent."""
     NO_DEVICES = "no_devices"
-    """The CUDA runtime loads, and it reports no device the driver exposes."""
+    """The driver exposes no device the CUDA runtime reports, or the runtime library itself does not load."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,7 +91,9 @@ class GpuSummary:
 
     @property
     def remedy(self) -> str:
-        """Returns the command that resolves the runtime, empty when the runtime is already usable."""
+        """Returns the command that resolves the runtime, empty when the runtime is already usable or when the host
+        platform carries no CuPy wheel.
+        """
         if self.available or self.status == GpuStatus.UNSUPPORTED_PLATFORM:
             return ""
         return GPU_REMEDY
