@@ -144,8 +144,8 @@ def compute_spatial_taper_mask(sigma: float, height: int, width: int) -> NDArray
     """
     column_distances, row_distances = _mean_centered_meshgrid(height=height, width=width)
 
-    # Computes where taper begins: 2*sigma pixels inward from the edge. This ensures the sigmoid reaches
-    # ~0.12 at the edge (when distance equals half-width).
+    # Computes where taper begins: 2*sigma pixels inward from the edge. Ensures the sigmoid reaches ~0.12 at the edge
+    # (when distance equals half-width).
     taper_start_row = np.float32(((height - 1) / 2) - 2 * sigma)
     taper_start_column = np.float32(((width - 1) / 2) - 2 * sigma)
 
@@ -226,9 +226,6 @@ def compute_registration_blocks(
 def _mean_centered_meshgrid(height: int, width: int) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
     """Creates a mean-centered distance meshgrid of the specified dimensions.
 
-    Notes:
-        Each coordinate value represents the absolute distance from the center of that axis.
-
     Args:
         height: The height of the frames or images to generate the meshgrid for, in pixels.
         width: The width of the frames or images to generate the meshgrid for, in pixels.
@@ -282,7 +279,7 @@ def _apply_rolling_mean_high_pass(frames: NDArray[np.float32], kernel_size: int)
         complete_window_count - 1 if remainder > 0 and complete_window_count > 0 else complete_window_count
     )
 
-    # Reshapes to (num_windows, kernel_size, height, width). This creates a view, not a copy.
+    # Reshapes to (num_windows, kernel_size, height, width). Creates a view, not a copy.
     if batched_windows > 0:
         complete = frames[: batched_windows * kernel_size].reshape(batched_windows, kernel_size, height, width)
         complete -= complete.mean(axis=1, keepdims=True)
@@ -299,8 +296,7 @@ def _compute_block_smoothing_kernel(x_block_count: int, y_block_count: int) -> N
     """Computes a normalized Gaussian kernel matrix for smoothing nonrigid block offsets.
 
     Notes:
-        Creates a kernel that weights neighboring blocks based on their spatial distance. Results are cached since
-        block counts don't change during a recording.
+        Results are cached since block counts don't change during a recording.
 
     Args:
         x_block_count: Number of blocks along the x-axis.

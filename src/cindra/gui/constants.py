@@ -263,8 +263,8 @@ class _ROIViewerConstants:
     distance between adjacent traces in both single-recording and multi-recording trace plots, with larger values
     decreasing separation (trace spacing is computed as 1.0 / scale_factor)."""
     average_threshold: int = 5
-    """An average trace is rendered only when more than this many ROIs are selected. At or below this count, only
-    individual traces are shown to avoid displaying a noisy average from too few samples."""
+    """The selected ROI count above which the average trace is rendered. At or below this count, only individual traces
+    are shown to avoid displaying a noisy average from too few samples."""
     average_scale_divisor: float = 25.0
     """The divisor used to compute the vertical scale of the average trace relative to the number of selected ROIs.
     The average scale is calculated as (selected_count / divisor) + 1, producing a gradually increasing amplitude as

@@ -69,7 +69,7 @@ _BYTES_PER_MEGABYTE: int = 1024 * 1024
 """The divisor converting a byte count into megabytes."""
 
 _MEGABYTES_PER_GIGABYTE: int = 1024
-"""The megabytes one gigabyte holds, which every reportable estimate is rounded up to a multiple of."""
+"""The megabytes one gigabyte holds, which sets the rounding granularity of every reportable estimate."""
 
 _SINGLE_PRECISION_BYTES: int = 4
 """The width of one single-precision element, which is the type every modeled working array holds."""
@@ -79,7 +79,7 @@ _BINARIZATION_LIVE_BATCHES: int = 2
 the whole of the next read."""
 
 _INTERNAL_ELEMENT_BYTES: int = 2
-"""The width of one element of the internal binary format, which a wider source is halved and cast down to."""
+"""The width of one element of the internal binary format. A wider source is halved and cast down to it."""
 
 _DETECTION_ARRAY_COPIES: float = 3.60
 """The copies of the binned movie the detection stage holds at its peak, which is the scale-0 thresholded variance.
@@ -133,7 +133,7 @@ _UPSAMPLING_PADDING: int = 3
 derives."""
 
 _DEVICE_PIPELINE_SLOTS: int = 2
-"""The staging slots the device-backed registration cycles a frame batch through."""
+"""The staging slots that carry each frame batch to the device."""
 
 _DEVICE_STAGING_DIRECTIONS: int = 2
 """The transfer directions of the page-locked host buffers each staging slot holds, which are the upload of one batch
@@ -179,7 +179,7 @@ _DEVICE_CONTEXT_BYTES: int = 536870912
 the registration allocates."""
 
 _DEVICE_LIVE_BACKENDS: int = 2
-"""The multiple of one backend's resident state that a plane registration is planned against.
+"""The multiple of one backend's resident state that a plane registration's plan assumes.
 
 Notes:
     One backend is live at a time, because each pass releases its device and page-locked host allocations before the
@@ -246,15 +246,15 @@ Notes:
 """
 
 _TRACKED_REGION_HEADROOM: float = 1.5
-"""The multiple of the most populated recording's region count the templates a tracked dataset holds are assumed not
-to exceed.
+"""The bound on the templates a tracked dataset holds, expressed as a multiple of the region count of its most populated
+recording.
 
 Notes:
-    This is a domain assumption about how a dataset's recordings overlap rather than a figure derived from the
-    pipeline: a tracked dataset holds at most every region of its most populated recording, plus about half that
-    count again contributed by regions the other recordings hold and it does not. Because it is an assumption rather
-    than a proof, the bound that carries it is taken alongside the combinatorial ceiling the pooled region count
-    sets, and the smaller of the two is used.
+    This is a domain assumption about how a dataset's recordings overlap rather than a figure derived from the pipeline.
+    A tracked dataset holds at most every region of its most populated recording, plus about half that count again
+    contributed by regions the other recordings hold and it does not. Because it is an assumption rather than a proof,
+    the bound that carries it is taken alongside the combinatorial ceiling the pooled region count sets, and the smaller
+    of the two is used.
 """
 
 
@@ -283,11 +283,11 @@ class RecordingGeometry:
     planes: tuple[PlaneGeometry, ...] = ()
     """The geometry of every virtual imaging plane, ordered by plane index."""
     raw_frame_pixels: int = 0
-    """The pixels one unsliced acquisition frame holds, which the conversion stage reads a batch of at a time."""
+    """The pixels one unsliced acquisition frame holds, which the conversion stage reads in batches."""
     source_element_bytes: int = _INTERNAL_ELEMENT_BYTES
     """The width of one element of the recording's source files."""
     combined_pixels: int = 0
-    """The pixels one combined multi-plane frame holds, which every multi-recording stage works at."""
+    """The pixels one combined multi-plane frame holds, which every multi-recording stage uses."""
     combined_frame_count: int = 0
     """The frames the combined view holds, trimmed to the shortest contributing plane."""
     two_channels: bool = False
@@ -295,7 +295,7 @@ class RecordingGeometry:
     extraction stages process alongside the first inside one job."""
     region_count: int = 0
     """The regions the recording's combined trace array holds, which the multi-recording stages read from the
-    single-recording output they run on."""
+    single-recording output they process."""
     resolved: bool = False
     """Determines whether the geometry follows from the recording's own data rather than from its absence."""
     acquisition_resolved: bool = False
@@ -306,7 +306,7 @@ class RecordingGeometry:
     reports."""
 
     def _describe_unresolved_inputs(self, data_path: Path | None) -> str:
-        """Describes the input that left the recording without an imaging plane, together with the remedy it calls for.
+        """Describes the input that left the recording without an imaging plane, together with the remedy it requires.
 
         Notes:
             The acquisition parameters and the source files fail independently and call for different remedies, so the
@@ -315,7 +315,7 @@ class RecordingGeometry:
             disagree rather than go missing.
 
         Args:
-            data_path: The raw imaging directory the recording was configured with, or None when it names none.
+            data_path: The recording's configured raw imaging directory, or None when it names none.
 
         Returns:
             The sentences naming the unresolved input and its remedy, empty when the recording holds a plane.
@@ -373,10 +373,10 @@ class JobSizing:
 
 @dataclass(frozen=True, slots=True)
 class _NonrigidBlockGeometry:
-    """Describes the overlapping blocks one plane's nonrigid registration resolves its offsets over."""
+    """Describes the overlapping blocks whose offsets one plane's nonrigid registration resolves."""
 
     count: int
-    """The blocks one frame is tiled with, which is zero while nonrigid registration is disabled."""
+    """The blocks that tile one frame, which is zero while nonrigid registration is disabled."""
     height: int
     """The height of one block in pixels."""
     width: int
@@ -397,7 +397,7 @@ def resolve_recording_geometry(
         grows.
 
     Args:
-        output_root: The output root the recording was configured with.
+        output_root: The recording's configured output root.
         data_path: The recording's configured raw imaging path, which is either the directory holding its source files
             or any parent of the directory that holds its acquisition parameters file. Every estimate reads the header
             of the first source file that directory holds.
@@ -427,18 +427,16 @@ def read_tracked_recording_geometry(cindra_root: Path) -> RecordingGeometry:
 
     Notes:
         Reads a recording's processed output rather than its raw acquisition, so the caller has already run the
-        single-recording pipeline over the recording to completion. The sibling resolve_recording_geometry reads the
-        raw acquisition instead and reports no region count, because no region exists before the pipeline runs.
+        single-recording pipeline over the recording to completion.
 
         Covers the combined field extent, the combined frame count, the second channel the metadata archive records,
         and the regions the combined trace array's own header reports. The per-plane geometry and the raw frame
         extent stay unread, because every multi-recording stage works at the combined view. Only headers are parsed,
         so a recording of any length costs a pair of small reads and no array is mapped.
 
-        The region count this reports is the regions one recording holds on its own. It is not the templates a
-        tracked dataset holds, which only the cross-recording discovery stage produces, so it does not make the
-        tracked count readable and a caller planning a dataset whose discovery has not yet run must not read it as
-        one.
+        The region count this reports is the regions one recording holds on its own. It is not the templates a tracked
+        dataset holds, which only the cross-recording discovery stage produces. It therefore does not make the tracked
+        count readable, and a caller planning a dataset whose discovery has not yet run must not read it as one.
 
     Args:
         cindra_root: The recording's pipeline output directory, which carries the combined metadata archive.
@@ -476,7 +474,7 @@ def resolve_maximum_roi_count(plane_count: int, configuration: SingleRecordingCo
         configuration: The recording's processing configuration.
 
     Returns:
-        The regions the recording can provably not exceed.
+        The ceiling, counting every plane of the recording together.
     """
     per_plane = _DETECTION_ITERATION_MULTIPLIER * configuration.roi_detection.maximum_iterations
     return per_plane * max(1, plane_count)
@@ -506,12 +504,12 @@ def estimate_single_recording_job_memory_mb(
     Args:
         job_name: The pipeline stage the job runs.
         specifier: The job's tracker specifier, which names a plane for the per-plane stages and is empty otherwise.
-        output_root: The output root the recording was configured with.
+        output_root: The recording's configured output root.
         configuration: The recording's processing configuration.
         data_path: The recording's configured raw imaging path, which is either the directory holding its source files
             or any parent of the directory that holds its acquisition parameters file. Every estimate reads the header
             of the first source file that directory holds.
-        planned_roi_count: The regions to plan for, counting every plane of the recording together. Use None to
+        planned_roi_count: The regions the plan covers, counting every plane of the recording together. Use None to
             accept the ceiling the detection iteration bound provides. Must be a positive integer when supplied.
         gpu_registration: Determines whether the registration jobs are planned for a CUDA device rather than the host
             CPU. Every other job name resolves the same figure whatever it holds.
@@ -622,7 +620,7 @@ def estimate_multi_recording_job_memory_mb(
             recording_directories field holds them. Each is either the recording's pipeline output directory or a
             directory containing it, matching the latitude the context resolver allows.
         configuration: The dataset's processing configuration.
-        planned_roi_count: The tracked templates to plan for, counting the dataset as a whole. Use None to accept
+        planned_roi_count: The tracked templates the plan covers, counting the dataset as a whole. Use None to accept
             the bound the per-recording region counts provide. Must be a positive integer when supplied.
 
     Returns:
@@ -674,12 +672,12 @@ def size_single_recording_job(
     Args:
         job_name: The pipeline stage the job runs.
         specifier: The job's tracker specifier, which names a plane for the per-plane stages and is empty otherwise.
-        output_root: The output root the recording was configured with.
+        output_root: The recording's configured output root.
         configuration: The recording's processing configuration.
         data_path: The recording's configured raw imaging path, which is either the directory holding its source files
             or any parent of the directory that holds its acquisition parameters file. Every estimate reads the header
             of the first source file that directory holds.
-        planned_roi_count: The regions to plan for, counting every plane of the recording together. Use None to
+        planned_roi_count: The regions the plan covers, counting every plane of the recording together. Use None to
             accept the ceiling the detection iteration bound provides. Must be a positive integer when supplied.
         gpu_registration: Determines whether the registration jobs are planned for a CUDA device rather than the host
             CPU. A job of any other stage reports no device memory whatever it holds.
@@ -733,7 +731,7 @@ def size_multi_recording_job(
         recording_directories: The root directory of every recording the dataset spans, as the configuration's
             recording_directories field holds them.
         configuration: The dataset's processing configuration.
-        planned_roi_count: The tracked templates to plan for, counting the dataset as a whole. Use None to accept
+        planned_roi_count: The tracked templates the plan covers, counting the dataset as a whole. Use None to accept
             the bound the per-recording region counts provide. Must be a positive integer when supplied.
 
     Returns:
@@ -855,7 +853,7 @@ def _estimate_registration_device_memory_mb(
 
     Args:
         specifier: The job's tracker specifier, which names the plane the job registers.
-        output_root: The output root the recording was configured with.
+        output_root: The recording's configured output root.
         configuration: The recording's processing configuration.
         data_path: The recording's configured raw imaging path, which is either the directory holding its source files
             or any parent of the directory that holds its acquisition parameters file.
@@ -891,10 +889,10 @@ def _estimate_registration_device_mb(plane: PlaneGeometry, configuration: Single
         The frame-shaped, block-shaped, and per-block terms are summed rather than maxed. The device memory pool
         retains a freed block rather than returning it to the driver, and the three phases request different shapes.
 
-        A configuration enabling two-step registration is charged for two backends as a margin. One backend is live
-        at a time, because each pass releases its allocations before the next pass builds its own, and the pool sorts
-        its free blocks by size, so a pass whose geometry differs allocates fresh blocks rather than reusing the
-        cached ones. The context term is charged once, because one process holds one primary context per device.
+        A configuration enabling two-step registration is charged for two backends as a margin. One backend is live at a
+        time, because each pass releases its allocations before the next pass builds its own. The pool sorts its free
+        blocks by size, so a pass whose geometry differs allocates fresh blocks rather than reusing the cached ones. The
+        context term is charged once, because one process holds one primary context per device.
 
     Args:
         plane: The plane's geometry.
@@ -950,7 +948,7 @@ def _resolve_device_batch_size(plane: PlaneGeometry, configuration: SingleRecord
 def _resolve_nonrigid_block_geometry(
     plane: PlaneGeometry, configuration: SingleRecordingConfiguration
 ) -> _NonrigidBlockGeometry:
-    """Resolves the block tiling one plane's nonrigid registration resolves its offsets over.
+    """Resolves the block tiling whose offsets one plane's nonrigid registration resolves.
 
     Args:
         plane: The plane's geometry.
@@ -1003,7 +1001,7 @@ def _estimate_processing_mb(
     Args:
         plane: The plane's geometry.
         configuration: The recording's processing configuration.
-        regions: The regions this plane's extraction is sized for.
+        regions: The regions that size this plane's extraction.
         channels: The channels the recording carries.
 
     Returns:
@@ -1022,7 +1020,7 @@ def _estimate_combination_mb(geometry: RecordingGeometry, regions: int) -> int:
 
     Args:
         geometry: The recording's geometry.
-        regions: The regions the combined trace arrays are sized for.
+        regions: The regions that size the combined trace arrays.
 
     Returns:
         The memory the stage holds in megabytes, before the shared tolerance.
@@ -1098,7 +1096,7 @@ def _resolve_metric_sample_count(plane: PlaneGeometry) -> int:
 
 
 def _resolve_binned_frame_count(plane: PlaneGeometry, configuration: SingleRecordingConfiguration) -> int:
-    """Resolves the frames the detection stage bins one plane's movie down to.
+    """Resolves the frames one plane's movie holds after the detection stage bins it.
 
     Notes:
         Binning happens inside each read batch and each batch truncates its own remainder, so the movie loses up to
@@ -1130,7 +1128,7 @@ def _resolve_binned_frame_count(plane: PlaneGeometry, configuration: SingleRecor
 def _resolve_planned_regions(
     geometry: RecordingGeometry, configuration: SingleRecordingConfiguration, planned_roi_count: int | None
 ) -> int:
-    """Resolves the regions the region-scaled estimates are sized for.
+    """Resolves the regions that size the region-scaled estimates.
 
     Notes:
         The regions detection finds are the one input the recording's acquisition leaves open, so a caller that
@@ -1140,10 +1138,10 @@ def _resolve_planned_regions(
     Args:
         geometry: The recording's geometry.
         configuration: The recording's processing configuration.
-        planned_roi_count: The regions the caller asked to plan for, or None to accept the detection ceiling.
+        planned_roi_count: The regions the caller's plan covers, or None to accept the detection ceiling.
 
     Returns:
-        The regions to size the region-scaled estimates for.
+        The caller's planned count when it supplied one, and the detection ceiling otherwise.
     """
     if planned_roi_count is not None:
         return planned_roi_count
@@ -1155,7 +1153,7 @@ def _resolve_tracked_regions(
     configuration: MultiRecordingConfiguration,
     planned_roi_count: int | None,
 ) -> int:
-    """Resolves the tracked templates the extraction estimate is sized for.
+    """Resolves the tracked templates that size the extraction estimate.
 
     Notes:
         The templates tracking produces do not exist when a dataset is sized, because one planning pass covers the
@@ -1175,16 +1173,16 @@ def _resolve_tracked_regions(
     Args:
         geometries: The geometry of every recording the dataset spans.
         configuration: The dataset's processing configuration.
-        planned_roi_count: The tracked templates the caller asked to plan for, or None to accept the bound.
+        planned_roi_count: The tracked templates the caller's plan covers, or None to accept the bound.
 
     Returns:
-        The tracked templates to size the extraction estimate for.
+        The caller's planned count when it supplied one, and the smaller of the two bounds otherwise.
     """
     if planned_roi_count is not None:
         return planned_roi_count
 
-    # Mirrors the recording count the tracking stage converts its mask prevalence into, which is the recordings a
-    # cluster must appear in before it is kept as a template. The floor of one keeps a prevalence of zero, which the
+    # Mirrors the recording count the tracking stage derives from its mask prevalence, which is the number of recordings
+    # that must hold a cluster before it is kept as a template. The floor of one keeps a prevalence of zero, which the
     # configuration admits, from dividing the pooled count by nothing.
     minimum_recordings = max(1, math.ceil(configuration.roi_tracking.mask_prevalence / 100 * len(geometries)))
     pooled_ceiling = sum(entry.region_count for entry in geometries) // minimum_recordings
@@ -1195,12 +1193,12 @@ def _resolve_tracked_regions(
 def _resolve_target_geometry(
     cindra_roots: Sequence[Path], geometries: Sequence[RecordingGeometry], specifier: str
 ) -> RecordingGeometry:
-    """Resolves the recording one extraction job runs on, together with the geometry the estimate reads from it.
+    """Resolves the recording one extraction job uses, together with the geometry the estimate reads from it.
 
     Notes:
-        The specifier carries the identifying component of the recording's path, which is what the dataset resolver
-        derives its recording identifiers from, so the match is made against that component rather than against the
-        directory's own name. The widest recording is charged when the specifier matches none of them, so an
+        The specifier carries the identifying component of the recording's path, which is the component the dataset
+        resolver uses to derive its recording identifiers, so the match is made against that component rather than
+        against the directory's own name. The widest recording is charged when the specifier matches none of them, so an
         unmatched job never understates.
 
     Args:
@@ -1209,7 +1207,7 @@ def _resolve_target_geometry(
         specifier: The specifier naming the target recording.
 
     Returns:
-        The geometry of the recording the extraction job runs on.
+        The geometry of the recording the extraction job uses.
     """
     identifiers = extract_unique_components(paths=list(cindra_roots))
     matched = [

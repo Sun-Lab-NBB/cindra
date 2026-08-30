@@ -66,8 +66,8 @@ class TiffConversionPlan:
         binaries produced therefore builds the plan first and deletes only once it holds one.
 
         Every plane of a resolved plan receives the same positive number of frames on every channel the recording
-        carries, which is what lets the conversion open each destination binary without checking the count it was
-        sized for.
+        carries, which is what lets the conversion open each destination binary without checking the frame count that
+        sized it.
     """
 
     contexts: tuple[RuntimeContext, ...]
@@ -87,9 +87,9 @@ class TiffConversionPlan:
     frame_widths: tuple[int, ...]
     """The width of the frames each plane receives."""
     channel_1_paths: tuple[Path, ...]
-    """The functional channel binary each plane is written into."""
+    """The functional channel binary receiving each plane's frames."""
     channel_2_paths: tuple[Path, ...]
-    """The second channel binary each plane is written into, empty for a single-channel recording."""
+    """The second channel binary receiving each plane's frames, empty for a single-channel recording."""
     channel_1_frame_counts: tuple[int, ...]
     """The number of functional channel frames each plane receives."""
     channel_2_frame_counts: tuple[int, ...]
@@ -105,7 +105,7 @@ def resolve_source_frame_geometry(
         Opens the header of the first source file alone, so the cost stays flat however many frames the recording
         holds. The frame count is that file's page count multiplied by the file count, which is exact while every
         file is full and an upper bound once the final one is short. A memory estimate sized from it therefore never
-        understates, which is the direction an estimate has to err in.
+        understates, which is the safe direction for an estimate to err.
 
     Args:
         data_directory: The directory holding the recording's source TIFF files, which is scanned non-recursively.
@@ -291,7 +291,7 @@ def convert_tiffs_to_binary(plan: TiffConversionPlan) -> None:
             positive, so opening a destination binary raises nothing the resolution has not already rejected.
 
     Raises:
-        RuntimeError: If a plane receives a different number of frames than its binary file was sized for.
+        RuntimeError: If a plane receives a different number of frames than the count that sized its binary file.
     """
     contexts = plan.contexts
     acquisition = contexts[0].acquisition
@@ -399,9 +399,9 @@ def convert_tiffs_to_binary(plan: TiffConversionPlan) -> None:
 
             interleave_offset = (interleave_offset + start_index) % interleave_stride
 
-    # Verifies that every plane received exactly the number of frames its binary was sized for. The conversion reads
-    # whole interleave cycles, which deliver that count to every plane and channel whatever the source files hold. A
-    # mismatch therefore reports a defect in the accounting rather than a recording the resolution should have rejected.
+    # Verifies that every plane received exactly the frame count that sized its binary. The conversion reads whole
+    # interleave cycles, which deliver that count to every plane and channel whatever the source files hold. A mismatch
+    # therefore reports a defect in the accounting rather than a recording the resolution should have rejected.
     for context_index, context in enumerate(contexts):
         expected_counts: list[tuple[str, int, int]] = [
             ("channel 1", write_indices[context_index], plan.channel_1_frame_counts[context_index])
@@ -447,13 +447,13 @@ def convert_tiffs_to_binary(plan: TiffConversionPlan) -> None:
         if channel_number > 1:
             context.runtime.detection.mean_image_channel_2 = mean_image_channel_2
 
-        # Sets initial valid pixel ranges to full frame (registration will update these).
+        # The registration stage narrows these ranges, so the conversion opens each plane at its full frame.
         context.runtime.registration.valid_y_range = (0, io_data.frame_height)
         context.runtime.registration.valid_x_range = (0, io_data.frame_width)
 
-        # Persists the frame geometry the binaries were written against before any mark comes off. A plane records a
-        # zero geometry until this save, and the mark is the only record that its binary is mid-write, so clearing
-        # the mark first would let an interrupted run leave a complete binary with nothing to size it against.
+        # Persists the frame geometry that describes the written binaries before any mark comes off. A plane records a
+        # zero geometry until this save, and the mark is the only record that its binary is mid-write. Clearing the mark
+        # first would therefore let an interrupted run leave a complete binary that nothing on disk describes.
         context.save_runtime()
 
     # Clearing each binary's mark declares its contents complete. This happens only after every frame has been
@@ -597,12 +597,12 @@ def _write_interleave_selection(
         first_frame_index: The index the requested interleave position first occupies inside the batch.
         interleave_stride: The length of the plane and channel interleave cycle.
         roi_lines: The MROI line range each selected frame is cropped to, empty for single-ROI data.
-        binary: The destination binary the selected frames are written into.
-        write_index: The index inside the destination binary the selected frames are written from.
+        binary: The destination binary that receives the selected frames.
+        write_index: The index inside the destination binary where the write of the selected frames begins.
         mean_image: The mean image accumulator of the written channel, or None before the first frame lands.
 
     Returns:
-        The index past the written frames and the mean image accumulator the written frames were added to.
+        The index past the written frames and the mean image accumulator that received them.
     """
     selection = frames[first_frame_index::interleave_stride]
     if selection.shape[0] == 0:
@@ -692,7 +692,7 @@ def _resolve_plane_dimensions(
     base_height: int,
     base_width: int,
 ) -> tuple[list[int], list[int]]:
-    """Returns the frame dimensions the binary of each plane is sized for.
+    """Returns the frame dimensions that size each plane's binary.
 
     Args:
         contexts: The runtime context of every plane, in plane order.
@@ -790,7 +790,7 @@ def _resolve_functional_channel_index(context: RuntimeContext) -> int:
 
 
 def _resolve_binary_paths(contexts: list[RuntimeContext]) -> tuple[tuple[Path, ...], tuple[Path, ...]]:
-    """Returns the binaries the conversion writes each plane's channels into.
+    """Returns the binaries that receive each plane's channel data.
 
     Args:
         contexts: The runtime context of every plane, in plane order. Each context must have IOData with binary file

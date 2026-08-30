@@ -125,7 +125,6 @@ class TrackingViewer(QMainWindow):
         self.setCentralWidget(central_widget)
         outer_layout = QVBoxLayout(central_widget)
 
-        # Assembles the toolbar row that holds the file menu button.
         toolbar = QHBoxLayout()
         self._file_button: QPushButton = QPushButton("File")
         self._file_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
@@ -148,7 +147,6 @@ class TrackingViewer(QMainWindow):
 
         main_layout = QHBoxLayout()
 
-        # Assembles the image display panel.
         self._graphics_widget = pg.GraphicsLayoutWidget()
         self._view_box: pg.ViewBox = self._graphics_widget.addViewBox(row=0, col=0)
         self._view_box.setAspectLocked(lock=True)

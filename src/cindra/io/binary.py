@@ -1,6 +1,4 @@
-"""Provides assets for reading and writing image data stored in cindra binary (.bin) files, along with the phase
-markers that flag a binary as mid-binarization or mid-registration.
-"""
+"""Provides assets for reading and writing cindra binary (.bin) image data and its phase markers."""
 
 from __future__ import annotations
 
@@ -58,7 +56,7 @@ def clear_binarization_marker(binary_path: Path) -> None:
         it finishes without first checking whether an earlier interrupted conversion left one behind.
 
     Args:
-        binary_path: The path to the binary to clear the mark from.
+        binary_path: The path to the binary whose mark is cleared.
     """
     _resolve_binarization_marker_path(binary_path=binary_path).unlink(missing_ok=True)
 
@@ -80,7 +78,7 @@ def clear_registration_marker(binary_path: Path) -> None:
         it finishes without first checking whether an earlier interrupted rewrite left one behind.
 
     Args:
-        binary_path: The path to the binary to clear the mark from.
+        binary_path: The path to the binary whose mark is cleared.
     """
     _resolve_registration_marker_path(binary_path=binary_path).unlink(missing_ok=True)
 
@@ -95,7 +93,7 @@ def resolve_active_binary_marker(binary_path: Path) -> Path | None:
         the pipeline, so every stage that consumes a binary asks this rather than testing one phase's marker.
 
     Args:
-        binary_path: The path to the binary to look for a marker beside.
+        binary_path: The path to the binary that may carry a marker beside it.
 
     Returns:
         The path of the marker guarding the binary, or None when no stage left one there.
@@ -119,8 +117,8 @@ class BinaryFile:
         height: The height of each frame stored inside the file.
         width: The width of each frame stored inside the file.
         file_path: The absolute path of the file to read from or write to.
-        frame_number: The total number of frames to size a newly created file for. The value is ignored when the
-            file already exists, where the frame count is read from the file's size instead.
+        frame_number: The number of frames a newly created file is sized to hold. The value is ignored when the file
+            already exists, where the frame count is read from the file's size instead.
         dtype: The name of the NumPy data type to use for the pixel values stored inside the file.
         read_only: Determines whether to open an existing file in read-only mode. When enabled, the file is
             memory-mapped without write access and __setitem__ raises a PermissionError.
@@ -382,13 +380,11 @@ class BinaryFile:
             if np.mean(good_indices) > reject_threshold:
                 data = data[good_indices]
 
-            # If a processed data batch has more frames than bin_size, bins the data. Otherwise, averages the batch into
-            # a single bin to preserve data when there are many bad frames.
             if data.shape[0] > bin_size:
                 frame_number, height, width = data.shape
 
-                # Ensures the number of frames is a multiple of bin_size for even binning. Truncates the data to a size
-                # that is divisible by bin_size.
+                # Truncates to a whole multiple of bin_size, because a trailing partial bin would average fewer frames
+                # than the bins beside it.
                 movie = data[: (frame_number // bin_size) * bin_size]
 
                 binned_movie = movie.reshape(-1, bin_size, height, width).astype(dtype=np.float32).mean(axis=1)

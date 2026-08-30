@@ -38,8 +38,8 @@ def run_tracking_viewer(
             visualized multi-recording dataset. The loader uses that recording's data to search and reconstruct the full
             dataset hierarchy.
         dataset: Multi-recording dataset name to load. Defaults to the first available dataset.
-        state_path: Optional path to a state file for cross-process state exchange with the GUI MCP server. When
-            provided, a StateWriter polls the viewer's display state and writes changes to this file.
+        state_path: Path to a state file for cross-process state exchange with the GUI MCP server. When provided, a
+            StateWriter polls the viewer's display state and writes changes to this file.
     """
     console.echo(message="Initializing the Tracking GUI...")
     application, owns_application = _get_or_create_application()
@@ -75,8 +75,8 @@ def run_registration_viewer(recording_path: Path, *, state_path: Path | None = N
 
     Args:
         recording_path: The path to a cindra-processed recording's root data directory containing registration results.
-        state_path: Optional path to a state file for cross-process state exchange with the GUI MCP server. When
-            provided, a StateWriter polls both viewers' display states and writes the combined state to this file.
+        state_path: Path to a state file for cross-process state exchange with the GUI MCP server. When provided, a
+            StateWriter polls both viewers' display states and writes the combined state to this file.
     """
     console.echo(message="Initializing the Registration GUI...")
     application, owns_application = _get_or_create_application()
@@ -172,8 +172,8 @@ def run_roi_viewer(
     Args:
         recording_path: Path to a cindra output directory to load on startup.
         dataset: Multi-recording dataset name to load. Stays in single-recording mode if not provided.
-        state_path: Optional path to a state file for cross-process state exchange with the GUI MCP server. When
-            provided, a StateWriter polls the viewer's display state and writes changes to this file.
+        state_path: Path to a state file for cross-process state exchange with the GUI MCP server. When provided, a
+            StateWriter polls the viewer's display state and writes changes to this file.
     """
     console.echo(message="Initializing the ROI GUI...")
     application, owns_application = _get_or_create_application()

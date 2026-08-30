@@ -44,7 +44,7 @@ def detect_pipeline_type(file_path: Path) -> PipelineType:  # noqa: RET503 - con
         file_path: The path to the configuration YAML file to inspect.
 
     Returns:
-        The PipelineType member matching the ``pipeline_type`` value stored in the configuration file.
+        The pipeline the configuration file's ``pipeline_type`` field names.
 
     Raises:
         FileNotFoundError: If the configuration file does not exist or does not have a '.yaml' extension.
@@ -86,9 +86,6 @@ class RuntimeSettings:
 @dataclass
 class AcquisitionParameters(YamlConfig):
     """Stores the data acquisition parameters used by the system that recorded the processed ROI activity data.
-
-    Describes the acquisition parameters of the input TIFF files, supporting both single-ROI (standard imaging) and
-    multi-ROI (MROI line-scanning) data.
 
     Notes:
         For single-ROI data, only frame_rate, plane_number, and channel_number are required. For MROI data, additional
@@ -170,8 +167,8 @@ class Main:
     Mesoscope and likely needs to be increased for most other use cases."""
 
     ignored_flyback_planes: tuple[int, ...] = ()
-    """The tuple of flyback plane indices to ignore when processing the data. Flyback planes typically contain no valid
-    imaging data, so it is common to exclude them from processing."""
+    """The flyback plane indices to ignore when processing the data. Flyback planes typically contain no valid imaging
+    data, so it is common to exclude them from processing."""
 
     custom_classifier_path: Path | None = None
     """The absolute path to a custom classifier file used for ROI classification. When set, this classifier is used
@@ -194,9 +191,9 @@ class FileIO:
     subdirectory under this path to store all output files."""
 
     ignored_file_names: tuple[str, ...] = ()
-    """The tuple of file names, given without their extension, to ignore when searching for and loading raw data. Any
-    file whose stem (the name with the extension stripped) exactly matches one of the entries in this tuple is excluded
-    from processing even if it has the correct extension and is located inside the input data directory."""
+    """The file names, given without their extension, to ignore when searching for and loading raw data. Any file whose
+    stem (the name with the extension stripped) exactly matches one of the entries in this tuple is excluded from
+    processing even if it has the correct extension and is located inside the input data directory."""
 
     repeat_binarization: bool = False
     """Determines whether to repeat the binarization step when processing. When True, the pipeline re-runs TIFF to
@@ -549,7 +546,7 @@ class SingleRecordingConfiguration(YamlConfig):
             file_path: The path to the .yaml configuration file.
 
         Returns:
-            A SingleRecordingConfiguration instance populated with the loaded data.
+            The single-recording configuration the YAML file stores.
         """
         return cls.from_yaml(file_path=file_path)
 
@@ -558,9 +555,9 @@ class SingleRecordingConfiguration(YamlConfig):
 class _PipelineHeader(YamlConfig):
     """Stores the raw pipeline type discriminator read from a configuration YAML file.
 
-    Declares only the ``pipeline_type`` field as a raw string. Extra keys present in the YAML are silently discarded by
-    dacite during deserialization, making this class safe to load against any cindra configuration file. The field
-    defaults to None so that a missing key is distinguishable from a valid value.
+    Extra keys present in the YAML are silently discarded by dacite during deserialization, making this class safe to
+    load against any cindra configuration file. The field defaults to None so that a missing key is distinguishable from
+    a valid value.
     """
 
     pipeline_type: str | None = None

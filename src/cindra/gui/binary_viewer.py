@@ -42,6 +42,7 @@ class BinaryPlayer(QMainWindow):
         data: Pre-loaded registration data to display on startup.
 
     Attributes:
+        recording_changed: Signal emitted after the File menu loads a new recording.
         data: The SingleRecordingData instance that stores the visualized recording's data.
         _channel_2_visible: Determines whether the channel 2 overlay is currently displayed.
         _current_frame: Index of the currently displayed frame.
@@ -70,13 +71,11 @@ class BinaryPlayer(QMainWindow):
         _skip_forward_button: Button that steps playback forward by the current frame delta.
     """
 
-    # Notifies listeners when the user loads a new recording via the File menu.
     recording_changed = QtCore.Signal()
 
     def __init__(self, data: SingleRecordingData) -> None:
         super().__init__()
 
-        # Adds the main UI window.
         pg.setConfigOptions(imageAxisOrder="row-major")
         self.setGeometry(*BINARY_STYLE.window_geometry)
         self.setWindowTitle("Registered Recording")
@@ -84,11 +83,9 @@ class BinaryPlayer(QMainWindow):
         self.setCentralWidget(self._central_widget)
         self._layout: QGridLayout = QGridLayout()
         self._central_widget.setLayout(self._layout)
-        # Initializes state flags and recording data.
         self._channel_2_visible: bool = False
         self.data: SingleRecordingData = data
 
-        # Initializes playback state.
         self._current_frame: int = 0
         self._frame_delta: int = BINARY_CONFIG.default_frame_delta
         self._display_range: NDArray[np.float32] = np.zeros((2,), dtype=np.float32)
@@ -100,7 +97,6 @@ class BinaryPlayer(QMainWindow):
         # Builds row 0, the toolbar holding the file menu and recording controls on a single line.
         toolbar = QHBoxLayout()
 
-        # Creates the file menu button with a dropdown for loading recordings.
         self._file_button: QPushButton = QPushButton("File")
         self._file_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self._file_button.setToolTip("Load a recording for visualization.")
@@ -120,7 +116,6 @@ class BinaryPlayer(QMainWindow):
         self._channel_2_button.clicked.connect(self._toggle_channel_2)
         toolbar.addWidget(self._channel_2_button)
 
-        # Adds the hint label listing the keyboard shortcuts.
         hint_label = QLabel(
             "Hint: Use arrows to navigate recording's frames / adjust frame step size, "
             "use space to toggle recording playback."
@@ -136,14 +131,12 @@ class BinaryPlayer(QMainWindow):
         self._layout.addWidget(self._graphics_widget, 1, 0, 1, 6)
         self._layout.setRowStretch(1, 1)
 
-        # Configures main image view.
         self._main_view_box: pg.ViewBox = pg.ViewBox(lockAspect=True, invertY=True, name="plot1")
         self._graphics_widget.addItem(self._main_view_box, row=0, col=0)
         self._main_view_box.setMenuEnabled(False)
         self._main_image: pg.ImageItem = pg.ImageItem()
         self._main_view_box.addItem(self._main_image)
 
-        # Configures rigid registration offset plot.
         self._offset_plot: pg.PlotItem = self._graphics_widget.addPlot(name="plot_offset", row=1, col=0, colspan=2)
         configure_plot(
             plot=self._offset_plot,
@@ -381,7 +374,6 @@ class BinaryPlayer(QMainWindow):
 
         self._main_view_box.setAspectLocked(lock=True, ratio=self.data.aspect_ratio)
 
-        # Configures the frame display slider.
         frame_count = self.data.frame_count
         last_frame = frame_count - 1
         self._time_step = (
@@ -469,7 +461,6 @@ class BinaryPlayer(QMainWindow):
                 axis=-1,
             )
 
-        # Updates the main image display and frame navigation controls.
         self._main_image.setImage(self._image, levels=self._display_range)
         self._frame_slider.setValue(self._current_frame)
         self._frame_number_label.setText(f"Current frame: {self._current_frame}")
@@ -528,7 +519,6 @@ class BinaryPlayer(QMainWindow):
 
     def _plot_clicked(self, event: object) -> None:
         """Handles mouse click events on plots for frame navigation."""
-        # Resolves which graphics items lie under the click position.
         items = self._graphics_widget.scene().items(event.scenePos())  # type: ignore[attr-defined]
         position_x = 0
         is_time_plot = False

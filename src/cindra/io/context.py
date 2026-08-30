@@ -56,7 +56,7 @@ def find_data_directory(data_path: Path) -> Path:
         ValueError: If the data_path is not a directory.
     """
     if not data_path.is_dir():
-        message = f"Unable to find data directory. The data_path is not a directory: {data_path}"
+        message = f"Unable to find data directory. The data_path is not a directory: {data_path}."
         console.error(message=message, error=ValueError)
 
     parameter_files = discover_marker_files(directory=data_path, marker_name=PARAMETERS_FILENAME)
@@ -99,8 +99,8 @@ def resolve_single_recording_contexts(
 
         When loading previously processed data (e.g., data moved to a different machine), acquisition parameters are
         loaded from the saved output directory if available, allowing the pipeline to work without raw TIFF data. A
-        plane record written before the recording declared its second channel receives that channel's binary path
-        here, so the conversion the re-declaration calls for has a destination to write it into.
+        plane record written before the recording declared its second channel receives that channel's binary path here,
+        so the conversion that the re-declaration requires has a destination for the new channel's frames.
 
     Args:
         configuration: The single-recording pipeline configuration. Must have output_path configured in
@@ -422,7 +422,7 @@ def extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str
         rejected, which keeps two jobs of the same dataset from collapsing onto one tracker record.
 
     Args:
-        paths: A list or tuple of Path objects.
+        paths: The recording directories whose distinguishing components are resolved.
 
     Returns:
         A tuple of unique components, one for each path, stored in the same order as the input paths.
@@ -485,9 +485,8 @@ def resolve_recording_roots(paths: list[Path] | tuple[Path, ...]) -> tuple[Path,
         rule, and every consumer sorts the result before displaying it.
 
     Args:
-        paths: Directories containing discovered marker files (e.g., parents of ``cindra_parameters.json``
-            or ``combined_metadata.npz``). The pipeline resolves sub-paths to raw data and outputs internally, so
-            callers should always work with recording roots rather than implementation-specific subdirectories.
+        paths: Directories containing discovered marker files (e.g., parents of ``cindra_parameters.json`` or
+            ``combined_metadata.npz``).
 
     Returns:
         A deduplicated tuple of recording root paths, one per unique recording.
@@ -669,8 +668,8 @@ def _validate_positive_count(value: object, field_name: str, json_path: Path) ->
 
     Args:
         value: The value read from the acquisition parameters file.
-        field_name: The name of the acquisition parameters field the value was read from.
-        json_path: The path to the acquisition parameters file the value was read from.
+        field_name: The name of the acquisition parameters field holding the value.
+        json_path: The path to the acquisition parameters file holding the value.
 
     Raises:
         ValueError: If the value is not a positive integer.

@@ -158,7 +158,6 @@ def compute_colors(
     color_count = len(ROIColorMode)
     colorbar: list[list[float]] = []
 
-    # Allocates output arrays: one RGB triplet per (color_mode, cell) and one scalar per (color_mode, cell).
     colors = np.zeros((color_count, roi_count, 3), dtype=np.uint8)
     normalized_statistics = np.zeros((color_count, roi_count), dtype=np.float32)
 
@@ -185,7 +184,6 @@ def compute_colors(
     else:
         random_hues = random_colors.copy()
 
-    # Stores the random hues as the normalization values for the RANDOM color slot.
     normalized_statistics[0] = random_hues
     colors[0] = _convert_hues_to_rgb(hues=random_colors)
 
@@ -218,7 +216,6 @@ def compute_colors(
             colorbar.append(list(ROI_CONFIG.fixed_colorbar_range))
             continue
 
-        # Looks up the pre-extracted array for this color mode, falling back to zeros for unmapped modes.
         mapped_field = _STATISTIC_FIELD_MAP.get(color_mode)
         statistic_values = (
             precomputed_statistics[mapped_field]
@@ -226,7 +223,6 @@ def compute_colors(
             else np.zeros((roi_count, 1), dtype=np.float32)
         )
 
-        # Computes percentile bounds for min-max normalization and stores [low, mid, high] for colorbar labels.
         statistic_low = np.percentile(a=statistic_values, q=COMMON_CONFIG.lower_percentile)
         statistic_high = np.percentile(a=statistic_values, q=COMMON_CONFIG.upper_percentile)
         colorbar.append(
@@ -237,14 +233,12 @@ def compute_colors(
             ],
         )
 
-        # Normalizes values to [0, 1] using the percentile range. Collapses to zeros if the range is degenerate.
         statistic_range = statistic_high - statistic_low
         if statistic_range > 0:
             statistic_values = np.clip(a=(statistic_values - statistic_low) / statistic_range, a_min=0, a_max=1)
         else:
             statistic_values = np.zeros_like(statistic_values)
 
-        # Maps the normalized [0, 1] values to RGB through the active colormap.
         colors[color_mode] = _apply_colormap(values=statistic_values, colormap=roi_colormap)
         normalized_statistics[color_mode] = statistic_values.ravel()
 
@@ -352,7 +346,6 @@ def initialize_roi_maps(
         text_labels=text_labels,
     )
 
-    # Populates the RGBA overlay for every color mode using the topmost ROI index at each pixel.
     for color_index in range(color_arrays.colors.shape[0]):
         _update_rgb_masks(
             color_arrays=color_arrays,
@@ -536,7 +529,6 @@ def update_colormap(
     """
     for color_index in range(1, color_arrays.normalized_statistics.shape[0]):
         if color_index == ROIColorMode.CELL_CLASSIFICATION:
-            # Recolors the binary classification slot using the new colormap endpoints.
             non_cell_color, cell_color = _classification_endpoint_colors(colormap=colormap)
             is_cell = color_arrays.normalized_statistics[color_index] > 0
             binary_colors = color_arrays.colors[color_index]
@@ -584,7 +576,7 @@ def update_correlation_masks(
     """
     color_index = ROIColorMode.CORRELATIONS
 
-    # Skips computation when no ROIs are selected, because there is no reference trace to correlate against.
+    # Skips computation when no ROIs are selected, because no reference trace exists for the correlation.
     if not selected_indices:
         return
 
@@ -615,13 +607,11 @@ def update_correlation_masks(
         correlation_max,
     ]
 
-    # Normalizes to [0, 1] for colormap mapping. Falls back to zeros if all correlations are identical.
     correlation_range = correlation_max - correlation_min
     normalized = (
         (correlation - correlation_min) / correlation_range if correlation_range > 0 else np.zeros_like(correlation)
     )
 
-    # Maps normalized correlations to RGB and writes into the CORRELATIONS color slot and overlay.
     color = _apply_colormap(values=normalized, colormap=colormap)
     color_arrays.colors[color_index] = color
     color_arrays.normalized_statistics[color_index] = normalized.ravel()
@@ -643,8 +633,7 @@ def flip_rois(
 
     Args:
         roi_statistics: The ROI statistics for the current view.
-        cell_classification: Cell classification array (column 0 labels are modified in place). The viewer passes an
-            in-memory copy, so the flips persist only until the labels are exported as a training dataset.
+        cell_classification: Cell classification array (column 0 labels are modified in place).
         color_arrays: The computed color arrays.
         roi_maps: The ROI index maps.
         selected_roi_indices: Indices of all ROIs to flip.
@@ -861,7 +850,6 @@ def _place_in_valid_region(
 
     normalized = (image - lower_bound) / (upper_bound - lower_bound)
 
-    # Places in the valid subregion, filling the border with the lower percentile value.
     output = np.full((frame_height, frame_width), fill_value=lower_bound, dtype=np.float32)
     with contextlib.suppress(ValueError, IndexError):
         output[valid_y_range[0] : valid_y_range[1], valid_x_range[0] : valid_x_range[1]] = normalized
