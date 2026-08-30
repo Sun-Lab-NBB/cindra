@@ -139,8 +139,10 @@ create, because concurrent jobs sharing a terminal interleave their bars.
 
 Worker allocation reaches the discovery and extraction stages as an invocation argument, as described in the
 Configuration overview section. Omitting a worker option applies the measured default of 2 workers for discovery and 16
-for extraction, published as `DISCOVERY_WORKERS` and `EXTRACTION_WORKERS` in `cindra.orchestration`. Setting a worker
-option to -1 requests every available core.
+for extraction, published as `DISCOVERY_WORKERS` and `EXTRACTION_WORKERS` in `cindra.orchestration`. On the MCP execute
+tools that default is a floor. A session that leaves `workers_per_job` as None widens each discovery and extraction job
+at dispatch as its queue drains, up to the 8 and 32 core ceilings the classes declare. Setting a worker option to -1
+requests every available core.
 
 ---
 
@@ -412,9 +414,13 @@ and both are left at those defaults in the common case.
 ## Configuration lifecycle
 
 1. **Template configs**: De-novo configurations generated via `generate_config_file_tool` or manually created. Templates
-   can live anywhere (e.g., `/Data/CA1_GCaMP6f_MD.yaml`) and are reusable across datasets. Templates are never modified
-   by the pipeline. One template can serve multiple datasets that share the same processing parameters (only
-   `dataset_name` differs, and this is handled by the batch tool).
+   can live anywhere (e.g., `/Data/CA1_GCaMP6f_MD.yaml`) and are reusable across datasets. The batch MCP tools never
+   modify a template, but `cindra run -i <file>` DOES write back into the file it is given, saving
+   `runtime.display_progress_bars` and any `-rp/--recording-path` override into it before dispatching. Never pass a
+   shared template to `cindra run`, because the first run stamps one dataset's output roots into the file every other
+   dataset shares. Pass a per-dataset copy, or the resolved copy the prepare tool already wrote. One template can serve
+   multiple datasets that share the same processing parameters (only `dataset_name` differs, and this is handled by the
+   batch tool).
 
 2. **Resolved copies**: When `prepare_multi_recording_batch_tool` runs, it loads the template and applies
    runtime-specific overrides (`recording_io.dataset_name` lowercased to a filesystem-safe key,

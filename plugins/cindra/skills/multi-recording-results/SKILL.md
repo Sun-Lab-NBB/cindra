@@ -391,8 +391,8 @@ completeness verdict with any missing items listed. It validates no array shape,
 tool is unavailable.
 
 Gate on `complete`, which is false whenever `missing` is non-empty. The `failed` count covers the required checks that
-did not pass, so it always equals the length of `missing`. The tool also returns `optional_absent` when the dataset
-holds none of an optional output, listing the channel 2 arrays and `cell_colocalization.npy` each recording lacks in
+did not pass, so it always equals the length of `missing`. The tool also returns `optional_absent` whenever any
+recording lacks an optional output, listing the channel 2 arrays and `cell_colocalization.npy` each recording lacks in
 the same label form `missing` uses. That list is informational, so report it as expected for a single-channel dataset
 and never treat it as an incomplete run.
 
