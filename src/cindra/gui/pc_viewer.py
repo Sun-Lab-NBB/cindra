@@ -43,8 +43,8 @@ class PCViewer(QMainWindow):
         _image_height: Height of PC images in pixels.
         _image_width: Width of PC images in pixels.
         _pc_metrics: Registration offset metrics array with shape (principal_component_count, 3), or None.
-        _pc_projections: Sampled-frame PC projection array with shape (sampled_frames,
-            principal_component_count), or None.
+        _pc_projections: Sampled-frame PC projection array with shape (sampled_frames, principal_component_count), or
+            None.
         _central_widget: Central widget container.
         _layout: Grid layout for arranging all controls and views.
         _graphics_widget: PyQtGraph graphics layout for image and plot views.
@@ -79,7 +79,6 @@ class PCViewer(QMainWindow):
         self._layout: QGridLayout = QGridLayout()
         self._central_widget.setLayout(self._layout)
 
-        # Initializes state and data.
         self._data: SingleRecordingData = data
         self._loaded: bool = False
         self._current_frame: int = 0
@@ -286,6 +285,61 @@ class PCViewer(QMainWindow):
             return 1
         return max(1, min(int(text), self._pc_count))
 
+    def _create_bottom_panel(self) -> None:
+        """Creates the bottom control panel with the PC selector, metric labels, and playback controls.
+
+        Widgets keep their natural size, and only the trailing stretch grows when the window is resized.
+        Fixed spacing separates each logical group.
+        """
+        bold_font = FONTS.large_bold
+        big_font = FONTS.large
+        panel = QHBoxLayout()
+        group_spacing = PC_STYLE.group_spacing
+
+        pc_label = QLabel("PC:")
+        pc_label.setFont(bold_font)
+        pc_label.setStyleSheet(STYLE.white_label)
+        self._pc_edit: QLineEdit = QLineEdit(self)
+        self._pc_edit.setText("1")
+        self._pc_edit.setFixedWidth(STYLE.edit_width)
+        self._pc_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
+        self._pc_edit.setFont(big_font)
+        self._pc_edit.setToolTip("Principal component number.")
+        self._pc_edit.returnPressed.connect(self._plot_frame)
+        self._pc_edit.returnPressed.connect(self.setFocus)
+        self._pc_edit.textEdited.connect(self._pause_animation)
+        self._pc_edit.installEventFilter(self)
+        panel.addWidget(pc_label)
+        panel.addWidget(self._pc_edit)
+        panel.addSpacing(group_spacing)
+
+        self._metric_labels: list[QLabel] = []
+        for _ in range(3):
+            metric_label = QLabel("")
+            metric_label.setStyleSheet(STYLE.white_label)
+            panel.addWidget(metric_label)
+            self._metric_labels.append(metric_label)
+        panel.addSpacing(group_spacing)
+
+        playback = create_play_pause_group(
+            parent=self,
+            play_tooltip="Start automatic PC cycling.",
+            pause_tooltip="Stop automatic PC cycling.",
+            no_focus=True,
+        )
+        self._play_button = playback.play_button
+        self._pause_button = playback.pause_button
+        self._play_button.clicked.connect(self._start_animation)
+        self._pause_button.clicked.connect(self._pause_animation)
+
+        panel.addWidget(self._play_button)
+        panel.addWidget(self._pause_button)
+
+        # Trailing stretch absorbs extra horizontal space so widgets stay at their natural size.
+        panel.addStretch()
+
+        self._layout.addLayout(panel, 2, 0)
+
     def _on_plane_changed(self, index: int) -> None:
         """Handles plane selector index changes by switching to the selected plane.
 
@@ -337,63 +391,6 @@ class PCViewer(QMainWindow):
         # Renders the selected PC and enables playback controls.
         self._plot_frame()
         self._play_button.setEnabled(True)
-
-    def _create_bottom_panel(self) -> None:
-        """Creates the bottom control panel with the PC selector, metric labels, and playback controls.
-
-        Widgets keep their natural size, and only the trailing stretch grows when the window is resized.
-        Fixed spacing separates each logical group.
-        """
-        bold_font = FONTS.large_bold
-        big_font = FONTS.large
-        panel = QHBoxLayout()
-        group_spacing = PC_STYLE.group_spacing
-
-        # Adds the PC selector, a label and input field for the current principal component number.
-        pc_label = QLabel("PC:")
-        pc_label.setFont(bold_font)
-        pc_label.setStyleSheet(STYLE.white_label)
-        self._pc_edit: QLineEdit = QLineEdit(self)
-        self._pc_edit.setText("1")
-        self._pc_edit.setFixedWidth(STYLE.edit_width)
-        self._pc_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
-        self._pc_edit.setFont(big_font)
-        self._pc_edit.setToolTip("Principal component number.")
-        self._pc_edit.returnPressed.connect(self._plot_frame)
-        self._pc_edit.returnPressed.connect(self.setFocus)
-        self._pc_edit.textEdited.connect(self._pause_animation)
-        self._pc_edit.installEventFilter(self)
-        panel.addWidget(pc_label)
-        panel.addWidget(self._pc_edit)
-        panel.addSpacing(group_spacing)
-
-        # Creates the metric value labels showing per-PC registration offset magnitudes.
-        self._metric_labels: list[QLabel] = []
-        for _ in range(3):
-            metric_label = QLabel("")
-            metric_label.setStyleSheet(STYLE.white_label)
-            panel.addWidget(metric_label)
-            self._metric_labels.append(metric_label)
-        panel.addSpacing(group_spacing)
-
-        playback = create_play_pause_group(
-            parent=self,
-            play_tooltip="Start automatic PC cycling.",
-            pause_tooltip="Stop automatic PC cycling.",
-            no_focus=True,
-        )
-        self._play_button = playback.play_button
-        self._pause_button = playback.pause_button
-        self._play_button.clicked.connect(self._start_animation)
-        self._pause_button.clicked.connect(self._pause_animation)
-
-        panel.addWidget(self._play_button)
-        panel.addWidget(self._pause_button)
-
-        # Trailing stretch absorbs extra horizontal space so widgets stay at their natural size.
-        panel.addStretch()
-
-        self._layout.addLayout(panel, 2, 0)
 
     def _start_animation(self) -> None:
         """Starts PC animation playback."""

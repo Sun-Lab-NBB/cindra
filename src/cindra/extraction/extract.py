@@ -53,6 +53,133 @@ def extract_traces(context: RuntimeContext | MultiRecordingRuntimeContext, *, wo
         _extract_multi_recording(context=context)
 
 
+def _extract_fluorescence_traces(
+    frames: BinaryFile | BinaryFileCombined,
+    roi_masks: tuple[tuple[NDArray[np.int32], NDArray[np.float32]], ...],
+    neuropil_masks: tuple[NDArray[np.int32], ...] | None,
+    batch_size: int,
+    channel_label: str,
+) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
+    """Extracts the fluorescence traces from the raw activity data using cell and neuropil masks.
+
+    Notes:
+        If neuropil masks are not provided, the neuropil fluorescence traces are returned as an array of zeroes.
+
+    Args:
+        frames: The raw activity data (movie) to process.
+        roi_masks: The cell masks for each ROI, where each element is a tuple of (flattened pixel indices,
+            normalized lambda weights).
+        neuropil_masks: The neuropil masks for each ROI, or None to skip neuropil extraction.
+        batch_size: The number of frames to process at the same time.
+        channel_label: A descriptive label for the channel being processed, used in log messages.
+
+    Returns:
+        The extracted cell and neuropil fluorescence traces stored as arrays with dimensions (roi_count, frame_count).
+    """
+    console.echo(message=f"Extracting {channel_label} ROI fluorescence data...", level=LogLevel.INFO)
+
+    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+    timer.reset()
+
+    # BinaryFileCombined stores the combined height and width as direct attributes, while BinaryFile exposes them
+    # through the shape tuple.
+    if isinstance(frames, BinaryFileCombined):
+        frame_count = frames.frame_number
+        height = frames.height
+        width = frames.width
+    else:
+        frame_count, height, width = frames.shape
+    roi_count = len(roi_masks)
+    pixel_count = height * width
+
+    fluorescence = np.zeros((roi_count, frame_count), dtype=np.float32)
+    neuropil_fluorescence = np.zeros((roi_count, frame_count), dtype=np.float32)
+
+    # Flattens cell masks and lambda weights into contiguous arrays with offset pointers. This format avoids Numba's
+    # tuple size limitations and enables efficient parallel processing.
+    roi_mask_sizes = np.array([len(pixel_indices) for pixel_indices, _ in roi_masks], dtype=np.int32)
+    roi_mask_offsets = np.zeros(roi_count + 1, dtype=np.int32)
+    roi_mask_offsets[1:] = np.cumsum(roi_mask_sizes)
+
+    total_roi_pixels = int(roi_mask_offsets[-1])
+    flat_roi_masks = np.empty(total_roi_pixels, dtype=np.int32)
+    flat_lambda_weights = np.empty(total_roi_pixels, dtype=np.float32)
+
+    for mask_index, (pixel_indices, lambda_weights) in enumerate(roi_masks):
+        start = roi_mask_offsets[mask_index]
+        end = roi_mask_offsets[mask_index + 1]
+        flat_roi_masks[start:end] = pixel_indices
+        flat_lambda_weights[start:end] = lambda_weights
+
+    # Flattens neuropil masks into contiguous arrays with offset pointers if provided.
+    flat_neuropil_masks: NDArray[np.int32] | None = None
+    neuropil_mask_offsets: NDArray[np.int32] | None = None
+    neuropil_pixel_count: NDArray[np.int32] | None = None
+
+    if neuropil_masks is not None:
+        neuropil_mask_sizes = np.array([len(indices) for indices in neuropil_masks], dtype=np.int32)
+        neuropil_mask_offsets = np.zeros(roi_count + 1, dtype=np.int32)
+        neuropil_mask_offsets[1:] = np.cumsum(neuropil_mask_sizes)
+
+        total_neuropil_pixels = int(neuropil_mask_offsets[-1])
+        flat_neuropil_masks = np.empty(total_neuropil_pixels, dtype=np.int32)
+        neuropil_pixel_count = np.zeros(roi_count, dtype=np.int32)
+
+        for mask_index, indices in enumerate(neuropil_masks):
+            start = neuropil_mask_offsets[mask_index]
+            end = neuropil_mask_offsets[mask_index + 1]
+            flat_neuropil_masks[start:end] = indices
+            neuropil_pixel_count[mask_index] = len(indices)
+
+    # Pre-allocates a reusable buffer for the extraction kernels. Both kernels write every element unconditionally,
+    # so zeroing is unnecessary. Re-allocated only for the last batch if it is smaller than the standard batch size.
+    output_prototype = np.empty((roi_count, batch_size), dtype=np.float32)
+
+    # Pre-allocates the float32 destination the binary source is converted into. The binary stores int16, so the
+    # conversion is required, while a fresh destination per batch is not. A leading-axis slice of this buffer stays
+    # C-contiguous, which is the layout both kernels read.
+    batch_buffer = np.empty((min(batch_size, frame_count), pixel_count), dtype=np.float32)
+
+    for batch_start in range(0, frame_count, batch_size):
+        batch_end = min(batch_start + batch_size, frame_count)
+
+        batch_source = frames[batch_start:batch_end]
+        batch_frames = batch_source.shape[0]
+        batch_pixels = batch_buffer[:batch_frames]
+        np.copyto(dst=batch_pixels, src=batch_source.reshape(batch_frames, pixel_count))
+        batch_slice = slice(batch_start, batch_start + batch_frames)
+
+        if batch_frames < output_prototype.shape[1]:
+            output_prototype = np.empty((roi_count, batch_frames), dtype=np.float32)
+
+        fluorescence[:, batch_slice] = _extract_cell_fluorescence(
+            output_prototype=output_prototype,
+            data=batch_pixels,
+            flat_roi_masks=flat_roi_masks,
+            flat_lambda_weights=flat_lambda_weights,
+            mask_offsets=roi_mask_offsets,
+        )
+
+        if neuropil_masks is not None:
+            neuropil_fluorescence[:, batch_slice] = _extract_neuropil_fluorescence(
+                output_prototype=output_prototype,
+                data=batch_pixels,
+                flat_neuropil_masks=flat_neuropil_masks,
+                mask_offsets=neuropil_mask_offsets,
+                neuropil_pixel_count=neuropil_pixel_count,
+            )
+
+    console.echo(
+        message=(
+            f"{channel_label.capitalize()} ROI fluorescence: extracted from {roi_count} ROIs in {frame_count} "
+            f"frames. Time taken: {timer.elapsed} seconds."
+        ),
+        level=LogLevel.SUCCESS,
+    )
+
+    return fluorescence, neuropil_fluorescence
+
+
 @njit(cache=True, parallel=True)
 def _extract_cell_fluorescence(  # pragma: no cover
     output_prototype: NDArray[np.float32],
@@ -190,7 +317,6 @@ def _create_and_unpack_masks(
         minimum_neuropil_pixels=minimum_neuropil_pixels,
     )
 
-    # Unpacks the per-ROI mask tuples into the separate formats expected by the extraction functions.
     roi_masks = tuple((indices, weights) for indices, weights, _ in per_roi_masks)
     neuropil_masks = (
         tuple(neuropil for _, _, neuropil in per_roi_masks if neuropil is not None)
@@ -204,133 +330,6 @@ def _create_and_unpack_masks(
     )
 
     return roi_masks, neuropil_masks
-
-
-def _extract_fluorescence_traces(
-    frames: BinaryFile | BinaryFileCombined,
-    roi_masks: tuple[tuple[NDArray[np.int32], NDArray[np.float32]], ...],
-    neuropil_masks: tuple[NDArray[np.int32], ...] | None,
-    batch_size: int,
-    channel_label: str,
-) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
-    """Extracts the fluorescence traces from the raw activity data using cell and neuropil masks.
-
-    Notes:
-        If neuropil masks are not provided, the neuropil fluorescence traces are returned as an array of zeroes.
-
-    Args:
-        frames: The raw activity data (movie) to process.
-        roi_masks: The cell masks for each ROI, where each element is a tuple of (flattened pixel indices,
-            normalized lambda weights).
-        neuropil_masks: The neuropil masks for each ROI, or None to skip neuropil extraction.
-        batch_size: The number of frames to process at the same time.
-        channel_label: A descriptive label for the channel being processed, used in log messages.
-
-    Returns:
-        The extracted cell and neuropil fluorescence traces stored as arrays with dimensions (roi_count, frame_count).
-    """
-    console.echo(message=f"Extracting {channel_label} ROI fluorescence data...", level=LogLevel.INFO)
-
-    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
-    timer.reset()
-
-    # BinaryFileCombined stores the combined height and width as direct attributes, while BinaryFile exposes them
-    # through the shape tuple.
-    if isinstance(frames, BinaryFileCombined):
-        frame_count = frames.frame_number
-        height = frames.height
-        width = frames.width
-    else:
-        frame_count, height, width = frames.shape
-    roi_count = len(roi_masks)
-    pixel_count = height * width
-
-    fluorescence = np.zeros((roi_count, frame_count), dtype=np.float32)
-    neuropil_fluorescence = np.zeros((roi_count, frame_count), dtype=np.float32)
-
-    # Flattens cell masks and lambda weights into contiguous arrays with offset pointers. This format avoids Numba's
-    # tuple size limitations and enables efficient parallel processing.
-    roi_mask_sizes = np.array([len(pixel_indices) for pixel_indices, _ in roi_masks], dtype=np.int32)
-    roi_mask_offsets = np.zeros(roi_count + 1, dtype=np.int32)
-    roi_mask_offsets[1:] = np.cumsum(roi_mask_sizes)
-
-    total_roi_pixels = int(roi_mask_offsets[-1])
-    flat_roi_masks = np.empty(total_roi_pixels, dtype=np.int32)
-    flat_lambda_weights = np.empty(total_roi_pixels, dtype=np.float32)
-
-    for mask_index, (pixel_indices, lambda_weights) in enumerate(roi_masks):
-        start = roi_mask_offsets[mask_index]
-        end = roi_mask_offsets[mask_index + 1]
-        flat_roi_masks[start:end] = pixel_indices
-        flat_lambda_weights[start:end] = lambda_weights
-
-    # Flattens neuropil masks into contiguous arrays with offset pointers if provided.
-    flat_neuropil_masks: NDArray[np.int32] | None = None
-    neuropil_mask_offsets: NDArray[np.int32] | None = None
-    neuropil_pixel_count: NDArray[np.int32] | None = None
-
-    if neuropil_masks is not None:
-        neuropil_mask_sizes = np.array([len(indices) for indices in neuropil_masks], dtype=np.int32)
-        neuropil_mask_offsets = np.zeros(roi_count + 1, dtype=np.int32)
-        neuropil_mask_offsets[1:] = np.cumsum(neuropil_mask_sizes)
-
-        total_neuropil_pixels = int(neuropil_mask_offsets[-1])
-        flat_neuropil_masks = np.empty(total_neuropil_pixels, dtype=np.int32)
-        neuropil_pixel_count = np.zeros(roi_count, dtype=np.int32)
-
-        for mask_index, indices in enumerate(neuropil_masks):
-            start = neuropil_mask_offsets[mask_index]
-            end = neuropil_mask_offsets[mask_index + 1]
-            flat_neuropil_masks[start:end] = indices
-            neuropil_pixel_count[mask_index] = len(indices)
-
-    # Pre-allocates a reusable buffer for the extraction kernels. Both kernels write every element unconditionally,
-    # so zeroing is unnecessary. Re-allocated only for the last batch if it is smaller than the standard batch size.
-    output_prototype = np.empty((roi_count, batch_size), dtype=np.float32)
-
-    # Pre-allocates the float32 destination the binary source is converted into. The binary stores int16, so the
-    # conversion is required, while a fresh destination per batch is not. A leading-axis slice of this buffer stays
-    # C-contiguous, which is the layout both kernels read.
-    batch_buffer = np.empty((min(batch_size, frame_count), pixel_count), dtype=np.float32)
-
-    for batch_start in range(0, frame_count, batch_size):
-        batch_end = min(batch_start + batch_size, frame_count)
-
-        batch_source = frames[batch_start:batch_end]
-        batch_frames = batch_source.shape[0]
-        batch_pixels = batch_buffer[:batch_frames]
-        np.copyto(dst=batch_pixels, src=batch_source.reshape(batch_frames, pixel_count))
-        batch_slice = slice(batch_start, batch_start + batch_frames)
-
-        if batch_frames < output_prototype.shape[1]:
-            output_prototype = np.empty((roi_count, batch_frames), dtype=np.float32)
-
-        fluorescence[:, batch_slice] = _extract_cell_fluorescence(
-            output_prototype=output_prototype,
-            data=batch_pixels,
-            flat_roi_masks=flat_roi_masks,
-            flat_lambda_weights=flat_lambda_weights,
-            mask_offsets=roi_mask_offsets,
-        )
-
-        if neuropil_masks is not None:
-            neuropil_fluorescence[:, batch_slice] = _extract_neuropil_fluorescence(
-                output_prototype=output_prototype,
-                data=batch_pixels,
-                flat_neuropil_masks=flat_neuropil_masks,
-                mask_offsets=neuropil_mask_offsets,
-                neuropil_pixel_count=neuropil_pixel_count,
-            )
-
-    console.echo(
-        message=(
-            f"{channel_label.capitalize()} ROI fluorescence: extracted from {roi_count} ROIs in {frame_count} "
-            f"frames. Time taken: {timer.elapsed} seconds."
-        ),
-        level=LogLevel.SUCCESS,
-    )
-
-    return fluorescence, neuropil_fluorescence
 
 
 def _update_roi_extraction_statistics(
@@ -990,6 +989,8 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
     # both functional during single-recording processing.
     roi_statistics_channel_2 = extraction_data.roi_statistics_channel_2
     if roi_statistics_channel_2 is not None:
+        # The channel 2 paths are set on every recording whose channel 2 statistics are set, which mypy cannot infer
+        # from two independently optional fields.
         channel_2_binary_paths: list[Path] = list(
             combined_data.registered_binary_paths_channel_2  # type: ignore[arg-type]
         )

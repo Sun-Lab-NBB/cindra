@@ -12,6 +12,7 @@ from tifffile import TiffWriter
 from ataraxis_base_utilities import error_format
 
 from cindra.layout import (
+    PARAMETERS_FILENAME,
     COMBINED_METADATA_FILENAME,
     ACQUISITION_PARAMETERS_FILENAME,
     RecordingArrays,
@@ -19,7 +20,6 @@ from cindra.layout import (
     resolve_plane_path,
     resolve_output_path,
 )
-from cindra.io.context import PARAMETERS_FILENAME
 from cindra.dataclasses import (
     SingleRecordingRuntimeData,
     MultiRecordingConfiguration,
@@ -89,7 +89,7 @@ class TestTolerance:
             assert _apply_tolerance(memory_mb=memory_mb) >= memory_mb
 
     def test_an_empty_working_set_converts_to_no_megabytes(self) -> None:
-        """Verifies that a model holding no bytes is charged no megabytes rather than a rounded-up one."""
+        """Verifies that a model holding no bytes is charged no megabytes."""
         assert _bytes_to_megabytes(byte_count=0) == 0
 
 
@@ -1224,7 +1224,7 @@ class TestPlannedRegionCount:
         assert large > small
 
     def test_planned_count_is_the_region_term_the_estimate_uses(self, tmp_path: Path) -> None:
-        """Verifies that the planned region count is exactly what the region-scaled model is sized for."""
+        """Verifies that the region-scaled model is sized by exactly the planned region count."""
         data_path = tmp_path / "raw"
         _write_raw_recording(data_path=data_path)
         configuration = SingleRecordingConfiguration()
@@ -1306,14 +1306,6 @@ class TestPlannedRegionCount:
 class TestTrackedRegionBound:
     """Tests the bound the tracked extraction estimate substitutes for a template count no plan can read."""
 
-    @staticmethod
-    def _dataset(region_counts: tuple[int, ...]) -> tuple[RecordingGeometry, ...]:
-        """Builds the geometry of a dataset whose recordings hold the given region counts."""
-        return tuple(
-            RecordingGeometry(combined_pixels=4096, combined_frame_count=600, region_count=count, resolved=True)
-            for count in region_counts
-        )
-
     def test_headroom_bound_holds_when_the_dataset_spans_many_recordings(self) -> None:
         """Verifies that the domain headroom term is the bound whenever the pooled ceiling sits above it."""
         configuration = MultiRecordingConfiguration()
@@ -1339,7 +1331,7 @@ class TestTrackedRegionBound:
         assert tracked == 1000
 
     def test_minimum_recordings_mirrors_the_count_tracking_derives(self) -> None:
-        """Verifies that the pooled ceiling divides by the recording count tracking rounds its prevalence up to."""
+        """Verifies that the pooled ceiling divides by the rounded-up recording count tracking derives."""
         configuration = MultiRecordingConfiguration()
         configuration.roi_tracking.mask_prevalence = 50
 
@@ -1374,7 +1366,7 @@ class TestTrackedRegionBound:
         assert tracked < sum(geometry.region_count for geometry in geometries) // 10
 
     def test_bound_reaches_the_extraction_estimate(self, tmp_path: Path) -> None:
-        """Verifies that the bound is exactly the template count the extraction model is sized for."""
+        """Verifies that the extraction model is sized by exactly the template count the bound reports."""
         configuration = MultiRecordingConfiguration()
         roots = [tmp_path / "day1", tmp_path / "day2", tmp_path / "day3"]
         for root, regions in zip(roots, (300, 500, 400), strict=True):
@@ -1411,12 +1403,20 @@ class TestTrackedRegionBound:
                 assert tracked <= math.ceil(max(counts) * 1.5)
                 assert tracked >= 1
 
+    @staticmethod
+    def _dataset(region_counts: tuple[int, ...]) -> tuple[RecordingGeometry, ...]:
+        """Builds the geometry of a dataset whose recordings hold the given region counts."""
+        return tuple(
+            RecordingGeometry(combined_pixels=4096, combined_frame_count=600, region_count=count, resolved=True)
+            for count in region_counts
+        )
+
 
 class TestPlannedTrackedRegionCount:
     """Tests the override a caller that knows its template count states instead of taking the bound."""
 
     def test_planned_count_is_the_tracked_term_the_estimate_uses(self, tmp_path: Path) -> None:
-        """Verifies that the planned count is exactly what the extraction model is sized for."""
+        """Verifies that the extraction model is sized by exactly the planned count."""
         configuration = MultiRecordingConfiguration()
         roots = [tmp_path / "day1", tmp_path / "day2"]
         for root in roots:
@@ -1479,7 +1479,7 @@ class TestPlannedTrackedRegionCount:
         )
 
     def test_discovery_does_not_read_the_planned_count(self, tmp_path: Path) -> None:
-        """Verifies that discovery is sized for the regions each recording reports whatever the caller plans for."""
+        """Verifies that discovery is sized for the regions each recording reports, whatever count the caller plans."""
         configuration = MultiRecordingConfiguration()
         roots = [tmp_path / "day1", tmp_path / "day2"]
         for root in roots:
