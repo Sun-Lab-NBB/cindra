@@ -507,7 +507,7 @@ class SingleRecordingData:
         """Switches the active data view to a different plane or the combined view.
 
         Args:
-            view_index: The view to switch to. -1 selects the combined view, 0+ selects a per-plane view.
+            view_index: The requested view. -1 selects the combined view, 0+ selects a per-plane view.
 
         Raises:
             ValueError: If the index is out of the valid range.
@@ -533,7 +533,8 @@ class SingleRecordingData:
             view_index: The initial view index. -1 selects the combined view, 0+ selects a per-plane view.
 
         Returns:
-            A fully populated SingleRecordingData instance.
+            The recording's combined results paired with its per-plane contexts, with every trace array memory-mapped
+            from disk.
         """
         console.echo(message=f"Loading a single recording's data from: {root_path}.")
         console.echo(message="Resolving runtime contexts...")
@@ -983,13 +984,16 @@ class ViewerData:
     single_recording: SingleRecordingData
     """The single-recording pipeline data, always present."""
 
+    dataset_name: str = ""
+    """Display label for the active multi-recording dataset."""
+
     _recordings: list[MultiRecordingData] = field(default_factory=list)
     """The loaded multi-recording dataset's per-recording MultiRecordingData instances. Empty when the visualized
     recording only has single-recording data."""
 
     _available_datasets: tuple[str, ...] = ()
-    """Natsorted dataset names discovered under the root path, used to inform consumers on multi-recording datasets
-    that include the visualized recording."""
+    """The natsorted dataset names discovered under the root path for the multi-recording datasets that include the
+    visualized recording."""
 
     _active_dataset_name: str = ""
     """The name of the active multi-recording dataset. Empty when the visualized recording only has single-recording
@@ -1001,9 +1005,6 @@ class ViewerData:
     _loaded_dataset_name: str = ""
     """The dataset name whose data is currently held in ``_recordings``. Persists across Original/Dataset toggles so
     that re-activating the same dataset is instant."""
-
-    dataset_name: str = ""
-    """Display label for the active multi-recording dataset."""
 
     @property
     def is_multi_recording(self) -> bool:
@@ -1048,14 +1049,7 @@ class ViewerData:
         return self._recordings[self._current_recording_index]
 
     def recording(self, index: int) -> MultiRecordingData:
-        """Returns the MultiRecordingData for the recording at the given index.
-
-        Args:
-            index: The recording index.
-
-        Returns:
-            The MultiRecordingData instance for the specified recording.
-        """
+        """Returns the MultiRecordingData for the recording at the given index."""
         return self._recordings[index]
 
     def load_dataset(self, dataset_name: str) -> None:
@@ -1069,7 +1063,7 @@ class ViewerData:
         """
         if dataset_name not in self._available_datasets:
             console.echo(
-                message=f"The requested '{dataset_name}' is not found in available datasets.",
+                message=f"The requested dataset '{dataset_name}' is not found among the available datasets.",
                 level=LogLevel.WARNING,
             )
             return
@@ -1094,7 +1088,7 @@ class ViewerData:
         """Switches the active recording.
 
         Args:
-            recording_index: The index of the recording to switch to.
+            recording_index: The index of the requested recording.
 
         Raises:
             ValueError: If the index is out of range.
@@ -1112,15 +1106,16 @@ class ViewerData:
         """Loads single-recording data and discovers available multi-recording datasets.
 
         Loads single-recording pipeline data from ``root_path``, then discovers available multi-recording dataset names
-        (lightweight). A dataset is only loaded when explicitly requested via the ``dataset`` parameter. Otherwise,
-        the instance starts in single-recording mode and consumers can load a dataset later via the dropdown.
+        (lightweight). A dataset is only loaded when explicitly requested via the ``dataset`` parameter. Otherwise, the
+        instance starts in single-recording mode.
 
         Args:
             root_path: Root cindra output directory.
             dataset: Explicit dataset name to load. Stays in single-recording mode if None.
 
         Returns:
-            A fully populated ViewerData instance.
+            The loaded single-recording data paired with the discovered dataset names and, when requested, the loaded
+            dataset.
         """
         single_recording = SingleRecordingData.from_data(root_path=root_path)
         available = cls._discover_dataset_names(root_path=root_path)
@@ -1138,9 +1133,6 @@ class ViewerData:
     @staticmethod
     def _discover_dataset_names(root_path: Path) -> tuple[str, ...]:
         """Discovers available multi-recording dataset names under root_path.
-
-        Searches for multi_recording_runtime_data.yaml files, extracts the lower-cased parent directory name
-        (dataset name) from each, deduplicates, and returns natsorted.
 
         Args:
             root_path: The root directory to search recursively.
@@ -1216,8 +1208,8 @@ class ViewerData:
         self._resolve_anchor_recording_index()
 
     def _resolve_anchor_recording_index(self) -> None:
-        """Points the current recording index at the anchor recording, which is the recording the viewer was launched
-        from, and falls back to the first recording when the loaded dataset does not include it.
+        """Points the current recording index at the anchor recording, which is the viewer's launch recording, and falls
+        back to the first recording when the loaded dataset does not include it.
         """
         # single_recording.output_path already returns the cindra root (plane output_path.parent), which matches
         # recording.data_path directly.

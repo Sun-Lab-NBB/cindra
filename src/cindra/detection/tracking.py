@@ -122,11 +122,167 @@ def track_rois_across_recordings(contexts: list[MultiRecordingRuntimeContext]) -
     console.echo(message=f"ROI tracking: complete. Time: {tracking_time} seconds.", level=LogLevel.SUCCESS)
 
 
+def _track_channel_rois(contexts: list[MultiRecordingRuntimeContext], *, channel_2: bool) -> None:
+    """Tracks ROIs for a single channel across multiple recordings.
+
+    Args:
+        contexts: The list of MultiRecordingRuntimeContext instances, one per recording.
+        channel_2: Determines whether to track channel 2 ROIs instead of channel 1.
+    """
+    # Extracts tracking configuration parameters. All contexts share the same configuration, so the first is used.
+    config = contexts[0].configuration.roi_tracking
+
+    # Spatial binning parameters control how the image is partitioned for parallel-friendly processing. The entry
+    # point rejects an asymmetric step pair, so both members hold the same value and either one sizes every bin.
+    step_size = config.step_sizes[0]
+    bin_size = config.bin_size
+
+    # Clustering parameters control which ROIs are grouped together as the same ROI across recordings.
+    maximum_distance = config.maximum_distance
+    threshold = config.threshold
+
+    # Prevalence thresholds determine which clusters and pixels are retained in the final templates.
+    mask_prevalence = config.mask_prevalence
+    pixel_prevalence = config.pixel_prevalence
+    minimum_size = config.minimum_size
+
+    # Converts mask_prevalence percentage to an absolute recording count threshold. Uses ceiling to ensure clusters
+    # must appear in at least this many recordings (e.g., 50% of 5 recordings = 3 recordings minimum).
+    minimum_recordings = int(np.ceil((mask_prevalence / 100) * len(contexts)))
+
+    all_rois, all_recordings = _collect_recording_rois(contexts=contexts, channel_2=channel_2)
+    if not all_rois:
+        return
+
+    # Retrieves the combined image dimensions from the first context. These define the coordinate space for all
+    # deformed ROI masks after diffeomorphic registration.
+    combined_data = contexts[0].runtime.combined_data
+    if combined_data is None:
+        return
+    image_height = combined_data.combined_height
+    image_width = combined_data.combined_width
+    image_shape = (image_height, image_width)
+
+    # Builds a spatial grid index for O(1) lookup of ROIs by approximate location. The grid cell size matches the
+    # binning step, so each ROI maps to exactly one cell and each cell is the core of exactly one bin.
+    roi_grid = _build_roi_grid(rois=all_rois, recordings=all_recordings, grid_size=step_size)
+
+    # Generates the grid positions that tile the image. Each position is the cell coordinate of one spatial bin, and
+    # the step equals the grid cell size, so consecutive bins neither overlap nor leave gaps between their cores.
+    grid_positions = [
+        (pixel_y // step_size, pixel_x // step_size)
+        for pixel_y in range(0, image_height, step_size)
+        for pixel_x in range(0, image_width, step_size)
+    ]
+
+    template_masks: list[ROIMask] = []
+    cluster_counter = 0
+
+    # Processes each spatial bin independently. Row-major enumeration keeps the ordering deterministic across runs.
+    for grid_position in console.track(
+        grid_positions,
+        description=f"Tracking {'channel 2' if channel_2 else 'channel 1'} ROIs across recordings",
+        unit="bins",
+    ):
+        grid_y, grid_x = grid_position
+        y_position = grid_y * step_size
+        x_position = grid_x * step_size
+
+        # Collects ROIs within the current bin plus overlap margins. The margins ensure ROIs near bin edges are
+        # clustered with their true neighbors, which may fall in adjacent bins.
+        bin_rois, bin_recordings = _collect_bin_rois(
+            roi_grid=roi_grid,
+            bin_origin_y=y_position,
+            bin_origin_x=x_position,
+            bin_height=step_size,
+            bin_width=step_size,
+            overlap_margin=bin_size,
+            grid_roi_size=step_size,
+        )
+
+        if not bin_rois:
+            continue
+
+        # Clusters ROIs based on spatial overlap (Jaccard distance). Each cluster represents candidate matches
+        # of the same ROI observed across different recordings.
+        clustered_rois = _cluster_rois_in_bin(
+            rois=bin_rois,
+            roi_recordings=bin_recordings,
+            threshold=threshold,
+            maximum_distance=maximum_distance,
+        )
+
+        for cluster_rois, cluster_recordings in clustered_rois:
+            # Filters clusters that don't appear in enough recordings. An ROI must be detected in at least
+            # minimum_recordings to be considered reliably trackable across recordings.
+            unique_recordings = len(set(cluster_recordings))
+            if unique_recordings < minimum_recordings:
+                continue
+
+            # Computes the cluster centroid to assign ownership to exactly one bin. Prevents duplicate template creation
+            # when the same cluster appears in overlapping regions of adjacent bins.
+            centroids = np.array([roi.centroid for roi in cluster_rois], dtype=np.float32)
+            cluster_center = centroids.mean(axis=0)
+
+            # Only the bin containing the cluster center "owns" the cluster. Other bins that see this cluster
+            # in their overlap margins will skip it.
+            if not (
+                y_position <= cluster_center[0] < y_position + step_size
+                and x_position <= cluster_center[1] < x_position + step_size
+            ):
+                continue
+
+            cluster_counter += 1
+
+            # Creates a consensus template mask from all ROIs in the cluster. The template includes only pixels
+            # that appear in at least pixel_prevalence percent of the cluster's ROIs.
+            template = _create_template_roi(
+                cluster_rois=cluster_rois,
+                cluster_id=cluster_counter,
+                image_shape=image_shape,
+                pixel_prevalence=pixel_prevalence,
+            )
+
+            # Clustering requires spatial overlap, so a clustered template always retains prevalence-passing pixels.
+            if template is not None:  # pragma: no branch
+                template_masks.append(template)
+
+                # Marks all source ROIs with the cluster ID to prevent them from being re-clustered in
+                # subsequent bins. This assignment persists in the original deformed_roi_masks.
+                for roi in cluster_rois:
+                    roi.cluster_id = cluster_counter
+
+    # Identifies pixels shared between multiple template masks. Overlapping regions are ambiguous and may be
+    # excluded from signal extraction.
+    _compute_overlap(rois=template_masks)
+
+    # Removes templates that become too small after excluding overlapping pixels. Small templates typically
+    # represent partial ROIs or segmentation artifacts.
+    filtered_templates = _filter_templates(template_masks=template_masks, minimum_size=minimum_size)
+
+    # Estimates template diameter from pixel counts for use by _backward_deform_masks. Shape statistics are not
+    # computed here since templates are lightweight ROIMask instances. Full statistics are only computed after
+    # backward deformation when ROIStatistics are needed for extraction and GUI.
+    template_diameter = 0
+    if filtered_templates:
+        template_diameter = estimate_diameter_from_rois(rois=filtered_templates)
+
+    # Stores the same template mask list and the estimated template diameter in all recording contexts. All recordings
+    # share identical templates since they represent consensus ROIs in the common registered coordinate space.
+    for context in contexts:
+        if channel_2:
+            context.runtime.tracking.template_masks_channel_2 = filtered_templates
+            context.runtime.tracking.template_diameter_channel_2 = template_diameter
+        else:
+            context.runtime.tracking.template_masks = filtered_templates
+            context.runtime.tracking.template_diameter = template_diameter
+
+
 def _compute_overlap(rois: list[ROIMask]) -> None:
     """Computes overlapping pixels across ROIs and updates each ROI's overlap_mask field in-place.
 
     Args:
-        rois: The list of ROIMask instances to process. Each ROI's ``overlap_mask`` field is updated in-place.
+        rois: The list of ROIMask instances to process.
     """
     mask_pixel_indices = [roi.raveled_pixels for roi in rois]
     if not mask_pixel_indices:
@@ -239,7 +395,7 @@ def _cluster_rois_in_bin(
     if candidate_pairs.shape[0] == 0:
         return []
 
-    # Filters to keep only pairs from different recordings using vectorized comparison. This excludes within-recording
+    # Filters to keep only pairs from different recordings using vectorized comparison. Excludes within-recording
     # clusters.
     recordings_array = np.array(roi_recordings, dtype=np.int32)
     different_recording_mask = recordings_array[candidate_pairs[:, 0]] != recordings_array[candidate_pairs[:, 1]]
@@ -434,7 +590,6 @@ def _collect_bin_rois(
     collected_rois: list[ROIMask] = []
     collected_recordings: list[int] = []
 
-    # Iterates over all grid cells that could contain ROIs within the search region.
     for grid_row in range(grid_row_start, grid_row_end):
         for grid_column in range(grid_column_start, grid_column_end):
             grid_cell = roi_grid.get((grid_row, grid_column))
@@ -481,162 +636,3 @@ def _filter_templates(
             if non_overlapping_pixels >= minimum_size:
                 filtered_templates.append(mask)
     return filtered_templates
-
-
-def _track_channel_rois(contexts: list[MultiRecordingRuntimeContext], *, channel_2: bool) -> None:
-    """Tracks ROIs for a single channel across multiple recordings.
-
-    Args:
-        contexts: The list of MultiRecordingRuntimeContext instances, one per recording.
-        channel_2: Determines whether to track channel 2 ROIs instead of channel 1.
-    """
-    # Extracts tracking configuration parameters. All contexts share the same configuration, so the first is used.
-    config = contexts[0].configuration.roi_tracking
-
-    # Spatial binning parameters control how the image is partitioned for parallel-friendly processing. The entry
-    # point rejects an asymmetric step pair, so both members hold the same value and either one sizes every bin.
-    step_size = config.step_sizes[0]
-    bin_size = config.bin_size
-
-    # Clustering parameters control which ROIs are grouped together as the same ROI across recordings.
-    maximum_distance = config.maximum_distance
-    threshold = config.threshold
-
-    # Prevalence thresholds determine which clusters and pixels are retained in the final templates.
-    mask_prevalence = config.mask_prevalence
-    pixel_prevalence = config.pixel_prevalence
-    minimum_size = config.minimum_size
-
-    # Converts mask_prevalence percentage to an absolute recording count threshold. Uses ceiling to ensure clusters
-    # must appear in at least this many recordings (e.g., 50% of 5 recordings = 3 recordings minimum).
-    minimum_recordings = int(np.ceil((mask_prevalence / 100) * len(contexts)))
-
-    # Collects all unclustered ROIs (cluster_id == 0) from the deformed masks across all recordings.
-    all_rois, all_recordings = _collect_recording_rois(contexts=contexts, channel_2=channel_2)
-    if not all_rois:
-        return
-
-    # Retrieves the combined image dimensions from the first context. These define the coordinate space for all
-    # deformed ROI masks after diffeomorphic registration.
-    combined_data = contexts[0].runtime.combined_data
-    if combined_data is None:
-        return
-    image_height = combined_data.combined_height
-    image_width = combined_data.combined_width
-    image_shape = (image_height, image_width)
-
-    # Builds a spatial grid index for O(1) lookup of ROIs by approximate location. The grid cell size matches the
-    # binning step, so each ROI maps to exactly one cell and each cell is the core of exactly one bin.
-    roi_grid = _build_roi_grid(rois=all_rois, recordings=all_recordings, grid_size=step_size)
-
-    # Generates the grid positions that tile the image. Each position is the cell coordinate of one spatial bin, and
-    # the step equals the grid cell size, so consecutive bins neither overlap nor leave gaps between their cores.
-    grid_positions = [
-        (pixel_y // step_size, pixel_x // step_size)
-        for pixel_y in range(0, image_height, step_size)
-        for pixel_x in range(0, image_width, step_size)
-    ]
-
-    template_masks: list[ROIMask] = []
-    cluster_counter = 0
-
-    # Processes each spatial bin independently. Row-major enumeration keeps the ordering deterministic across runs.
-    for grid_position in console.track(
-        grid_positions,
-        description=f"Tracking {'channel 2' if channel_2 else 'channel 1'} ROIs across recordings",
-        unit="bins",
-    ):
-        # Converts grid indices back to pixel coordinates for boundary calculations.
-        grid_y, grid_x = grid_position
-        y_position = grid_y * step_size
-        x_position = grid_x * step_size
-
-        # Collects ROIs within the current bin plus overlap margins. The margins ensure ROIs near bin edges are
-        # clustered with their true neighbors, which may fall in adjacent bins.
-        bin_rois, bin_recordings = _collect_bin_rois(
-            roi_grid=roi_grid,
-            bin_origin_y=y_position,
-            bin_origin_x=x_position,
-            bin_height=step_size,
-            bin_width=step_size,
-            overlap_margin=bin_size,
-            grid_roi_size=step_size,
-        )
-
-        if not bin_rois:
-            continue
-
-        # Clusters ROIs based on spatial overlap (Jaccard distance). Each cluster represents candidate matches
-        # of the same ROI observed across different recordings.
-        clustered_rois = _cluster_rois_in_bin(
-            rois=bin_rois,
-            roi_recordings=bin_recordings,
-            threshold=threshold,
-            maximum_distance=maximum_distance,
-        )
-
-        # Processes each cluster to create template masks for ROIs that meet the prevalence threshold.
-        for cluster_rois, cluster_recordings in clustered_rois:
-            # Filters clusters that don't appear in enough recordings. An ROI must be detected in at least
-            # minimum_recordings to be considered reliably trackable across recordings.
-            unique_recordings = len(set(cluster_recordings))
-            if unique_recordings < minimum_recordings:
-                continue
-
-            # Computes the cluster centroid to assign ownership to exactly one bin. This prevents duplicate
-            # template creation when the same cluster appears in overlapping regions of adjacent bins.
-            centroids = np.array([roi.centroid for roi in cluster_rois], dtype=np.float32)
-            cluster_center = centroids.mean(axis=0)
-
-            # Only the bin containing the cluster center "owns" the cluster. Other bins that see this cluster
-            # in their overlap margins will skip it.
-            if not (
-                y_position <= cluster_center[0] < y_position + step_size
-                and x_position <= cluster_center[1] < x_position + step_size
-            ):
-                continue
-
-            cluster_counter += 1
-
-            # Creates a consensus template mask from all ROIs in the cluster. The template includes only pixels
-            # that appear in at least pixel_prevalence percent of the cluster's ROIs.
-            template = _create_template_roi(
-                cluster_rois=cluster_rois,
-                cluster_id=cluster_counter,
-                image_shape=image_shape,
-                pixel_prevalence=pixel_prevalence,
-            )
-
-            # Clustering requires spatial overlap, so a clustered template always retains prevalence-passing pixels.
-            if template is not None:  # pragma: no branch
-                template_masks.append(template)
-
-                # Marks all source ROIs with the cluster ID to prevent them from being re-clustered in
-                # subsequent bins. This assignment persists in the original deformed_roi_masks.
-                for roi in cluster_rois:
-                    roi.cluster_id = cluster_counter
-
-    # Identifies pixels shared between multiple template masks. Overlapping regions are ambiguous and may be
-    # excluded from signal extraction.
-    _compute_overlap(rois=template_masks)
-
-    # Removes templates that become too small after excluding overlapping pixels. Small templates typically
-    # represent partial ROIs or segmentation artifacts.
-    filtered_templates = _filter_templates(template_masks=template_masks, minimum_size=minimum_size)
-
-    # Estimates template diameter from pixel counts for use by _backward_deform_masks. Shape statistics are not
-    # computed here since templates are lightweight ROIMask instances. Full statistics are only computed after
-    # backward deformation when ROIStatistics are needed for extraction and GUI.
-    template_diameter = 0
-    if filtered_templates:
-        template_diameter = estimate_diameter_from_rois(rois=filtered_templates)
-
-    # Stores the same template mask list and the estimated template diameter in all recording contexts. All recordings
-    # share identical templates since they represent consensus ROIs in the common registered coordinate space.
-    for context in contexts:
-        if channel_2:
-            context.runtime.tracking.template_masks_channel_2 = filtered_templates
-            context.runtime.tracking.template_diameter_channel_2 = template_diameter
-        else:
-            context.runtime.tracking.template_masks = filtered_templates
-            context.runtime.tracking.template_diameter = template_diameter

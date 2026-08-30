@@ -55,23 +55,22 @@ _WORKER_THREAD_CEILING: int = 1
 Notes:
     A spawned worker re-imports the numeric backends rather than inheriting the parent's, and each of them sizes its
     thread pool to the whole host at import unless the environment says otherwise. A pool running one worker per core
-    would therefore hold the square of the core count in threads while using one of them. The ceiling of one is the
-    floor each job raises from, not the width it runs at, because every stage sets its own budget once it starts.
+    would therefore hold the square of the core count in threads while using one of them. The ceiling of one is each
+    job's starting floor rather than its running width, because every stage sets its own budget once it starts.
 
     The backends that fix their width while loading take the session's widest job width instead, because no runtime
     setter reaches them once a worker has started.
 """
 
 _POOL_START_METHOD: str = "spawn"
-"""The multiprocessing start method every worker process of an execution session is created with.
+"""The multiprocessing start method that creates every worker process of an execution session.
 
 Notes:
-    Spawn is the only method available on every platform the library supports. Requesting it explicitly therefore
-    gives a Linux session the process semantics a macOS or Windows session gets by default, rather than the platform
-    default of the host it happens to run on. The alternatives are also unsound for this pipeline. A forked worker
-    inherits the parent's already-sized numeric backends, which leaves the thread pin inert and hands every concurrent
-    job a host-wide backend pool, and it inherits the parent's Numba and threading state at whatever point the fork
-    interrupted it.
+    Spawn is the only method available on every platform the library supports. Requesting it explicitly therefore gives
+    a Linux session the process semantics a macOS or Windows session gets by default, rather than the platform default
+    of its host. The alternatives are also unsound for this pipeline. A forked worker inherits the parent's
+    already-sized numeric backends, which leaves the thread pin inert and hands every concurrent job a host-wide backend
+    pool, and it inherits the parent's Numba and threading state at whatever point the fork interrupted it.
 """
 
 _BROKEN_POOL_MESSAGE: str = (
@@ -138,14 +137,7 @@ class PendingJob:
 
 @dataclass(slots=True)
 class JobExecutionState:
-    """Tracks the runtime state for one batch execution session across both pipeline types.
-
-    Notes:
-        Each admitted job runs in its own worker process at the width the dispatcher resolved for it, so a
-        registration job and a processing job run side by side, each holding its own numeric-backend budget. Running
-        them as threads of one process instead would let the later of the two overwrite the BLAS width the earlier one
-        set. That width is a property of the process rather than of the thread that asked for it.
-    """
+    """Tracks the runtime state for one batch execution session across both pipeline types."""
 
     all_jobs: dict[tuple[str, str], PendingJob] = field(default_factory=dict)
     """All submitted jobs keyed by their tracker path and job identifier pair, used for status reporting."""
@@ -191,6 +183,29 @@ class JobExecutionState:
     """The lock guarding every mutation of the job queues."""
     manager_thread: Thread | None = None
     """The background thread running the execution manager, or None before the session starts it."""
+
+
+class _AdmissionDecisions(StrEnum):
+    """Defines the outcomes of evaluating one queued job's prerequisites against its own tracker."""
+
+    ADMIT = "admit"
+    """Every prerequisite job succeeded, so the job moves into its resource class queue."""
+    WAIT = "wait"
+    """At least one prerequisite job has not finished, so the job stays in the admission pool."""
+    ABORT = "abort"
+    """At least one prerequisite job failed or is absent from the tracker, so the job can never run."""
+
+
+class _JobOutcomes(StrEnum):
+    """Defines the outcomes of examining the worker pool future the session holds for one dispatched job."""
+
+    RUNNING = "running"
+    """The worker has not finished the job, so the job keeps its place in its resource class running set."""
+    COMPLETED = "completed"
+    """The worker returned, so the job already recorded its own terminal state on its tracker."""
+    ABANDONED = "abandoned"
+    """The future carries an exception or a cancellation rather than a result. That covers a worker the host killed, a
+    worker that raised on its way out of the job, and a job the pool canceled before any worker started it."""
 
 
 _execution_state: JobExecutionState | None = None
@@ -245,16 +260,16 @@ def start_execution_session(
         Each job takes its worker count when the dispatcher submits it, and that count travels to the pipeline as a
         dispatch argument, so one configuration file serves every job dispatched concurrently against it. A session
         accepting the class defaults widens a job of an elastic class toward that class's ceiling over the cores the
-        host holds free, while a session carrying a worker override gives every job of a class the budgets bound the
-        width it requested.
+        host holds free. A session carrying a worker override gives every job of a class the budgets bound the width it
+        requested.
 
         Each class resolves its own concurrency cap, and the session CPU budget is recorded alongside those caps
         because every class dispatches during the same cycle. The dispatcher holds the sum of the cores committed by
         the running jobs of every class inside that budget, so the per-class caps cannot oversubscribe the machine
         between them.
 
-        The session also holds the CUDA devices its device-backed jobs run on, one device per running job. It holds
-        the devices the caller names, which leaves the rest of the host's devices to the work running beside it, and a
+        The session also holds the CUDA devices its device-backed jobs use, one device per running job. It holds the
+        devices the caller names, which leaves the rest of the host's devices to the work running beside it, and a
         session naming none registers on the host CPU.
 
     Args:
@@ -263,13 +278,13 @@ def start_execution_session(
             class default.
         max_parallel_jobs: Requested maximum concurrent jobs per resource class, -1 to lift the caps, or None to
             accept the derived caps.
-        gpu_devices: The zero-based indices of the CUDA devices the session registers on. Use None to register on the
-            host CPU, [-1] to name every device the host exposes, and an explicit list to name those devices.
+        gpu_devices: The zero-based indices of the CUDA devices the session uses for registration. Use None to register
+            on the host CPU, [-1] to name every device the host exposes, and an explicit list to name those devices.
 
     Returns:
         A dictionary carrying the submitted job total under 'total_jobs', the session core budget under 'cpu_budget',
-        the session memory budget under 'memory_budget_mb', the device indices the session holds under 'gpu_devices',
-        and the per-class worker count, concurrency cap, and job count under 'resource_classes'.
+        and the session memory budget under 'memory_budget_mb'. It also carries the device indices the session holds
+        under 'gpu_devices', and the per-class worker count, concurrency cap, and job count under 'resource_classes'.
 
     Raises:
         ValueError: If either override is zero or is a negative value other than -1. If gpu_devices is empty, names a
@@ -388,29 +403,6 @@ def cancel_execution_session() -> tuple[int, int]:
     return canceled_count, active_count
 
 
-class _AdmissionDecisions(StrEnum):
-    """Defines the outcomes of evaluating one queued job's prerequisites against its own tracker."""
-
-    ADMIT = "admit"
-    """Every prerequisite job succeeded, so the job moves into its resource class queue."""
-    WAIT = "wait"
-    """At least one prerequisite job has not finished, so the job stays in the admission pool."""
-    ABORT = "abort"
-    """At least one prerequisite job failed or is absent from the tracker, so the job can never run."""
-
-
-class _JobOutcomes(StrEnum):
-    """Defines the outcomes of examining the worker pool future the session holds for one dispatched job."""
-
-    RUNNING = "running"
-    """The worker has not finished the job, so the job keeps its place in its resource class running set."""
-    COMPLETED = "completed"
-    """The worker returned, so the job already recorded its own terminal state on its tracker."""
-    ABANDONED = "abandoned"
-    """The future carries an exception or a cancellation rather than a result. That covers a worker the host killed, a
-    worker that raised on its way out of the job, and a job the pool canceled before any worker started it."""
-
-
 def _job_execution_manager(state: JobExecutionState) -> None:
     """Admits jobs whose prerequisites succeeded and dispatches them under their resource class concurrency caps.
 
@@ -480,10 +472,10 @@ def _job_execution_manager(state: JobExecutionState) -> None:
 
 
 def _resolve_session_devices(gpu_devices: list[int] | None) -> list[int]:
-    """Resolves the CUDA devices one execution session runs its device-backed jobs on.
+    """Resolves the CUDA devices one execution session's device-backed jobs use.
 
     Args:
-        gpu_devices: The zero-based device indices the caller asks for, [-1] to ask for every device the host exposes,
+        gpu_devices: The zero-based device indices the caller requests, [-1] to ask for every device the host exposes,
             or None to register on the host CPU.
 
     Returns:
@@ -525,7 +517,7 @@ def _validate_session_device_agreement(all_jobs: dict[tuple[str, str], PendingJo
 
     Notes:
         A registration job carries the resource class its planner chose, so a session whose devices disagree with that
-        class would run the stage on the resource the plan did not size it for.
+        class would run the stage on a resource the plan's sizing never covered.
 
     Args:
         all_jobs: All submitted jobs keyed by dispatch key.
@@ -726,7 +718,7 @@ def _dispatch_admitted_jobs(state: JobExecutionState, pool: Executor) -> bool:
 
     Args:
         state: The current job execution state, accessed under its lock.
-        pool: The worker pool the session dispatches its jobs into.
+        pool: The worker pool that receives the session's dispatched jobs.
 
     Returns:
         True if at least one job was submitted during this cycle, False otherwise.
@@ -746,9 +738,9 @@ def _dispatch_pass(state: JobExecutionState, pool: Executor, *, release_reservat
     """Submits admitted jobs during one pass of the dispatcher.
 
     Notes:
-        Each submission precedes the queue mutation it belongs to, so a job the pool refuses stays at the head of its
-        class queue. That keeps it inside a collection the broken-pool handler scans, which is what lets the one job
-        the pool refused reach a terminal state alongside its peers.
+        Each submission precedes its own queue mutation, so a job the pool refuses stays at the head of its class queue.
+        That keeps it inside a collection the broken-pool handler scans, which is what lets the one job the pool refused
+        reach a terminal state alongside its peers.
 
         A job of an elastic class takes its width from the cores the session holds free at the moment it is submitted,
         so the same queue hands its last jobs more cores than its first. The peer count that divides those cores is
@@ -760,7 +752,7 @@ def _dispatch_pass(state: JobExecutionState, pool: Executor, *, release_reservat
 
     Args:
         state: The current job execution state, accessed under its lock.
-        pool: The worker pool the session dispatches its jobs into.
+        pool: The worker pool that receives the session's dispatched jobs.
         release_reservations: Determines whether a class holding a reservation dispatches at its full derived
             concurrency rather than at the concurrency its reservation leaves free.
 
@@ -878,7 +870,7 @@ def _device_memory_admits(device: int, required_megabytes: int) -> bool:
 
 
 def _create_job_pool(max_workers: int, maximum_thread_count: int) -> Executor:
-    """Creates the worker pool one execution session dispatches its jobs into.
+    """Creates the worker pool that receives one execution session's dispatched jobs.
 
     Notes:
         Each job runs in its own process, which gives it its own numeric-backend thread budget and its own address
@@ -897,11 +889,11 @@ def _create_job_pool(max_workers: int, maximum_thread_count: int) -> Executor:
 
     Args:
         max_workers: The number of worker processes the pool may hold.
-        maximum_thread_count: The threads each backend that fixes its width while loading may open, which is the
-            widest count any job of the session runs at.
+        maximum_thread_count: The threads each backend that fixes its width while loading may open, which is the widest
+            count any job of the session reaches.
 
     Returns:
-        The pool to dispatch the session's jobs into.
+        The pool that receives the session's dispatched jobs.
     """
     return ProcessPoolExecutor(
         max_workers=max_workers,
@@ -915,9 +907,9 @@ def _resolve_pool_size(state: JobExecutionState) -> int:
     """Resolves the number of worker processes one execution session's pool may hold.
 
     Notes:
-        Sized to the concurrency every resource class may reach at once, so admission remains the only thing bounding
-        how many jobs run. A pool narrower than that would hold an admitted job behind its own queue, which would
-        reorder the dispatch sequence the prerequisite graph implies.
+        The pool is sized to the concurrency every resource class may reach at once, so admission remains the only thing
+        bounding how many jobs run. A pool narrower than that would hold an admitted job behind its own queue, which
+        would reorder the dispatch sequence the prerequisite graph implies.
 
     Args:
         state: The execution state whose per-class concurrency caps size the pool.
@@ -929,12 +921,12 @@ def _resolve_pool_size(state: JobExecutionState) -> int:
 
 
 def _resolve_maximum_job_workers(state: JobExecutionState) -> int:
-    """Resolves the widest worker count any job of one execution session runs at.
+    """Resolves the widest worker count any job of one execution session reaches.
 
     Notes:
-        The numeric backends that fix their pool width while loading read the environment their worker inherits, and
-        no runtime setter reaches them once that worker has started. They therefore take this count rather than the
-        width a worker starts at, which leaves a job free to spend the cores its dispatch allocated.
+        The numeric backends that fix their pool width while loading read the environment their worker inherits, and no
+        runtime setter reaches them once that worker has started. They therefore take this count rather than a worker's
+        starting width, which leaves a job free to spend the cores its dispatch allocated.
 
         An elastic class widens its jobs toward its own ceiling as its queue drains, so that ceiling is the width its
         jobs may reach. Every other class takes the width the session resolved for it. The core budget bounds neither
@@ -944,7 +936,7 @@ def _resolve_maximum_job_workers(state: JobExecutionState) -> int:
         state: The execution state whose resource classes and resolved widths bound the count.
 
     Returns:
-        The widest worker count a job of this session runs at, always at least one.
+        The widest worker count a job of this session reaches, always at least one.
     """
     if not state.elastic_workers:
         return max(state.class_workers.values(), default=1)
@@ -1035,7 +1027,7 @@ def _resolve_committed_width(state: JobExecutionState, class_name: str, dispatch
 
     Args:
         state: The current job execution state, accessed under its lock.
-        class_name: The name of the resource class the running job belongs to.
+        class_name: The name of the running job's resource class.
         dispatch_key: The tracker path and job identifier pair that addresses the running job.
 
     Returns:
@@ -1076,8 +1068,8 @@ def _pipeline_worker(
         single_recording: Determines whether to call the single-recording or multi-recording pipeline.
         workers: The number of parallel workers to allocate to this job. A value of None makes the pipeline apply the
             default for the job's stage.
-        device: The zero-based index of the CUDA device a registration job runs on. A value of None runs the
-            registration on the host CPU. Every other stage ignores it.
+        device: The zero-based index of the CUDA device a registration job uses. A value of None runs the registration
+            on the host CPU. Every other stage ignores it.
     """
     try:
         if single_recording:

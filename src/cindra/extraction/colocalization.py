@@ -133,10 +133,9 @@ def compute_spatial_colocalization(
     is reciprocal.
 
     Notes:
-        Appropriate when both channels contain functional data with independently detected ROIs. The overlap fraction is
-        normalized by the smaller ROI size, ensuring that a small ROI fully contained within a larger ROI receives an
-        overlap score of 1.0. The mutual best-match constraint guarantees one-to-one correspondence: the inverse mapping
-        (channel 2 to channel 1) is fully derivable from the returned array.
+        Appropriate when both channels contain functional data with independently detected ROIs. The mutual best-match
+        constraint guarantees one-to-one correspondence: the inverse mapping (channel 2 to channel 1) is fully derivable
+        from the returned array.
 
     Args:
         rois_channel_1: The ROI statistics for channel 1 ROIs.
@@ -175,9 +174,8 @@ def compute_spatial_colocalization(
     best_scores_1 = np.max(a=overlap_matrix, axis=1)
     best_indices_2 = np.argmax(a=overlap_matrix, axis=0)
 
-    # Enforces mutual best matching: a pair (i, j) is accepted only when channel 1 ROI i's best match is j AND channel 2
-    # ROI j's best match is i. For each channel 1 ROI i, looks up its proposed partner j = best_indices_1[i], then
-    # checks whether j's best partner points back to i.
+    # For each channel 1 ROI i, looks up its proposed partner j = best_indices_1[i], then checks whether j's best
+    # partner points back to i.
     is_mutual = best_indices_2[best_indices_1] == np.arange(count_1)
 
     unmatched = ~is_mutual | (best_scores_1 < colocalization_threshold)
@@ -269,50 +267,6 @@ def _correct_bleedthrough(
     return corrected
 
 
-def _build_sparse_roi_masks(
-    rois: list[ROIStatistics],
-    frame_height: int,
-    frame_width: int,
-) -> csr_matrix:
-    """Builds a sparse binary mask matrix from ROI pixel coordinates.
-
-    Args:
-        rois: The ROI statistics containing pixel coordinates.
-        frame_height: The height of the imaging field in pixels.
-        frame_width: The width of the imaging field in pixels.
-
-    Returns:
-        A Compressed Sparse Row (CSR) matrix of shape (n_rois, frame_height * frame_width) where each row contains ones
-        at the flattened pixel indices belonging to that ROI.
-    """
-    total_pixels = frame_height * frame_width
-    roi_count = len(rois)
-
-    # Accumulates COO-format triplet arrays (row, column, value) for all ROIs. Each ROI contributes one entry per pixel,
-    # where the row is the ROI index and the column is the flattened pixel index.
-    row_indices: list[NDArray[np.intp]] = []
-    column_indices: list[NDArray[np.intp]] = []
-
-    for roi_index, roi in enumerate(rois):
-        flat_pixels = (roi.mask.y_pixels * frame_width + roi.mask.x_pixels).astype(np.intp)
-
-        row_indices.append(np.full(len(flat_pixels), fill_value=roi_index, dtype=np.intp))
-        column_indices.append(flat_pixels)
-
-    all_rows = np.concatenate(row_indices)
-    all_columns = np.concatenate(column_indices)
-    data = np.ones(len(all_rows), dtype=np.float32)
-
-    # Duplicate (row, column) entries are summed by default, so any repeated pixel coordinates within an ROI produce
-    # values greater than 1.
-    masks = csr_matrix((data, (all_rows, all_columns)), shape=(roi_count, total_pixels))
-
-    # Clips summed duplicates back to binary values to ensure each pixel is counted at most once.
-    masks.data = np.minimum(masks.data, np.float32(1.0))
-
-    return masks
-
-
 def _compute_overlap_matrix(
     rois_channel_1: list[ROIStatistics],
     rois_channel_2: list[ROIStatistics],
@@ -368,3 +322,47 @@ def _compute_overlap_matrix(
     intersection_counts /= minimum_sizes
 
     return intersection_counts
+
+
+def _build_sparse_roi_masks(
+    rois: list[ROIStatistics],
+    frame_height: int,
+    frame_width: int,
+) -> csr_matrix:
+    """Builds a sparse binary mask matrix from ROI pixel coordinates.
+
+    Args:
+        rois: The ROI statistics containing pixel coordinates.
+        frame_height: The height of the imaging field in pixels.
+        frame_width: The width of the imaging field in pixels.
+
+    Returns:
+        A Compressed Sparse Row (CSR) matrix of shape (n_rois, frame_height * frame_width) where each row contains ones
+        at the flattened pixel indices belonging to that ROI.
+    """
+    total_pixels = frame_height * frame_width
+    roi_count = len(rois)
+
+    # Accumulates COO-format triplet arrays (row, column, value) for all ROIs. Each ROI contributes one entry per pixel,
+    # where the row is the ROI index and the column is the flattened pixel index.
+    row_indices: list[NDArray[np.intp]] = []
+    column_indices: list[NDArray[np.intp]] = []
+
+    for roi_index, roi in enumerate(rois):
+        flat_pixels = (roi.mask.y_pixels * frame_width + roi.mask.x_pixels).astype(np.intp)
+
+        row_indices.append(np.full(len(flat_pixels), fill_value=roi_index, dtype=np.intp))
+        column_indices.append(flat_pixels)
+
+    all_rows = np.concatenate(row_indices)
+    all_columns = np.concatenate(column_indices)
+    data = np.ones(len(all_rows), dtype=np.float32)
+
+    # Duplicate (row, column) entries are summed by default, so any repeated pixel coordinates within an ROI produce
+    # values greater than 1.
+    masks = csr_matrix((data, (all_rows, all_columns)), shape=(roi_count, total_pixels))
+
+    # Clips summed duplicates back to binary values to ensure each pixel is counted at most once.
+    masks.data = np.minimum(masks.data, np.float32(1.0))
+
+    return masks

@@ -25,6 +25,22 @@ type _ChannelDetectionResult = tuple[
 ]
 
 def detect_plane_rois(context: RuntimeContext, *, workers: int) -> None: ...
+def _detect_channel(
+    binary_path: Path,
+    frame_height: int,
+    frame_width: int,
+    frame_count: int,
+    bin_size: int,
+    valid_y_range: tuple[int, int],
+    valid_x_range: tuple[int, int],
+    bad_frames: NDArray[np.bool_] | None,
+    detection_config: ROIDetection,
+    nonrigid_block_size: tuple[int, int],
+    workers: int,
+    custom_classifier_path: Path | None,
+    plane_index: int,
+    channel_label: str,
+) -> _ChannelDetectionResult: ...
 def _create_enhanced_mean_image(
     mean_image: NDArray[np.float32],
     roi_diameter: int,
@@ -45,19 +61,3 @@ def _apply_preclassification(
     channel_label: str,
     diameter: int = 10,
 ) -> list[ROIStatistics]: ...
-def _detect_channel(
-    binary_path: Path,
-    frame_height: int,
-    frame_width: int,
-    frame_count: int,
-    bin_size: int,
-    valid_y_range: tuple[int, int],
-    valid_x_range: tuple[int, int],
-    bad_frames: NDArray[np.bool_] | None,
-    detection_config: ROIDetection,
-    nonrigid_block_size: tuple[int, int],
-    workers: int,
-    custom_classifier_path: Path | None,
-    plane_index: int,
-    channel_label: str,
-) -> _ChannelDetectionResult: ...

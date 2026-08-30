@@ -27,6 +27,13 @@ from .colocalization import (
 from ..classification import classify as classify
 
 def extract_traces(context: RuntimeContext | MultiRecordingRuntimeContext, *, workers: int) -> None: ...
+def _extract_fluorescence_traces(
+    frames: BinaryFile | BinaryFileCombined,
+    roi_masks: tuple[tuple[NDArray[np.int32], NDArray[np.float32]], ...],
+    neuropil_masks: tuple[NDArray[np.int32], ...] | None,
+    batch_size: int,
+    channel_label: str,
+) -> tuple[NDArray[np.float32], NDArray[np.float32]]: ...
 def _extract_cell_fluorescence(
     output_prototype: NDArray[np.float32],
     data: NDArray[np.float32],
@@ -53,13 +60,6 @@ def _create_and_unpack_masks(
     minimum_neuropil_pixels: int,
     channel_label: str,
 ) -> tuple[tuple[tuple[NDArray[np.int32], NDArray[np.float32]], ...], tuple[NDArray[np.int32], ...] | None]: ...
-def _extract_fluorescence_traces(
-    frames: BinaryFile | BinaryFileCombined,
-    roi_masks: tuple[tuple[NDArray[np.int32], NDArray[np.float32]], ...],
-    neuropil_masks: tuple[NDArray[np.int32], ...] | None,
-    batch_size: int,
-    channel_label: str,
-) -> tuple[NDArray[np.float32], NDArray[np.float32]]: ...
 def _update_roi_extraction_statistics(
     roi_statistics: list[ROIStatistics],
     cell_fluorescence: NDArray[np.float32],
