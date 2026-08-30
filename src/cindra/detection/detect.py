@@ -425,9 +425,8 @@ def _create_enhanced_mean_image(
         diameter to estimate and subtract the slowly varying background. The residual is then divided by its local
         absolute magnitude to normalize contrast across the field of view. Finally, the result is clipped and rescaled
         to the [0, 1] range. Border regions outside the valid registration crop are filled with the minimum value of
-        the enhanced interior. The background estimate is Gaussian rather than rank based. A median-filtered
-        background leaves about twice the high-frequency power in the residual, and this image is the target
-        cross-recording registration aligns, which tracks measurably better under the Gaussian estimate.
+        the enhanced interior. This image is the target cross-recording registration aligns, and a Gaussian
+        background estimate tracks measurably better across recordings than the rank-based estimate it replaced.
 
     Args:
         mean_image: The mean image to enhance, already cropped to the valid registration region.
