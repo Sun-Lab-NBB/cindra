@@ -332,7 +332,8 @@ class TestProcessingModel:
         plane = PlaneGeometry(height=512, width=512, frame_count=60000, sampling_rate=30.0)
 
         # The decay term is round(0.4 * 30) = 12, and the ratio term is 60000 // 5000 = 12. Each 500 frame read batch
-        # bins 41 of its own frames and discards the remaining 8, so 120 batches yield 4920 bins rather than 5000.
+        # yields 41 bins from 492 of its own frames and discards the remaining 8, so 120 batches yield 4920 bins
+        # rather than 5000.
         assert _resolve_binned_frame_count(plane=plane, configuration=configuration) == 4920
 
     def test_binning_truncates_the_remainder_of_every_batch(self) -> None:

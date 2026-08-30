@@ -70,7 +70,7 @@ class TestCollectBinRois:
             (15 // grid_roi_size, 15 // grid_roi_size): [(roi_outside, 0)],
         }
 
-        # Without overlap margin, the bin [20, 60) x [20, 60) should not capture the ROI at (15, 15).
+        # Without overlap margin, the bin (20, 60) x (20, 60) should not capture the ROI at (15, 15).
         collected_rois_no_margin, _ = _collect_bin_rois(
             roi_grid=roi_grid,
             bin_origin_y=20,
@@ -82,7 +82,7 @@ class TestCollectBinRois:
         )
         assert not collected_rois_no_margin
 
-        # With overlap margin of 10, the search region becomes [10, 70) x [10, 70), capturing the ROI.
+        # With overlap margin of 10, the search region becomes (10, 70) x (10, 70), capturing the ROI.
         collected_rois_with_margin, collected_recordings = _collect_bin_rois(
             roi_grid=roi_grid,
             bin_origin_y=20,

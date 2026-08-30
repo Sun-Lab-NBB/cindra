@@ -1190,7 +1190,7 @@ class TestCombinedDataSaveLoad:
         combined.save(root_path=tmp_path)
 
         assert (tmp_path / "combined_metadata.npz").exists()
-        assert not (tmp_path / "combined_metadata.tmp.npz").exists()
+        assert not list(tmp_path.glob(".combined_metadata.npz.*.tmp"))
 
     def test_failed_payload_write_leaves_no_marker(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Verifies that a payload write which fails partway through leaves no completion marker behind."""

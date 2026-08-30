@@ -1023,8 +1023,9 @@ class TestAlignJobs:
         assert tracker.file_path.exists()
         assert len(tracker.find_jobs(job_name="")) == 2
 
-    def test_foreign_entry_resets_tracker(self, tmp_path: Path) -> None:
-        """Verifies that tracker entries outside the job universe trigger a reset before reinitialization."""
+    def test_foreign_entry_is_discarded(self, tmp_path: Path) -> None:
+        """Verifies that tracker entries outside the job universe are discarded while every in-universe job is
+        kept."""
         tracker = ProcessingTracker(file_path=tmp_path / "tracker.yaml")
         tracker.initialize_jobs(jobs=[("foreign_job", "")])
         jobs = [(SingleRecordingJobNames.BINARIZE, "")]

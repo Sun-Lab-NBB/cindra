@@ -116,8 +116,8 @@ class TestPcaDenoise:
         pca_denoise(frames=denoised, block_size=(16, 16), component_fraction=0.5)
 
         # The 16x16 blocks overlap, so most pixels accumulate a taper-weighted sum over several reconstructions.
-        # Recovering the input to six digits requires the taper to be accumulated into the normalizer exactly as it
-        # is into the reconstruction, and requires the running total to be divided by that normalizer.
+        # Recovering the input to four decimal places requires the taper to be accumulated into the normalizer
+        # exactly as it is into the reconstruction, and requires the running total to be divided by that normalizer.
         np.testing.assert_allclose(denoised, movie, atol=1e-4)
 
     def test_parallel_workers(self) -> None:
