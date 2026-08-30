@@ -1,4 +1,6 @@
-"""Provides assets for converting imaging data, resolving runtime contexts, inventorying outputs, and selecting ROIs."""
+"""Provides assets for converting imaging data, reading and marking plane binaries, resolving runtime contexts,
+combining plane results, inventorying outputs, and selecting ROIs.
+"""
 
 from .tiff import (
     TIFF_EXTENSIONS,

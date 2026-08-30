@@ -142,7 +142,9 @@ class IOData:
     recordings."""
 
     plane_index: int | None = None
-    """The zero-based index identifying this plane's position in a multi-plane volumetric recording."""
+    """The zero-based index of this virtual imaging plane. For single-ROI data it is the physical plane's position in
+    the volume. For MROI data it enumerates every ROI and physical plane combination, so the physical plane is this
+    index modulo the acquisition plane count."""
 
 
 @dataclass(slots=True)
@@ -826,7 +828,8 @@ class ROIStatistics:
 
     # Defines the shape statistics computed during ROI detection, which carry defaults for staged construction.
     compactness: float = 0.0
-    """The ratio of actual to expected mean radius, where values near 1 indicate compact circular ROIs."""
+    """The ratio of actual to expected mean radius, floored at 1.0, where values near 1 indicate compact circular
+    ROIs."""
 
     solidity: float = 0.0
     """The ratio of soma pixels to convex hull area, measuring how solid/filled the ROI is."""

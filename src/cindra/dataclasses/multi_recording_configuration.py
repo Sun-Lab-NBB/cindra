@@ -17,13 +17,15 @@ class ReferenceImageType(StrEnum):
     """Defines the supported reference image types for diffeomorphic registration across recordings."""
 
     MEAN = "mean"
-    """The temporal mean of all registered frames, providing a static view of the imaging field."""
+    """The mean of the temporally binned movie, which excludes the frames registration marked bad and is zero outside
+    the valid registration crop."""
 
     ENHANCED_MEAN = "enhanced_mean"
     """The high-pass filtered mean image that enhances ROI boundaries for improved registration."""
 
     MAXIMUM_PROJECTION = "maximum_projection"
-    """The maximum intensity projection across all frames, highlighting active structures."""
+    """The maximum of every pixel across the temporally binned and high-pass filtered movie, zero outside the valid
+    registration crop, highlighting active structures."""
 
 
 @dataclass(slots=True)
@@ -38,8 +40,8 @@ class RecordingIO:
 
     dataset_name: str = ""
     """Specifies the name of the multi_recording dataset. The name is lowercased and used to create the output directory
-    under each recording's cindra directory (e.g., recording/cindra/multi_recording/{dataset_name}/) and to identify the
-    dataset in the tracker file."""
+    under each recording's cindra directory (e.g., recording/cindra/multi_recording/{dataset_name}/), and the tracker
+    file for that dataset is written inside that same directory."""
 
     repeat_selection: bool = False
     """Determines whether to repeat the ROI selection step when processing. When True, the pipeline re-runs ROI

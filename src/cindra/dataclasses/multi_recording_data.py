@@ -30,7 +30,8 @@ class MultiRecordingIOData:
 
     recording_id: str = ""
     """The unique identifier for this recording, derived from the distinguishing component of the recording directory
-    path. This ID is used to name output subdirectories and identify the recording in logs."""
+    path. This ID is the tracker specifier of the recording's multi-recording extraction job, and it
+    identifies the recording in status messages."""
 
     data_path: Path | None = None
     """The path to this recording's cindra single-recording pipeline output directory. This is the resolved cindra root
@@ -505,7 +506,9 @@ class MultiRecordingRuntimeData(YamlConfig):
 
     extraction: ExtractionData = field(default_factory=ExtractionData)
     """The runtime data from the extraction stage. After backward transformation, tracked ROI masks are stored as
-    ROIStatistics in roi_statistics. Extraction then populates fluorescence traces and classification fields."""
+    ROIStatistics in roi_statistics. Extraction then populates the fluorescence traces, the spike traces, and, for a
+    dual-channel dataset, the cross-channel colocalization array. The classification fields stay unset, because the
+    multi-recording pipeline reuses the single-recording classification."""
 
     timing: MultiRecordingTimingData = field(default_factory=MultiRecordingTimingData)
     """The timing information for both discovery and extraction phases."""
