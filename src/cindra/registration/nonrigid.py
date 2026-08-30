@@ -132,7 +132,7 @@ def compute_nonrigid_offsets(
         x_blocks: The list of x-coordinate ranges for each block from compute_registration_blocks.
         y_blocks: The list of y-coordinate ranges for each block from compute_registration_blocks.
         maximum_offset: The maximum allowed offset in pixels. Constrains the correlation search window.
-        workers: The number of parallel workers for FFT computation. Use -1 for all available cores.
+        workers: The number of parallel workers for FFT computation. Must be a positive integer.
 
     Returns:
         A tuple of (y_offsets, x_offsets, correlation_maxima) arrays with shape (frame_count, block_count).

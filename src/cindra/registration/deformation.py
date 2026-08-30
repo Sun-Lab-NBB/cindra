@@ -229,7 +229,8 @@ class Deformation:
             new_width: The target width in pixels.
 
         Returns:
-            A new Deformation with resized fields, or self if already the correct size.
+            A new identity Deformation of the requested size when this deformation is an identity, a new Deformation
+            with resized fields when it is not, or self when it already holds the requested size.
         """
         if self.is_identity:
             return Deformation.identity(height=new_height, width=new_width)

@@ -33,9 +33,11 @@ def apply_phase_correlation(
     for efficiency.
 
     Args:
-        frames: The frames to correlate with shape (num_frames, height, width).
-        kernel: The reference kernel from compute_reference_fft.
-        workers: The number of parallel workers for FFT computation. Use -1 for all available cores.
+        frames: The frames to correlate with shape (num_frames, height, width), or the extracted blocks with shape
+            (num_frames, num_blocks, block_height, block_width).
+        kernel: The phase-normalized reference kernel, from compute_phase_correlation_kernel for whole frames or
+            from compute_nonrigid_reference_data for extracted blocks.
+        workers: The number of parallel workers for FFT computation. Must be a positive integer.
 
     Returns:
         The correlation maps with the same shape as input frames.
@@ -231,11 +233,14 @@ def apply_spatial_high_pass(data: NDArray[np.float32], window: int) -> NDArray[n
 
     Args:
         data: Recording frames with shape (num_frames, height, width) or a single image with shape (height, width).
-        window: The window size for the low-pass component to subtract.
+        window: The window size for the low-pass component to subtract. Must be a positive even integer.
 
     Returns:
         The high-pass filtered data. A 2D input returns a 2D array, and a 3D input returns a 3D array of the
         same shape.
+
+    Raises:
+        ValueError: If the window size is not a positive even integer.
     """
     # Promotes 2D input to 3D for uniform processing. The flag records the promotion so that the output drops only an
     # axis this function added, leaving a genuine single-frame stack three-dimensional.
@@ -286,7 +291,8 @@ def compute_upsampling_kernel(padding: int, subpixel: int = 10) -> tuple[NDArray
 
     Returns:
         A tuple of (kernel_matrix, upsampled_point_count) where kernel_matrix is the upsampling transformation
-        matrix and upsampled_point_count is the number of points in the upsampled grid.
+        matrix and upsampled_point_count is the number of samples along one axis of the
+        upsampled grid, so the square grid it indexes holds that count squared points.
     """
     low_resolution_coordinates = np.arange(-padding, padding + 1, dtype=np.float64)
 

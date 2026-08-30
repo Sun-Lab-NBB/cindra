@@ -125,7 +125,7 @@ def compute_rigid_offsets(
             correlation surface the quadrant rearrangement reads.
         temporal_smoothing_sigma: The standard deviation for temporal Gaussian smoothing of correlation
             maps. If 0, no smoothing is applied.
-        workers: The number of parallel workers for FFT computation. Use -1 for all available cores.
+        workers: The number of parallel workers for FFT computation. Must be a positive integer.
 
     Returns:
         A tuple of (y_offsets, x_offsets, correlation_maxima) arrays with shape (num_frames,). The offsets
