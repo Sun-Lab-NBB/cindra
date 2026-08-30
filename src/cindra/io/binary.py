@@ -1,4 +1,6 @@
-"""Provides assets for reading and writing image data stored in cindra binary (.bin) files."""
+"""Provides assets for reading and writing image data stored in cindra binary (.bin) files, along with the phase
+markers that flag a binary as mid-binarization or mid-registration.
+"""
 
 from __future__ import annotations
 

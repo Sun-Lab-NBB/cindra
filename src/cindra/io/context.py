@@ -204,7 +204,7 @@ def resolve_single_recording_contexts(
             io_data.registered_binary_path_channel_2 = plane_output_path / CHANNEL_2_BINARY_FILENAME
 
         if acquisition.is_mroi:
-            # Computes ROI index and physical plane index from the virtual plane index. Virtual planes are organized
+            # Computes the ROI index from the virtual plane index. Virtual planes are organized
             # as: ROI 0 plane 0, ROI 0 plane 1, ..., ROI 1 plane 0, ROI 1 plane 1, etc.
             roi_index = virtual_plane_index // acquisition.plane_number
             io_data.mroi_lines = acquisition.roi_lines[roi_index]

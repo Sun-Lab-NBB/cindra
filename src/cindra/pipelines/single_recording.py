@@ -516,7 +516,8 @@ def _resolve_second_channel_binary(context: RuntimeContext) -> Path | None:
         context: The plane context whose second channel binary is resolved.
 
     Returns:
-        The path of the plane's second channel binary, or None when the recording declares a single channel.
+        The path of the plane's second channel binary, or None when the recording declares a single channel or the
+        plane record carries no output path.
     """
     if context.acquisition.channel_number <= 1:
         return None
@@ -535,8 +536,8 @@ def _clear_downstream_data(output_root: Path) -> None:
     Notes:
         The conversion replaces every plane binary of the recording, so the offsets, images, traces, and combined
         dataset that earlier runs measured describe frames that no longer exist. Removing the registration reference
-        image is what makes the registration stage run again, because that image is the marker it reads before
-        skipping an already registered plane.
+        image is what makes the registration stage run again, because that image is one of the three arrays it reads
+        before skipping an already registered plane, alongside both rigid offset arrays.
 
         The combined outputs belong to the recording rather than to one plane, and the combination stage merges every
         plane into them, so rebuilding any plane voids them. The completion marker goes first, which leaves an

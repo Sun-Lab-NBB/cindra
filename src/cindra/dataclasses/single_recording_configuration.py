@@ -200,12 +200,14 @@ class FileIO:
 
     repeat_binarization: bool = False
     """Determines whether to repeat the binarization step when processing. When True, the pipeline re-runs TIFF to
-    binary conversion using the data_path from the current configuration, even if binary files already exist. This
-    allows raw data to be relocated or updated without affecting other pipeline states. When False (default), an
-    existing binary is reused when it carries no write marker, is sized to the frame geometry recorded for its plane,
-    and is accompanied by the second channel binary a two-channel recording declares. Binarization refuses a binary that
-    fails any of those checks and names this parameter as the remedy, because enabling it rebuilds every plane binary
-    from the source TIFF files."""
+    binary conversion using the data_path from the current configuration, even if binary files already exist. A
+    conversion replaces every plane binary, so it first deletes the registration, detection, and extraction outputs of
+    every plane directory the output root holds, the recording's combined dataset, and the ROI selections every
+    multi-recording dataset holds for this recording. It also resets each plane's recorded runtime sections. When
+    False (default), an existing binary is reused when it carries no write marker, is sized to the frame geometry
+    recorded for its plane, and is accompanied by the second channel binary a two-channel recording declares.
+    Binarization refuses a binary that fails any of those checks and names this parameter as the remedy, because
+    enabling it rebuilds every plane binary from the source TIFF files."""
 
 
 @dataclass(slots=True)
