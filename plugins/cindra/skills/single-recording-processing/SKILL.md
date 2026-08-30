@@ -25,7 +25,7 @@ execution manifests, dispatch jobs, monitor progress, and hand off to downstream
 - Error routing to appropriate upstream skills
 
 **Does not cover:**
-- Configuration parameters, tuning guidance, or config file creation (see `/single-recording-configuration`)
+- Configuration parameters, tuning guidance, or configuration file creation (see `/single-recording-configuration`)
 - Output data formats, array shapes, dtypes, file references, or data interpretation (see `/single-recording-results`)
 - Input data format, TIFF requirements, or acquisition parameters (see `/acquisition-data-preparation`)
 - Multi-recording processing workflow (see `/multi-recording-processing`)
@@ -148,9 +148,9 @@ against the verification checklist at the end of this skill, before calling any 
    `combining`, or `completed`. If validation fails, invoke `/acquisition-data-preparation` to resolve issues first.
 
 3. **Configure**: Ask the user if they have an existing template configuration file. If not, invoke
-   `/single-recording-configuration` to create one. Template configs are reusable across recordings and live at
+   `/single-recording-configuration` to create one. Template configurations are reusable across recordings and live at
    user-chosen locations (e.g., `/Data/CA1_GCaMP6f_SD.yaml`), so pass the same template path for every recording that
-   shares parameters. Do NOT create per-recording config copies: the prepare tool saves resolved copies as
+   shares parameters. Do NOT create per-recording configuration copies: the prepare tool saves resolved copies as
    `cindra/configuration.yaml` inside each recording's output root, preserving the original template.
 
 4. **Confirm output directory**: Ask the user where processed data should be written. Each recording requires an
@@ -212,9 +212,8 @@ argument `output_root` and take the parent of the `cindra/` folder. That path eq
 to the prepare tool and the per-entry `output_root` it returns, never the `raw_data_paths` entry that keys the same
 recording. This matters on a separate-output layout where the two roots differ. `get_recording_status_tool` and
 `clean_processing_output_tool` resolve `cindra/` directly under the given path with NO fallback, so feeding the raw-data
-path makes `get_recording_status_tool` report `not_started`, a silent false negative, while
-`clean_processing_output_tool` errors with "No cindra directory found at" when the path exists and "Output root not
-found" when it does not.
+path makes `get_recording_status_tool` report `not_started`, a silent false negative. `clean_processing_output_tool`
+errors with "No cindra directory found at" when the path exists and "Output root not found" when it does not.
 `verify_single_recording_output_tool` also searches recursively for `configuration.yaml`, so it may still pass through
 that fallback when fed the wrong root, and the two then disagree. Always reuse the `output_root` captured from the
 prepare manifest for status, verify, and clean.

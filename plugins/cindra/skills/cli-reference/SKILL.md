@@ -113,11 +113,11 @@ so call the tool and hand over the command only while the server is down.
 
 ### `cindra configure`
 
-| Short | Long            | Type                                                        | Default | Status   | Effect                                       |
-|-------|-----------------|-------------------------------------------------------------|---------|----------|----------------------------------------------|
+| Short | Long            | Type                                                                         | Default | Status   | Effect                                       |
+|-------|-----------------|------------------------------------------------------------------------------|---------|----------|----------------------------------------------|
 | `-p`  | `--pipeline`    | case-insensitive choice of `single-recording`, `sd`, `multi-recording`, `md` | none    | required | Selects the pipeline to configure            |
-| `-od` | `--output-path` | existing directory                                          | none    | required | Names the directory to write into            |
-| `-n`  | `--name`        | string                                                      | `None`  | optional | Names the file, defaulting per pipeline type |
+| `-od` | `--output-path` | existing directory                                                           | none    | required | Names the directory to write into            |
+| `-n`  | `--name`        | string                                                                       | `None`  | optional | Names the file, defaulting per pipeline type |
 
 Omitting `-n` writes `cindra_sd_conf.yaml` for a single-recording pipeline and `cindra_md_conf.yaml` for a
 multi-recording one. The name keeps every component it carries and gains the `.yaml` suffix, so `-n mouse5_2024.03.01`

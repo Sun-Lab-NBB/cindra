@@ -317,7 +317,7 @@ override semantics of both parameters, and the `resource_classes` mapping the ex
 ### Planning before dispatch
 
 Four tools answer what a batch will do before it runs. `get_pipeline_job_universe_tool` reports which jobs can run right
-now, `size_pipeline_jobs_tool` reports the cores and memory each job holds, `check_threading_runtime_tool` reports
+now, and `size_pipeline_jobs_tool` reports the cores and memory each job holds. `check_threading_runtime_tool` reports
 whether this host carries the numeric threading layer its platform needs, and `get_recording_status_tool` reads the
 recorded outcomes once a batch has been prepared.
 
@@ -357,7 +357,7 @@ Summary: 1/2 datasets complete | 2/4 recordings extracted | 0 failed
 
 ### Preparation errors
 
-| Error Message                                    | Resolution                               |
+| Error pattern                                    | Resolution                               |
 |--------------------------------------------------|------------------------------------------|
 | "At least one dataset configuration is required" | Provide dataset configurations           |
 | "Configuration not found"                        | Invoke `/multi-recording-configuration`  |
@@ -395,7 +395,7 @@ tracker.
 
 ### Execution errors
 
-| Error Message                            | Resolution                                   |
+| Error pattern                            | Resolution                                   |
 |------------------------------------------|----------------------------------------------|
 | "An execution session is already active" | Wait for current session or cancel first     |
 | "Job ID not found in tracker"            | Re-prepare the batch to regenerate manifests |
@@ -444,18 +444,21 @@ the previously RUNNING jobs leave RUNNING before starting a new session.
 ## Verification checklist
 
 ```text
-Multi-Recording Processing Workflow:
+Multi-Recording Processing Workflow, tool-settled (run `get_recording_status_tool`, `resolve_dataset_name_tool`, then
+`get_processing_jobs_status_tool`):
 - [ ] MCP server connected (if not, invoke `/cindra-mcp-environment-setup`)
 - [ ] All recordings confirmed as single-recording complete (status: completed)
-- [ ] Recordings grouped into datasets
 - [ ] Dataset names resolved via `resolve_dataset_name_tool`
+- [ ] Batch prepared or full pipeline executed
+- [ ] Status monitored until all datasets complete or fail
+
+Multi-Recording Processing Workflow, reader-judged:
+- [ ] Recordings grouped into datasets
 - [ ] Template configuration confirmed or created via `/multi-recording-configuration` (reusable across datasets)
 - [ ] Share of the machine to dedicate to processing confirmed with user
-- [ ] Batch prepared or full pipeline executed
 - [ ] `path_conflicts` read from the prepare response and every named dataset reported to the user
 - [ ] Every `warnings` entry from `reset_processing_phases_tool` acted on before dispatching the reset phase
 - [ ] Parameter-change re-run cleaned the `discovery` phase or set the matching repeat flag
-- [ ] Status monitored until all datasets complete or fail
 - [ ] Failed datasets routed to appropriate skill (see Error routing)
 - [ ] Successful datasets verified via `/multi-recording-results`
 ```

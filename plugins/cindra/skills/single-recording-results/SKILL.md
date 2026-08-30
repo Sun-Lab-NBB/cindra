@@ -9,8 +9,7 @@ user-invocable: true
 
 # Single-recording results data reference
 
-The single-recording pipeline writes its results under each recording's `cindra/` output directory, which holds the
-combined arrays at its root and one `plane_{index}/` directory per virtual plane.
+Documents the output data the single-recording pipeline writes and the MCP tools that verify and query it.
 
 ---
 
@@ -248,7 +247,7 @@ renames it into place. The metadata file therefore doubles as an atomic completi
 payload it describes is missing or partially written.
 
 For every file, array shape, dtype, NPZ key, and data type convention the pipeline produces, see
-[references/output-formats.md](references/output-formats.md).
+[output-formats.md](references/output-formats.md).
 
 ---
 
