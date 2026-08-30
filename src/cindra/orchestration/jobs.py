@@ -71,15 +71,12 @@ class PipelinePhase:
 
     job_name: str
     """The tracker job name that identifies the phase."""
-
     per_specifier: bool
     """Determines whether the phase expands into one job per specifier instead of a single job."""
-
     prerequisite: str | None
     """The job name of the phase that must succeed before this phase runs, or None for the pipeline's first phase."""
-
     prerequisite_scope: PrerequisiteScope
-    """Determines which jobs of the preceding phase this phase's jobs depend on."""
+    """Determines which jobs of the preceding phase gate this phase's jobs."""
 
 
 SINGLE_RECORDING_PHASES: tuple[PipelinePhase, ...] = (
@@ -130,7 +127,7 @@ PER_PLANE_JOB_NAMES: frozenset[str] = frozenset(
     str(phase.job_name) for phase in SINGLE_RECORDING_PHASES if phase.per_specifier
 )
 """The single-recording job names that expand into one job per imaging plane, each carrying a 'plane_{index}'
-specifier. Derived from the phase model, so that adding a per-plane phase updates it automatically."""
+specifier."""
 
 
 def resolve_single_recording_jobs(plane_count: int) -> list[tuple[str, str]]:
@@ -330,10 +327,11 @@ def validate_job_prerequisites(
 ) -> str | None:
     """Validates that a job's prerequisites either already succeeded or arrive with the same submission.
 
-    The tracker is the authoritative source for phase completion. Files on disk may be corrupt or incomplete even if
-    they exist, and the tracker only marks SUCCEEDED when processing is confirmed complete. A prerequisite that is
-    submitted alongside the dependent job passes validation because the execution manager admits the dependent job only
-    after that prerequisite actually succeeds.
+    Notes:
+        The tracker is the authoritative source for phase completion. Files on disk may be corrupt or incomplete even if
+        they exist, and the tracker only marks SUCCEEDED when processing is confirmed complete. A prerequisite that is
+        submitted alongside the dependent job passes validation because the execution manager admits the dependent job
+        only after that prerequisite actually succeeds.
 
     Args:
         registry: The point-in-time job registry of the tracker that owns the target job.

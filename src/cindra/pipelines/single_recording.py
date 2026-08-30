@@ -234,8 +234,6 @@ def register_recording_plane(
 
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
-
-    # Runs registration (motion correction) and the registration quality metrics computation.
     register_plane(context=context, workers=workers, device=device)
 
     if registration_skipped:
@@ -361,7 +359,7 @@ def save_combined_data(contexts: list[RuntimeContext]) -> None:
 
     output_path = resolve_output_path(output_root=root_path)
     combined_data.save(root_path=output_path)
-    console.echo(message=f"Combined data saved to: {output_path}", level=LogLevel.SUCCESS)
+    console.echo(message=f"Combined data saved to: {output_path}.", level=LogLevel.SUCCESS)
 
 
 def _validate_binaries_are_unmarked(contexts: list[RuntimeContext]) -> None:

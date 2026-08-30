@@ -29,12 +29,11 @@ def _load_single_recording_runtime(plane_directory: Path) -> SingleRecordingRunt
     """Loads a SingleRecordingRuntimeData instance and corrects stale paths if the dataset was relocated.
 
     When a dataset is moved between machines, the paths cached in the plane's runtime YAML no longer match the actual
-    directory structure. This function detects the mismatch by comparing the cached output_path to the known-correct
-    plane directory, computes a prefix substitution, relocates all cached paths and persists the corrected paths to
-    disk.
+    directory structure. Detects the mismatch by comparing the cached output_path to the known-correct plane directory,
+    computes a prefix substitution, relocates all cached paths and persists the corrected paths to disk.
 
     Args:
-        plane_directory: The actual on-disk path to the plane directory (e.g., ``cindra/plane_0``).
+        plane_directory: The actual on-disk path to the plane directory.
 
     Returns:
         A SingleRecordingRuntimeData instance whose scalar fields and cached paths are resolved against the correct
@@ -52,7 +51,6 @@ def _load_single_recording_runtime(plane_directory: Path) -> SingleRecordingRunt
         # Reloads the runtime from the corrected YAML so that arrays are resolved against the new paths.
         runtime = SingleRecordingRuntimeData.load(output_path=plane_directory)
 
-    # Arrays are loaded on demand by each consumer (pipeline functions, GUI factory methods).
     return runtime
 
 
@@ -90,8 +88,8 @@ def _relocate_cross_recording_path(path: Path, old_prefix: Path, new_prefix: Pat
     Multi-recording datasets store output paths for all recordings in each recording's runtime data. When the entry
     recording's prefix is used for relocation, paths belonging to other recordings fail ``relative_to`` because they
     contain a different recording-specific directory segment (e.g., a different timestamp-based recording directory).
-    This function handles that case by splitting the cross-recording path at the same depth as the entry prefix,
-    substituting the differing recording-specific segments into the new prefix, and reattaching the trailing suffix.
+    Handles that case by splitting the cross-recording path at the same depth as the entry prefix, substituting the
+    differing recording-specific segments into the new prefix, and reattaching the trailing suffix.
 
     Args:
         path: The stale cross-recording path to relocate.
@@ -218,8 +216,8 @@ class RuntimeContext:
     def save_shared(self) -> None:
         """Saves shared configuration and acquisition parameters to the root output directory.
 
-        This method derives the root path from self.configuration.file_io.output_path and creates the cindra
-        subdirectory if it does not exist.
+        Derives the root path from self.configuration.file_io.output_path and creates the cindra subdirectory if it does
+        not exist.
 
         Raises:
             ValueError: If output_path is not configured in the configuration.
@@ -239,8 +237,6 @@ class RuntimeContext:
 
     def save_runtime(self) -> None:
         """Saves this plane's runtime data to its output directory.
-
-        This method uses self.runtime.io.output_path as the save location, which is plane-specific (e.g., plane_0/).
 
         Raises:
             ValueError: If output_path is not set in the runtime IOData.
@@ -348,8 +344,6 @@ class MultiRecordingRuntimeContext:
     def save_shared(self) -> None:
         """Saves the shared configuration to the main recording's output directory.
 
-        This method saves the immutable configuration to the first recording's multi_recording directory.
-
         Raises:
             ValueError: If output_path is not set in the runtime data.
         """
@@ -367,8 +361,6 @@ class MultiRecordingRuntimeContext:
 
     def save_runtime(self) -> None:
         """Saves this recording's runtime data to its output directory.
-
-        This method uses self.runtime.output_path as the save location. This directory is recording-specific.
 
         Raises:
             ValueError: If output_path is not set in the runtime data.

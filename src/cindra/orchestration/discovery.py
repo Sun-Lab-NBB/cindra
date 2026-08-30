@@ -33,7 +33,7 @@ class SingleRecordingJobs:
     """Describes the single-recording jobs one recording declares and the subset whose inputs already exist."""
 
     output_root: Path
-    """The output root the universe was resolved against."""
+    """The output root the universe resolution used."""
     plane_count: int
     """The virtual imaging planes the recording holds, which is zero when its parameters were not found."""
     universe: tuple[tuple[str, str], ...] = ()
@@ -80,7 +80,7 @@ def resolve_single_recording_job_universe(output_root: Path, data_path: Path | N
         processing stage writes, which are the arrays the combination stage concatenates.
 
     Args:
-        output_root: The output root the recording was configured with.
+        output_root: The recording's configured output root.
         data_path: The raw imaging directory, consulted only when the recording carries no output yet.
 
     Returns:

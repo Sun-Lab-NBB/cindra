@@ -41,14 +41,10 @@ def discover_multi_recording_cells(configuration: MultiRecordingConfiguration, *
     # otherwise run their matrix work single-threaded. Invoked outside that engine, the same code would size those
     # backends to the whole host rather than to the job.
     with threadpool_limits(limits=workers):
-        # Respects the repeat_selection flag to skip recordings with existing selections.
         select_recording_rois(contexts=contexts)
 
-        # Uses diffeomorphic demons registration to align every recording to a shared visual space.
         register_recordings(contexts=contexts, workers=workers)
 
-        # Clusters ROIs across recordings in the shared deformed visual space and generates template masks for ROIs
-        # that can be reliably identified across recordings.
         track_rois_across_recordings(contexts=contexts)
 
         project_templates_to_recordings(contexts=contexts, workers=workers)
@@ -86,11 +82,11 @@ def extract_multi_recording_fluorescence(
 
     Raises:
         ValueError: If the target recording_id does not match any resolved recording context.
-        RuntimeError: If the combined single-recording data is not loaded, if backward-transformed ROI statistics
-            are not available, indicating the discovery phase has not completed, if an interrupted binarization or
-            registration left one of the recording's plane binaries marked, if a recording directory holds multiple
-            combined_metadata.npz files, if the recording paths do not contain unique identifying components, or if a
-            resolved recording identifier contains a colon.
+        RuntimeError: If the combined single-recording data is not loaded, if backward-transformed ROI statistics are
+            not available, indicating the discovery phase has not completed, or if an interrupted binarization or
+            registration left one of the recording's plane binaries marked. It is also raised when a recording directory
+            holds multiple combined_metadata.npz files, when the recording paths do not contain unique identifying
+            components, or when a resolved recording identifier contains a colon.
         FileNotFoundError: If the recording's multi_recording_runtime_data.yaml was not written by an earlier
             bootstrap step, or if no combined_metadata.npz file is found in a recording directory.
     """

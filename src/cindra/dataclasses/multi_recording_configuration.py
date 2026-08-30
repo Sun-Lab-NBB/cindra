@@ -76,12 +76,11 @@ class ROISelection:
 
     probability_threshold_channel_2: float | None = None
     """The minimum required cell probability score for channel 2 ROIs. When set to None (default), channel 2 ROIs use
-    the same probability_threshold as channel 1. Set this to a different value when channel 2 ROIs have different
-    classification characteristics."""
+    the same probability_threshold as channel 1."""
 
     maximum_size_channel_2: int | None = None
     """The maximum allowed ROI size for channel 2, in pixels. When set to None (default), channel 2 ROIs use the same
-    maximum_size as channel 1. Set this to a different value when channel 2 ROIs have different size characteristics."""
+    maximum_size as channel 1."""
 
     mroi_region_margin_channel_2: int | None = None
     """The minimum required distance from MROI region borders for channel 2 ROIs, in pixels. When set to None (default),
@@ -210,6 +209,6 @@ class MultiRecordingConfiguration(YamlConfig):
             file_path: The path to the .yaml configuration file.
 
         Returns:
-            A MultiRecordingConfiguration instance populated with the loaded data.
+            The multi-recording configuration the YAML file stores.
         """
         return cls.from_yaml(file_path=file_path)

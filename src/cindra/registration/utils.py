@@ -290,9 +290,9 @@ def compute_upsampling_kernel(padding: int, subpixel: int = 10) -> tuple[NDArray
         subpixel: The subpixel resolution factor (e.g., 10 means 0.1 pixel precision). Defaults to 10.
 
     Returns:
-        A tuple of (kernel_matrix, upsampled_point_count) where kernel_matrix is the upsampling transformation
-        matrix and upsampled_point_count is the number of samples along one axis of the
-        upsampled grid, so the square grid it indexes holds that count squared points.
+        A tuple of (kernel_matrix, upsampled_point_count) where kernel_matrix is the upsampling transformation matrix
+        and upsampled_point_count is the number of samples along one axis of the upsampled grid, so the square grid it
+        indexes holds that count squared points.
     """
     low_resolution_coordinates = np.arange(-padding, padding + 1, dtype=np.float64)
 
