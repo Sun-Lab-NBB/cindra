@@ -30,9 +30,13 @@ if TYPE_CHECKING:
     from cindra.dataclasses import RuntimeContext, SingleRecordingConfiguration
     from cindra.registration.batch import BatchRegistrationResult
 
-_SMOOTHING_SIGMA = 1.15
-_BLOCK_SIZE = (64, 64)
-_BATCH_PARAMETERS = {
+_SMOOTHING_SIGMA: float = 1.15
+"""The Gaussian smoothing sigma that shapes the reference kernels and the edge taper of these tests."""
+
+_BLOCK_SIZE: tuple[int, int] = (64, 64)
+"""The block extent, in pixels, that divides each frame for the nonrigid passes of these tests."""
+
+_BATCH_PARAMETERS: dict[str, Any] = {
     "normalization_minimum": -np.inf,
     "normalization_maximum": np.inf,
     "bidirectional_phase_offset": 0,
@@ -44,6 +48,7 @@ _BATCH_PARAMETERS = {
     "maximum_block_offset": 5.0,
     "one_photon_enabled": False,
 }
+"""The per-pass registration parameters that shape every batch these tests register."""
 
 # Every worker process that reaches a device builds its own CUDA context, which costs hundreds of megabytes of device
 # memory apiece. Holding the device tests to one worker keeps a wide parallel run from filling the card with contexts,
@@ -64,7 +69,9 @@ class TestBufferReuseContract:
         offset array backed by a staging buffer the next batch refills would corrupt the recorded offsets.
         """
         movie, reference = _build_shifted_movie(frame_count=400, height=128, width=128)
-        backend = GpuRegistrationBackend(reference_data=_build_reference_data(reference, nonrigid=True), device=0)
+        backend = GpuRegistrationBackend(
+            reference_data=_build_reference_data(reference_image=reference, nonrigid=True), device=0
+        )
 
         def batches() -> Iterator[NDArray[np.int16]]:
             for start in range(0, 400, 100):
@@ -100,7 +107,7 @@ class TestDeviceParity:
     def test_offsets_match_the_cpu_backend(self, height: int, width: int, *, nonrigid: bool) -> None:
         """Verifies the device resolves the same quantized offsets the host resolves, at even and odd widths."""
         movie, reference = _build_shifted_movie(frame_count=64, height=height, width=width)
-        reference_data = _build_reference_data(reference, nonrigid=nonrigid)
+        reference_data = _build_reference_data(reference_image=reference, nonrigid=nonrigid)
 
         host = _register_frames_batch(
             reference_data=reference_data,
@@ -123,7 +130,9 @@ class TestDeviceParity:
     def test_narrow_input_resolves_the_same_offsets_as_a_wide_one(self) -> None:
         """Verifies a batch supplied in the stored width resolves what the widened batch resolves."""
         movie, reference = _build_shifted_movie(frame_count=64, height=128, width=128)
-        backend = GpuRegistrationBackend(reference_data=_build_reference_data(reference, nonrigid=False), device=0)
+        backend = GpuRegistrationBackend(
+            reference_data=_build_reference_data(reference_image=reference, nonrigid=False), device=0
+        )
 
         narrow = _register_single_batch(backend=backend, frames=movie, nonrigid_enabled=False, **_BATCH_PARAMETERS)
         wide = _register_single_batch(
@@ -239,7 +248,7 @@ class TestPreprocessingPaths:
     def test_one_photon_preprocessing_matches_the_cpu_backend(self) -> None:
         """Verifies the device reproduces the spatial smoothing and high-pass filtering of the one-photon path."""
         movie, reference = _build_shifted_movie(frame_count=32, height=128, width=128)
-        reference_data = _build_reference_data(reference, nonrigid=True)
+        reference_data = _build_reference_data(reference_image=reference, nonrigid=True)
         parameters = _build_parameters(one_photon_enabled=True, pre_smoothing_sigma=4.0, spatial_highpass_window=42)
 
         host = _register_frames_batch(
@@ -260,7 +269,7 @@ class TestPreprocessingPaths:
     def test_temporal_smoothing_matches_the_cpu_backend(self) -> None:
         """Verifies the device reproduces the temporal smoothing applied to the correlation maps."""
         movie, reference = _build_shifted_movie(frame_count=32, height=128, width=128)
-        reference_data = _build_reference_data(reference, nonrigid=False)
+        reference_data = _build_reference_data(reference_image=reference, nonrigid=False)
         parameters = _build_parameters(temporal_smoothing_sigma=1.5)
 
         host = _register_frames_batch(
@@ -282,7 +291,7 @@ class TestPreprocessingPaths:
     def test_bidirectional_correction_matches_the_cpu_backend(self, offset: int) -> None:
         """Verifies the device reproduces the bidirectional scan correction for either shift direction."""
         movie, reference = _build_shifted_movie(frame_count=32, height=128, width=128)
-        reference_data = _build_reference_data(reference, nonrigid=False)
+        reference_data = _build_reference_data(reference_image=reference, nonrigid=False)
         parameters = _build_parameters(bidirectional_phase_offset=offset)
 
         host = _register_frames_batch(
@@ -305,7 +314,7 @@ class TestPreprocessingPaths:
         generator = np.random.default_rng(19)
         movie = generator.integers(low=100, high=1000, size=(32, 128, 128)).astype(np.int16)
         reference = movie[0].astype(np.float32)
-        reference_data = _build_reference_data(reference, nonrigid=True)
+        reference_data = _build_reference_data(reference_image=reference, nonrigid=True)
 
         # A threshold no block clears drives every block through all three smoothing levels.
         parameters = _build_parameters(signal_to_noise_threshold=1e6)
@@ -327,13 +336,13 @@ class TestPreprocessingPaths:
 
 
 class TestPrecomputedOffsets:
-    """Tests the entry point the secondary channel registers through."""
+    """Tests the entry point that registers the secondary channel."""
 
     @pytest.mark.parametrize("nonrigid", [False, True])
     def test_application_matches_the_cpu_backend(self, *, nonrigid: bool) -> None:
         """Verifies the device applies precomputed offsets the way the host kernels apply them."""
         movie, reference = _build_shifted_movie(frame_count=32, height=128, width=128)
-        reference_data = _build_reference_data(reference, nonrigid=nonrigid)
+        reference_data = _build_reference_data(reference_image=reference, nonrigid=nonrigid)
         generator = np.random.default_rng(5)
         y_offsets = generator.integers(low=-4, high=5, size=32).astype(np.int32)
         x_offsets = generator.integers(low=-4, high=5, size=32).astype(np.int32)
@@ -373,7 +382,9 @@ class TestPrecomputedOffsets:
     def test_missing_block_offsets_are_refused(self) -> None:
         """Verifies that enabling nonrigid application without block offsets reports the missing offsets."""
         movie, reference = _build_shifted_movie(frame_count=8, height=128, width=128)
-        backend = GpuRegistrationBackend(reference_data=_build_reference_data(reference, nonrigid=True), device=0)
+        backend = GpuRegistrationBackend(
+            reference_data=_build_reference_data(reference_image=reference, nonrigid=True), device=0
+        )
         expected_message = (
             "Unable to apply precomputed registration offsets on the GPU backend for device 0. Nonrigid registration "
             "is enabled, but the caller supplied no nonrigid block offsets."
@@ -397,13 +408,17 @@ class TestBackendGuards:
     def test_repr_names_the_device_and_the_geometry(self) -> None:
         """Verifies the representation carries the device index and the frame geometry."""
         _, reference = _build_shifted_movie(frame_count=4, height=128, width=128)
-        backend = GpuRegistrationBackend(reference_data=_build_reference_data(reference, nonrigid=False), device=0)
+        backend = GpuRegistrationBackend(
+            reference_data=_build_reference_data(reference_image=reference, nonrigid=False), device=0
+        )
         assert repr(backend) == "GpuRegistrationBackend(device=0, frame_height=128, frame_width=128, nonrigid=False)"
 
     def test_unsupported_batch_dtype_is_refused(self) -> None:
         """Verifies a batch carrying neither storage nor arithmetic width reports the widths the backend accepts."""
         movie, reference = _build_shifted_movie(frame_count=8, height=128, width=128)
-        backend = GpuRegistrationBackend(reference_data=_build_reference_data(reference, nonrigid=False), device=0)
+        backend = GpuRegistrationBackend(
+            reference_data=_build_reference_data(reference_image=reference, nonrigid=False), device=0
+        )
         expected_message = (
             "Unable to stage a frame batch for the GPU registration backend on device 0. The batch dtype must be "
             "int16 or float32, but got float64."
@@ -416,7 +431,9 @@ class TestBackendGuards:
     def test_nonrigid_without_block_reference_data_is_refused(self) -> None:
         """Verifies that requesting nonrigid registration against a rigid reference reports the missing blocks."""
         movie, reference = _build_shifted_movie(frame_count=8, height=128, width=128)
-        backend = GpuRegistrationBackend(reference_data=_build_reference_data(reference, nonrigid=False), device=0)
+        backend = GpuRegistrationBackend(
+            reference_data=_build_reference_data(reference_image=reference, nonrigid=False), device=0
+        )
         expected_message = (
             "Unable to run nonrigid registration on the GPU backend for device 0. The reference data the backend "
             "holds carries no block structure, so nonrigid registration was requested with a reference computed for "
@@ -430,7 +447,9 @@ class TestBackendGuards:
     def test_odd_smoothing_window_is_refused(self) -> None:
         """Verifies the spatial smoothing refuses a window the integral-image differencing cannot express."""
         movie, reference = _build_shifted_movie(frame_count=8, height=128, width=128)
-        backend = GpuRegistrationBackend(reference_data=_build_reference_data(reference, nonrigid=False), device=0)
+        backend = GpuRegistrationBackend(
+            reference_data=_build_reference_data(reference_image=reference, nonrigid=False), device=0
+        )
         expected_message = (
             "Unable to apply spatial smoothing on the GPU backend. Filter window must be a positive even integer, "
             "but got 41."
@@ -458,7 +477,7 @@ class TestRemainingBranches:
     def test_one_photon_without_pre_smoothing_matches_the_cpu_backend(self) -> None:
         """Verifies the one-photon path runs the high-pass filter alone when no pre-smoothing is configured."""
         movie, reference = _build_shifted_movie(frame_count=16, height=128, width=128)
-        reference_data = _build_reference_data(reference, nonrigid=False)
+        reference_data = _build_reference_data(reference_image=reference, nonrigid=False)
         parameters = _build_parameters(one_photon_enabled=True, pre_smoothing_sigma=0.0)
 
         host = _register_frames_batch(
@@ -478,7 +497,9 @@ class TestRemainingBranches:
     def test_normalization_weights_are_reused_across_batches(self) -> None:
         """Verifies the high-pass normalization weights are derived once and reused for the rest of the pass."""
         movie, reference = _build_shifted_movie(frame_count=32, height=128, width=128)
-        backend = GpuRegistrationBackend(reference_data=_build_reference_data(reference, nonrigid=False), device=0)
+        backend = GpuRegistrationBackend(
+            reference_data=_build_reference_data(reference_image=reference, nonrigid=False), device=0
+        )
         parameters = _build_parameters(one_photon_enabled=True, pre_smoothing_sigma=0.0)
 
         results = list(backend.register_batches((movie[:16], movie[16:]), nonrigid_enabled=False, **parameters))
@@ -514,7 +535,9 @@ class TestRemainingBranches:
     def test_release_hands_the_device_allocations_back(self) -> None:
         """Verifies that releasing drops the staged buffers and the resident reference data."""
         _, reference = _build_shifted_movie(frame_count=8, height=128, width=128)
-        backend = GpuRegistrationBackend(reference_data=_build_reference_data(reference, nonrigid=False), device=0)
+        backend = GpuRegistrationBackend(
+            reference_data=_build_reference_data(reference_image=reference, nonrigid=False), device=0
+        )
 
         backend.release()
 
@@ -526,7 +549,9 @@ class TestRemainingBranches:
     def test_second_release_returns_without_touching_the_device(self) -> None:
         """Verifies that releasing twice is a no-op, so a finally block may cover an already-released backend."""
         _, reference = _build_shifted_movie(frame_count=8, height=128, width=128)
-        backend = GpuRegistrationBackend(reference_data=_build_reference_data(reference, nonrigid=False), device=0)
+        backend = GpuRegistrationBackend(
+            reference_data=_build_reference_data(reference_image=reference, nonrigid=False), device=0
+        )
 
         backend.release()
         backend.release()

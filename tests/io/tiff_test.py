@@ -16,7 +16,7 @@ from cindra.io.tiff import _read_tiff, _discover_tiff_files, resolve_source_fram
 
 
 class TestDiscoverTiffFiles:
-    """Tests _discover_tiff_files."""
+    """Tests the suffixes, ignored stems, and natural ordering of the flat TIFF scan, and the paths it rejects."""
 
     def test_discovers_tif_and_tiff_files(self, tmp_path: Path) -> None:
         """Verifies that both .tif and .tiff files are discovered."""
@@ -79,7 +79,7 @@ class TestDiscoverTiffFiles:
 
 
 class TestReadTiff:
-    """Tests _read_tiff."""
+    """Tests the frame batches the TIFF reader returns and the int16 conversion each source dtype receives."""
 
     def test_reads_batch_of_frames(self, tmp_path: Path) -> None:
         """Verifies that a batch of frames is correctly read from a multi-frame TIFF."""
@@ -251,7 +251,7 @@ class TestReadTiff:
 
 
 class TestSourceFrameGeometry:
-    """Tests resolve_source_frame_geometry."""
+    """Tests the frame shape and frame count the source scan derives, and the empty directory it rejects."""
 
     def test_geometry_follows_the_first_page_header(self, tmp_path: Path) -> None:
         """Verifies that the frame shape and element width are read from the first source file."""

@@ -93,7 +93,7 @@ class TestBinaryFileInit:
 
 
 class TestBinaryFileRepresentation:
-    """Tests BinaryFile.__repr__."""
+    """Tests the path, geometry, dtype, and open mode the representation reports, each moving on its own."""
 
     def test_representation_reports_the_resolved_path_and_the_open_mode(self, tmp_path: Path) -> None:
         """Verifies that the representation reports every geometry field the instance holds separately."""
@@ -455,8 +455,8 @@ class TestBinMovie:
         file_path = tmp_path / "test.bin"
         data = _create_test_binary(file_path=file_path)
 
-        # A bad_frames.npy naming every frame index produces this mask, which leaves no good frame to derive the batch
-        # stride from. The stride floors at one frame, and the below-threshold path then keeps the bad frames.
+        # A bad_frames.npy naming every frame index produces this mask, which leaves no good frame for deriving the
+        # batch stride. The stride floors at one frame, and the below-threshold path then keeps the bad frames.
         bad_frames = np.ones(_FRAME_COUNT, dtype=np.bool_)
 
         with BinaryFile(height=_FRAME_HEIGHT, width=_FRAME_WIDTH, file_path=file_path) as binary_file:
@@ -481,13 +481,12 @@ class TestBinMovie:
 
             assert result.dtype == np.float32
             assert result.shape == (1, _FRAME_HEIGHT, _FRAME_WIDTH)
-            # All frames have value 10, so the averaged bin should also be 10.
+            # A constant movie averages to that same constant regardless of where the bin boundaries land.
             np.testing.assert_allclose(actual=result[0], desired=10.0)
 
     def test_bin_movie_averages_correctly(self, tmp_path: Path) -> None:
         """Verifies that the binned output contains the correct mean of each bin's frames."""
         file_path = tmp_path / "test.bin"
-        # Creates 4 frames with known constant values for straightforward average verification.
         frame_count = 4
         data = np.empty((frame_count, _FRAME_HEIGHT, _FRAME_WIDTH), dtype=np.int16)
         data[0] = 10
@@ -499,7 +498,6 @@ class TestBinMovie:
         with BinaryFile(height=_FRAME_HEIGHT, width=_FRAME_WIDTH, file_path=file_path) as binary_file:
             result = binary_file.bin_movie(bin_size=2)
 
-            # Bin 0: mean(10, 20) = 15.0, Bin 1: mean(30, 40) = 35.0.
             assert result.shape[0] == 2
             np.testing.assert_allclose(actual=result[0], desired=15.0)
             np.testing.assert_allclose(actual=result[1], desired=35.0)
@@ -543,7 +541,7 @@ def _create_test_binary(file_path: Path, frame_count: int = _FRAME_COUNT) -> NDA
         frame_count: The number of frames to write into the binary file.
 
     Returns:
-        The int16 data array that was written to the file, with shape (frame_count, height, width).
+        The int16 data array written to the file, with shape (frame_count, height, width).
     """
     data = np.arange(frame_count * _FRAME_HEIGHT * _FRAME_WIDTH, dtype=np.int16).reshape(
         frame_count, _FRAME_HEIGHT, _FRAME_WIDTH

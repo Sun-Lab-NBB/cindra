@@ -16,7 +16,7 @@ from cindra.detection.detect_rois import (
 
 
 class TestExtendRoi:
-    """Tests extend_roi."""
+    """Tests the diamond-shaped cardinal-neighbor growth, its frame clipping, and its duplicate-free output."""
 
     def test_single_pixel_one_iteration(self) -> None:
         """Verifies that a single pixel expands to a diamond of 5 pixels after one iteration."""
@@ -61,7 +61,7 @@ class TestExtendRoi:
 
 
 class TestSubtractNeuropil:
-    """Tests _subtract_neuropil."""
+    """Tests the in-place per-frame high-pass that removes neuropil contamination from the detection input."""
 
     def test_in_place_modification(self) -> None:
         """Verifies that frames are modified in-place."""
@@ -86,7 +86,7 @@ class TestSubtractNeuropil:
 
 
 class TestConvolveSquare2d:
-    """Tests _convolve_square_2d."""
+    """Tests the box-mean scaling the uniform square kernel applies to each frame."""
 
     def test_output_shape(self) -> None:
         """Verifies that the output shape matches the input shape."""
@@ -112,14 +112,14 @@ class TestConvolveSquare2d:
 
 
 class TestCreateInitialSquare:
-    """Tests _create_initial_square."""
+    """Tests the centered seed patch, its frame clipping, and the unit normalization of its weights."""
 
     def test_centered_square(self) -> None:
         """Verifies that the output is a square patch centered at the given location."""
         y_pixels, x_pixels, _weights = _create_initial_square(
             center_y=10, center_x=10, square_size=5, height=30, width=30
         )
-        assert len(y_pixels) == 25  # 5x5
+        assert len(y_pixels) == 25
         assert np.all(y_pixels >= 8)
         assert np.all(y_pixels <= 12)
         assert np.all(x_pixels >= 8)
@@ -150,7 +150,7 @@ class TestCreateInitialSquare:
 
 
 class TestExtendMask:
-    """Tests _extend_mask."""
+    """Tests the eight-neighbor weight distribution and the frame bounds the mask growth respects."""
 
     def test_expands_in_all_directions(self) -> None:
         """Verifies that the mask expands into all 8 surrounding neighbors."""
@@ -186,7 +186,7 @@ class TestExtendMask:
 
 
 class TestEstimateSpatialScale:
-    """Tests _estimate_spatial_scale."""
+    """Tests the dominant scale index that the multiscale projection peaks select."""
 
     def test_returns_dominant_scale(self) -> None:
         """Verifies that the dominant scale is returned for a clear scale pattern."""
@@ -206,7 +206,7 @@ class TestEstimateSpatialScale:
 
 
 class TestComputeMultiscaleMasks:
-    """Tests _compute_multiscale_masks."""
+    """Tests that a full-resolution mask projects onto every requested scale with a non-empty coordinate set."""
 
     def test_output_list_lengths(self) -> None:
         """Verifies that the output lists have one entry per scale."""

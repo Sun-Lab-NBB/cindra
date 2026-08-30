@@ -930,7 +930,7 @@ class TestDeviceAssignment:
 
 
 class TestDeviceMemoryAdmission:
-    """Tests the free device memory the dispatcher holds a device-backed job against."""
+    """Tests the free device memory the dispatcher requires before it admits a device-backed job."""
 
     def test_job_without_an_estimate_is_admitted(self) -> None:
         """Verifies that a job carrying no device estimate takes its device without reading the runtime."""

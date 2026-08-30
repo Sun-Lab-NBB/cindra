@@ -23,7 +23,7 @@ _CLASSIFIED_LABELS: list[float] = [1.0, 0.0, 0.0, 0.0]
 
 @pytest.mark.xdist_group(name="gui_viewers")
 class TestInitialSelection:
-    """Tests the ROI selection that the viewer opens on."""
+    """Tests the ROI selection the viewer applies at startup."""
 
     def test_recording_without_any_classified_cell_opens_on_the_first_roi(
         self,

@@ -26,7 +26,7 @@ _FRAME_COUNT: int = 36
 
 
 class TestComputePcMetrics:
-    """Tests compute_pc_metrics."""
+    """Tests the quality metrics measured from the PC extremes and the binary preconditions they require."""
 
     def test_computes_metric_outputs(
         self,

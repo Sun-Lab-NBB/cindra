@@ -9,7 +9,7 @@ from cindra.detection.denoise import pca_denoise, _fit_and_reconstruct_block
 
 
 class TestFitAndReconstructBlock:
-    """Tests _fit_and_reconstruct_block."""
+    """Tests the truncated component reconstruction of one spatial block and the noise its rank limit removes."""
 
     def test_output_shape(self) -> None:
         """Verifies that the reconstructed block has the same shape as the input."""
@@ -59,7 +59,7 @@ class TestFitAndReconstructBlock:
 
 
 class TestPcaDenoise:
-    """Tests pca_denoise."""
+    """Tests the in-place block blend, its worker count validation, and its parallel-to-sequential agreement."""
 
     def test_in_place_modification(self) -> None:
         """Verifies that pca_denoise modifies frames in-place."""

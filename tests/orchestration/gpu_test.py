@@ -303,7 +303,12 @@ class TestFreeDeviceMemory:
 
 
 class _DeviceContext:
-    """Stands in for the CuPy device context manager, recording the index inside which a probe transforms."""
+    """Stands in for the CuPy device context manager, recording each device index a probe enters.
+
+    Attributes:
+        index: The CUDA device index the stand-in represents.
+        _recorded: The shared mapping that receives each entered device index.
+    """
 
     def __init__(self, index, recorded):
         self.index = index

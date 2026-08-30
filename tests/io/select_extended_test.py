@@ -19,7 +19,7 @@ from cindra.dataclasses import (
 
 
 class TestFilterRois:
-    """Tests _filter_rois."""
+    """Tests the ROI filters the multi-recording selection applies per channel, and the missing inputs it rejects."""
 
     def test_selects_all_rois_with_permissive_filters(self) -> None:
         """Verifies that all ROIs are selected when filters are permissive."""
@@ -71,7 +71,6 @@ class TestFilterRois:
 
         _filter_rois(runtime=runtime, configuration=configuration)
 
-        # Only ROIs at indices 0 and 2 have probability above 0.5.
         assert 0 in runtime.io.selected_roi_indices
         assert 2 in runtime.io.selected_roi_indices
         assert 1 not in runtime.io.selected_roi_indices
@@ -95,7 +94,6 @@ class TestFilterRois:
 
         channel_1_count, channel_2_count = _filter_rois(runtime=runtime, configuration=configuration)
 
-        # All channel 1 ROIs pass (all probabilities are 0.9).
         assert channel_1_count == roi_count
         # Channel 2: ROI at index 1 has probability 0.2 < 0.5, so excluded.
         assert channel_2_count == 2

@@ -12,7 +12,7 @@ from cindra.registration.bidirectional_phase_correction import (
 
 
 class TestComputeBidirectionalPhaseOffset:
-    """Tests compute_bidirectional_phase_offset."""
+    """Tests the odd-to-even line offset the scanner phase estimate recovers, including on odd-height frames."""
 
     def test_zero_offset_for_aligned_frames(self) -> None:
         """Verifies zero offset is returned when odd and even lines are aligned."""
@@ -56,7 +56,7 @@ class TestComputeBidirectionalPhaseOffset:
 
 
 class TestApplyBidirectionalPhaseCorrection:
-    """Tests apply_bidirectional_phase_correction."""
+    """Tests the in-place shift applied to odd scan lines alone, and the border it zeros in each direction."""
 
     def test_zero_offset_no_change(self) -> None:
         """Verifies zero offset produces no change to frames."""
@@ -69,18 +69,16 @@ class TestApplyBidirectionalPhaseCorrection:
     def test_positive_offset_shifts_odd_lines_right(self) -> None:
         """Verifies positive offset shifts odd lines to the right and zeros the left border."""
         frames = np.ones((1, 4, 10), dtype=np.float32)
-        frames[0, 1, :] = np.arange(10, dtype=np.float32)  # Populates the odd line.
+        frames[0, 1, :] = np.arange(10, dtype=np.float32)
         apply_bidirectional_phase_correction(frames=frames, bidirectional_phase_offset=3)
-        # Confirms the odd line shifted right by 3 with the left border zeroed.
         np.testing.assert_allclose(frames[0, 1, :3], 0.0)
         np.testing.assert_allclose(frames[0, 1, 3:], np.arange(7, dtype=np.float32))
 
     def test_negative_offset_shifts_odd_lines_left(self) -> None:
         """Verifies negative offset shifts odd lines to the left and zeros the right border."""
         frames = np.ones((1, 4, 10), dtype=np.float32)
-        frames[0, 1, :] = np.arange(10, dtype=np.float32)  # Populates the odd line.
+        frames[0, 1, :] = np.arange(10, dtype=np.float32)
         apply_bidirectional_phase_correction(frames=frames, bidirectional_phase_offset=-3)
-        # Confirms the odd line shifted left by 3 with the right border zeroed.
         np.testing.assert_allclose(frames[0, 1, :7], np.arange(start=3, stop=10, dtype=np.float32))
         np.testing.assert_allclose(frames[0, 1, 7:], 0.0)
 
@@ -103,8 +101,6 @@ class TestApplyBidirectionalPhaseCorrection:
         """Verifies the correction is applied consistently to all frames."""
         frames = np.ones((3, 6, 10), dtype=np.float32)
         apply_bidirectional_phase_correction(frames=frames, bidirectional_phase_offset=2)
-        # Confirms all frames are corrected identically.
         np.testing.assert_array_equal(frames[0], frames[1])
         np.testing.assert_array_equal(frames[1], frames[2])
-        # Confirms the left border of odd lines is zeroed.
         np.testing.assert_allclose(frames[:, 1::2, :2], 0.0)

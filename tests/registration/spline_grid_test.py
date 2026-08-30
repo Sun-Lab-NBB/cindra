@@ -29,7 +29,7 @@ _UNIFORM_BSPLINE_KNOTS: NDArray[np.float64] = np.arange(-3, 5, dtype=np.float64)
 
 
 class TestComputeCardinalCoefficients:
-    """Tests compute_cardinal_coefficients."""
+    """Tests the Catmull-Rom basis weights, their partition of unity, and the control points they interpolate."""
 
     @pytest.mark.parametrize("interpolation_factor", [0.0, 0.125, 0.25, 0.5, 0.75, 1.0])
     def test_matches_the_catmull_rom_basis_matrix(self, interpolation_factor: float) -> None:
@@ -63,7 +63,7 @@ class TestComputeCardinalCoefficients:
 
 
 class TestComputeBasisCoefficients:
-    """Tests _compute_basis_coefficients."""
+    """Tests the uniform cubic B-spline weights against scipy, including their unit sum and interval symmetry."""
 
     @pytest.mark.parametrize("interpolation_factor", [0.0, 0.2, 0.5, 0.75, 0.9])
     def test_matches_the_scipy_bspline_basis(self, interpolation_factor: float) -> None:
@@ -93,7 +93,7 @@ class TestComputeBasisCoefficients:
 
 
 class TestSampleGrid:
-    """Tests the _sample_grid kernel."""
+    """Tests the 4x4 knot neighborhood sum that turns the knot grid into a dense deformation field."""
 
     def test_matches_a_direct_four_by_four_basis_sum(self) -> None:
         """Verifies each sampled pixel equals the scipy-basis weighted sum over its own 4x4 knot neighborhood."""
@@ -211,7 +211,7 @@ class TestSplineGridInit:
 
 
 class TestSplineGridDeformationFields:
-    """Tests SplineGrid.deformation_fields property."""
+    """Tests the shape and dtype of the dense fields that the knot grid produces."""
 
     def test_output_shapes(self) -> None:
         """Verifies the deformation fields have the correct shape."""
@@ -258,7 +258,6 @@ class TestSplineGridSetFromFields:
         field_x = np.ones((50, 50), dtype=np.float32) * 0.5
         success = grid.set_from_fields(field_y=field_y, field_x=field_x, injective=False)
         assert success
-        # Without the injectivity constraint, the interior should faithfully reproduce the uniform input field.
         recovered_y, recovered_x = grid.deformation_fields
         np.testing.assert_allclose(recovered_y[10:-10, 10:-10], 0.5, atol=0.15)
         np.testing.assert_allclose(recovered_x[10:-10, 10:-10], 0.5, atol=0.15)
@@ -270,14 +269,13 @@ class TestSplineGridSetFromFields:
         field_x = np.ones((50, 50), dtype=np.float32) * 0.5
         success = grid.set_from_fields(field_y=field_y, field_x=field_x, freeze_edges=False)
         assert success
-        # With edges left unfrozen, the interior should track the uniform input field closely.
         recovered_y, recovered_x = grid.deformation_fields
         np.testing.assert_allclose(recovered_y[10:-10, 10:-10], 0.5, atol=0.15)
         np.testing.assert_allclose(recovered_x[10:-10, 10:-10], 0.5, atol=0.15)
 
 
 class TestSplineGridFreezeEdges:
-    """Tests SplineGrid._freeze_edges behavior."""
+    """Tests the boundary displacement the outer knots zero out, and the refusal a too-small grid returns."""
 
     def test_frozen_edges_produce_zero_at_boundary(self) -> None:
         """Verifies that frozen edges produce approximately zero deformation at boundaries."""
@@ -313,7 +311,6 @@ class TestSplineGridUnfold:
         field_x = np.ones((50, 50), dtype=np.float32) * 100.0
         grid.set_from_fields(field_y=field_y, field_x=field_x, injective=True, freeze_edges=False)
         recovered_y, _ = grid.deformation_fields
-        # Expects the injectivity constraint to bound the recovered values below the theoretical limit.
         limit = (1.0 / 2.046392675) * 5.0 * 0.9
         assert np.max(np.abs(recovered_y)) < limit * 2.0
 

@@ -350,4 +350,4 @@ def _summary(status: OpenMPStatus, **overrides: object) -> OpenMPSummary:
         "loadable": False,
     }
     fields.update(overrides)
-    return OpenMPSummary(**fields)  # type: ignore[arg-type]
+    return OpenMPSummary(**fields)  # type: ignore[arg-type]  # The override mapping erases the per-field types.

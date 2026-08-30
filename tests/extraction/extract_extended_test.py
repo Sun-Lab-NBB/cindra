@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 
 class TestCreateAndUnpackMasks:
-    """Tests _create_and_unpack_masks."""
+    """Tests the cell and neuropil mask arrays unpacked for extraction, with and without the neuropil pass."""
 
     def test_with_neuropil_extraction(self) -> None:
         """Verifies that mask creation with neuropil extraction produces both cell and neuropil masks."""
@@ -94,7 +94,7 @@ class TestCreateAndUnpackMasks:
 
 
 class TestExtractFluorescenceTraces:
-    """Tests _extract_fluorescence_traces."""
+    """Tests the finite zero trace an ROI reports when its neuropil mask holds no pixels."""
 
     def test_empty_neuropil_mask_yields_zero_trace(self, tmp_path: Path) -> None:
         """Verifies that an ROI whose neuropil mask holds no pixels reports a finite zero neuropil trace."""

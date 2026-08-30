@@ -10,7 +10,7 @@ from cindra.classification.classify import classify
 
 
 class TestApplyPreclassification:
-    """Tests _apply_preclassification."""
+    """Tests the probability threshold that decides which detected ROIs survive the preclassification filter."""
 
     def test_threshold_zero_keeps_all_rois(self) -> None:
         """Verifies that a threshold of 0.0 keeps all ROIs regardless of classifier output."""
@@ -133,7 +133,7 @@ def _make_circular_roi(
     radius: int = 5,
     frame_width: int = 64,
 ) -> ROIStatistics:
-    """Creates an ROIStatistics instance with a circular mask for testing."""
+    """Creates an ROIStatistics instance with a circular mask."""
     row_offsets, column_offsets = np.mgrid[-radius : radius + 1, -radius : radius + 1]
     inside = row_offsets**2 + column_offsets**2 <= radius**2
     y_array = (centroid[0] + row_offsets[inside]).astype(np.int32)
@@ -156,7 +156,7 @@ def _make_line_roi(
     length: int,
     frame_width: int = 64,
 ) -> ROIStatistics:
-    """Creates an ROIStatistics instance with a one-pixel-wide horizontal mask for testing."""
+    """Creates an ROIStatistics instance with a one-pixel-wide horizontal mask."""
     y_array = np.full(length, fill_value=centroid[0], dtype=np.int32)
     x_array = np.arange(centroid[1], centroid[1] + length, dtype=np.int32)
     pixel_weights = np.ones(length, dtype=np.float32)

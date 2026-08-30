@@ -23,7 +23,7 @@ _FRAME_WIDTH: int = 8
 
 
 class TestConvertNumpyFileToBinary:
-    """Tests BinaryFile.convert_numpy_file_to_binary."""
+    """Tests the .bin file the numpy conversion writes, the suffix it appends, and the missing source it rejects."""
 
     def test_converts_npy_to_binary(self, tmp_path: Path) -> None:
         """Verifies that a .npy file is correctly converted to a .bin file with matching contents."""
@@ -63,7 +63,7 @@ class TestConvertNumpyFileToBinary:
 
 
 class TestWriteTiff:
-    """Tests BinaryFile.write_tiff."""
+    """Tests the frames the TIFF export writes for a full binary and for a frame range, and the suffix it appends."""
 
     def test_writes_full_tiff(self, tmp_path: Path) -> None:
         """Verifies that binary data is correctly written to a BigTiff and can be read back."""
@@ -124,7 +124,7 @@ class TestBinaryFileCombined:
         """Verifies that planes of unequal length combine into a view spanning the shortest plane's frames."""
         plane_extent = 4
 
-        # Reproduces plane binaries of unequal length, which the combined view caps rather than reads past.
+        # Reproduces plane binaries of unequal length, which the combined view caps rather than overruns.
         long_path = tmp_path / "plane0.bin"
         short_path = tmp_path / "plane1.bin"
         _create_test_binary(file_path=long_path, frame_count=11, height=plane_extent, width=plane_extent)
@@ -149,7 +149,7 @@ class TestBinaryFileCombined:
         combined.close()
 
     def test_representation_reports_the_capped_frame_count_and_the_plane_total(self, tmp_path: Path) -> None:
-        """Verifies that the representation reports the derived combined geometry rather than any single plane's."""
+        """Verifies that the representation reports the derived combined geometry."""
         plane_extent = 4
 
         # The three planes hold different frame counts, so a representation reporting any one plane's count, or the
@@ -379,7 +379,7 @@ def _create_test_binary(file_path: Path, frame_count: int, height: int, width: i
         width: The frame width in pixels.
 
     Returns:
-        The int16 data array that was written to the file.
+        The int16 data array written to the file.
     """
     data = np.arange(frame_count * height * width, dtype=np.int16).reshape(frame_count, height, width)
     data.tofile(file_path)
