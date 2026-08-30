@@ -88,7 +88,7 @@ Returns `jobs` holding the `name`, `specifier`, `cores`, `memory_mb`, and `devic
 `total_jobs`, `peak_memory_mb` and `peak_device_memory_mb` for the single largest job, `total_memory_mb` for every job
 at once, and `pipeline_type`. No device total is reported, because the device count rather than a shared pool bounds the
 jobs that hold a device at once. `gpu_registration=True` plans the registration jobs for a CUDA device, which reports 2
-cores in place of 4, raises their `memory_mb` by the page-locked host buffers the device staging holds, and fills their
+cores in place of 8, raises their `memory_mb` by the page-locked host buffers the device staging holds, and fills their
 `device_memory_mb`. Every other job reports a `device_memory_mb` of zero. Unlike the universe tool, this one fails when
 the recording's raw imaging data cannot be read, because no stage of it could run.
 

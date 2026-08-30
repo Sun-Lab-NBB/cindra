@@ -212,7 +212,9 @@ argument `output_root` and take the parent of the `cindra/` folder. That path eq
 to the prepare tool and the per-entry `output_root` it returns, never the `raw_data_paths` entry that keys the same
 recording. This matters on a separate-output layout where the two roots differ. `get_recording_status_tool` and
 `clean_processing_output_tool` resolve `cindra/` directly under the given path with NO fallback, so feeding the raw-data
-path makes them report `not_started` or "Output root not found", a silent false negative.
+path makes `get_recording_status_tool` report `not_started`, a silent false negative, while
+`clean_processing_output_tool` errors with "No cindra directory found at" when the path exists and "Output root not
+found" when it does not.
 `verify_single_recording_output_tool` also searches recursively for `configuration.yaml`, so it may still pass through
 that fallback when fed the wrong root, and the two then disagree. Always reuse the `output_root` captured from the
 prepare manifest for status, verify, and clean.
@@ -293,9 +295,9 @@ exceeds the whole budget still runs rather than stalling the session.
 | Phase    | Resource class     | Cores per job | Dispatch ceiling | Concurrency                         |
 |----------|--------------------|---------------|------------------|-------------------------------------|
 | BINARIZE | `binarization`     | 3             | None             | Hard ceiling of 4                   |
-| REGISTER | `registration`     | 4             | 32               | Session CPU budget, 4 jobs reserved |
+| REGISTER | `registration`     | 8             | 32               | Session CPU budget, 4 jobs reserved |
 | REGISTER | `registration_gpu` | 2             | None             | One job per session CUDA device     |
-| PROCESS  | `processing`       | 10            | 10               | Session CPU budget, 5 jobs reserved |
+| PROCESS  | `processing`       | 8             | 16               | Session CPU budget, 5 jobs reserved |
 | COMBINE  | `combination`      | 1             | None             | Session CPU budget                  |
 
 Every cap but the two hard ceilings derives from the host as `min(max(1, budget // cores_per_job), max(1, job_count))`,
@@ -384,9 +386,10 @@ because the batch runs without it.
 
 A `raw_data_paths` entry may name the recording's imaging directory or any parent of it, because preparation resolves
 the imaging directory the way the conversion does, by locating the `cindra_parameters.json` file beneath the path and
-reading the directory that holds it. Only a path whose subtree carries no source file the conversion accepts lands in
-`invalid_recordings`, with a reason that names the subdirectory holding TIFF files when one exists, and it receives no
-manifest and no tracker.
+reading the directory that holds it. A path whose subtree carries no source file the conversion accepts lands in
+`invalid_recordings`, with a reason that names the subdirectory holding TIFF files when one exists. Every other
+preparation failure lands there too, such as a recording holding no readable acquisition parameters file, so read each
+entry's reason rather than assuming a missing TIFF file. A rejected recording receives no manifest and no tracker.
 
 A recording reported under `path_conflicts` still runs, but against the paths its existing configuration records rather
 than the ones you passed, because preparation never reinitializes an existing tracker. Each entry names the `recording`,

@@ -53,11 +53,15 @@ The verification response reports `success`, `complete`, the echoed `output_root
 `total_checks`, `passed`, `failed`, `missing`, and `warnings`. `failed` counts the required checks that did not pass, so
 it always equals the length of `missing`, and `complete` is False whenever `missing` is non-empty. The `warnings` list
 is always present and holds non-fatal issues such as a registered-binary path that does not resolve on disk, so a
-response carrying warnings can still report `complete` as True. An `optional_absent` list appears only when it holds
-entries, carrying the same label form for the optional outputs the recording does not hold. It is informational and
-never gates `complete`. The three principal-component registration arrays land there whenever the recording holds fewer
-than 1500 frames, which is the threshold below which the registration metrics are skipped. A recording naming flyback
-planes also carries `flyback_planes`, whose registration, projection, and extraction items count as optional.
+response carrying warnings can still report `complete` as True. The `two_channels` flag derives from the channel-2
+registered binary paths in `combined_metadata.npz`, so it means channel 2 is present AND functional rather than merely
+that `main.two_channels` is True. A recording with a structural channel 2 reports it False, and the tool then runs none
+of the optional channel-2 checks even though each plane still holds `detection_data/mean_image_channel_2.npy`. An
+`optional_absent` list appears only when it holds entries, carrying the same label form for the optional outputs the
+recording does not hold. It is informational and never gates `complete`. The three principal-component registration
+arrays land there whenever the recording holds fewer than 1500 frames, which is the threshold below which the
+registration metrics are skipped. A recording naming flyback planes also carries `flyback_planes`, whose registration,
+projection, and extraction items count as optional.
 
 ### Query tools
 
