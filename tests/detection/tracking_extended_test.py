@@ -9,7 +9,7 @@ from cindra.detection.tracking import _collect_bin_rois
 
 
 class TestCollectBinRois:
-    """Tests _collect_bin_rois."""
+    """Tests the bin search region, the margin that widens it, and the already-clustered ROIs it skips."""
 
     def test_collects_rois_within_bin(self) -> None:
         """Verifies that ROIs within the bin region are correctly collected."""
@@ -138,13 +138,12 @@ class TestCollectBinRois:
             grid_roi_size=grid_roi_size,
         )
 
-        # Only the unclustered ROI should be collected.
         assert len(collected_rois) == 1
         assert collected_recordings == [0]
 
 
 def _make_roi_mask(centroid: tuple[int, int], pixel_count: int = 5, cluster_id: int = 0) -> ROIMask:
-    """Creates a minimal ROIMask instance for testing."""
+    """Creates an ROIMask instance whose pixels all sit on the given centroid."""
     y_pixels = np.full(pixel_count, fill_value=centroid[0], dtype=np.int32)
     x_pixels = np.full(pixel_count, fill_value=centroid[1], dtype=np.int32)
     return ROIMask(

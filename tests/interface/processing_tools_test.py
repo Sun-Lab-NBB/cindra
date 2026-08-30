@@ -80,7 +80,7 @@ _SOURCE_FRAME_SHAPE: tuple[int, int, int] = (2, 16, 16)
 """The frame count, height, and width of the TIFF file the raw data gate accepts as a readable source file."""
 
 _ABSENT_DEVICE_INDEX: int = 4096
-"""The CUDA device index no host exposes, which the device mask rejection test asks a session to run on."""
+"""The CUDA device index no host exposes, which the device mask rejection test hands a session as its device."""
 
 
 class TestActiveExecutionTiming:
@@ -557,7 +557,7 @@ class TestResetProcessingPhases:
 
 
 class TestCleanProcessingOutput:
-    """Tests the order in which the clean tool removes the completion markers and the data they vouch for."""
+    """Tests the order in which the clean tool removes the completion markers and the data they certify."""
 
     def test_combined_marker_is_unlinked_before_its_payload(self, tmp_path: Path) -> None:
         """Verifies that the single-recording completion marker is the first file the clean removes."""
@@ -580,7 +580,7 @@ class TestCleanProcessingOutput:
         assert deleted_files.index(str(cindra_root / RecordingArrays.CELL_FLUORESCENCE)) > 0
 
     def test_tracking_marker_is_unlinked_before_its_payload(self, tmp_path: Path, monkeypatch) -> None:
-        """Verifies that the multi-recording discovery marker is removed ahead of the arrays it vouches for."""
+        """Verifies that the multi-recording discovery marker is removed ahead of the arrays it certifies."""
         dataset_path = tmp_path / OUTPUT_DIRECTORY_NAME / MULTI_RECORDING_DIRECTORY_NAME / "animal_a_task"
         arrays_directory = dataset_path / MULTI_RECORDING_ARRAYS_DIRECTORY_NAME
         arrays_directory.mkdir(parents=True)

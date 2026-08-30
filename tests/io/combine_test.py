@@ -14,7 +14,7 @@ from cindra.dataclasses import (
 
 
 class TestComputePlaneOffsets:
-    """Tests _compute_plane_offsets."""
+    """Tests the combined-view position each plane receives, from the plain grid to the two-level MROI tiling."""
 
     def test_single_plane_returns_zero_offsets(self) -> None:
         """Verifies that a single-plane recording produces zero displacements."""
@@ -57,7 +57,7 @@ class TestComputePlaneOffsets:
         assert y_displacement.shape == (2,)
         assert x_displacement.shape == (2,)
 
-        # Two planes in a grid: they should not both be at the origin.
+        # Two planes in a grid do not both sit at the origin.
         offsets = np.stack([y_displacement, x_displacement], axis=1)
         unique_positions = np.unique(offsets, axis=0)
         assert len(unique_positions) == 2

@@ -292,14 +292,7 @@ class TestExtractMultiRecording:
 
 
 class _ConstantTimer:
-    """Replaces PrecisionTimer with a stub reporting a fixed interval, so timing oracles do not depend on wall time.
-
-    Args:
-        precision: The precision keyword the real PrecisionTimer accepts, retained so the stub matches its signature.
-
-    Attributes:
-        precision: Stores the precision keyword the constructor received.
-    """
+    """Replaces PrecisionTimer with a stub reporting a fixed interval, so timing oracles do not depend on wall time."""
 
     def __init__(self, precision=None) -> None:
         self.precision = precision

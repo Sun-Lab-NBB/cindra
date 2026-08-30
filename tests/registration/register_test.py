@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 
 class TestComputeCrop:
-    """Tests the _compute_crop function."""
+    """Tests the valid pixel region the frame offsets leave behind and the bad-frame flags large offsets raise."""
 
     def test_returns_valid_region_for_small_offsets(self) -> None:
         """Verifies that small offsets produce a large valid region."""
@@ -169,7 +169,7 @@ class TestComputeCropBadFrameFraction:
 
 
 class TestPickInitialReference:
-    """Tests the _pick_initial_reference function."""
+    """Tests the seed image built from the most mutually correlated frames, and the input scale it leaves intact."""
 
     def test_output_shape(self) -> None:
         """Verifies the output shape matches the spatial dimensions of the input frames."""
@@ -223,7 +223,7 @@ class TestPickInitialReference:
 
 
 class TestComputeReference:
-    """Tests the _compute_reference function."""
+    """Tests that the iteratively refined reference keeps the raw intensity scale of the frames that built it."""
 
     def test_reference_stays_on_raw_intensity_scale(self) -> None:
         """Verifies the reference keeps the intensity scale of frames carrying a large positive baseline."""
@@ -249,7 +249,7 @@ class TestComputeReference:
 
 
 class TestApplyPrecomputedOffsetsBatch:
-    """Tests _apply_precomputed_offsets_batch."""
+    """Tests the replay of stored offsets across the rigid, nonrigid, and phase-correction branches."""
 
     def test_zero_offsets_preserve_frames(self) -> None:
         """Verifies that zero offsets leave frames unchanged."""
@@ -396,17 +396,7 @@ class TestApplyPrecomputedOffsetsBatch:
 
 
 def _build_baseline_frames(frame_count: int, size: int, baseline: float, seed: int) -> NDArray[np.float32]:
-    """Builds a stack of blob frames with integer-pixel shifts rendered on top of a positive intensity baseline.
-
-    Args:
-        frame_count: The number of frames to render.
-        size: The height and width of each square frame in pixels.
-        baseline: The constant intensity offset added to every pixel of every frame.
-        seed: The seed for the random generator used to render the per-frame noise.
-
-    Returns:
-        The rendered frame stack with shape (frame_count, size, size).
-    """
+    """Builds a stack of blob frames with integer-pixel shifts rendered on top of a positive intensity baseline."""
     generator = np.random.default_rng(seed=seed)
     y_grid = np.arange(size, dtype=np.float32)[:, np.newaxis]
     x_grid = np.arange(size, dtype=np.float32)[np.newaxis, :]

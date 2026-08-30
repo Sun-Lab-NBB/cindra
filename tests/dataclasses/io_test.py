@@ -435,7 +435,7 @@ class TestExtractionDataSaveLoad:
         mapped = ExtractionData()
         mapped.memory_map_arrays(output_path=tmp_path)
 
-        # ROI statistics should be loaded (eagerly, since npz does not support mmap).
+        # ROI statistics load eagerly, because npz does not support mmap.
         assert mapped.roi_statistics is not None
         assert len(mapped.roi_statistics) == len(original.roi_statistics)
 
@@ -857,7 +857,7 @@ class TestExtractionDataChannel2:
         mapped = ExtractionData()
         mapped.memory_map_arrays(output_path=tmp_path)
 
-        # Channel 2 ROI statistics should be eagerly loaded (npz cannot be memory-mapped).
+        # Channel 2 ROI statistics load eagerly, because npz cannot be memory-mapped.
         assert mapped.roi_statistics_channel_2 is not None
         assert len(mapped.roi_statistics_channel_2) == len(original.roi_statistics_channel_2)
 
@@ -939,7 +939,7 @@ class TestMultiRecordingRegistrationDataChannel2:
         assert mapped.transformed_maximum_projection_channel_2 is not None
         assert is_memory_mapped(array=mapped.transformed_maximum_projection_channel_2)
 
-        # Channel 2 deformed ROI masks should be eagerly loaded (npz cannot be memory-mapped).
+        # Channel 2 deformed ROI masks load eagerly, because npz cannot be memory-mapped.
         assert mapped.deformed_roi_masks_channel_2 is not None
         assert len(mapped.deformed_roi_masks_channel_2) == 1
         _assert_roi_masks_equal(
@@ -1874,8 +1874,8 @@ def _make_marker_ordering_data(root_path: Path) -> CombinedData:
     """Builds a minimal CombinedData instance for the completion-marker ordering tests.
 
     Args:
-        root_path: The root directory the instance saves into. The referenced binary file is created inside it, so
-            that the relative path conversion performed by the save method succeeds.
+        root_path: The root directory that receives the instance's saved arrays. The referenced binary file is
+            created inside it, so that the relative path conversion performed by the save method succeeds.
 
     Returns:
         A CombinedData instance describing one plane.

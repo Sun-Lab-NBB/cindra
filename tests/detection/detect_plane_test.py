@@ -54,7 +54,7 @@ binary for both channels reports centroids the channel 2 movie plants nowhere.""
 
 
 class TestDetectPlaneRois:
-    """Tests detect_plane_rois."""
+    """Tests the per-plane detection stage end to end, covering its optional passes and the failures it reports."""
 
     def test_detects_planted_blobs(
         self,

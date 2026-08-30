@@ -25,7 +25,7 @@ from cindra.registration.utils import (
 
 
 class TestApplyPhaseCorrelation:
-    """Tests apply_phase_correlation."""
+    """Tests the frequency-domain normalization and the correlation peak it resolves for motion estimation."""
 
     def test_output_shape(self) -> None:
         """Verifies the output shape matches the input frames shape."""
@@ -101,7 +101,7 @@ class TestApplyPhaseCorrelation:
 
 
 class TestApplyMask:
-    """Tests apply_mask (numba parallel kernel)."""
+    """Tests the element-wise taper arithmetic, the ranks it broadcasts over, and the width it propagates."""
 
     def test_basic_computation(self) -> None:
         """Verifies the element-wise computation frames * mask + offset."""
@@ -196,7 +196,7 @@ class TestApplyMask:
 
 
 class TestCombineRigidOffsets:
-    """Tests combine_rigid_offsets."""
+    """Tests the per-frame concatenation that merges rigid offsets across processing batches."""
 
     def test_concatenation(self) -> None:
         """Verifies horizontal concatenation of rigid offset batches."""
@@ -228,7 +228,7 @@ class TestCombineRigidOffsets:
 
 
 class TestCombineNonrigidOffsets:
-    """Tests combine_nonrigid_offsets."""
+    """Tests the stacking that preserves per-block structure when merging nonrigid offsets across batches."""
 
     def test_vertical_stacking(self) -> None:
         """Verifies vertical stacking of nonrigid offset batches."""
@@ -249,7 +249,7 @@ class TestCombineNonrigidOffsets:
 
 
 class TestComputeGaussianFrequencyFilter:
-    """Tests compute_gaussian_frequency_filter."""
+    """Tests the unit gain, zero phase, and caching of the Fourier-domain filter phase correlation reuses."""
 
     def test_shape(self) -> None:
         """Verifies the filter shape matches rfft2 output dimensions."""
@@ -279,7 +279,7 @@ class TestComputeGaussianFrequencyFilter:
 
 
 class TestApplyTemporalSmoothing:
-    """Tests apply_temporal_smoothing."""
+    """Tests the frame-axis Gaussian filtering and the frame-to-frame variation it removes."""
 
     def test_preserves_shape(self) -> None:
         """Verifies the output shape matches the input shape."""
@@ -310,7 +310,7 @@ class TestApplyTemporalSmoothing:
 
 
 class TestApplySpatialSmoothing:
-    """Tests apply_spatial_smoothing."""
+    """Tests the window validation and axis preservation of the sliding-window smoothing on 2D and 3D inputs."""
 
     def test_3d_input(self) -> None:
         """Verifies correct output shape for 3D input."""
@@ -328,7 +328,6 @@ class TestApplySpatialSmoothing:
         """Verifies constant input produces constant output (after normalization)."""
         data = np.ones((2, 20, 20), dtype=np.float32) * 7.0
         result = apply_spatial_smoothing(data=data, window=4)
-        # Interior values should be close to original (border effects exist at edges).
         np.testing.assert_allclose(result[0, 5:15, 5:15], 7.0, atol=0.5)
 
     def test_odd_window_raises_error(self) -> None:
@@ -392,7 +391,7 @@ class TestApplySpatialSmoothing:
 
 
 class TestApplySpatialHighPass:
-    """Tests apply_spatial_high_pass."""
+    """Tests the background removal and axis preservation of the sliding-window high-pass on 2D and 3D inputs."""
 
     def test_removes_uniform_background(self) -> None:
         """Verifies the high-pass filter removes uniform spatial background."""
@@ -448,7 +447,7 @@ class TestApplySpatialHighPass:
 
 
 class TestComputeReferenceFft:
-    """Tests compute_reference_fft."""
+    """Tests the conjugated reference spectrum that phase correlation multiplies into each frame spectrum."""
 
     def test_shape(self) -> None:
         """Verifies the output shape matches rfft2 dimensions."""
@@ -471,7 +470,7 @@ class TestComputeReferenceFft:
 
 
 class TestComputeUpsamplingKernel:
-    """Tests compute_upsampling_kernel."""
+    """Tests the shape, dtype, and caching of the RBF interpolation matrix subpixel offset estimation uses."""
 
     def test_output_types(self) -> None:
         """Verifies the return types are (ndarray, int)."""
@@ -501,7 +500,7 @@ class TestComputeUpsamplingKernel:
 
 
 class TestComputeGaussianRbfWeights:
-    """Tests _compute_gaussian_rbf_weights."""
+    """Tests the symmetry, unit diagonal, and bounded range of the pairwise radial basis weights."""
 
     def test_square_matrix_for_same_coordinates(self) -> None:
         """Verifies a square matrix is returned when source equals target."""
@@ -531,7 +530,7 @@ class TestComputeGaussianRbfWeights:
 
 
 class TestGetNormalizationWeights:
-    """Tests _get_normalization_weights."""
+    """Tests the border correction that compensates for zero-padded windows in the spatial high-pass."""
 
     def test_shape(self) -> None:
         """Verifies the output shape matches (height, width)."""

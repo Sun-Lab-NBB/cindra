@@ -10,7 +10,7 @@ from cindra.registration.register_recordings import _warp_mask_pixels, _forward_
 
 
 class TestWarpMaskPixels:
-    """Tests _warp_mask_pixels."""
+    """Tests the pixel positions and weights an ROI mask carries after a deformation warps it."""
 
     def test_identity_deformation_preserves_pixels(self) -> None:
         """Verifies that a zero-displacement deformation preserves pixel positions approximately."""
@@ -47,7 +47,7 @@ class TestWarpMaskPixels:
 
 
 class TestForwardDeformMasks:
-    """Tests _forward_deform_masks."""
+    """Tests the mask count and derived radius that survive the push into the common deformed space."""
 
     def test_identity_deformation_preserves_mask_count(self) -> None:
         """Verifies that identity deformation preserves the number of masks and leaves each one with pixels."""
@@ -86,7 +86,7 @@ class TestForwardDeformMasks:
 
 
 class TestBackwardDeformMasks:
-    """Tests _backward_deform_masks."""
+    """Tests the per-mask ROI statistics the pull back into a recording's own space produces."""
 
     def test_identity_deformation_returns_roi_statistics(self) -> None:
         """Verifies that identity deformation returns ROIStatistics with computed fields."""
@@ -155,7 +155,7 @@ def _make_roi_mask(
     cluster_id: int = 0,
     recording_count: int = 1,
 ) -> ROIMask:
-    """Creates a circular ROIMask instance for testing."""
+    """Creates a filled circular ROIMask centered on the given centroid."""
     delta_y, delta_x = np.mgrid[-radius : radius + 1, -radius : radius + 1]
     inside_circle = delta_y**2 + delta_x**2 <= radius**2
     y_array = (centroid[0] + delta_y[inside_circle]).astype(np.int32)

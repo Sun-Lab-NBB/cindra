@@ -569,7 +569,7 @@ class TestMultiRecordingRegistrationDataIsRegistered:
     def test_returns_false_for_an_empty_deformed_mask_list(self, tmp_path: Path) -> None:
         """Verifies that an empty deformed mask list indicates registration neither in memory nor on disk."""
         # save_arrays writes no archive for an empty mask list, so the in-memory answer matches the on-disk one only
-        # while both treat that list as a registration that produced nothing to track against.
+        # while both treat that list as a registration that produced no tracking target.
         data = MultiRecordingRegistrationData()
         data.deform_field_y = np.zeros((64, 64), dtype=np.float32)
         data.deform_field_x = np.zeros((64, 64), dtype=np.float32)

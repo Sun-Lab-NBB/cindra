@@ -8,7 +8,7 @@ from cindra.detection.detect import _create_enhanced_mean_image
 
 
 class TestCreateEnhancedMeanImage:
-    """Tests _create_enhanced_mean_image."""
+    """Tests the normalized contrast image, its border fill outside the valid region, and its default diameter."""
 
     def test_output_shape_matches_full_frame(self) -> None:
         """Verifies the output shape matches (frame_height, frame_width)."""

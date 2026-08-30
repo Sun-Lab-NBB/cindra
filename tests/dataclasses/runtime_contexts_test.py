@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 
 class TestRuntimeContextSaveShared:
-    """Tests RuntimeContext.save_shared."""
+    """Tests the configuration and acquisition files save_shared writes and its refusal of an unset output path."""
 
     def test_save_shared_writes_configuration_and_acquisition(
         self, single_recording_context: Callable[..., RuntimeContext], tmp_path: Path
@@ -58,7 +58,7 @@ class TestRuntimeContextSaveShared:
 
 
 class TestRuntimeContextSaveRuntime:
-    """Tests RuntimeContext.save_runtime."""
+    """Tests the runtime_data.yaml file written into the plane directory and the refusal of an unset output path."""
 
     def test_save_runtime_writes_runtime_yaml(
         self, single_recording_context: Callable[..., RuntimeContext], tmp_path: Path
@@ -85,7 +85,7 @@ class TestRuntimeContextSaveRuntime:
 
 
 class TestRuntimeContextLoad:
-    """Tests RuntimeContext.load."""
+    """Tests the plane contexts load rebuilds, the paths it repairs after a move, and the inputs it refuses."""
 
     def test_load_all_planes_round_trip(
         self, single_recording_context: Callable[..., RuntimeContext], tmp_path: Path
@@ -238,7 +238,7 @@ class TestRuntimeContextLoad:
 
 
 class TestMultiRecordingRuntimeContextSaveShared:
-    """Tests MultiRecordingRuntimeContext.save_shared."""
+    """Tests the configuration save_shared writes into a dataset directory and the refusal of an unset output path."""
 
     def test_save_shared_writes_configuration(self, tmp_path: Path) -> None:
         """Verifies that save_shared writes the configuration into the main recording's output directory."""
@@ -268,7 +268,7 @@ class TestMultiRecordingRuntimeContextSaveShared:
 
 
 class TestMultiRecordingRuntimeContextSaveRuntime:
-    """Tests MultiRecordingRuntimeContext.save_runtime."""
+    """Tests the multi_recording_runtime_data.yaml save_runtime writes and its refusal of an unset output path."""
 
     def test_save_runtime_writes_runtime_yaml(self, tmp_path: Path) -> None:
         """Verifies that save_runtime writes multi_recording_runtime_data.yaml into the recording output directory."""
@@ -296,7 +296,7 @@ class TestMultiRecordingRuntimeContextSaveRuntime:
 
 
 class TestMultiRecordingRuntimeContextLoad:
-    """Tests MultiRecordingRuntimeContext.load."""
+    """Tests the dataset contexts load rebuilds, the stale paths it repairs, and the inputs it refuses."""
 
     def test_load_all_recordings_round_trip(self, tmp_path: Path) -> None:
         """Verifies that load with recording_index=-1 returns all recording contexts with combined data loaded."""

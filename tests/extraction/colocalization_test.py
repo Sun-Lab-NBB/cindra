@@ -23,7 +23,7 @@ from cindra.extraction.colocalization import (
 
 
 class TestCorrectBleedthrough:
-    """Tests _correct_bleedthrough."""
+    """Tests the regression that removes functional-channel bleedthrough without producing negative pixels."""
 
     def test_output_non_negative(self) -> None:
         """Verifies that the corrected image has no negative values."""
@@ -62,7 +62,7 @@ class TestCorrectBleedthrough:
 
 
 class TestBuildSparseRoiMasks:
-    """Tests _build_sparse_roi_masks."""
+    """Tests the flat pixel indexing and binary clipping of the sparse ROI mask matrix."""
 
     def test_shape(self) -> None:
         """Verifies that the sparse matrix has the correct shape."""
@@ -89,7 +89,7 @@ class TestBuildSparseRoiMasks:
 
 
 class TestComputeOverlapMatrix:
-    """Tests _compute_overlap_matrix."""
+    """Tests the pairwise overlap fraction normalized by the smaller ROI, including the empty input shape."""
 
     def test_identical_rois_full_overlap(self) -> None:
         """Verifies that identical ROIs produce an overlap of 1.0."""
@@ -126,7 +126,7 @@ class TestComputeOverlapMatrix:
 
 
 class TestComputeSpatialColocalization:
-    """Tests compute_spatial_colocalization."""
+    """Tests the mutual best-match pairing that links channel 1 and channel 2 ROIs by pixel overlap."""
 
     def test_empty_channel_1(self) -> None:
         """Verifies correct handling of empty channel 1."""
@@ -202,7 +202,7 @@ class TestComputeSpatialColocalization:
 
 
 class TestComputeIntensityColocalization:
-    """Tests compute_intensity_colocalization."""
+    """Tests the inside-versus-surround intensity comparison that scores each ROI in the structural channel."""
 
     def test_empty_rois(self) -> None:
         """Verifies correct handling of an empty ROI list."""
@@ -308,7 +308,7 @@ def _make_roi(
     radius: float = 5.0,
     overlap_mask: NDArray[np.bool_] | None = None,
 ) -> ROIStatistics:
-    """Creates a minimal ROIStatistics instance for testing."""
+    """Creates an ROIStatistics instance wrapping a mask built from the given pixels and weights."""
     mask = ROIMask(
         y_pixels=np.array(y_pixels, dtype=np.int32),
         x_pixels=np.array(x_pixels, dtype=np.int32),
@@ -328,7 +328,7 @@ def _make_circular_roi(
     frame_height: int,
     frame_width: int,
 ) -> ROIStatistics:
-    """Creates a circular ROI for testing."""
+    """Creates an ROIStatistics instance whose mask is a filled circle of the given radius."""
     y_coordinates, x_coordinates = np.mgrid[0:frame_height, 0:frame_width]
     distance = np.sqrt((y_coordinates - center_y) ** 2 + (x_coordinates - center_x) ** 2)
     inside = distance <= radius

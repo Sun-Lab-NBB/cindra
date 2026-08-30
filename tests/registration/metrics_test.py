@@ -28,7 +28,7 @@ _PC_HIGHPASS_WINDOW: int = 20
 
 
 class TestComputePcExtremes:
-    """Tests _compute_pc_extremes."""
+    """Tests the low and high extreme images that the principal component projections of a movie separate."""
 
     def test_output_shapes_two_components(self) -> None:
         """Verifies output array shapes when using two principal components."""
@@ -166,7 +166,7 @@ class TestComputePcExtremes:
 
 
 class TestRegisterPcExtremes:
-    """Tests _register_pc_extremes."""
+    """Tests the shift measured between the extreme images under each of the two preprocessing modes."""
 
     def test_recovers_planted_shift_without_pre_smoothing(self) -> None:
         """Verifies that one-photon mode without pre-smoothing measures the exact translation between PC extremes."""
@@ -223,9 +223,6 @@ def _build_pc_extreme_pair() -> tuple[NDArray[np.float32], NDArray[np.float32]]:
     brighter than the blobs, and a box mean over a symmetric window reproduces a linear ramp exactly, so the spatial
     high-pass filter annihilates it while leaving the blobs intact. A correlation that skips that filter is instead
     dominated by the ramp, which is identical in both images and therefore pulls the peak toward a zero offset.
-
-    Returns:
-        A tuple of the low and high extreme images, each with shape (1, 128, 128).
     """
     rows, columns = np.mgrid[0:128, 0:128]
     blobs = np.zeros((128, 128), dtype=np.float64)
