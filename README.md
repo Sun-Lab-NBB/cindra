@@ -748,7 +748,7 @@ Produces:
 | `cell_fluorescence.npy`       | Fluorescence traces for tracked ROIs in this recording |
 | `neuropil_fluorescence.npy`   | Background fluorescence from surround masks            |
 | `subtracted_fluorescence.npy` | Neuropil-corrected and baseline-subtracted traces      |
-| `spikes.npy`                  | Spike amplitudes for tracked ROIs (when enabled)       |
+| `spikes.npy`                  | Spike amplitudes, zero-filled when extraction disabled |
 
 **Run via CLI:** `cindra run --input-path md_config.yaml --extract`
 
@@ -911,11 +911,16 @@ This library provides two MCP servers that expose neural imaging pipeline functi
 
 Every tool names a filesystem path by what that path holds, and the same name means the same thing in every tool. A
 `raw_data_path` names one recording's imaging directory, which holds its TIFF files beside its `cindra_parameters.json`
-file, or any parent of that directory. An `output_root` is the parent of the `cindra/` folder a pipeline writes that
+file. Every tool that reads a recording also accepts any parent of that directory, because it locates the parameters
+file beneath the path it is given. `generate_acquisition_parameters_file_tool` is the exception, since it writes that
+file into the directory it is handed. An `output_root` is the parent of the `cindra/` folder a pipeline writes that
 recording's results under, and a `root_directory` is a tree searched for recordings. The plural `raw_data_paths` and
 `output_roots` name lists of the same two concepts, and a `configuration_path`, a `tracker_path`, an `output_path`, or a
 `file_path` names one specific file. An `output_path` is the configuration file `generate_config_file_tool` writes, and
-the `file_path` that tool returns is the same path with its suffix normalized to `.yaml`.
+the `file_path` that tool returns is the same path with its suffix normalized to `.yaml`. Three names reach the caller
+only as response keys. A `recording_root` is the session-level root `discover_recordings_tool` reports beside each
+candidate, a `cindra_path` is the `cindra` output directory the results tools report, and a `dataset_output_path` is one
+recording's directory inside a multi-recording dataset tree.
 
 #### Data Processing Server
 
@@ -1056,9 +1061,9 @@ expedite the task's runtime, use the `tox --parallel` command to run some tasks 
 Claude Code skills and AI development assets for this project are distributed through two marketplaces:
 
 - [cindra](https://github.com/Sun-Lab-NBB/cindra) marketplace: Provides MCP server registrations, pipeline-specific
-  skills for single-recording and multi-recording processing, configuration, results inspection, visualization, and MCP
-  environment setup. Install this marketplace to register the `cindra mcp` and `cindra-gui mcp` servers with
-  compatible MCP clients and make all pipeline workflow skills available.
+  skills for single-recording and multi-recording processing, configuration, results inspection, acquisition data
+  preparation, visualization, CLI reference, and MCP environment setup. Install this marketplace to register the `cindra
+  mcp` and `cindra-gui mcp` servers with compatible MCP clients and make all pipeline workflow skills available.
 - [ataraxis](https://github.com/Sun-Lab-NBB/ataraxis) marketplace: Provides shared development skills that enforce
   cindra coding conventions (Python style, README style, commit messages, pyproject.toml, tox configuration) and
   general-purpose codebase exploration tools via the **automation** plugin.
