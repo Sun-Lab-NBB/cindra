@@ -102,8 +102,8 @@
   every job a configuration declares and which of them can run right now. `size_pipeline_jobs_tool` reports the cores,
   memory, and device memory each of those jobs holds, substituting the device models for the registration jobs when
   `gpu_registration` is set. `check_threading_runtime_tool` reports whether the host carries the numeric threading layer
-  the platform selects, and `check_gpu_runtime_tool` reports the CUDA devices the host exposes, so an agent gates
-  a batch on a flag rather than on parsing a per-job tracker failure. The dispatch half lives in `cindra.orchestration`,
+  the platform selects, and `check_gpu_runtime_tool` reports the CUDA devices the host exposes, so an agent gates a
+  batch on a flag rather than on parsing a per-job tracker failure. The dispatch half lives in `cindra.orchestration`,
   so the execute, monitor, and cancel tools hold only argument validation and response shaping. The prepare tools stay
   in the interface layer, because building a manifest is a user-facing operation over paths and configuration files
   rather than part of the scheduling model. Every job class carries a per-job worker count from `cindra.orchestration`,
@@ -116,12 +116,13 @@
   once nothing else can use the room. Every other class derives its concurrency from the session CPU budget alone.
   Memory bounds admission rather than concurrency, because the memory one job holds follows the recording it processes
   rather than the class that owns it. A class is elastic where its `maximum_workers_per_job` ceiling stands strictly
-  above its `workers_per_job` default, which covers registration, processing, discovery, and extraction. Binarization
-  and combination carry no ceiling, so each takes its default whatever the host holds free. An elastic class widens its jobs at dispatch as the queue drains, and only in a session that accepted the class
-  defaults, because an explicit `workers_per_job` reaches every job unchanged. The free cores divide among the elastic
-  classes holding queued work before the share divides among the jobs, so a full queue resolves to the class default
-  while a queue holding one job resolves toward the ceiling. A class carrying no ceiling takes its default whatever the
-  host holds free.
+  above its `workers_per_job` default, which covers registration, processing, discovery, and extraction. Binarization,
+  combination, and the device-backed registration class carry no ceiling, so each takes its default whatever the host
+  holds free. An elastic class widens its jobs at dispatch as the queue drains, and only in a session that accepted the
+  class defaults, because an explicit `workers_per_job` reaches every job unchanged. The free cores divide among the
+  elastic classes holding queued work before the share divides among the jobs, so a full queue resolves to the class
+  default while a queue holding one job resolves toward the ceiling. A class carrying no ceiling takes its default
+  whatever the host holds free.
 - **Process-isolated jobs**: The batch engine dispatches every job into a `ProcessPoolExecutor` sized to the
   concurrency the per-class caps allow, so admission remains the only thing bounding how many jobs run. Isolation buys
   two things a thread pool cannot. A job's BLAS width belongs to its process, so concurrent jobs at different widths no
