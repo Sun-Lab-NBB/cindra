@@ -61,14 +61,17 @@ dependencies = [
     "tifffile>=2026,<2027",
     # Supplies the codecs tifffile loads at runtime to decode compressed TIFF data, which no cindra module imports.
     # The floor matches the one tifffile itself declares for its 'codecs' extra.
-    "imagecodecs>=2026.5.10,<2027",
+    "imagecodecs>=2026.8.16,<2027",
 
     # Visualization
     "matplotlib>=3,<4",
 
     # GUI
     "pyside6>=6,<7",
-    "pyqtgraph>=0.14,<1",  # 0.14 is the release that supplies the PySide6 binding the viewers use
+    # 0.14 is the first release whose private QPainterPathPrivate layout matches Qt 6.10, which removed the
+    # leading field. Every viewer curve reaches that ctypes cast through arrayToQPath, and the pyside6 pin
+    # above admits Qt 6.10 and later.
+    "pyqtgraph>=0.14,<1",
 
     # CLI and MCP Server
     "click>=8,<9",
