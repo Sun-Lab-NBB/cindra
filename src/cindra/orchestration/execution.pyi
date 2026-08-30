@@ -70,6 +70,16 @@ class JobExecutionState:
     lock: Lock = field(default_factory=Lock)
     manager_thread: Thread | None = ...
 
+class _AdmissionDecisions(StrEnum):
+    ADMIT = "admit"
+    WAIT = "wait"
+    ABORT = "abort"
+
+class _JobOutcomes(StrEnum):
+    RUNNING = "running"
+    COMPLETED = "completed"
+    ABANDONED = "abandoned"
+
 _execution_state: JobExecutionState | None
 
 def get_execution_state() -> JobExecutionState | None: ...
@@ -82,17 +92,6 @@ def start_execution_session(
     gpu_devices: list[int] | None = None,
 ) -> dict[str, object]: ...
 def cancel_execution_session() -> tuple[int, int]: ...
-
-class _AdmissionDecisions(StrEnum):
-    ADMIT = "admit"
-    WAIT = "wait"
-    ABORT = "abort"
-
-class _JobOutcomes(StrEnum):
-    RUNNING = "running"
-    COMPLETED = "completed"
-    ABANDONED = "abandoned"
-
 def _job_execution_manager(state: JobExecutionState) -> None: ...
 def _resolve_session_devices(gpu_devices: list[int] | None) -> list[int]: ...
 def _validate_session_device_agreement(

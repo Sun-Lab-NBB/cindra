@@ -21,13 +21,13 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
     from pyqtgraph.GraphicsScene.mouseEvents import MouseClickEvent  # type: ignore[import-untyped]
 
-type ClickHandler = Callable[[int, int, bool, bool], bool]
+type _ClickHandler = Callable[[int, int, bool, bool], bool]
 """The callback type for click events dispatched by a ViewBox to the orchestrator.
 
 Signature: (click_x, click_y, is_right_button, is_multi_select) -> handled.
 """
 
-type ZoomHandler = Callable[[], None]
+type _ZoomHandler = Callable[[], None]
 """The callback type for double-click zoom-to-fit events dispatched by a ViewBox to the orchestrator."""
 
 
@@ -76,14 +76,13 @@ def configure_plot(
 ) -> None:
     """Applies the shared pyqtgraph plot configuration backbone.
 
-    Disables the context menu, sets mouse interaction axes, fixes the left-axis width and bottom-axis
-    height to prevent layout offsets, and optionally sets the plot title and axis labels.
+    Pins the left-axis width and the bottom-axis height so panels sharing a layout do not offset one another.
 
     Args:
         plot: The pyqtgraph PlotItem to configure.
-        title: Optional plot title text.
-        left_label: Optional label for the left (y) axis.
-        bottom_label: Optional label for the bottom (x) axis.
+        title: Plot title text.
+        left_label: Label for the left (y) axis.
+        bottom_label: Label for the bottom (x) axis.
         mouse_x: Determines whether horizontal mouse interaction is enabled.
         mouse_y: Determines whether vertical mouse interaction is enabled.
     """
@@ -107,7 +106,7 @@ def add_plot_legend(plot: pg.PlotItem, *, column_count: int) -> pg.LegendItem:
         column_count: Number of columns in the legend layout.
 
     Returns:
-        The created LegendItem instance.
+        The legend added to the plot.
     """
     return plot.addLegend(
         horSpacing=PLOT_STYLE.legend_horizontal_spacing,
@@ -203,10 +202,10 @@ class ViewBox(pg.ViewBox):
         self.state["yInverted"] = invert_y
 
         # Holds the callbacks the orchestrator installs after construction.
-        self._click_handler: ClickHandler | None = None
-        self._zoom_handler: ZoomHandler | None = None
+        self._click_handler: _ClickHandler | None = None
+        self._zoom_handler: _ZoomHandler | None = None
 
-    def set_click_handler(self, handler: ClickHandler) -> None:
+    def set_click_handler(self, handler: _ClickHandler) -> None:
         """Configures the instance to use the provided click handler when the user clicks.
 
         Args:
@@ -214,7 +213,7 @@ class ViewBox(pg.ViewBox):
         """
         self._click_handler = handler
 
-    def set_zoom_handler(self, handler: ZoomHandler) -> None:
+    def set_zoom_handler(self, handler: _ZoomHandler) -> None:
         """Configures the instance to use the provided zoom handler on double-click zoom-to-fit.
 
         Args:
@@ -304,7 +303,7 @@ def plot_trace(
         maximum_trace_count: Maximum number of traces to plot in multi-ROI mode.
 
     Returns:
-        Tuple of (y_minimum, y_maximum) defining the plotted y-axis range.
+        The lower and upper bounds of the plotted y-axis range.
     """
     trace_box.clear()
     # Removes any stale legend from a previous plot cycle before re-adding.
@@ -426,9 +425,6 @@ def _plot_single_trace(
 ) -> tuple[float, float]:
     """Plots overlaid traces for a single selected ROI.
 
-    Draws each enabled trace type on the same axes, allowing the user to compare raw fluorescence, neuropil,
-    neuropil-corrected, and deconvolved spike signals simultaneously.
-
     Args:
         trace_box: The plot item to draw on.
         axis: The left y-axis for tick configuration.
@@ -444,7 +440,7 @@ def _plot_single_trace(
         spikes_visible: Determines whether the deconvolved spike trace is drawn.
 
     Returns:
-        Tuple of (y_minimum, y_maximum) for the plotted range.
+        The lower and upper bounds of the plotted y-axis range.
     """
     fluorescence = cell_fluorescence[roi_index, :]
     neuropil = neuropil_fluorescence[roi_index, :]
@@ -509,7 +505,7 @@ def _plot_multi_trace(
         maximum_trace_count: Maximum number of traces to display.
 
     Returns:
-        Tuple of (y_minimum, y_maximum) for the plotted range.
+        The lower and upper bounds of the plotted y-axis range.
     """
     selected = selected_indices[: min(len(selected_indices), maximum_trace_count)]
     trace_spacing = 1.0 / scale_factor

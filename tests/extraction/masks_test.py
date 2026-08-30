@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 
 class TestCreateMasks:
-    """Tests create_masks."""
+    """Tests the per-ROI mask set the extraction consumes, with and without its neuropil companion."""
 
     def test_without_neuropil(self) -> None:
         """Verifies that neuropil=False produces None neuropil masks."""
@@ -61,7 +61,7 @@ class TestCreateMasks:
 
 
 class TestCreateRoiPixels:
-    """Tests _create_roi_pixels."""
+    """Tests the boolean cell footprint and the percentile filter that keeps the high-weight core."""
 
     def test_all_roi_pixels_marked(self) -> None:
         """Verifies that ROI pixel positions are marked True in the output mask."""
@@ -100,7 +100,7 @@ class TestCreateRoiPixels:
 
 
 class TestCreateRoiMasks:
-    """Tests _create_roi_masks."""
+    """Tests the overlap exclusion and the unit weight normalization each ROI's extraction mask carries."""
 
     def test_includes_all_pixels_with_overlap(self) -> None:
         """Verifies that all ROI pixels are included when include_overlap=True."""
@@ -158,7 +158,7 @@ class TestCreateRoiMasks:
 
 
 class TestCreateNeuropilMasks:
-    """Tests _create_neuropil_masks."""
+    """Tests the surround ring the masks carve outside the cells, its minimum size, and the cache it reuses."""
 
     def test_neuropil_does_not_overlap_roi(self) -> None:
         """Verifies that neuropil masks do not overlap with the ROI pixel region."""
@@ -274,7 +274,7 @@ def _make_roi(
     radius: float = 5.0,
     overlap_mask: NDArray[np.bool_] | None = None,
 ) -> ROIStatistics:
-    """Creates a minimal ROIStatistics instance for testing."""
+    """Creates an ROIStatistics instance wrapping a mask built from the given pixels and weights."""
     mask = ROIMask(
         y_pixels=np.array(y_pixels, dtype=np.int32),
         x_pixels=np.array(x_pixels, dtype=np.int32),
@@ -294,7 +294,7 @@ def _make_circular_roi(
     frame_height: int,
     frame_width: int,
 ) -> ROIStatistics:
-    """Creates a circular ROI for testing."""
+    """Creates an ROIStatistics instance whose mask is a filled circle of the given radius."""
     y_coordinates, x_coordinates = np.mgrid[0:frame_height, 0:frame_width]
     distance = np.sqrt((y_coordinates - center_y) ** 2 + (x_coordinates - center_x) ** 2)
     inside = distance <= radius

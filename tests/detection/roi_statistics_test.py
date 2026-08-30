@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 
 class TestEstimateDiameterFromRois:
-    """Tests estimate_diameter_from_rois."""
+    """Tests the median pixel count behind the diameter estimate and the defaults its degenerate inputs return."""
 
     def test_empty_list_returns_default(self) -> None:
         """Verifies that an empty ROI list returns the default diameter."""
@@ -76,7 +76,7 @@ class TestEstimateDiameterFromRois:
 
 
 class TestComputeMedianPixelPosition:
-    """Tests _compute_median_pixel_position."""
+    """Tests the representative pixel the median position picks, which is always a member of the ROI."""
 
     def test_single_pixel(self) -> None:
         """Verifies that a single pixel returns itself."""
@@ -102,7 +102,7 @@ class TestComputeMedianPixelPosition:
 
 
 class TestComputeDistanceKernel:
-    """Tests _compute_distance_kernel."""
+    """Tests the Euclidean distance field the radius and compactness measurements read."""
 
     def test_shape(self) -> None:
         """Verifies the output kernel has the correct shape."""
@@ -128,7 +128,7 @@ class TestComputeDistanceKernel:
 
 
 class TestROI:
-    """Tests the _ROI wrapper class."""
+    """Tests the cached shape measurements, hull-area fallbacks, and overlap accounting of the per-ROI wrapper."""
 
     def test_pixel_count(self) -> None:
         """Verifies the total pixel count."""
@@ -247,7 +247,7 @@ class TestROI:
 
     def test_flat_weight_gradient_keeps_every_pixel(self) -> None:
         """Verifies that an ROI whose weights carry no radial gradient keeps all of its pixels in the soma."""
-        # A 3x4 block plus one distant outlier gives 13 pixels, clearing the ten-pixel crop shortcut. With every
+        # A 4x3 block plus one distant outlier gives 13 pixels, clearing the ten-pixel crop shortcut. With every
         # weight at zero, the cumulative radial weight never rises, so the gradient is flat and the crop radius is
         # undefined. The soma must then fall back to the whole ROI rather than to an arbitrary radius.
         block_y = [5, 5, 5, 6, 6, 6, 7, 7, 7, 8, 8, 8]
@@ -281,7 +281,6 @@ class TestROI:
         ellipse = roi.fit_ellipse(y_scale=10, x_scale=10)
         assert isinstance(ellipse, _EllipseData)
         assert ellipse.radius > 0
-        # A circular ROI should have an aspect ratio close to 1.
         assert 0.5 < ellipse.aspect_ratio < 1.5
 
     def test_get_overlap_mask(self) -> None:
@@ -316,12 +315,11 @@ class TestROI:
         keep_flags = _ROI.remove_overlapping_rois(
             rois=[first_roi, second_roi], overlap_image=overlap_image, maximum_overlap_fraction=0.5
         )
-        # At least one should be removed since all pixels overlap.
         assert not all(keep_flags)
 
 
 class TestEllipseData:
-    """Tests _EllipseData properties."""
+    """Tests the effective radius scaling and the bounded aspect ratio the fitted ellipse reports."""
 
     def test_radius_scales_by_mean(self) -> None:
         """Verifies that the effective radius is scaled by the mean of y_scale and x_scale."""
@@ -346,7 +344,7 @@ class TestEllipseData:
 
 
 class TestComputeRoiStatistics:
-    """Tests compute_roi_statistics."""
+    """Tests the in-place statistic assignment, the lightweight and full modes, and the overlap removal pass."""
 
     def test_empty_list_raises(self) -> None:
         """Verifies that an empty ROI list raises ValueError."""
@@ -409,7 +407,6 @@ class TestComputeRoiStatistics:
         second_roi = _make_circular_roi(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
         rois = [first_roi, second_roi]
         compute_roi_statistics(rois=rois, frame_height=50, frame_width=50, diameter=10, maximum_overlap_fraction=0.5)
-        # At least one ROI should be removed due to complete overlap.
         assert len(rois) < 2
 
     def test_aspect_ratio_scales_ellipse_fitting(self) -> None:
@@ -448,7 +445,7 @@ def _make_mask(
     radius: float = 5.0,
     centroid: tuple[int, int] | None = None,
 ) -> ROIMask:
-    """Creates a minimal ROIMask for testing."""
+    """Creates an ROIMask instance from explicit pixel coordinates and weights."""
     y_array = np.array(y_pixels, dtype=np.int32)
     x_array = np.array(x_pixels, dtype=np.int32)
     weight_array = np.array(weights, dtype=np.float32)

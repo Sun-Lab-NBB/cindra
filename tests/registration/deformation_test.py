@@ -20,7 +20,7 @@ from cindra.registration.deformation import (
 
 
 class TestCreateDiffusionKernel:
-    """Tests _create_diffusion_kernel."""
+    """Tests the normalization, symmetry, and degenerate-sigma collapse of the discrete diffusion kernel."""
 
     def test_small_sigma_returns_delta(self) -> None:
         """Verifies that sigma below threshold returns a single-element delta kernel."""
@@ -62,7 +62,7 @@ class TestCreateDiffusionKernel:
 
 
 class TestDiffuse:
-    """Tests the diffuse function."""
+    """Tests the shape, dtype, and per-dimension sigma handling of the scale-space smoothing pass."""
 
     def test_small_sigma_identity(self) -> None:
         """Verifies that a very small sigma produces no smoothing."""
@@ -89,7 +89,7 @@ class TestDiffuse:
 
 
 class TestZoom:
-    """Tests the zoom function."""
+    """Tests the output geometry, dtype preservation, and interpolation orders of the scale-factor resampling."""
 
     def test_upscale_shape(self) -> None:
         """Verifies the output shape after upscaling."""
@@ -131,7 +131,7 @@ class TestZoom:
 
 
 class TestMakeSamplesAbsolute:
-    """Tests _make_samples_absolute."""
+    """Tests the conversion of relative displacement fields into the absolute coordinates interpolation samples."""
 
     def test_zero_deltas_give_identity_grid(self) -> None:
         """Verifies that zero displacement fields produce identity coordinate grids."""
@@ -234,7 +234,7 @@ class TestProject:
 
 
 class TestResize:
-    """Tests the _resize function."""
+    """Tests the target-shape resampling and the value preservation it owes an unchanged or uniform input."""
 
     def test_shape_change(self) -> None:
         """Verifies the output has the requested dimensions."""
@@ -319,7 +319,7 @@ class TestDeformationConstructor:
 
 
 class TestDeformationScale:
-    """Tests Deformation.scale."""
+    """Tests the displacement magnitude scaling and the copy a unit factor produces."""
 
     def test_scale_by_factor(self) -> None:
         """Verifies that scaling multiplies all displacement values."""
@@ -337,13 +337,12 @@ class TestDeformationScale:
         deformation = Deformation(field_y=field_y, field_x=field_x)
         copied = deformation.scale(factor=1.0)
         np.testing.assert_array_equal(copied.get_field(dimension=0), field_y)
-        # Confirms the result is a copy rather than a view.
         copied.get_field(dimension=0)[0, 0] = 999.0
         assert deformation.get_field(dimension=0)[0, 0] != 999.0
 
 
 class TestDeformationCompose:
-    """Tests Deformation.compose."""
+    """Tests the identity neutrality and the additive displacement result of composing two deformations."""
 
     def test_compose_with_identity_left(self) -> None:
         """Verifies that identity.compose(deformation) returns a copy of the deformation."""
@@ -377,7 +376,7 @@ class TestDeformationCompose:
 
 
 class TestDeformationResizeField:
-    """Tests Deformation.resize_field."""
+    """Tests the field resampling across resolutions, including its identity and same-size shortcuts."""
 
     def test_resize_identity(self) -> None:
         """Verifies that resizing an identity deformation returns a new identity."""
@@ -404,7 +403,7 @@ class TestDeformationResizeField:
 
 
 class TestDeformationApply:
-    """Tests Deformation.apply_deformation."""
+    """Tests the backward warp a deformation applies to image data at its own and at a resized field resolution."""
 
     def test_zero_displacement_preserves_image(self) -> None:
         """Verifies that zero displacement fields preserve the image."""
@@ -433,7 +432,7 @@ class TestDeformationApply:
 
 
 class TestDeformationInverse:
-    """Tests Deformation.inverse."""
+    """Tests the splatting inversion against the analytic inverse of uniform and linearly varying displacements."""
 
     def test_inverse_of_small_displacement(self) -> None:
         """Verifies that the inverse of a uniform displacement is its exact negation at interior pixels."""
@@ -472,7 +471,7 @@ class TestDeformationInverse:
 
 
 class TestDeformationGetDeformationLocations:
-    """Tests Deformation.get_deformation_locations."""
+    """Tests that the relative displacement fields resolve to absolute pixel positions."""
 
     def test_returns_absolute_coordinates(self) -> None:
         """Verifies that the returned coordinates are absolute pixel positions."""
@@ -486,7 +485,7 @@ class TestDeformationGetDeformationLocations:
 
 
 class TestDeformationRegularize:
-    """Tests Deformation.regularize."""
+    """Tests the B-spline smoothness fit and the minimum knot count the edge-freezing constraint requires."""
 
     def test_regularize_identity(self) -> None:
         """Verifies that regularizing an identity deformation returns identity."""
@@ -516,7 +515,7 @@ class TestDeformationRegularize:
 
 
 class TestDeformationCrop:
-    """Tests Deformation.crop."""
+    """Tests the origin clamping and slice extraction of the local field window used for ROI-sized warps."""
 
     def test_crop_identity(self) -> None:
         """Verifies that cropping an identity deformation returns a smaller identity."""

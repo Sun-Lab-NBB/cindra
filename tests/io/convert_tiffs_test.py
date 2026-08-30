@@ -10,7 +10,7 @@ import pytest
 from tifffile import TiffFile, TiffWriter
 from ataraxis_base_utilities import error_format
 
-from cindra.layout import SINGLE_RECORDING_RUNTIME_DATA_FILENAME
+from cindra.layout import PARAMETERS_FILENAME, SINGLE_RECORDING_RUNTIME_DATA_FILENAME
 from cindra.io.tiff import (
     _MISMATCH_REPORT_LIMIT,
     TiffConversionPlan,
@@ -28,7 +28,6 @@ from cindra.io.binary import (
     _resolve_binarization_marker_path,
     _resolve_registration_marker_path,
 )
-from cindra.io.context import PARAMETERS_FILENAME
 from cindra.dataclasses import (
     IOData,
     RuntimeContext,
@@ -51,7 +50,7 @@ _FRAME_WIDTH: int = 6
 
 
 class TestConvertTiffsToBinary:
-    """Tests convert_tiffs_to_binary."""
+    """Tests the frames and metadata the conversion writes for each plane and channel binary, and its marks."""
 
     def test_single_plane_single_channel_writes_exact_frames(
         self, tmp_path: Path, read_binary_movie: Callable[[Path, int, int], NDArray[np.int16]]
@@ -901,7 +900,7 @@ class TestConvertTiffsToBinary:
 
 
 class TestResolveTiffConversionPlan:
-    """Tests resolve_tiff_conversion_plan."""
+    """Tests the refusals the conversion plan raises, and the outputs it leaves untouched while it resolves."""
 
     def test_empty_contexts_raises(self) -> None:
         """Verifies that providing no contexts raises a ValueError."""
@@ -981,7 +980,7 @@ class TestResolveTiffConversionPlan:
 
 
 class TestResolveBinaryPaths:
-    """Tests _resolve_binary_paths."""
+    """Tests the refusal a context missing the binary path of either channel raises."""
 
     def test_missing_channel_1_path_raises(self, tmp_path: Path) -> None:
         """Verifies that a missing channel 1 binary path raises a ValueError."""
@@ -1024,7 +1023,7 @@ class TestResolveBinaryPaths:
 
 
 class TestScanSourceFrames:
-    """Tests _scan_source_frames."""
+    """Tests the frame count the source scan reports, the one open it spends per file, and the shapes it rejects."""
 
     def test_empty_tiff_raises(self, tmp_path: Path) -> None:
         """Verifies that an empty (zero-page) first TIFF file raises a ValueError."""
@@ -1113,7 +1112,7 @@ class TestScanSourceFrames:
 
 
 class TestResolvePlaneDimensions:
-    """Tests _resolve_plane_dimensions."""
+    """Tests the frame shape a plane carrying no ROI line range takes from the source geometry."""
 
     def test_plane_receives_the_source_frame_shape(self, tmp_path: Path) -> None:
         """Verifies that a plane carrying no ROI line range is sized by the source frame shape."""
@@ -1133,7 +1132,7 @@ class TestResolvePlaneDimensions:
 
 
 class TestCreateBinaryFiles:
-    """Tests _create_binary_files."""
+    """Tests the binarization mark each opened binary carries, and the registration mark the open drops."""
 
     def test_marks_the_binary_it_opens(self, tmp_path: Path) -> None:
         """Verifies that a freshly opened binary carries the binarization mark and drops any registration mark."""

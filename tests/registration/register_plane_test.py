@@ -45,7 +45,7 @@ _MOTION_SHIFTS_X: tuple[int, ...] = (0, 2, 2, -3, 1, -1, 3, 0, -2, 3, -3, 1, 2, 
 
 
 class TestRegisterPlane:
-    """Tests register_plane."""
+    """Tests the per-plane motion correction end to end, from its channel and refinement passes to its markers."""
 
     def test_reduces_inter_frame_variance(
         self,
@@ -109,13 +109,13 @@ class TestRegisterPlane:
         assert reference_image.shape == (128, 128)
         assert (plane_directory / "detection_data" / "mean_image.npy").exists()
 
-        # The offsets are measured against whichever image the refinement loop converged on, so their absolute scale is
-        # fixed by where that image's content sits rather than by the planted shifts alone. That position is measured
-        # here from the saved reference image itself, by cross-correlating it against the unshifted blob pattern, which
-        # uses none of the offsets under test. The refinement recenters on the frames it averages and rounds that
-        # recentering to whole pixels once per iteration, so the position wanders a few pixels away from the +-3 pixel
-        # band the planted shifts span. Six pixels bounds that wander while staying well inside the 13-pixel search
-        # radius, which is the constant a dropped recentering term would add to every offset.
+        # The offsets are measured against the refinement loop's converged image, so their absolute scale is fixed by
+        # where that image's content sits rather than by the planted shifts alone. That position is measured here from
+        # the saved reference image itself, by cross-correlating it against the unshifted blob pattern, which uses none
+        # of the offsets under test. The refinement recenters on the frames it averages and rounds that recentering to
+        # whole pixels once per iteration, so the position wanders a few pixels away from the +-3 pixel band the planted
+        # shifts span. Six pixels bounds that wander while staying well inside the 13-pixel search radius, which is the
+        # constant a dropped recentering term would add to every offset.
         reference_shift_y, reference_shift_x = _measure_content_shift(image=reference_image, template=base_image)
         assert abs(reference_shift_y) <= 6
         assert abs(reference_shift_x) <= 6
@@ -367,8 +367,8 @@ class TestRegisterPlane:
         assert two_step_x_span <= 1
 
         # Both runs remove the planted motion, and the refinement leaves no more behind than the pass it refines. The
-        # claim is an upper bound rather than a strict improvement, because the first pass already aligns this movie
-        # to within floating point noise, which leaves the refinement nothing to improve on.
+        # claim is an upper bound rather than a strict improvement, because the first pass already aligns this movie to
+        # within floating point noise, which leaves the refinement no room for improvement.
         assert single_pass_spread < 0.5 * unregistered_spread
         assert two_step_spread <= single_pass_spread
 
@@ -1047,14 +1047,14 @@ class TestRegisterPlane:
         correlation = float(np.corrcoef(projections[:, 0], scales)[0, 1])
         assert abs(correlation) > 0.95
 
-        # The two extreme images are the means of the frames at the two ends of that same component, so the brighter
-        # of them is whichever end the ramp's bright frames project onto. Swapping the two ends flips this sign.
+        # The two extreme images are the means of the frames at the two ends of that same component, so the brighter of
+        # them is the end the ramp's bright frames reach. Swapping the two ends flips this sign.
         intensity_difference = float(extreme_images[1, 0].mean() - extreme_images[0, 0].mean())
         assert np.sign(intensity_difference) == np.sign(correlation)
 
         # The movie carries no translation at all, so what aligning the two extremes of the component reports is the
         # residual registration leaves behind. That residual is bounded by the diagonal of the one-pixel quantum the
-        # integer correlation peak rounds each axis to, rather than by a larger shift.
+        # integer correlation peak imposes on each axis, rather than by a larger shift.
         assert float(shift_metrics[0, 0]) <= float(np.sqrt(2.0))
 
         # Both nonrigid columns stay at their zero fill, because the fixture leaves nonrigid registration disabled.
@@ -1113,13 +1113,6 @@ def _measure_content_shift(image: NDArray[np.float64], template: NDArray[np.floa
 
     The measurement is a plain mean-subtracted FFT cross-correlation computed here rather than through any pipeline
     helper, so the position it reports is independent of the offsets the pipeline itself recorded.
-
-    Args:
-        image: The image whose content position is measured, with shape (height, width).
-        template: The unshifted content the image is compared against, with shape (height, width).
-
-    Returns:
-        A tuple of the (vertical, horizontal) shift in pixels, wrapped into the signed range each axis spans.
     """
     height, width = image.shape
     image_spectrum = np.fft.rfft2(image.astype(np.float64) - image.mean())
@@ -1161,12 +1154,6 @@ def _measure_alignment_spread(movie: NDArray[np.int16]) -> float:
     The synthetic movies carry four bright blobs on a flat background that translate together, so the background-
     subtracted intensity centroid tracks the frame's translation. Its spread across frames is therefore the residual
     misalignment left after registration, measured without reference to any offset the pipeline itself reported.
-
-    Args:
-        movie: The movie with shape (frames, height, width) whose alignment is measured.
-
-    Returns:
-        The Euclidean magnitude of the per-axis standard deviation of the centroid across frames, in pixels.
     """
     # Restricts the measurement to the interior, so the wrap-around edges the translation introduces stay out of it.
     interior = movie[:, 16:112, 16:112].astype(np.float64)
@@ -1195,17 +1182,7 @@ def _make_interrupted_registration_context(
     gaussian_blob_image: Callable[..., NDArray[np.float64]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> RuntimeContext:
-    """Builds a context whose registration fails after its first batch, leaving a partially rewritten binary.
-
-    Args:
-        tmp_path: The temporary directory the context writes its binary into.
-        single_recording_context: The context factory fixture.
-        gaussian_blob_image: The synthetic image builder fixture.
-        monkeypatch: The patcher used to inject the batch failure.
-
-    Returns:
-        The prepared context. Calling register_plane on it raises RuntimeError partway through the batch loop.
-    """
+    """Builds a context whose registration fails after its first batch, leaving a partially rewritten binary."""
     movie = _build_static_blob_movie(gaussian_blob_image=gaussian_blob_image)
 
     def configure(configuration: SingleRecordingConfiguration) -> None:
@@ -1226,7 +1203,7 @@ def _make_interrupted_registration_context(
         if completed_batches > 1:
             message = "Unable to register the frame batch. Simulated mid-loop failure."
             raise RuntimeError(message)
-        return _register_frames_batch(**keyword_arguments)  # type: ignore[arg-type]
+        return _register_frames_batch(**keyword_arguments)  # type: ignore[arg-type]  # The kwargs are typed as object.
 
     monkeypatch.setattr("cindra.registration.register._register_frames_batch", fail_after_first_batch)
     return context
@@ -1238,17 +1215,7 @@ def _make_interrupted_second_channel_context(
     gaussian_blob_image: Callable[..., NDArray[np.float64]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> RuntimeContext:
-    """Builds a two-channel context whose registration fails once the alignment channel has been fully rewritten.
-
-    Args:
-        tmp_path: The temporary directory the context writes its binaries into.
-        single_recording_context: The context factory fixture.
-        gaussian_blob_image: The synthetic image builder fixture.
-        monkeypatch: The patcher used to inject the secondary-channel failure.
-
-    Returns:
-        The prepared context. Calling register_plane on it raises RuntimeError between the two channel rewrites.
-    """
+    """Builds a two-channel context whose registration fails once the alignment channel has been fully rewritten."""
     movie = _build_static_blob_movie(gaussian_blob_image=gaussian_blob_image)
     movie_channel_2 = _build_static_blob_movie(gaussian_blob_image=gaussian_blob_image, centers=_SECONDARY_BLOB_CENTERS)
     context = single_recording_context(

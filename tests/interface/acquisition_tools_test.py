@@ -170,7 +170,7 @@ class TestRoiLineSpanExpansion:
         assert written["roi_lines"] == [list(range(16)), list(range(24, 40))]
 
     def test_the_response_summarizes_the_expanded_lines(self, tmp_path: Path) -> None:
-        """Verifies that the response carries the per-region summary rather than the enumerated row indices."""
+        """Verifies that the response carries the per-region summary of the expanded spans."""
         result = generate_acquisition_parameters_file_tool(
             raw_data_path=str(tmp_path), roi_line_spans=[[0, 15], [24, 39]], **_MROI_GEOMETRY
         )
@@ -228,7 +228,7 @@ class TestAcquisitionParametersFileValidation:
     """Tests the file validator, its compacted parameter echo, and its line slice requests."""
 
     def test_roi_lines_are_replaced_by_per_roi_summaries(self, tmp_path: Path) -> None:
-        """Verifies that the echoed parameters carry one summary entry per ROI instead of the line arrays."""
+        """Verifies that the echoed parameters carry one summary entry per ROI."""
         file_path = _write_parameters_file(directory=tmp_path, roi_lines=[list(range(16)), list(range(16, 32))])
 
         result = validate_acquisition_parameters_file_tool(file_path=str(file_path))

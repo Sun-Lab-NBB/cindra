@@ -35,7 +35,8 @@ def compute_cardinal_coefficients(  # pragma: no cover
     factor_squared = factor * factor
     factor_cubed = factor_squared * factor
 
-    # Coefficient for p0 (leftmost point). Uses tension_factor=0.5 (Catmull-Rom).
+    # Coefficient for p0 (leftmost point). The 0.5 multiplier is the cardinal scale (1 - tension) / 2 evaluated at
+    # the tension of zero that selects Catmull-Rom.
     coefficients[0] = -0.5 * (factor_cubed - 2.0 * factor_squared + factor)
 
     # Coefficient for p3 (rightmost point).

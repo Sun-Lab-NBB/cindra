@@ -5,9 +5,10 @@ answers from the recording's acquisition parameters and a stat of its output tre
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from dataclasses import field, dataclass
+from dataclasses import dataclass
 
 from ..layout import (
+    PARAMETERS_FILENAME,
     CHANNEL_1_BINARY_FILENAME,
     COMBINED_METADATA_FILENAME,
     ACQUISITION_PARAMETERS_FILENAME,
@@ -20,7 +21,7 @@ from ..layout import (
     resolve_dataset_path,
     resolve_plane_specifier,
 )
-from .context import PARAMETERS_FILENAME, extract_unique_components, load_acquisition_parameters
+from .context import extract_unique_components, load_acquisition_parameters
 from ..dataclasses import AcquisitionParameters
 
 if TYPE_CHECKING:
@@ -33,7 +34,7 @@ class RecordingPlanes:
     """Describes the virtual imaging planes one recording holds and how far each of them has been processed."""
 
     output_root: Path
-    """The output root the inventory was resolved against."""
+    """The output root this inventory describes."""
     plane_count: int
     """The number of virtual imaging planes the recording holds, which is zero when its parameters were not found."""
     plane_paths: tuple[Path, ...] = ()
@@ -45,8 +46,7 @@ class RecordingPlanes:
     processed: bool = False
     """Determines whether the recording carries the combined metadata archive that marks its pipeline complete."""
     resolved: bool = False
-    """Determines whether the plane count follows from the recording's own acquisition parameters rather than from
-    their absence."""
+    """Determines whether the recording's own acquisition parameters supplied the plane count."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,7 +55,7 @@ class DatasetRecordings:
 
     dataset_name: str
     """The name of the tracked dataset, already lowered to the fold the output directory carries."""
-    recording_roots: tuple[Path, ...] = field(default=())
+    recording_roots: tuple[Path, ...] = ()
     """The output root of every recording the dataset spans, in the order the caller supplied them."""
     recording_ids: tuple[str, ...] = ()
     """The identifier of every recording, derived from the component of its path that distinguishes it."""
@@ -64,12 +64,9 @@ class DatasetRecordings:
     extracted_recordings: tuple[str, ...] = ()
     """The identifiers of the recordings whose tracked fluorescence has already been extracted."""
     discovered: bool = False
-    """Determines whether the dataset carries the tracked template mask archive.
-
-    Notes:
-        The archive is written by the clustering step, which the projection back into each recording still follows, so
-        it marks the dataset as tracked rather than the discovery job as finished.
-    """
+    """Determines whether the dataset carries the tracked template mask archive, which the clustering step writes before
+    the projection back into each recording and which therefore marks the dataset as tracked rather than the discovery
+    job as finished."""
 
 
 def resolve_recording_planes(output_root: Path, data_path: Path | None = None) -> RecordingPlanes:
@@ -85,7 +82,7 @@ def resolve_recording_planes(output_root: Path, data_path: Path | None = None) -
         the pipeline creates. Resolving costs a few small reads and creates nothing on disk.
 
     Args:
-        output_root: The output root the recording was configured with.
+        output_root: The recording's configured output root.
         data_path: The raw imaging directory, consulted only when the output directory carries no acquisition
             parameters. Use None when the recording has already been processed.
 
@@ -164,7 +161,7 @@ def is_recording_processed(output_root: Path) -> bool:
         atomic write, so its presence marks every array it describes as already on disk.
 
     Args:
-        output_root: The output root the recording was configured with.
+        output_root: The recording's configured output root.
 
     Returns:
         True when the recording carries the completion marker.
@@ -176,7 +173,7 @@ def is_plane_registered(output_root: Path, plane_index: int) -> bool:
     """Determines whether one virtual imaging plane carries registration output.
 
     Args:
-        output_root: The output root the recording was configured with.
+        output_root: The recording's configured output root.
         plane_index: The index of the virtual imaging plane.
 
     Returns:
@@ -190,7 +187,7 @@ def is_plane_converted(output_root: Path, plane_index: int) -> bool:
     """Determines whether one virtual imaging plane carries the binary the conversion stage writes.
 
     Args:
-        output_root: The output root the recording was configured with.
+        output_root: The recording's configured output root.
         plane_index: The index of the virtual imaging plane.
 
     Returns:
@@ -208,7 +205,7 @@ def is_plane_processed(output_root: Path, plane_index: int) -> bool:
         job's own inputs exist.
 
     Args:
-        output_root: The output root the recording was configured with.
+        output_root: The recording's configured output root.
         plane_index: The index of the virtual imaging plane.
 
     Returns:
@@ -224,10 +221,10 @@ def is_recording_extractable(output_root: Path, dataset_name: str) -> bool:
     Notes:
         The discovery stage projects a template mask set back into every recording it spans, and the extraction stage
         refuses to run without that recording's own projected statistics. The dataset-wide template archive marks the
-        clustering step rather than the projection, so it is not the condition an extraction job waits on.
+        clustering step rather than the projection, so it does not gate an extraction job.
 
     Args:
-        output_root: The output root the recording was configured with.
+        output_root: The recording's configured output root.
         dataset_name: The name of the tracked dataset, in any casing.
 
     Returns:
@@ -256,7 +253,7 @@ def resolve_acquisition_parameters(output_root: Path, data_path: Path | None) ->
     """Resolves a recording's acquisition parameters from its output directory or its raw imaging directory.
 
     Args:
-        output_root: The output root the recording was configured with.
+        output_root: The recording's configured output root.
         data_path: The raw imaging directory, consulted only when the output directory carries no parameters.
 
     Returns:

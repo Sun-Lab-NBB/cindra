@@ -17,13 +17,15 @@ class ReferenceImageType(StrEnum):
     """Defines the supported reference image types for diffeomorphic registration across recordings."""
 
     MEAN = "mean"
-    """The temporal mean of all registered frames, providing a static view of the imaging field."""
+    """The mean of the temporally binned movie, which excludes the frames registration marked bad and is zero outside
+    the valid registration crop."""
 
     ENHANCED_MEAN = "enhanced_mean"
     """The high-pass filtered mean image that enhances ROI boundaries for improved registration."""
 
     MAXIMUM_PROJECTION = "maximum_projection"
-    """The maximum intensity projection across all frames, highlighting active structures."""
+    """The maximum of every pixel across the temporally binned and high-pass filtered movie, zero outside the valid
+    registration crop, highlighting active structures."""
 
 
 @dataclass(slots=True)
@@ -38,8 +40,8 @@ class RecordingIO:
 
     dataset_name: str = ""
     """Specifies the name of the multi_recording dataset. The name is lowercased and used to create the output directory
-    under each recording's cindra directory (e.g., recording/cindra/multi_recording/{dataset_name}/) and to identify the
-    dataset in the tracker file."""
+    under each recording's cindra directory (e.g., recording/cindra/multi_recording/{dataset_name}/), and the tracker
+    file for that dataset is written inside that same directory."""
 
     repeat_selection: bool = False
     """Determines whether to repeat the ROI selection step when processing. When True, the pipeline re-runs ROI
@@ -74,12 +76,11 @@ class ROISelection:
 
     probability_threshold_channel_2: float | None = None
     """The minimum required cell probability score for channel 2 ROIs. When set to None (default), channel 2 ROIs use
-    the same probability_threshold as channel 1. Set this to a different value when channel 2 ROIs have different
-    classification characteristics."""
+    the same probability_threshold as channel 1."""
 
     maximum_size_channel_2: int | None = None
     """The maximum allowed ROI size for channel 2, in pixels. When set to None (default), channel 2 ROIs use the same
-    maximum_size as channel 1. Set this to a different value when channel 2 ROIs have different size characteristics."""
+    maximum_size as channel 1."""
 
     mroi_region_margin_channel_2: int | None = None
     """The minimum required distance from MROI region borders for channel 2 ROIs, in pixels. When set to None (default),
@@ -208,6 +209,6 @@ class MultiRecordingConfiguration(YamlConfig):
             file_path: The path to the .yaml configuration file.
 
         Returns:
-            A MultiRecordingConfiguration instance populated with the loaded data.
+            The multi-recording configuration the YAML file stores.
         """
         return cls.from_yaml(file_path=file_path)

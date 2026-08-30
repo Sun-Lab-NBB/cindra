@@ -11,7 +11,7 @@ try:
 except ImportError:  # pragma: no cover
     # The CuPy distribution publishes no macOS wheel, so the dependency marker excludes darwin and this module has to
     # stay importable there. Guarding the import also covers a Linux or Windows host whose installation was trimmed.
-    # Every entry point that reaches a device calls verify_gpu_runtime() before touching the name below, and
+    # Every entry point that reaches a device either calls verify_gpu_runtime() or guards on the name below itself, and
     # resolve_gpu_devices() reports RUNTIME_MISSING while the name is None. Only one of the two branches runs on any
     # single host, so the fallback stays out of coverage measurement.
     cupy = None
@@ -20,7 +20,7 @@ GPU_REMEDY: str = (
     "Install the CuPy build matching the CUDA version the local driver runs, as 'cupy-cuda13x[ctk]' for CUDA 13 or "
     "'cupy-cuda12x[ctk]' for CUDA 12, and run 'cindra gpu' to report what the host exposes."
 )
-"""The remedy an unusable GPU runtime reports, named by every message this module produces.
+"""The remedy an unusable GPU runtime reports, named by every message that a CuPy installation would resolve.
 
 Notes:
     The 'ctk' extra carries the CUDA math libraries CuPy resolves on first use. A bare CuPy installation imports and
@@ -45,7 +45,7 @@ Notes:
 
 
 class GpuStatus(StrEnum):
-    """Defines the outcome of a request to resolve the CUDA devices the registration stage runs on."""
+    """Defines the outcome of a request to resolve the CUDA devices the registration stage uses."""
 
     AVAILABLE = "available"
     """At least one device is present and the runtime performs a transform on it."""
@@ -56,7 +56,7 @@ class GpuStatus(StrEnum):
     LIBRARIES_MISSING = "libraries_missing"
     """The CuPy distribution is present, and the CUDA math libraries it loads on first use are absent."""
     NO_DEVICES = "no_devices"
-    """The CUDA runtime loads, and it reports no device the driver exposes."""
+    """The driver exposes no device the CUDA runtime reports, or the runtime library itself does not load."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,7 +80,7 @@ class GpuSummary:
     status: GpuStatus
     """The outcome of the resolution."""
     devices: tuple[GpuDevice, ...]
-    """The devices the backend runs on, empty for every outcome other than AVAILABLE."""
+    """The devices the backend uses, empty for every outcome other than AVAILABLE."""
     detail: str
     """The reason the runtime is unusable, empty when the status is AVAILABLE."""
 
@@ -91,7 +91,9 @@ class GpuSummary:
 
     @property
     def remedy(self) -> str:
-        """Returns the command that resolves the runtime, empty when the runtime is already usable."""
+        """Returns the command that resolves the runtime, empty when the runtime is already usable or when the host
+        platform carries no CuPy wheel.
+        """
         if self.available or self.status == GpuStatus.UNSUPPORTED_PLATFORM:
             return ""
         return GPU_REMEDY
@@ -112,13 +114,13 @@ class GpuSummary:
 
 
 def resolve_gpu_devices(device: int | None = None) -> GpuSummary:
-    """Resolves the CUDA devices the registration stage runs on.
+    """Resolves the CUDA devices the registration stage uses.
 
     Probes the runtime by transforming a small array on one device, because CuPy resolves the cuFFT shared library on
     first use rather than at import.
 
     Args:
-        device: The zero-based index of the CUDA device to transform the probe array on. Use None to transform it on
+        device: The zero-based index of the CUDA device that transforms the probe array. Use None to transform it on
             the device the runtime selects by default. An index the host does not expose falls back to that same device.
 
     Returns:
@@ -165,11 +167,11 @@ def verify_gpu_runtime(device: int | None = None) -> None:
 
     Notes:
         The runtime is verified before the requested index, so a host reaching no device at all reports the
-        installation that resolves it rather than the index it was asked for.
+        installation that resolves it rather than the index the caller named.
 
     Args:
-        device: The zero-based index of the CUDA device the caller registers on. Use None to verify the runtime alone,
-            without naming a device.
+        device: The zero-based index of the CUDA device the caller uses. Use None to verify the runtime alone, without
+            naming a device.
 
     Raises:
         RuntimeError: If no CUDA device is usable.
@@ -194,7 +196,7 @@ def verify_gpu_runtime(device: int | None = None) -> None:
 
 
 def resolve_device_budget() -> int:
-    """Resolves the number of CUDA devices the batch engine schedules GPU registration jobs across.
+    """Resolves the number of CUDA devices that receive the batch engine's GPU registration jobs.
 
     Returns:
         The count of usable devices, which is zero when no device is usable.
@@ -223,8 +225,8 @@ def resolve_free_device_memory_mb(device: int) -> int | None:
         with cupy.cuda.Device(device):
             free_bytes, _ = cupy.cuda.runtime.memGetInfo()
     except Exception:
-        # A driver that refuses the query leaves the caller no figure to gate on, which is reported as None rather
-        # than as a zero that would stall every device-backed job of the session.
+        # A driver that refuses the query leaves the caller no gating figure, which is reported as None rather than
+        # as a zero that would stall every device-backed job of the session.
         return None
 
     return int(free_bytes // _BYTES_PER_MEGABYTE)
@@ -265,8 +267,8 @@ def _probe_device_transform(device: int | None) -> None:
     """Transforms a small array on one device to resolve the CUDA math libraries the backend loads.
 
     Args:
-        device: The zero-based index of the CUDA device to transform on, or None to transform on the device the
-            runtime selects by default.
+        device: The zero-based index of the CUDA device that performs the transform, or None to transform on the
+            device the runtime selects by default.
     """
     if device is None:
         _transform_probe_array()

@@ -15,6 +15,16 @@ from ..dataclasses import (
 _MINIMUM_WEIGHT_FRACTION: float
 _MINIMUM_SPATIAL_SCALE: int
 _NORMALIZATION_EPSILON: float
+_SCALE_COUNT: int
+_BASE_FILTER_SIZE: int
+_BASE_THRESHOLD_MULTIPLIER: float
+_EXTENSION_ITERATIONS: int
+_SPLIT_VARIANCE_THRESHOLD: float
+_REFERENCE_FRAME_COUNT: int
+_PEAK_DETECTION_WINDOW: int
+_PEAK_TOLERANCE: float
+_PEAK_COUNT: int
+_MAXIMUM_PIXEL_COUNT: int
 
 def extend_roi(
     y_pixels: NDArray[np.int32], x_pixels: NDArray[np.int32], height: int, width: int, iterations: int = 1
@@ -38,6 +48,7 @@ def _check_split_components(
 def _extend_mask(
     y_pixels: NDArray[np.int32], x_pixels: NDArray[np.int32], weights: NDArray[np.float32], height: int, width: int
 ) -> tuple[NDArray[np.int32], NDArray[np.int32], NDArray[np.float32]]: ...
+def _find_best_scale(scale_images: NDArray[np.float32]) -> int: ...
 def _estimate_spatial_scale(scale_images: NDArray[np.float32]) -> int: ...
 def _compute_multiscale_masks(
     y_pixels: NDArray[np.int32],
@@ -54,4 +65,3 @@ def _extend_iteratively(
     width: int,
     active_frame_indices: NDArray[np.intp],
 ) -> tuple[NDArray[np.int32], NDArray[np.int32], NDArray[np.float32]]: ...
-def _find_best_scale(scale_images: NDArray[np.float32]) -> int: ...

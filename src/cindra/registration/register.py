@@ -71,9 +71,9 @@ _OUTLIER_METRIC_SCALE: int = 100
 def register_plane(context: RuntimeContext, *, workers: int, device: int | None = None) -> None:
     """Registers (motion-corrects) all frames for a single imaging plane specified by the input runtime context.
 
-    Computes registration offsets from the alignment channel (determined by
-    config.registration.align_by_first_channel), then applies those offsets to both channels. If two-step registration
-    is enabled, a refinement pass is performed using the mean of registered frames as the reference.
+    Computes registration offsets from the alignment channel (determined by config.registration.align_by_first_channel),
+    then applies those offsets to both channels. If two-step registration is enabled, a refinement pass is performed,
+    which recomputes the reference from a fresh sample of the registered frames and re-registers them against it.
 
     All configuration is read from context.configuration, file paths from context.runtime.io, and results are stored in
     context.runtime.registration, context.runtime.detection, and context.runtime.timing. The registered frames are
@@ -83,8 +83,8 @@ def register_plane(context: RuntimeContext, *, workers: int, device: int | None 
 
     Notes:
         The worker count drives both the FFT thread pool used by phase correlation and the Numba thread mask used by
-        the nonrigid warping kernels. The Numba mask is thread-local, so concurrently dispatched planes can hold
-        different worker budgets inside a single process.
+        the edge-taper, spectrum-normalization, and nonrigid kernels. The Numba mask is thread-local, so
+        concurrently dispatched planes can hold different worker budgets inside a single process.
 
         The device argument selects where both channels are registered, running the pass on a CUDA device when the
         caller names one and on the host CPU otherwise. Only the alignment channel resolves offsets against a
@@ -95,14 +95,14 @@ def register_plane(context: RuntimeContext, *, workers: int, device: int | None 
         Only the alignment channel is registered against a reference, and the secondary channel receives the offsets
         computed from that channel. The two binaries therefore agree about whether motion has been removed only once
         both rewrites have finished. The markers are cleared after the registration outputs that describe those
-        rewrites are persisted, and an interrupted run leaves them behind for the binarization stage to act on.
+        rewrites are persisted, and an interrupted run leaves them behind for the binarization stage to handle.
 
     Args:
         context: The RuntimeContext containing configuration, file paths, and mutable runtime data structures. Modified
             in-place to store registration outputs including reference image, offsets, mean images, and timing data.
         workers: The number of parallel workers allocated to this registration job. Must be a positive integer.
-        device: The zero-based index of the CUDA device to register this plane on. Use None to register the plane on
-            the host CPU.
+        device: The zero-based index of the CUDA device that registers this plane. Use None to register the plane on the
+            host CPU.
     """
     # The Numba thread mask is thread-local and cannot exceed the core count Numba detected at import time.
     numba.set_num_threads(min(workers, numba.config.NUMBA_NUM_THREADS))
@@ -267,7 +267,6 @@ def register_plane(context: RuntimeContext, *, workers: int, device: int | None 
             clear_registration_marker(binary_path=binary_path)
 
         principal_component_count = config.registration.registration_metric_principal_components
-        # The >=1500-frame metrics path is impractical on synthetic data, and compute_pc_metrics is covered directly.
         if principal_component_count > 0 and frame_count >= _MINIMUM_REGISTRATION_METRIC_FRAMES:
             timer.reset()
             compute_pc_metrics(context=context, workers=workers)
@@ -289,10 +288,9 @@ def register_plane(context: RuntimeContext, *, workers: int, device: int | None 
                 level=LogLevel.INFO,
             )
 
-        # Persists the final registration state (including metrics if computed) to disk.
         context.save_runtime()
 
-        # Releases registration arrays to free memory. Arrays remain on disk for subsequent pipeline phases.
+        # Arrays remain on disk for subsequent pipeline phases.
         context.runtime.registration.release_arrays()
 
 
@@ -308,10 +306,10 @@ def _compute_crop(
 ) -> tuple[NDArray[np.bool_], tuple[int, int], tuple[int, int]]:
     """Computes the valid pixel region after registration by analyzing frame offsets.
 
-    After registration, frames that shifted significantly will have undefined pixels at their edges. This function
-    determines which pixel region is valid across all frames by finding the maximum offset magnitude. It also
-    identifies bad frames that have abnormally large offsets or poor correlation quality, excluding them from the
-    valid region calculation to prevent a few outlier frames from unnecessarily shrinking the usable field of view.
+    After registration, frames that shifted significantly will have undefined pixels at their edges. Determines which
+    pixel region is valid across all frames by finding the maximum offset magnitude. It also identifies bad frames that
+    have abnormally large offsets or poor correlation quality, excluding them from the valid region calculation to
+    prevent a few outlier frames from unnecessarily shrinking the usable field of view.
 
     Args:
         x_offsets: The x-direction rigid pixel offsets with shape (num_frames,).
@@ -330,7 +328,7 @@ def _compute_crop(
         (y_min, y_max) defining usable rows, and the valid x-range as (x_min, x_max) defining usable columns.
     """
     # Computes median filter window: largest odd number below the array length, capped at maximum.
-    # This extracts a smooth baseline trend from the offset time series.
+    # Extracts a smooth baseline trend from the offset time series.
     filter_window = min((len(y_offsets) // 2) * 2 - 1, _MAXIMUM_MEDIAN_FILTER_WINDOW)
 
     # Subtracts baseline to isolate high-frequency deviations (sudden jumps indicate bad frames). Casts the medfilt
@@ -462,7 +460,7 @@ def _compute_reference(
             The search window is limited to min(height, width) * maximum_offset_fraction pixels.
         temporal_smoothing_sigma: The standard deviation for temporal Gaussian smoothing of correlation maps.
             If 0, no smoothing is applied.
-        workers: The number of parallel workers for FFT computation. Use -1 for all available cores.
+        workers: The number of parallel workers for FFT computation. Must be a positive integer.
         one_photon_enabled: Determines whether to apply one-photon preprocessing, which includes spatial smoothing
             followed by high-pass filtering.
 
@@ -561,7 +559,7 @@ def _register_frames_batch(
         signal_to_noise_threshold: The SNR threshold below which additional smoothing is applied to correlation
             peaks. Higher values apply more smoothing. Typical values range from 1.0 to 1.5.
         maximum_block_offset: The maximum allowed offset for nonrigid blocks in pixels.
-        workers: The number of parallel workers for FFT computation. Use -1 for all available cores.
+        workers: The number of parallel workers for FFT computation. Must be a positive integer.
         one_photon_enabled: Determines whether to apply one-photon preprocessing, which includes spatial smoothing
             followed by high-pass filtering.
         nonrigid_enabled: Determines whether to apply nonrigid (piecewise) registration after rigid alignment.
@@ -652,7 +650,7 @@ def _register_frames_batch(
             taper_mask=taper_mask_nonrigid,
             mean_offset=mean_offset_nonrigid,
             reference_kernel=reference_kernel_nonrigid,
-            snr_threshold=signal_to_noise_threshold,
+            signal_to_noise_threshold=signal_to_noise_threshold,
             smoothing_kernel=blocks[-1],
             x_blocks=blocks[1],
             y_blocks=blocks[0],
@@ -660,7 +658,6 @@ def _register_frames_batch(
             workers=workers,
         )
 
-        # Applies nonrigid warping to original frames using computed block offsets.
         frames = apply_nonrigid_correction(
             frames=frames,
             y_blocks=blocks[0],
@@ -803,12 +800,12 @@ def _register_alignment_channel(
     Args:
         context: The RuntimeContext containing configuration, acquisition parameters, and runtime data.
         workers: The number of parallel workers to use for the phase correlation FFT computations.
-        device: The zero-based index of the CUDA device to register this plane on. Use None to register the plane on
-            the host CPU.
+        device: The zero-based index of the CUDA device that registers this plane. Use None to register the plane on the
+            host CPU.
 
     Returns:
-        The device backend this pass registered through, which the secondary channel reuses, or None when the pass
-        ran on the host CPU.
+        The device backend that performed this pass, which the secondary channel reuses, or None when the pass ran on
+        the host CPU.
     """
     config = context.configuration
     align_by_first_channel = config.registration.align_by_first_channel
@@ -1013,7 +1010,7 @@ def _register_alignment_channel(
         batch_results: Iterator[BatchRegistrationResult]
         if gpu_backend is not None:
             batch_results = gpu_backend.register_batches(
-                read_batches(),
+                batches=read_batches(),
                 normalization_minimum=normalization_minimum,
                 normalization_maximum=normalization_maximum,
                 bidirectional_phase_offset=bidirectional_phase_for_registration,
@@ -1141,8 +1138,8 @@ def _register_secondary_channel(
         bidirectional_phase_corrected: Determines whether this channel's binary already carries the bidirectional
             phase correction, which holds for the two-step refinement pass that follows a completed first pass. The
             flag stored in context.runtime.registration tracks the alignment channel rather than this one.
-        gpu_backend: The device backend the alignment pass registered through, whose device-resident reference data
-            this channel reuses, or None when the alignment pass ran on the host CPU.
+        gpu_backend: The device backend that performed the alignment pass, whose device-resident reference data this
+            channel reuses, or None when the alignment pass ran on the host CPU.
     """
     config = context.configuration
     align_by_first_channel = config.registration.align_by_first_channel
@@ -1154,7 +1151,6 @@ def _register_secondary_channel(
     plane_index = io_data.plane_index if io_data.plane_index is not None else 0
     height, width, frame_count = io_data.frame_height, io_data.frame_width, io_data.frame_count
 
-    # Extracts registration data (offsets computed from alignment channel).
     registration_data = context.runtime.registration
     bidirectional_phase_offset = registration_data.bidirectional_phase_offset
 
@@ -1176,7 +1172,7 @@ def _register_secondary_channel(
     y_offsets_nonrigid = registration_data.nonrigid_y_offsets if nonrigid_enabled else None
     x_offsets_nonrigid = registration_data.nonrigid_x_offsets if nonrigid_enabled else None
 
-    # Selects channel paths based on alignment configuration (uses the opposite channel from alignment).
+    # The secondary channel is the one the alignment configuration did not select.
     if align_by_first_channel:
         binary_path = io_data.registered_binary_path_channel_2
         channel_label = "channel 2"

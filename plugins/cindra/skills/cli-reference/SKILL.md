@@ -113,11 +113,11 @@ so call the tool and hand over the command only while the server is down.
 
 ### `cindra configure`
 
-| Short | Long            | Type                                                        | Default | Status   | Effect                                       |
-|-------|-----------------|-------------------------------------------------------------|---------|----------|----------------------------------------------|
-| `-p`  | `--pipeline`    | choice of `single-recording`, `sd`, `multi-recording`, `md` | none    | required | Selects the pipeline to configure            |
-| `-od` | `--output-path` | existing directory                                          | none    | required | Names the directory to write into            |
-| `-n`  | `--name`        | string                                                      | `None`  | optional | Names the file, defaulting per pipeline type |
+| Short | Long            | Type                                                                         | Default | Status   | Effect                                       |
+|-------|-----------------|------------------------------------------------------------------------------|---------|----------|----------------------------------------------|
+| `-p`  | `--pipeline`    | case-insensitive choice of `single-recording`, `sd`, `multi-recording`, `md` | none    | required | Selects the pipeline to configure            |
+| `-od` | `--output-path` | existing directory                                                           | none    | required | Names the directory to write into            |
+| `-n`  | `--name`        | string                                                                       | `None`  | optional | Names the file, defaulting per pipeline type |
 
 Omitting `-n` writes `cindra_sd_conf.yaml` for a single-recording pipeline and `cindra_md_conf.yaml` for a
 multi-recording one. The name keeps every component it carries and gains the `.yaml` suffix, so `-n mouse5_2024.03.01`
@@ -192,7 +192,8 @@ field is set before omitting it.
 `--dataset` switches the viewer into tracked ROI mode. `--recording-path` takes the pipeline output root, which is the
 parent of the recording's `cindra` directory, and `launch_viewer_tool` names that same value `output_root` while
 passing it through this flag. `launch_viewer_tool` builds exactly these invocations and always supplies `--state-file`,
-which is how the MCP path reads live viewer state.
+which is how the MCP path reads live viewer state. `--state-file` is declared hidden on all three viewers, so it does
+not appear in `--help` even though every viewer accepts it.
 
 ### `cindra-gui mcp`
 

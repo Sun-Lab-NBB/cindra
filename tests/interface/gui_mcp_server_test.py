@@ -59,7 +59,7 @@ class TestListViewers:
 
     @pytest.mark.xdist_group(name="viewer_registry")
     def test_listed_viewer_names_its_output_root(self, tmp_path: Path) -> None:
-        """Verifies that a registered viewer is listed with the pipeline output root it was launched against."""
+        """Verifies that a registered viewer is listed with the pipeline output root its launch named."""
         _viewer_registry["viewer_0"] = _ViewerProcess(
             viewer_id="viewer_0",
             viewer_type="roi",

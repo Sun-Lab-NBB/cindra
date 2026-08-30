@@ -27,7 +27,7 @@ REGISTRATION_WORKERS: int = 8
 
 REGISTRATION_GPU_WORKERS: int = 2
 """The number of CPU cores one device-backed registration job holds. The job builds its reference image, computes its
-crop, and runs its median filters on the host, so it occupies cores alongside the device it registers on."""
+crop, and runs its median filters on the host, so it occupies cores alongside the device it uses."""
 
 PROCESSING_WORKERS: int = 8
 """The number of CPU cores one processing job holds while the session dispatches at its full concurrency."""
@@ -112,9 +112,9 @@ class ResourceClass:
 
     Notes:
         The ceiling is the width at which the stage stops converting cores into wall clock, so an allocation past it
-        holds capacity another job would turn into throughput. A class carries None when its work waits on something
-        the host cores do not supply, which covers the storage the conversion decodes from, the serial merge the
-        combination stage performs, and the device a registration job holds.
+        holds capacity another job would turn into throughput. A class carries None when its work waits on something the
+        host cores do not supply, which covers the storage the conversion reads, the serial merge the combination stage
+        performs, and the device a registration job holds.
     """
     concurrency_limit: int | None
     """The jobs of this class that may run at once regardless of the capacity the budgets could still supply, or None
@@ -122,7 +122,7 @@ class ResourceClass:
 
     Notes:
         This is a hard ceiling. It counts a resource the CPU budget does not supply, which is the storage a conversion
-        decodes from and the devices a registration runs on, so spare capacity never lifts it.
+        reads and the devices a registration uses, so spare capacity never lifts it.
     """
     concurrency_reservation: int | None
     """The jobs of this class that run at once while other work can still use the capacity the class gives up, or None
@@ -164,8 +164,8 @@ _PROCESSING_RESOURCES: ResourceClass = ResourceClass(
     concurrency_reservation=_PROCESSING_CONCURRENCY_RESERVATION,
 )
 """The resource class of the plane-processing jobs. Detection materializes the binned movie in anonymous memory, so its
-jobs carry the largest per-job memory estimates the dispatcher admits against, and it holds a reservation so the stages
-waiting on no other job keep a share of the host."""
+jobs carry the largest per-job memory estimates the dispatcher's admission reads, and it holds a reservation so the
+stages waiting on no other job keep a share of the host."""
 
 _COMBINATION_RESOURCES: ResourceClass = ResourceClass(
     name="combination",
@@ -222,16 +222,16 @@ def resolve_stage_workers(
         requested count is honored exactly. A requested count of zero, or any negative count other than -1, is
         rejected.
 
-        Every pipeline stage resolves through this function. The combination stage takes no worker argument of its
-        own, so its default is the single core its serial merge occupies.
+        The combination stage takes no worker argument of its own, so its default is the single core its serial merge
+        occupies.
 
         The registration stage default alone responds to gpu_registration, because it is the one stage that runs on a
         CUDA device. Every other stage resolves the same count whatever that flag holds.
 
     Args:
-        job_name: The single or multi-recording pipeline stage to allocate workers for.
-        requested_workers: The number of workers the caller asks for. Use None to accept the default for the
-            stage and -1 to request every available core.
+        job_name: The single or multi-recording pipeline stage that receives the allocated workers.
+        requested_workers: The number of workers the caller requests. Use None to accept the default for the stage and
+            -1 to request every available core.
         gpu_registration: Determines whether the registration jobs are planned for a CUDA device rather than the host
             CPU.
 
@@ -291,7 +291,7 @@ def class_requires_device(resource_class: ResourceClass) -> bool:
         resource_class: The resource class to test.
 
     Returns:
-        True when each job of the class holds one CUDA device while it runs.
+        True for the device-backed registration class alone.
     """
     return resource_class.name == _REGISTRATION_GPU_CLASS_NAME
 
@@ -319,14 +319,13 @@ def resolve_class_allocation(
         A class carrying a hard concurrency ceiling is bounded by a resource the CPU budget does not supply, so it keeps
         its class default and ignores both overrides. Every other class takes its default worker count and bounds its
         concurrency by the CPU budget. Memory bounds admission rather than concurrency, because the memory one job holds
-        follows the recording it processes rather than the class it belongs to.
+        follows the recording it processes rather than the class that owns it.
 
         Every cap resolved here bounds one class in isolation, because a class cannot know which other classes will be
-        dispatching alongside it. The dispatcher therefore holds the sum of the cores committed by every class inside
-        the same CPU budget at run time.
+        dispatching alongside it.
 
     Args:
-        resource_class: The resource class to resolve the allocation for.
+        resource_class: The resource class whose allocation is resolved.
         budget: The number of CPU cores available to the session after reserving system cores.
         job_count: The number of jobs of this class in the session, which caps the useful concurrency.
         workers_per_job: The requested CPU cores per job, -1 to request every available core, or None to accept

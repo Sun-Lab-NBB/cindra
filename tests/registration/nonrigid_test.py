@@ -8,7 +8,6 @@ import scipy.ndimage
 from cindra.detection import compute_registration_blocks
 from cindra.registration.nonrigid import (
     _upsample_block_offsets,
-    _compute_correlation_snr,
     compute_nonrigid_offsets,
     _apply_coordinate_offsets,
     apply_nonrigid_correction,
@@ -16,11 +15,12 @@ from cindra.registration.nonrigid import (
     _extract_upsampling_regions,
     _apply_bilinear_interpolation,
     compute_nonrigid_reference_data,
+    _compute_correlation_signal_to_noise_ratio,
 )
 
 
 class TestApplyBilinearInterpolation:
-    """Tests the _apply_bilinear_interpolation kernel."""
+    """Tests the interior sampling accuracy and the edge clamping of the warp's bilinear sampler."""
 
     def test_matches_map_coordinates_inside_the_source(self) -> None:
         """Verifies interior sampling reproduces scipy.ndimage.map_coordinates at the same coordinates."""
@@ -61,7 +61,7 @@ class TestApplyBilinearInterpolation:
 
 
 class TestApplyCoordinateOffsets:
-    """Tests the _apply_coordinate_offsets kernel."""
+    """Tests that the per-pixel offset maps shift each frame's sampling position by the offset they carry."""
 
     def test_offsets_shift_the_sampled_position(self) -> None:
         """Verifies that a uniform offset map samples the frame at the grid position plus that offset."""
@@ -91,7 +91,7 @@ class TestApplyCoordinateOffsets:
 
 
 class TestInterpolateBlockOffsets:
-    """Tests the _interpolate_block_offsets kernel."""
+    """Tests that the vertical and horizontal block offsets densify into their own per-pixel maps."""
 
     def test_each_axis_reads_its_own_block_offsets(self) -> None:
         """Verifies that the vertical and horizontal block offsets are interpolated into their own output maps."""
@@ -124,7 +124,7 @@ class TestInterpolateBlockOffsets:
 
 
 class TestExtractUpsamplingRegions:
-    """Tests the _extract_upsampling_regions kernel."""
+    """Tests that each block and frame pair copies the correlation window anchored at its own peak."""
 
     def test_copies_the_window_anchored_at_each_peak(self) -> None:
         """Verifies that every (block, frame) pair copies the window starting at its own peak coordinates."""
@@ -156,7 +156,7 @@ class TestExtractUpsamplingRegions:
 
 
 class TestComputeCorrelationSnr:
-    """Tests the _compute_correlation_snr kernel."""
+    """Tests the peak-to-background ratio gating adaptive smoothing, including its zero-background fallback."""
 
     def test_ratio_of_peak_to_background_outside_the_exclusion_box(self) -> None:
         """Verifies the SNR is the central peak divided by the largest value outside the peak exclusion box."""
@@ -169,10 +169,10 @@ class TestComputeCorrelationSnr:
         # to 2 and columns 2 to 3 here. This value sits inside it and must not become the background.
         correlation_data[0, 1, 2] = 8.0
 
-        # The largest value outside the exclusion box, which is the background the ratio divides by.
+        # The largest value outside the exclusion box, which is the background the ratio uses as its divisor.
         correlation_data[0, 0, 0] = 4.0
 
-        snr = _compute_correlation_snr(correlation_data=correlation_data, padding=1)
+        snr = _compute_correlation_signal_to_noise_ratio(correlation_data=correlation_data, padding=1)
 
         np.testing.assert_array_equal(snr, np.array([2.5], dtype=np.float32))
 
@@ -181,7 +181,7 @@ class TestComputeCorrelationSnr:
         correlation_data = np.zeros((1, 5, 5), dtype=np.float32)
         correlation_data[0, 2, 2] = 3.0
 
-        snr = _compute_correlation_snr(correlation_data=correlation_data, padding=1)
+        snr = _compute_correlation_signal_to_noise_ratio(correlation_data=correlation_data, padding=1)
 
         # Every value outside the exclusion box is zero, so the divisor is the 1e-10 epsilon and the ratio is 3e10.
         assert np.isfinite(snr[0])
@@ -189,7 +189,7 @@ class TestComputeCorrelationSnr:
 
 
 class TestComputeNonrigidReferenceData:
-    """Tests compute_nonrigid_reference_data."""
+    """Tests the per-block taper masks and phase-normalized reference kernels the block correlation consumes."""
 
     def test_output_shapes(self) -> None:
         """Verifies the output arrays have correct shapes."""
@@ -253,7 +253,7 @@ class TestComputeNonrigidReferenceData:
 
 
 class TestComputeNonrigidOffsets:
-    """Tests compute_nonrigid_offsets."""
+    """Tests the per-block subpixel offsets, their correlation maxima, and the smoothing levels SNR triggers."""
 
     def test_consistent_offsets_for_identical_frames(self) -> None:
         """Verifies consistent offsets and correct shapes when frames match the reference."""
@@ -278,7 +278,7 @@ class TestComputeNonrigidOffsets:
             taper_mask=taper,
             mean_offset=offset,
             reference_kernel=kernel,
-            snr_threshold=1.2,
+            signal_to_noise_threshold=1.2,
             smoothing_kernel=smoothing_kernel,
             x_blocks=x_blocks,
             y_blocks=y_blocks,
@@ -297,7 +297,7 @@ class TestComputeNonrigidOffsets:
         assert np.max(np.abs(x_offsets)) < 1.0
 
     def test_correlation_maxima_match_the_upsampled_peak(self) -> None:
-        """Verifies the correlation maxima are gathered from the peak indices the offsets are derived from."""
+        """Verifies the correlation maxima are gathered from the same peak indices that yield the offsets."""
         generator = np.random.default_rng(seed=42)
         reference = generator.standard_normal((64, 64)).astype(np.float32)
         y_blocks, x_blocks, _block_counts, _, smoothing_kernel = compute_registration_blocks(
@@ -321,7 +321,7 @@ class TestComputeNonrigidOffsets:
             taper_mask=taper,
             mean_offset=offset,
             reference_kernel=kernel,
-            snr_threshold=1.2,
+            signal_to_noise_threshold=1.2,
             smoothing_kernel=smoothing_kernel,
             x_blocks=x_blocks,
             y_blocks=y_blocks,
@@ -335,7 +335,7 @@ class TestComputeNonrigidOffsets:
         np.testing.assert_allclose(y_offsets[1] - y_offsets[0], 2.0, atol=0.3)
         np.testing.assert_allclose(x_offsets[1] - x_offsets[0], -3.0, atol=0.3)
 
-        # Pins the identity the gather rests on, which is that argmax reports an index attaining the maximum.
+        # Pins the identity underlying the gather, which is that argmax reports an index attaining the maximum.
         matrix = generator.standard_normal((512, 61 * 61)).astype(np.float32)
         peak_indices = np.argmax(matrix, axis=1)
         np.testing.assert_array_equal(np.amax(matrix, axis=1), matrix[np.arange(matrix.shape[0]), peak_indices])
@@ -363,7 +363,7 @@ class TestComputeNonrigidOffsets:
             taper_mask=taper,
             mean_offset=offset,
             reference_kernel=kernel,
-            snr_threshold=1.2,
+            signal_to_noise_threshold=1.2,
             smoothing_kernel=smoothing_kernel,
             x_blocks=x_blocks,
             y_blocks=y_blocks,
@@ -399,7 +399,7 @@ class TestComputeNonrigidOffsets:
             taper_mask=taper,
             mean_offset=offset,
             reference_kernel=kernel,
-            snr_threshold=1e9,
+            signal_to_noise_threshold=1e9,
             smoothing_kernel=smoothing_kernel,
             x_blocks=x_blocks,
             y_blocks=y_blocks,
@@ -410,7 +410,6 @@ class TestComputeNonrigidOffsets:
         block_count = len(y_blocks)
         assert y_offsets.shape == (2, block_count)
         assert x_offsets.shape == (2, block_count)
-        # Expects frames identical to the reference to still produce sub-pixel offsets despite the extra smoothing.
         assert np.max(np.abs(y_offsets)) < 1.0
         assert np.max(np.abs(x_offsets)) < 1.0
 
@@ -452,7 +451,7 @@ class TestAdaptiveCorrelationSmoothing:
             taper_mask=taper,
             mean_offset=offset,
             reference_kernel=kernel,
-            snr_threshold=1.2,
+            signal_to_noise_threshold=1.2,
             smoothing_kernel=smoothing_kernel,
             x_blocks=x_blocks,
             y_blocks=y_blocks,
@@ -474,7 +473,7 @@ class TestAdaptiveCorrelationSmoothing:
 
 
 class TestApplyNonrigidCorrection:
-    """Tests apply_nonrigid_correction."""
+    """Tests that block offsets warp each frame back to its pre-translation content without changing its shape."""
 
     def test_undoes_a_known_translation(self) -> None:
         """Verifies that block offsets matching an imposed roll restore the original frame exactly."""
@@ -545,12 +544,11 @@ class TestApplyNonrigidCorrection:
 
         assert result.shape == (3, 64, 64)
         assert result.dtype == np.float32
-        # Expects warping a constant (all-ones) image by any offset to yield a constant image.
         np.testing.assert_allclose(result, 1.0, atol=1e-4)
 
 
 class TestUpsampleBlockOffsets:
-    """Tests _upsample_block_offsets."""
+    """Tests the densification of sparse block offsets into full-resolution per-pixel offset maps."""
 
     def test_output_shape(self) -> None:
         """Verifies the output offset maps have the correct shape."""

@@ -85,13 +85,11 @@ def pca_denoise(
         )
         normalization[y_slice, x_slice] += taper_mask
 
-    # Fits PCA and reconstructs each block. When multiple workers are available, the fitting runs in parallel across
-    # blocks since each block's SVD is independent. LAPACK releases the GIL during SVD computation. Limits each block
-    # fit to a single BLAS thread. The worker budget is already spent on the block pool below, so leaving the BLAS
-    # thread count unconstrained would multiply the two and oversubscribe the host. The limit also encloses the
-    # accumulation, because the BLAS width the fits run at decides their summation order. Each block is centered inside
-    # the worker that fits it and accumulated as soon as it returns, so the resident set holds one block per worker
-    # rather than a centered and a reconstructed copy of every block at once.
+    # Limits each block fit to a single BLAS thread. The worker budget is already spent on the block pool below, so
+    # leaving the BLAS thread count unconstrained would multiply the two and oversubscribe the host. The limit also
+    # encloses the accumulation, because the BLAS width the fits run at decides their summation order. Each block is
+    # centered inside the worker that fits it and accumulated as soon as it returns, so the resident set holds one block
+    # per worker rather than a centered and a reconstructed copy of every block at once.
     with threadpool_limits(limits=1):
         if parallel_workers == 1:
             for block_slice in block_slices:
@@ -108,7 +106,6 @@ def pca_denoise(
     reconstruction /= normalization
     reconstruction += frame_mean
 
-    # Copies result to input array for in-place semantics.
     frames[:] = reconstruction
 
     message = f"PCA denoising of binned movie: complete. Time taken: {timer.elapsed} seconds."

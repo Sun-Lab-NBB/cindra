@@ -104,7 +104,8 @@ class BackgroundView(IntEnum):
 
     CORRECTED_STRUCTURAL = 5
     """Displays the bleed-through-corrected structural channel mean image computed during functional-to-structural
-    channel colocalization. Only enabled when colocalization data exists."""
+    channel colocalization. The ROI viewer hides this entry unless the recording wrote a corrected structural mean
+    image, which only the structural channel 2 extraction path produces."""
 
 
 class BackgroundViewLabel(StrEnum):
@@ -193,7 +194,7 @@ class Colormap(StrEnum):
     """Defines the available colormaps for ROI overlay coloring."""
 
     HSV = "hsv"
-    """The hue-saturation-value cyclic colormap."""
+    """The hue ramp the viewer applies directly at full saturation and value, bypassing matplotlib."""
     VIRIDIS = "viridis"
     """The viridis perceptually uniform sequential colormap."""
     PLASMA = "plasma"
@@ -245,11 +246,11 @@ class _ROIViewerConstants:
     """The offset added to random hue values after division when channel 2 data is present. Shifts the compressed hue
     range away from zero, ensuring channel 2 ROIs are colored in a distinct hue band from channel 1 ROIs."""
     hsv_divisor: float = 1.4
-    """The normalization divisor for percentile-based statistic values before HSV color mapping. Scales the statistic
+    """The normalization divisor for every normalized value before HSV color mapping. Scales the statistic
     range to occupy a visually informative portion of the hue spectrum, preventing extreme hues from dominating the
     overlay."""
     hsv_offset: float = 0.4
-    """The normalization offset applied before HSV division for percentile-based statistics. Shifts the scaled statistic
+    """The normalization offset applied before HSV division for every normalized value. Shifts the scaled statistic
     values to center the color mapping within a perceptually useful region of the hue spectrum."""
     random_color_seed: int = 0
     """The seed for the random number generator used to assign ROI hue values. Ensures reproducible color assignments
@@ -262,8 +263,8 @@ class _ROIViewerConstants:
     distance between adjacent traces in both single-recording and multi-recording trace plots, with larger values
     decreasing separation (trace spacing is computed as 1.0 / scale_factor)."""
     average_threshold: int = 5
-    """An average trace is rendered only when more than this many ROIs are selected. At or below this count, only
-    individual traces are shown to avoid displaying a noisy average from too few samples."""
+    """The selected ROI count above which the average trace is rendered. At or below this count, only individual traces
+    are shown to avoid displaying a noisy average from too few samples."""
     average_scale_divisor: float = 25.0
     """The divisor used to compute the vertical scale of the average trace relative to the number of selected ROIs.
     The average scale is calculated as (selected_count / divisor) + 1, producing a gradually increasing amplitude as
@@ -294,8 +295,8 @@ class _BinaryPlayerConstants:
     """Encapsulates static runtime parameters for the binary player window."""
 
     playback_speed_multiplier: int = 5
-    """The factor by which playback runs faster than the recording's real-time rate. A value of 5 means the binary
-    viewer plays frames at 5x the original recording speed."""
+    """The divisor applied to the recording's real-time frame interval when deriving the playback timer interval. Each
+    tick advances the current frame navigation step, so the on-screen rate is this factor times that step."""
     subsample_frame_count: int = 100
     """The number of evenly-spaced frames subsampled from the recording for dynamic range estimation. These frames
     are used to compute the mean and standard deviation that define the display intensity range."""

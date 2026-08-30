@@ -61,7 +61,7 @@ class TestMultiRecordingConfigurationRoundTrip:
 
 
 class TestDetectPipelineType:
-    """Tests detect_pipeline_type."""
+    """Tests the pipeline type a saved configuration reports and the errors a missing or unrecognized file raises."""
 
     def test_detects_single_recording_pipeline(self, tmp_path: Path) -> None:
         """Verifies that a saved SingleRecordingConfiguration file is detected as SINGLE_RECORDING."""

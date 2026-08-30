@@ -51,10 +51,10 @@ def run_single_recording_pipeline(
     """Executes the requested single-recording processing pipeline steps for the target data.
 
     The caller is responsible for writing all path overrides (``file_io.data_path``, ``file_io.output_path``) and the
-    ``runtime.display_progress_bars`` flag into the configuration file before invoking this function. The pipeline
-    reads these values from the file at ``configuration_path`` and does not accept them as direct parameters. Each
-    stage takes its worker count as a direct parameter, which keeps the configuration file immutable and therefore
-    safe to share between concurrently dispatched jobs.
+    ``runtime.display_progress_bars`` flag into the configuration file before invoking this function. The pipeline reads
+    these values from the file at ``configuration_path``. Each stage takes its worker count as a direct parameter, which
+    keeps the configuration file immutable and therefore safe to share between concurrently dispatched jobs. An
+    invocation that sets none of the four stage flags runs every stage in phase order.
 
     Args:
         configuration_path: The path to the single-recording configuration YAML file.
@@ -99,17 +99,17 @@ def run_single_recording_pipeline(
         SingleRecordingJobNames.PROCESS: processing_workers,
     }
 
-    # Resolves RuntimeContext instances for all planes upfront. This determines the plane count without requiring
-    # binarization to run first, mirroring how run_multi_recording_pipeline resolves contexts before building jobs.
-    # In REMOTE mode (job_id provided, i.e., when dispatched by the MCP job executor), disables bootstrap persistence
-    # because the prepare tool already wrote the shared configuration and per-plane runtime_data.yaml files
-    # single-threaded. Skipping the per-worker re-save keeps a worker from overwriting every peer plane's file with
-    # its own stale snapshot, since this resolver builds a context per plane rather than per dispatched job.
+    # Resolving the contexts upfront determines the plane count without requiring binarization to run first, mirroring
+    # how run_multi_recording_pipeline resolves contexts before building jobs. In REMOTE mode (job_id provided, i.e.,
+    # when dispatched by the MCP job executor), disables bootstrap persistence because the prepare tool already wrote
+    # the shared configuration and per-plane runtime_data.yaml files single-threaded. Skipping the per-worker re-save
+    # keeps a worker from overwriting every peer plane's file with its own stale snapshot, since this resolver builds a
+    # context per plane rather than per dispatched job.
     contexts = resolve_single_recording_contexts(configuration=configuration, persist=job_id is None)
     plane_count = len(contexts)
 
-    # Derives the tracker path from the configuration. The tracker lives under the cindra/ subdirectory, consistent
-    # with where batch tools create it and where get_recording_status_tool looks for it.
+    # The tracker lives under the cindra/ subdirectory, consistent with where batch tools create it and where
+    # get_recording_status_tool looks for it.
     tracker_path: Path = output_path / OUTPUT_DIRECTORY_NAME / SINGLE_RECORDING_TRACKER_FILENAME
 
     # The insertion order of this dictionary sequences the jobs a LOCAL-mode invocation runs, so the registration
@@ -210,9 +210,9 @@ def run_multi_recording_pipeline(
 
     The caller is responsible for writing all runtime overrides (``recording_io.recording_directories``,
     ``runtime.display_progress_bars``) into the configuration file before invoking this function. The pipeline reads
-    these values from the file at ``configuration_path`` and does not accept them as direct parameters. Each stage
-    takes its worker count as a direct parameter, which keeps the configuration file immutable and therefore safe to
-    share between concurrently dispatched jobs.
+    these values from the file at ``configuration_path``. Each stage takes its worker count as a direct parameter, which
+    keeps the configuration file immutable and therefore safe to share between concurrently dispatched jobs. An
+    invocation that sets neither stage flag runs both stages in phase order.
 
     Args:
         configuration_path: The path to the multi-recording configuration YAML file. The configuration must include the
@@ -257,12 +257,11 @@ def run_multi_recording_pipeline(
         f"'{configuration.recording_io.dataset_name}'...",
     )
 
-    # Resolves MultiRecordingRuntimeContext instances to extract recording IDs and the main recording output
-    # path. This also validates that all recording directories contain valid single-recording outputs and
-    # handles relocated data. In REMOTE mode (job_id provided, i.e., when dispatched by the MCP job executor),
-    # disables bootstrap persistence because the prepare tool already wrote the shared configuration and every
-    # recording's multi_recording_runtime_data.yaml single-threaded. Skipping the per-worker re-save keeps a worker
-    # from overwriting every peer recording's file with its own stale snapshot.
+    # The resolution also validates that all recording directories contain valid single-recording outputs and handles
+    # relocated data. In REMOTE mode (job_id provided, i.e., when dispatched by the MCP job executor), disables
+    # bootstrap persistence because the prepare tool already wrote the shared configuration and every recording's
+    # multi_recording_runtime_data.yaml single-threaded. Skipping the per-worker re-save keeps a worker from overwriting
+    # every peer recording's file with its own stale snapshot.
     contexts = resolve_multi_recording_contexts(configuration=configuration, persist=job_id is None)
     recording_ids: list[str] = [context.runtime.io.recording_id for context in contexts]
     main_recording_path = contexts[0].runtime.output_path

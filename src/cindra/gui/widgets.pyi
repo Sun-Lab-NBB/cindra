@@ -20,8 +20,8 @@ from .constants import (
     TraceMode as TraceMode,
 )
 
-type ClickHandler = Callable[[int, int, bool, bool], bool]
-type ZoomHandler = Callable[[], None]
+type _ClickHandler = Callable[[int, int, bool, bool], bool]
+type _ZoomHandler = Callable[[], None]
 
 @dataclass(frozen=True, slots=True)
 class PlayPauseGroup:
@@ -53,13 +53,13 @@ class ViewBox(pg.ViewBox):
     border: Incomplete
     menu: Incomplete
     name: Incomplete
-    _click_handler: ClickHandler | None
-    _zoom_handler: ZoomHandler | None
+    _click_handler: _ClickHandler | None
+    _zoom_handler: _ZoomHandler | None
     def __init__(
         self, *, border: object = None, invert_y: bool = False, enable_menu: bool = True, name: str | None = None
     ) -> None: ...
-    def set_click_handler(self, handler: ClickHandler) -> None: ...
-    def set_zoom_handler(self, handler: ZoomHandler) -> None: ...
+    def set_click_handler(self, handler: _ClickHandler) -> None: ...
+    def set_zoom_handler(self, handler: _ZoomHandler) -> None: ...
     def mouseDoubleClickEvent(self, event: object) -> None: ...
     def mouseClickEvent(self, event: MouseClickEvent) -> None: ...
 

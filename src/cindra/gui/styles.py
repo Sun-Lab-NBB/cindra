@@ -70,16 +70,16 @@ class _FontStyle:
     """The font size for axis labels and legend entry labels."""
 
     small: QtGui.QFont = field(default_factory=lambda: QtGui.QFont("Arial", 14))
-    """Small font (Arial 14pt) for general GUI widgets and the application default."""
+    """The small font for general GUI widgets and the application default."""
 
     small_bold: QtGui.QFont = field(default_factory=lambda: QtGui.QFont("Arial", 14, QtGui.QFont.Weight.Bold.value))
-    """Small bold font (Arial 14pt bold) for combo boxes, buttons, and overlay text."""
+    """The small bold font for combo boxes, buttons, and overlay text."""
 
     large: QtGui.QFont = field(default_factory=lambda: QtGui.QFont("Arial", 16))
-    """Large font (Arial 16pt) for prominent GUI input fields."""
+    """The large font for prominent GUI input fields."""
 
     large_bold: QtGui.QFont = field(default_factory=lambda: QtGui.QFont("Arial", 16, QtGui.QFont.Weight.Bold.value))
-    """Large bold font (Arial 16pt bold) for prominent GUI labels."""
+    """The large bold font for prominent GUI labels."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,8 +140,7 @@ class _PCViewerStyle:
 class _Colors:
     """Defines the RGB color palette shared across all viewer windows.
 
-    All colors are expressed as ``(R, G, B)`` integer tuples in the 0-255 range. Viewers select from this palette at
-    their call sites, giving each entry a local semantic name.
+    All colors are expressed as ``(R, G, B)`` integer tuples in the 0-255 range.
     """
 
     cyan: tuple[int, int, int] = (0, 255, 255)

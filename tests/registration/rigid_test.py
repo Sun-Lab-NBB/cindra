@@ -14,7 +14,7 @@ from cindra.registration.rigid import (
 
 
 class TestComputeEdgeTaper:
-    """Tests compute_edge_taper."""
+    """Tests the taper mask and mean offset that suppress phase-correlation wraparound at the frame edges."""
 
     def test_output_shapes(self) -> None:
         """Verifies both outputs have the correct shape."""
@@ -55,7 +55,7 @@ class TestComputeEdgeTaper:
 
 
 class TestApplyEdgeTaper:
-    """Tests apply_edge_taper."""
+    """Tests the masked-and-offset frame arithmetic that precedes phase correlation."""
 
     def test_output_shape(self) -> None:
         """Verifies the output shape matches the input frames shape."""
@@ -76,7 +76,7 @@ class TestApplyEdgeTaper:
 
 
 class TestComputePhaseCorrelationKernel:
-    """Tests compute_phase_correlation_kernel."""
+    """Tests the phase-only reference spectrum and the optional Gaussian smoothing it carries."""
 
     def test_shape(self) -> None:
         """Verifies the kernel shape matches rfft2 output dimensions."""
@@ -115,7 +115,7 @@ class TestComputePhaseCorrelationKernel:
 
 
 class TestComputeRigidOffsets:
-    """Tests compute_rigid_offsets."""
+    """Tests the per-frame translation estimate, its correlation values, and the search radius it clamps."""
 
     def test_zero_offset_for_identical_frames(self) -> None:
         """Verifies zero offsets when frames match the reference."""
@@ -223,7 +223,7 @@ class TestComputeRigidOffsets:
 
 
 class TestTranslateFrame:
-    """Tests translate_frame."""
+    """Tests the circular shift direction, its roundtrip inversion, and the frame geometry it preserves."""
 
     def test_zero_offset_identity(self) -> None:
         """Verifies zero offset produces no change."""

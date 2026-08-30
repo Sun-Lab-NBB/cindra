@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 from ataraxis_base_utilities import error_format
 
+from cindra.layout import PARAMETERS_FILENAME
 from cindra.io.context import (
-    PARAMETERS_FILENAME,
     OUTPUT_DIRECTORY_NAME,
     find_data_directory,
     find_cindra_directory,
@@ -23,7 +23,7 @@ from cindra.dataclasses.single_recording_configuration import AcquisitionParamet
 
 
 class TestFindDataDirectory:
-    """Tests find_data_directory."""
+    """Tests the directory the parameters file search returns, and the missing file and plain file it rejects."""
 
     def test_finds_directory_with_nested_parameters_file(self, tmp_path: Path) -> None:
         """Verifies that the function locates the correct directory when the parameters file is in a subdirectory."""
@@ -56,7 +56,7 @@ class TestFindDataDirectory:
 
 
 class TestLoadAcquisitionParameters:
-    """Tests load_acquisition_parameters."""
+    """Tests the single-ROI and MROI files the loader accepts, and the missing and invalid fields it rejects."""
 
     def test_loads_valid_single_roi_json(self, tmp_path: Path) -> None:
         """Verifies that a valid single-ROI parameters file is loaded correctly."""
@@ -267,7 +267,7 @@ class TestLoadAcquisitionParameters:
 
 
 class TestFindAcquisitionParameters:
-    """Tests _find_acquisition_parameters."""
+    """Tests the nested discovery and load the acquisition parameters wrapper performs for a data path."""
 
     def test_finds_and_loads_parameters_from_nested_directory(self, tmp_path: Path) -> None:
         """Verifies that the wrapper function correctly discovers and loads acquisition parameters."""
@@ -282,7 +282,7 @@ class TestFindAcquisitionParameters:
 
 
 class TestExtractUniqueComponents:
-    """Tests extract_unique_components."""
+    """Tests the unique component each path contributes as its tracker specifier, and the paths it rejects."""
 
     def test_extracts_unique_leaf_directories(self) -> None:
         """Verifies that unique leaf directory names are extracted when they differ between paths."""
@@ -346,7 +346,7 @@ class TestExtractUniqueComponents:
 
 
 class TestResolveRecordingRoots:
-    """Tests resolve_recording_roots."""
+    """Tests the recording roots resolved from output directories, shared leaf names, and duplicate paths."""
 
     def test_resolves_roots_from_nested_paths(self) -> None:
         """Verifies that recording roots are resolved by stripping the trailing components shared by every path."""
@@ -479,7 +479,7 @@ class TestResolveRecordingRoots:
 
 
 class TestFindCindraDirectory:
-    """Tests find_cindra_directory."""
+    """Tests the output directory the metadata search returns, and the absent and ambiguous trees it rejects."""
 
     def test_finds_directory_with_combined_metadata(self, tmp_path: Path) -> None:
         """Verifies that the cindra output directory is found when combined_metadata.npz exists."""
@@ -520,7 +520,7 @@ class TestFindCindraDirectory:
 
 
 class TestComputeMroiRegionBorders:
-    """Tests _compute_mroi_region_borders."""
+    """Tests the sorted region borders an MROI recording yields, and the empty result a non-MROI recording gives."""
 
     def test_returns_empty_tuple_for_non_mroi(self, tmp_path: Path) -> None:
         """Verifies that a non-MROI recording returns an empty tuple."""

@@ -391,19 +391,19 @@ completeness verdict with any missing items listed. It validates no array shape,
 tool is unavailable.
 
 Gate on `complete`, which is false whenever `missing` is non-empty. The `failed` count covers the required checks that
-did not pass, so it always equals the length of `missing`. The tool also returns `optional_absent` when the dataset
-holds none of an optional output, listing the channel 2 arrays and `cell_colocalization.npy` each recording lacks in
+did not pass, so it always equals the length of `missing`. The tool also returns `optional_absent` whenever any
+recording lacks an optional output, listing the channel 2 arrays and `cell_colocalization.npy` each recording lacks in
 the same label form `missing` uses. That list is informational, so report it as expected for a single-channel dataset
 and never treat it as an incomplete run.
 
 ```text
-Multi-Recording Output Completeness:
+Multi-Recording Output Completeness, tool-settled (run `verify_multi_recording_output_tool`):
 
 Shared files (main recording only):
 - [ ] `multi_recording_configuration.yaml` exists
 
 Per-recording files (every recording):
-- [ ] `multi_recording_runtime_data.yaml` exists with non-zero timing fields
+- [ ] `multi_recording_runtime_data.yaml` exists
 
 Registration data (per recording):
 - [ ] `registration_arrays/deform_field_y.npy` exists
@@ -412,21 +412,23 @@ Registration data (per recording):
 - [ ] `registration_arrays/transformed_enhanced_mean_image.npy` exists
 - [ ] `registration_arrays/transformed_maximum_projection.npy` exists
 - [ ] `registration_deformed_masks.npz` exists and contains `pixel_counts`, `y_pixels`, `x_pixels` keys
-- [ ] Channel 2 registration files exist if both channels are functional, except
-      `registration_arrays/transformed_mean_image_channel_2.npy`, which exists for any dual-channel recording
 
 Tracking data (per recording, identical across recordings):
 - [ ] `tracking_template_masks.npz` exists and contains `pixel_counts`, `cluster_id`, `recording_count` keys
-- [ ] Channel 2 tracking files exist if both channels are functional
 
 Extraction data (per recording):
 - [ ] `roi_masks.npz` exists with backward-transformed template masks
 - [ ] `roi_statistics.npz` exists with shape statistics
-- [ ] `cell_fluorescence.npy` exists with shape (num_rois, num_frames)
-- [ ] `neuropil_fluorescence.npy` exists with shape matching cell_fluorescence
-- [ ] `subtracted_fluorescence.npy` exists with shape matching cell_fluorescence
-- [ ] `spikes.npy` exists with shape matching cell_fluorescence
+- [ ] `cell_fluorescence.npy`, `neuropil_fluorescence.npy`, `subtracted_fluorescence.npy`, and `spikes.npy` exist
+
+Multi-Recording Output Completeness, reader-judged:
+- [ ] `multi_recording_runtime_data.yaml` holds non-zero timing fields in every recording
+- [ ] Channel 2 registration files exist if both channels are functional, except
+      `registration_arrays/transformed_mean_image_channel_2.npy`, which exists for any dual-channel recording
+- [ ] Channel 2 tracking files exist if both channels are functional
 - [ ] Channel 2 trace files exist if both channels are functional
 - [ ] `cell_colocalization.npy` exists if both channels are functional, with shape (num_rois, 2)
+- [ ] `cell_fluorescence.npy` has shape (num_rois, num_frames), and `neuropil_fluorescence.npy`,
+      `subtracted_fluorescence.npy`, and `spikes.npy` match it
 - [ ] Fluorescence trace shapes are consistent across all per-recording files
 ```

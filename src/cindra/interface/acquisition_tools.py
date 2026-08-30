@@ -10,7 +10,8 @@ from itertools import pairwise
 from natsort import natsorted
 from tifffile import TiffFile
 
-from ..io import TIFF_EXTENSIONS, PARAMETERS_FILENAME, MAXIMUM_CHANNEL_COUNT, find_data_directory
+from ..io import TIFF_EXTENSIONS, MAXIMUM_CHANNEL_COUNT, find_data_directory
+from ..layout import PARAMETERS_FILENAME
 from .mcp_instance import mcp
 
 _MINIMUM_RECOMMENDED_FRAMES_PER_PLANE: int = 200

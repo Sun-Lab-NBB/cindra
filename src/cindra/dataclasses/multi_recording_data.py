@@ -30,11 +30,11 @@ class MultiRecordingIOData:
 
     recording_id: str = ""
     """The unique identifier for this recording, derived from the distinguishing component of the recording directory
-    path. This ID is used to name output subdirectories and identify the recording in logs."""
+    path. This ID is the tracker specifier of the recording's multi-recording extraction job, and it
+    identifies the recording in status messages."""
 
     data_path: Path | None = None
-    """The path to this recording's cindra single-recording pipeline output directory. This is the resolved cindra root
-    that contains combined_metadata.npz and other single-recording outputs."""
+    """The path to this recording's cindra single-recording pipeline output directory."""
 
     dataset_name: str = ""
     """The name of the multi-recording dataset, used to create the output subdirectory structure."""
@@ -47,9 +47,7 @@ class MultiRecordingIOData:
 
     dataset_output_paths: tuple[Path, ...] = ()
     """The multi_recording output paths for every recording in the dataset, stored in natural-sorted order. Each entry
-    points to a recording's multi_recording output directory (e.g., {cindra_directory}/multi_recording/{dataset_name}/).
-    Storing this tuple in every recording enables full dataset hierarchy reconstruction from any single recording's
-    serialized YAML file."""
+    points to a recording's multi_recording output directory."""
 
     selected_roi_indices: tuple[int, ...] = ()
     """The indices of channel 1 ROIs selected from CombinedData.extraction.roi_statistics for multi-recording tracking.
@@ -65,12 +63,10 @@ class MultiRecordingRegistrationData:
     """Stores runtime data from the registration stage."""
 
     deform_field_y: NDArray[np.float32] | None = None
-    """The Y-dimension displacement field computed by DiffeomorphicDemonsRegistration. Combined with deform_field_x,
-    these fields can be used to construct a Deformation instance for warping images."""
+    """The Y-dimension displacement field computed by DiffeomorphicDemonsRegistration."""
 
     deform_field_x: NDArray[np.float32] | None = None
-    """The X-dimension displacement field computed by DiffeomorphicDemonsRegistration. Combined with deform_field_y,
-    these fields can be used to construct a Deformation instance for warping images."""
+    """The X-dimension displacement field computed by DiffeomorphicDemonsRegistration."""
 
     transformed_mean_image: NDArray[np.float32] | None = None
     """The mean image transformed to the shared (deformed) visual space."""
@@ -90,7 +86,6 @@ class MultiRecordingRegistrationData:
     transformed_maximum_projection_channel_2: NDArray[np.float32] | None = None
     """The channel 2 maximum projection transformed to the shared (deformed) visual space."""
 
-    # Defines the deformed masks that serve as the intermediate data for ROI tracking.
     deformed_roi_masks: list[ROIMask] | None = None
     """The channel 1 ROI spatial data after multi-recording registration deform offsets have been applied to the spatial
     coordinates of each ROI."""
@@ -453,7 +448,6 @@ class MultiRecordingTimingData:
         recording-specific.
     """
 
-    # Defines the discovery phase timing, which is duplicated in every recording of the dataset.
     registration_time: int = 0
     """The across-recording diffeomorphic demons registration time in seconds."""
 
@@ -466,7 +460,6 @@ class MultiRecordingTimingData:
     total_discovery_time: int = 0
     """The total discovery phase time in seconds."""
 
-    # Defines the extraction phase timing, which is specific to this recording.
     extraction_time: int = 0
     """The fluorescence extraction time for this recording in seconds."""
 
@@ -505,7 +498,9 @@ class MultiRecordingRuntimeData(YamlConfig):
 
     extraction: ExtractionData = field(default_factory=ExtractionData)
     """The runtime data from the extraction stage. After backward transformation, tracked ROI masks are stored as
-    ROIStatistics in roi_statistics. Extraction then populates fluorescence traces and classification fields."""
+    ROIStatistics in roi_statistics. Extraction then populates the fluorescence traces, the spike traces, and, for a
+    dual-channel dataset, the cross-channel colocalization array. The classification fields stay unset, because the
+    multi-recording pipeline reuses the single-recording classification."""
 
     timing: MultiRecordingTimingData = field(default_factory=MultiRecordingTimingData)
     """The timing information for both discovery and extraction phases."""
@@ -530,7 +525,8 @@ class MultiRecordingRuntimeData(YamlConfig):
     def load_arrays(self) -> None:
         """Eagerly loads all multi-recording NumPy arrays from disk into memory.
 
-        CombinedData (single-recording data) is not loaded by this method and must be loaded separately by the caller.
+        The caller loads ``CombinedData`` separately, because it references immutable single-recording outputs that this
+        instance does not own.
         """
         if self.output_path is not None:
             self.registration.load_arrays(output_path=self.output_path)
@@ -540,7 +536,8 @@ class MultiRecordingRuntimeData(YamlConfig):
     def memory_map_arrays(self) -> None:
         """Memory-maps all multi-recording NumPy arrays from disk in read-only ``r`` mode.
 
-        CombinedData (single-recording data) is not loaded by this method and must be loaded separately by the caller.
+        The caller loads ``CombinedData`` separately, because it references immutable single-recording outputs that this
+        instance does not own.
         """
         if self.output_path is not None:
             self.registration.memory_map_arrays(output_path=self.output_path)

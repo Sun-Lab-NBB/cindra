@@ -14,7 +14,7 @@ from cindra.dataclasses import ROIMask, ROIStatistics, MultiRecordingRuntimeData
 
 
 class TestFilterChannelRois:
-    """Tests _filter_channel_rois."""
+    """Tests the probability, size, and MROI border filters that decide which ROIs of one channel survive."""
 
     def test_all_pass(self) -> None:
         """Verifies that all ROIs pass when no filters are restrictive."""
@@ -62,8 +62,8 @@ class TestFilterChannelRois:
     def test_mroi_border_filter(self) -> None:
         """Verifies that ROIs near MROI region borders are excluded."""
         rois = [
-            _make_roi(centroid=(10, 50)),  # Near border at x=50.
-            _make_roi(centroid=(10, 100)),  # Far from border.
+            _make_roi(centroid=(10, 50)),
+            _make_roi(centroid=(10, 100)),
         ]
         classification = np.ones((2, 2), dtype=np.float32)
         result = _filter_channel_rois(
@@ -104,25 +104,6 @@ class TestFilterChannelRois:
             region_margin=0,
         )
         assert result == ()
-
-
-def _make_roi(
-    centroid: tuple[int, int] = (10, 10),
-    pixel_count: int = 50,
-) -> ROIStatistics:
-    """Creates a minimal ROIStatistics instance for testing."""
-    y_pixels = np.arange(pixel_count, dtype=np.int32) % 10
-    x_pixels = np.arange(pixel_count, dtype=np.int32) // 10
-    mask = ROIMask(
-        y_pixels=y_pixels,
-        x_pixels=x_pixels,
-        pixel_weights=np.ones(pixel_count, dtype=np.float32),
-        centroid=centroid,
-        frame_width=100,
-    )
-    roi = ROIStatistics(mask=mask)
-    roi.pixel_count = pixel_count
-    return roi
 
 
 class TestClearSelections:
@@ -167,6 +148,25 @@ class TestClearSelections:
     def test_recording_clearing_without_datasets_reports_zero(self, tmp_path):
         """Verifies that a recording belonging to no dataset reports nothing cleared."""
         assert clear_recording_selections(cindra_root=tmp_path) == 0
+
+
+def _make_roi(
+    centroid: tuple[int, int] = (10, 10),
+    pixel_count: int = 50,
+) -> ROIStatistics:
+    """Creates a minimal ROIStatistics instance for testing."""
+    y_pixels = np.arange(pixel_count, dtype=np.int32) % 10
+    x_pixels = np.arange(pixel_count, dtype=np.int32) // 10
+    mask = ROIMask(
+        y_pixels=y_pixels,
+        x_pixels=x_pixels,
+        pixel_weights=np.ones(pixel_count, dtype=np.float32),
+        centroid=centroid,
+        frame_width=100,
+    )
+    roi = ROIStatistics(mask=mask)
+    roi.pixel_count = pixel_count
+    return roi
 
 
 def _write_dataset_runtime(tmp_path, indices, channel_2_indices=(), dataset_name="dataset_a"):

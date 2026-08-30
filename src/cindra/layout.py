@@ -1,7 +1,6 @@
 """Provides the on-disk contract of the cindra pipelines: the directory and file names every stage writes under a
 caller-supplied output root, and the pure resolvers that build a path from that root. This module imports nothing from
-cindra, so every layer from the configuration dataclasses upward reads the contract from one definition instead of
-respelling it.
+cindra, so every layer from the configuration dataclasses upward reads the contract from one definition.
 """
 
 from enum import StrEnum
@@ -97,10 +96,7 @@ _REGISTRATION_MARKER_SUFFIX: str = ".registering"
 
 Notes:
     Registration rewrites its input binary rather than writing a second copy, so an interrupted run leaves a binary
-    holding corrected frames up to an unknown point and raw frames after it. The pipeline refuses a binary carrying
-    either phase marker, and enabling 'file_io.repeat_binarization' rebuilds it. The two suffixes differ so that
-    whoever finds one on disk reads which phase died without opening the source, and each suffix spells its phase the
-    way the reported job status spells it.
+    holding corrected frames up to an unknown point and raw frames after it.
 """
 
 _CHANNEL_2_ARRAY_SUFFIX: str = "_channel_2"
@@ -326,10 +322,6 @@ def resolve_registration_marker_name(binary_name: str) -> str:
 def resolve_plane_specifier(plane_index: int) -> str:
     """Resolves the specifier that identifies one virtual imaging plane.
 
-    Notes:
-        The specifier names a plane's output directory and identifies the plane a per-plane job processes on its
-        tracker, so both spell the plane the same way.
-
     Args:
         plane_index: The index of the virtual imaging plane.
 
@@ -343,7 +335,7 @@ def parse_plane_specifier(specifier: str) -> int | None:
     """Reads the virtual plane index a per-plane specifier carries.
 
     Notes:
-        The inverse of resolve_plane_specifier. A specifier that names no plane resolves to None rather than raising,
+        Inverts ``resolve_plane_specifier``. A specifier that names no plane resolves to None rather than raising,
         because a caller routing a mixed job set asks this of every specifier it holds.
 
     Args:
