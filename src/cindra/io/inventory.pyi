@@ -1,8 +1,9 @@
 from pathlib import Path
-from dataclasses import field, dataclass
+from dataclasses import dataclass
 from collections.abc import Sequence
 
 from ..layout import (
+    PARAMETERS_FILENAME as PARAMETERS_FILENAME,
     CHANNEL_1_BINARY_FILENAME as CHANNEL_1_BINARY_FILENAME,
     COMBINED_METADATA_FILENAME as COMBINED_METADATA_FILENAME,
     ACQUISITION_PARAMETERS_FILENAME as ACQUISITION_PARAMETERS_FILENAME,
@@ -16,7 +17,6 @@ from ..layout import (
     resolve_plane_specifier as resolve_plane_specifier,
 )
 from .context import (
-    PARAMETERS_FILENAME as PARAMETERS_FILENAME,
     extract_unique_components as extract_unique_components,
     load_acquisition_parameters as load_acquisition_parameters,
 )
@@ -35,7 +35,7 @@ class RecordingPlanes:
 @dataclass(frozen=True, slots=True)
 class DatasetRecordings:
     dataset_name: str
-    recording_roots: tuple[Path, ...] = field(default=())
+    recording_roots: tuple[Path, ...] = ...
     recording_ids: tuple[str, ...] = ...
     dataset_paths: tuple[Path, ...] = ...
     extracted_recordings: tuple[str, ...] = ...

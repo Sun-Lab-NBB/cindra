@@ -20,7 +20,6 @@ from .select import (
 )
 from .combine import combine_planes as combine_planes
 from .context import (
-    PARAMETERS_FILENAME as PARAMETERS_FILENAME,
     MAXIMUM_CHANNEL_COUNT as MAXIMUM_CHANNEL_COUNT,
     find_data_directory as find_data_directory,
     find_cindra_directory as find_cindra_directory,
@@ -45,7 +44,6 @@ from .inventory import (
 
 __all__ = [
     "MAXIMUM_CHANNEL_COUNT",
-    "PARAMETERS_FILENAME",
     "TIFF_DECODE_CEILING",
     "TIFF_EXTENSIONS",
     "BinaryFile",

@@ -12,7 +12,7 @@ from tifffile import TiffWriter
 from ataraxis_base_utilities import error_format, ensure_directory_exists
 from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 
-from cindra.io.context import PARAMETERS_FILENAME
+from cindra.layout import PARAMETERS_FILENAME
 from cindra.dataclasses import MultiRecordingConfiguration, SingleRecordingConfiguration
 from cindra.orchestration import (
     MULTI_RECORDING_TRACKER_FILENAME,
@@ -60,7 +60,7 @@ _DATASET_NAME: str = "tracked_cells"
 
 
 class TestRunMultiRecordingPipeline:
-    """Tests run_multi_recording_pipeline."""
+    """Tests the phases a multi-recording run dispatches, the recordings it targets, and its configuration guards."""
 
     def test_runs_all_phases_when_no_flags_set(self, tmp_path: Path) -> None:
         """Verifies that omitting every phase flag runs discovery and extraction across both recordings."""
@@ -227,8 +227,8 @@ class TestRunMultiRecordingPipeline:
             run_multi_recording_pipeline(configuration_path=configuration_path, discover=True)
 
 
-class TestExecuteMultiRecordingJob:
-    """Tests dispatch_multi_recording_job."""
+class TestDispatchMultiRecordingJob:
+    """Tests the failed status the dispatcher records for a job name the multi-recording pipeline does not define."""
 
     def test_unknown_job_fails_and_reraises(self, tmp_path: Path) -> None:
         """Verifies that an unrecognized job name marks the job failed and re-raises the ValueError."""
@@ -245,7 +245,7 @@ class TestExecuteMultiRecordingJob:
         with pytest.raises(ValueError, match=error_format(expected_message)):
             dispatch_multi_recording_job(
                 configuration=configuration,
-                job_name="unrecognized_job",  # type: ignore[arg-type]
+                job_name="unrecognized_job",  # type: ignore[arg-type]  # The invalid name is the input under test.
                 specifier="",
                 job_id=job_id,
                 tracker=tracker,

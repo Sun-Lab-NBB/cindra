@@ -9,8 +9,8 @@ import yaml
 import pytest
 from ataraxis_base_utilities import error_format
 
+from cindra.layout import PARAMETERS_FILENAME
 from cindra.io.context import (
-    PARAMETERS_FILENAME,
     resolve_multi_recording_contexts,
     resolve_single_recording_contexts,
 )
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 
 class TestResolveSingleRecordingContexts:
-    """Tests resolve_single_recording_contexts."""
+    """Tests the per-plane contexts the single-recording resolution builds, and its load-only bootstrap checks."""
 
     def test_creates_one_context_per_plane(self, tmp_path: Path) -> None:
         """Verifies that one context per physical plane is created with a derived per-plane sampling rate."""
@@ -245,7 +245,7 @@ class TestResolveSingleRecordingContexts:
 
 
 class TestResolveMultiRecordingContexts:
-    """Tests resolve_multi_recording_contexts."""
+    """Tests the per-recording contexts the dataset resolution builds, its target filter, and its bootstrap checks."""
 
     def test_resolves_all_recordings(self, tmp_path: Path) -> None:
         """Verifies that every recording is resolved with shared dataset output paths and persisted bootstrap files."""
