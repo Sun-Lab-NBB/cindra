@@ -17,32 +17,34 @@
   performs diffeomorphic demons registration to a common space, clusters ROIs across recordings via spatial overlap, and
   projects template masks back to individual recordings. Phase 2 extracts fluorescence traces and applies OASIS
   deconvolution for tracked ROI templates (parallelizable across recordings).
-- **Self-driven orchestration**: `cindra.orchestration` owns the whole scheduling surface across nine modules that
-  form a one-way dependency chain. `gpu.py` and `openmp.py` import nothing from the package, and `jobs.py` is the leaf
-  above `cindra.layout`. It holds the job name enumerations and the phase model (`SINGLE_RECORDING_PHASES`,
-  `MULTI_RECORDING_PHASES`, `PipelinePhase`, `PrerequisiteScope`). It also holds the resolvers that expand that model
-  into a recording's job universe (`resolve_single_recording_jobs`, `resolve_multi_recording_jobs`,
-  `resolve_pipeline_jobs`), the prerequisite graph (`resolve_single_recording_prerequisites`,
-  `resolve_multi_recording_prerequisites`, `resolve_prerequisite_job_ids`, `validate_job_prerequisites`), the phase
-  expansion (`resolve_downstream_phases`, `order_phases_by_execution`), and the prerequisite messages.
-  `generate_job_ids` derives the identifier that tracks each of those jobs, which is what the `job_id` parameter of both
-  pipeline entry points names. The plane specifier, the tracker filenames, and every other on-disk name live one layer
-  below in `cindra.layout`, which `jobs.py` reads. `allocation.py` adds the stage worker defaults, the
-  resource-class model, and the host core and memory budgets. `footprints.py` adds the per-stage memory models, the two
-  estimators that report what one job holds, and the two sizers that pair each estimate with its stage's declared cores
-  and its device memory as a `JobSizing`. It reads `allocation.py` for those cores alone. A job is sized from the data
-  that exists when the sizing happens, so a single-recording model reads the acquisition alone while a multi-recording
-  model reads the completed single-recording output that it processes. `discovery.py` pairs the job model with the
-  on-disk inventory to report both the jobs a recording declares and the subset whose inputs exist. `worker.py` holds
-  the per-job entry points every scheduler dispatches, along with the two priming entry points that write the shared
-  bootstrap. `execution.py` holds the batch engine: `PendingJob`, `JobExecutionState`, the admission scan, the two-pass
-  dispatcher, and the manager thread. `pipeline.py` holds the two sequential entry points. `gpu.py` holds the CUDA
-  device discovery, the runtime verification, and `ALL_DEVICES_REQUEST`, the sentinel naming every device the host
-  exposes. `allocation.py` reads its device count, `pipeline.py` reads its verification, and `execution.py` reads both
-  the sentinel and the discovery. `openmp.py` carries no module-level side effect and its check runs only inside those
-  two entry points, so importing the package writes nothing and a console message never precedes the stdio MCP server's
-  JSON-RPC stream. Nothing below `orchestration` imports it, and no module inside it imports `interface`, so the MCP
-  layer is a thin argument-validation and JSON-shaping wrapper over calls into the package. This mirrors the
+- **Self-driven orchestration**: `cindra.orchestration` owns the whole scheduling surface across nine modules that form
+  a one-way dependency chain. `gpu.py` and `openmp.py` import nothing from the package, and `jobs.py` is the leaf above
+  `cindra.layout`. `discovery.py` imports `jobs`, `allocation.py` imports `jobs` and `gpu`, and `footprints.py` imports
+  `jobs` and `allocation`. `worker.py` imports `jobs`, `allocation`, and `gpu`, `pipeline.py` imports `worker`, `jobs`,
+  `gpu`, and `openmp`, and `execution.py` imports `pipeline`, `jobs`, `allocation`, and `gpu`. It holds the job name
+  enumerations and the phase model (`SINGLE_RECORDING_PHASES`, `MULTI_RECORDING_PHASES`, `PipelinePhase`,
+  `PrerequisiteScope`). It also holds the resolvers that expand that model into a recording's job universe
+  (`resolve_single_recording_jobs`, `resolve_multi_recording_jobs`, `resolve_pipeline_jobs`), the prerequisite graph
+  (`resolve_single_recording_prerequisites`, `resolve_multi_recording_prerequisites`, `resolve_prerequisite_job_ids`,
+  `validate_job_prerequisites`), the phase expansion (`resolve_downstream_phases`, `order_phases_by_execution`), and the
+  prerequisite messages. `generate_job_ids` derives the identifier that tracks each of those jobs, which is what the
+  `job_id` parameter of both pipeline entry points names. The plane specifier, the tracker filenames, and every other
+  on-disk name live one layer below in `cindra.layout`, which `jobs.py` reads. `allocation.py` adds the stage worker
+  defaults, the resource-class model, and the host core and memory budgets. `footprints.py` adds the per-stage memory
+  models, the two estimators that report what one job holds, and the two sizers that pair each estimate with its stage's
+  declared cores and its device memory as a `JobSizing`. It reads `allocation.py` for those cores alone. A job is sized
+  from the data that exists when the sizing happens, so a single-recording model reads the acquisition alone while a
+  multi-recording model reads the completed single-recording output that it processes. `discovery.py` pairs the job
+  model with the on-disk inventory to report both the jobs a recording declares and the subset whose inputs exist.
+  `worker.py` holds the per-job entry points every scheduler dispatches, along with the two priming entry points that
+  write the shared bootstrap. `execution.py` holds the batch engine: `PendingJob`, `JobExecutionState`, the admission
+  scan, the two-pass dispatcher, and the manager thread. `pipeline.py` holds the two sequential entry points. `gpu.py`
+  holds the CUDA device discovery, the runtime verification, and `ALL_DEVICES_REQUEST`, the sentinel naming every device
+  the host exposes. `allocation.py` reads its device count, `pipeline.py` reads its verification, and `execution.py`
+  reads both the sentinel and the discovery. `openmp.py` carries no module-level side effect and its check runs only
+  inside those two entry points, so importing the package writes nothing and a console message never precedes the stdio
+  MCP server's JSON-RPC stream. Nothing below `orchestration` imports it, and no module inside it imports `interface`,
+  so the MCP layer is a thin argument-validation and JSON-shaping wrapper over calls into the package. This mirrors the
   orchestration package of `ataraxis-video-system` and `ataraxis-communication-interface`, and its concurrency model
   follows `sollertia-forgery`.
 - **Tracker-driven job state**: The transitions of a job the pipeline runs belong to the tracker's `run_job()` context
@@ -80,7 +82,7 @@
   from `cindra` for this reason.
 - **MCP tool organization**: Tools are split across four modules (`acquisition_tools`, `configuration_tools`,
   `processing_tools`, `results_tools`) imported at module level to trigger `@mcp.tool()` registration. Every tool names
-  a filesystem path by the thing that path holds, and the vocabulary is identical across parameter names, response keys,
+  a filesystem path by what that path holds, and the vocabulary is identical across parameter names, response keys,
   docstrings, and messages. `raw_data_path` and `raw_data_paths` name a recording's raw imaging path, which resolves to
   the directory holding its TIFF files and its `cindra_parameters.json` file. `output_root` and `output_roots` name the
   pipeline output root that parents the `cindra` directory, and `root_directory` names a tree searched for recordings.
@@ -121,8 +123,7 @@
   holds free. An elastic class widens its jobs at dispatch as the queue drains, and only in a session that accepted the
   class defaults, because an explicit `workers_per_job` reaches every job unchanged. The free cores divide among the
   elastic classes holding queued work before the share divides among the jobs, so a full queue resolves to the class
-  default while a queue holding one job resolves toward the ceiling. A class carrying no ceiling takes its default
-  whatever the host holds free.
+  default while a queue holding one job resolves toward the ceiling.
 - **Process-isolated jobs**: The batch engine dispatches every job into a `ProcessPoolExecutor` sized to the
   concurrency the per-class caps allow, so admission remains the only thing bounding how many jobs run. Isolation buys
   two things a thread pool cannot. A job's BLAS width belongs to its process, so concurrent jobs at different widths no
@@ -143,17 +144,17 @@
   `verify_openmp_runtime()` runs and fails a host with no runtime at `import cindra` rather than at the stage that needs
   it.
 - **Thread budget confinement**: Two ataraxis assets and one third-party context manager divide the work, and each
-  covers a moment the others cannot. `limit_worker_threads` from `ataraxis-data-structures` encloses the batch
-  engine's worker pool for the session's whole lifetime, so every worker process imports its numeric backends at a
-  width of one instead of sizing each of them to the whole host. `initialize_worker_threads` runs as that pool's
-  initializer, which reaches the backends that read their variable the first time they are asked to work rather than
-  while they are imported. Neither touches `NUMBA_NUM_THREADS`, so a worker still latches the host's full ceiling and
-  each stage raises to its own budget through `numba.set_num_threads`. `threadpool_limits` then confines the
-  scikit-learn and LAPACK fits inside the running worker, which is the only one of the three that acts on an
-  already-loaded library. `pipelines/single_recording.py`, `pipelines/multi_recording.py`, and
-  `registration/register.py` limit to the job's `workers`, and `detection/denoise.py` limits to 1 because its own block
-  pool already spends the budget. The BLAS width these set is a property of the process rather than of the thread that
-  asked for it, which is why the engine gives each job its own process.
+  covers a moment the others cannot. `limit_worker_threads` from `ataraxis-data-structures` encloses the batch engine's
+  worker pool for the session's whole lifetime, so every worker process imports its numeric backends at a width of one
+  instead of sizing each of them to the whole host. `initialize_worker_threads` runs as that pool's initializer, which
+  reaches the backends that read their variable the first time they are asked to work rather than while they are
+  imported. Neither touches `NUMBA_NUM_THREADS`, so a worker still latches the host's full ceiling and each stage raises
+  to its own budget through `numba.set_num_threads`. `threadpool_limits` then confines the scikit-learn and LAPACK fits
+  inside the running worker, which is the only one of the three that acts on an already-loaded library.
+  `pipelines/single_recording.py`, `pipelines/multi_recording.py`, and `registration/register.py` limit to the job's
+  `workers`, and `detection/denoise.py` limits to 1 because its own block pool already spends the budget. The BLAS width
+  that these three assets set is a property of the process rather than of the thread that asked for it, which is why the
+  engine gives each job its own process.
 - **Binary write integrity**: Binarization fills a plane binary sized to its full frame count, and registration rewrites
   that binary in place. Each phase guards its own write with its own marker, `<binary>.binarizing` and
   `<binary>.registering`, whose suffixes match the `binarizing` and `registering` job statuses the interface reports.
@@ -293,12 +294,8 @@
    (`SINGLE_RECORDING_PHASES`, `MULTI_RECORDING_PHASES`). Add, remove, or reorder a phase there rather than at each call
    site, and the pipelines, the execution engine, and the MCP layer follow automatically
 6. Maintain the job naming convention (`SingleRecordingJobNames`, `MultiRecordingJobNames`) for tracker consistency
-7. Keep the dependency chain one-way. `gpu.py` and `openmp.py` import nothing from the package, and `jobs.py` imports
-   `cindra.layout` alone. `discovery.py` imports `jobs`, `allocation.py` imports `jobs` and `gpu`, and `footprints.py`
-   imports `jobs` and `allocation`. `worker.py` imports `jobs`, `allocation`, and `gpu`, and `pipeline.py` imports
-   `worker`, `jobs`, `gpu`, and `openmp`. `execution.py` imports `pipeline`, `jobs`, `allocation`, and `gpu`, and no
-   orchestration module imports `interface`. `gpu.py` writes nothing at import, and `verify_gpu_runtime()` runs only
-   where the caller named a registration device
+7. Keep the dependency chain one-way, as the Self-driven orchestration entry above states, and add no edge it does not
+   name
 
 **Modifying registration:**
 
@@ -306,9 +303,8 @@
 2. Understand the two-step registration refinement when enabled
 3. Rigid registration uses phase correlation (`rigid.py`), and nonrigid uses block-based deformation (`nonrigid.py`)
 4. Cross-recording registration uses diffeomorphic demons (`diffeomorphic.py`) with multiscale pyramid (`pyramid.py`)
-5. Registration rewrites its input binary in place under a `<binary>.registering` marker, the parallel of the
-   `<binary>.binarizing` marker binarization writes while it fills that binary. Keep the create and clear pair around
-   any new write loop, and confine BLAS fits with `threadpool_limits` as `register.py` does
+5. Keep the create and clear pair around any new write loop, and confine BLAS fits with `threadpool_limits` as
+   `register.py` does
 6. `register_plane` takes `device: int | None`. None registers the plane on the host CPU, and an index builds
    `GpuRegistrationBackend` against that CUDA device (`registration/gpu.py`). The alignment pass reads
    `registration.gpu_batch_size` for its device batch while that field is above zero and `registration.batch_size`
@@ -325,9 +321,8 @@
 **Modifying extraction:**
 
 1. Review `src/cindra/extraction/extract.py` for the polymorphic dispatch pattern
-2. Numba JIT functions use `@njit(cache=True, parallel=True)` with `prange` for ROI parallelization
-3. Mask creation and lambda weight computation are in `masks.py`
-4. OASIS deconvolution and delta fluorescence computation are in `deconvolve.py`
+2. Mask creation and lambda weight computation are in `masks.py`
+3. OASIS deconvolution and delta fluorescence computation are in `deconvolve.py`
 
 **Modifying GUI viewers:**
 
@@ -354,7 +349,6 @@
 1. Review `src/cindra/interface/cli.py` for the main CLI Click group structure
 2. Review `src/cindra/interface/gui_cli.py` for the GUI CLI structure
 3. Follow existing patterns for Click option decorators and error handling
-4. CLI writes configuration overrides to the config file before pipeline execution
 
 **Modifying API documentation:**
 
@@ -403,9 +397,9 @@
   with the other two conversions, or as a regression, and do not add a scaling variant of `resize_field` unless the
   user asks for one
 - `_clear_downstream_data` sweeps every plane directory the output root holds rather than the contiguous range the
-  declared plane count spans. A directory that count no longer covers therefore loses the results measured from the
-  frames the conversion replaces, while keeping the binary the conversion does not rewrite. Keep the sweep reading the
-  directories off disk, because the declared count comes from a user-editable file
+  declared plane count spans. A plane directory that the declared count no longer covers therefore loses the results
+  measured from the frames the conversion replaces, while keeping the binary the conversion does not rewrite. Keep the
+  sweep reading the directories off disk, because the declared count comes from a user-editable file
 - The imaging directory is resolved, then scanned flat. `find_data_directory` in `io/context.py` searches the configured
   data path for `cindra_parameters.json` and returns the directory holding it, and `_collect_tiff_files` in `io/tiff.py`
   then globs that one directory without descending. A data path may therefore name the imaging directory or any parent
@@ -417,4 +411,3 @@
   directly, because a reader that scans it directly rejects a recording the conversion would have processed. Correct a
   claim of recursive TIFF discovery rather than implementing one, because a caller who assumes recursion hands the batch
   the wrong directory
-- Use `console.error()` from ataraxis-base-utilities for all error handling (no bare `raise`)

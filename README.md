@@ -60,13 +60,7 @@ ___
   - [Configuration](#configuration)
   - [Data Structures](#data-structures)
   - [Single-Recording Pipeline](#single-recording-pipeline)
-    - [Phase 1: Binarization](#phase-1-binarization)
-    - [Phase 2: Registration](#phase-2-registration)
-    - [Phase 3: Processing](#phase-3-processing)
-    - [Phase 4: Combination](#phase-4-combination)
   - [Multi-Recording Pipeline](#multi-recording-pipeline)
-    - [Phase 1: Discovery](#phase-1-discovery)
-    - [Phase 2: Multi-Recording Extraction](#phase-2-multi-recording-extraction)
   - [API](#api)
   - [CLI Commands](#cli-commands)
   - [GUI Viewers](#gui-viewers)
@@ -365,7 +359,7 @@ detection reads the valid pixel ranges that registration computes.
 #### Phase 1: Binarization
 
 The binarization phase converts raw TIFF files into an internal memory-mapped binary format that the rest of the
-pipeline reads from. During conversion, interleaved frames are separated by plane and channel, and a mean image is
+pipeline reads. During conversion, interleaved frames are separated by plane and channel, and a mean image is
 computed for each plane. TIFF files are slow to read frame-by-frame due to file format overhead, and the binary format
 provides instant random access to any frame through memory mapping, which is essential for reading frames out of order
 or in parallel.
@@ -386,11 +380,11 @@ and states the remedy, which is enabling `file_io.repeat_binarization` to rebuil
 
 A rebuild replaces every plane binary of the recording, so it first discards everything the pipeline measured from the
 previous ones: each plane's registration and detection output, its extracted traces, and the recording's combined
-dataset. That discard covers every plane directory the output directory holds, including one the declared plane count no
-longer reaches, whose own binary the rebuild leaves alone. The rebuilt binaries hold raw frames again, so every plane
-has to be registered and processed once more before the recording can be combined. The discard follows the resolution of
-every source file and destination the conversion needs, so a rebuild that the source files reject, such as one whose
-TIFF files disagree about their frame shape, leaves the previous results in place.
+dataset. That discard covers every plane directory the output directory holds, including a directory that the declared
+plane count no longer reaches, whose own binary the rebuild leaves alone. The rebuilt binaries hold raw frames again, so
+every plane has to be registered and processed once more before the recording can be combined. The discard follows the
+resolution of every source file and destination the conversion needs, so a rebuild that the source files reject, such as
+one whose TIFF files disagree about their frame shape, leaves the previous results in place.
 
 Reads:
 
@@ -801,10 +795,10 @@ parameter gives the phase its default (`BINARIZATION_WORKERS`, `REGISTRATION_WOR
 `DISCOVERY_WORKERS`, `EXTRACTION_WORKERS`, all exported from `cindra`), and passing `-1` requests every available core.
 
 Four of those stages also publish a ceiling as `REGISTRATION_MAXIMUM_WORKERS`, `PROCESSING_MAXIMUM_WORKERS`,
-`DISCOVERY_MAXIMUM_WORKERS`, and `EXTRACTION_MAXIMUM_WORKERS`. A batch driven by `start_execution_session()` widens a
-job whose ceiling stands above its stage default over the cores no running job holds, stopping at that ceiling, so a
-draining queue hands its last jobs more cores than its first. The widening applies in a session that accepted the stage
-defaults, because a session naming its own worker count gives every job that count.
+`DISCOVERY_MAXIMUM_WORKERS`, and `EXTRACTION_MAXIMUM_WORKERS`. A batch driven by `start_execution_session()` widens such
+a job over the cores no running job holds, stopping at its ceiling, so a draining queue hands its last jobs more cores
+than its first. The widening applies in a session that accepted the stage defaults, because a session naming its own
+worker count gives every job that count.
 
 The device a registration job uses is threaded through the same way. `run_single_recording_pipeline()` takes
 `registration_device`, where None registers every plane on the host CPU and a zero-based index registers them on that
@@ -817,13 +811,13 @@ External schedulers that need to enumerate a recording's jobs and their dependen
 themselves can read the phase model exported from `cindra.orchestration`. `SINGLE_RECORDING_PHASES` and
 `MULTI_RECORDING_PHASES` describe the ordered phases, `resolve_single_recording_jobs()` and
 `resolve_multi_recording_jobs()` expand them into a job universe of `(job_name, specifier)` pairs, and
-`resolve_single_recording_prerequisites()` and `resolve_multi_recording_prerequisites()` return the jobs each job
-depends on. `generate_job_ids()` derives the identifier each of those jobs is tracked under, which is what the
+`resolve_single_recording_prerequisites()` and `resolve_multi_recording_prerequisites()` report each job's
+prerequisite jobs. `generate_job_ids()` derives the identifier each of those jobs is tracked under, which is what the
 `job_id` parameter of both pipeline entry points names. This keeps a scheduler's view of the pipeline in step with the
 library rather than restating it.
 
-A scheduler that also wants to know which of those jobs can run right now, where their inputs and outputs live, and
-how much memory each one holds reads three further groups, all exported from `cindra`.
+Three further groups, all exported from `cindra`, answer which of those jobs can run right now, where their inputs
+and outputs live, and how much memory each one holds.
 
 `resolve_single_recording_job_universe()` and `resolve_multi_recording_job_universe()` pair the phase model with the
 inventory on disk, returning both the jobs a recording declares and the subset whose own inputs already exist.
@@ -835,8 +829,8 @@ a dataset spans without building a runtime context or creating a directory, and 
 under a caller-supplied output root, and `resolve_array_path()` names a file inside one of them. The result arrays sit
 directly in those roots and are named by `RecordingArrays`, while `DetectionImages`, `RegistrationArrays`, and
 `MultiRecordingArrays` name files inside the `detection_data`, `registration_data`, and `registration_arrays`
-subdirectories, whose names `cindra.layout` exports. `resolve_plane_specifier()` and
-`parse_plane_specifier()` convert between a plane index and the specifier its jobs and its directory both carry.
+subdirectories, whose names `cindra.layout` exports. `resolve_plane_specifier()` and `parse_plane_specifier()`
+convert between a plane index and the specifier its jobs and its directory both carry.
 
 `estimate_single_recording_job_memory_mb()` and `estimate_multi_recording_job_memory_mb()` project the memory one job
 holds from the shape of the data it processes, returning the figure in megabytes. `size_single_recording_job()` and
@@ -847,8 +841,8 @@ every multi-recording job, reports a device memory of zero. A job is sized from 
 happens, so a whole job graph resolves up front and every job of it reports the same figure at every point in the run. A
 single-recording job reads the acquisition metadata and one source file header, which fix every shape the pipeline
 writes. The regions detection finds are the one input the acquisition leaves open, so a caller that knows them passes
-them through `planned_roi_count` and the ceiling `resolve_maximum_roi_count()` derives from the detection iteration
-bound covers them otherwise. A multi-recording job runs on the completed output of that pipeline, so it reads the
+them through `planned_roi_count`, and `resolve_maximum_roi_count()` derives a covering ceiling from the detection
+iteration bound otherwise. A multi-recording job runs on the completed output of that pipeline, so it reads the
 combined geometry and the region count each recording holds directly. A recording carrying no readable raw imaging data,
 and a dataset whose recordings report no regions, can run no stage at all. Sizing either raises rather than returning a
 figure, and the interface layer reports the job as unsizable instead of admitting it.
@@ -913,8 +907,8 @@ Every tool names a filesystem path by what that path holds, and the same name me
 `raw_data_path` names one recording's imaging directory, which holds its TIFF files beside its `cindra_parameters.json`
 file. Every tool that reads a recording also accepts any parent of that directory, because it locates the parameters
 file beneath the path it is given. `generate_acquisition_parameters_file_tool` is the exception, since it writes that
-file into the directory it is handed. An `output_root` is the parent of the `cindra/` folder a pipeline writes that
-recording's results under, and a `root_directory` is a tree searched for recordings. The plural `raw_data_paths` and
+file into the directory it is handed. An `output_root` is the parent of the `cindra/` folder that holds that
+recording's pipeline results, and a `root_directory` is a tree searched for recordings. The plural `raw_data_paths` and
 `output_roots` name lists of the same two concepts, and a `configuration_path`, a `tracker_path`, an `output_path`, or a
 `file_path` names one specific file. An `output_path` is the configuration file `generate_config_file_tool` writes, and
 the `file_path` that tool returns is the same path with its suffix normalized to `.yaml`. Three names reach the caller
@@ -1130,5 +1124,3 @@ ___
 - Almar Klein, author of the original [pirt](https://github.com/almarklein/pirt) library, whose diffeomorphic
   registration algorithms were reimplemented to form the basis of the multi-recording registration module.
 - The creators of all other dependencies and projects listed in the [pyproject.toml](pyproject.toml) file.
-
-___
