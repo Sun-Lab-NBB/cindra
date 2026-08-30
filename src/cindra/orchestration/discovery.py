@@ -48,7 +48,7 @@ class SingleRecordingJobs:
 
     Notes:
         The conversion job is reported ready whenever the recording's parameters resolve, which is the weakest of the
-        five conditions, because its own input is the raw image set this record does not read.
+        four conditions, because its own input is the raw image set this record does not read.
     """
     resolved: bool = False
     """Determines whether the universe follows from the recording's own parameters rather than from their absence."""

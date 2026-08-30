@@ -171,7 +171,7 @@ class JobExecutionState:
     Notes:
         A session accepting the class defaults sets this, so a queue that drains gradually widens the jobs it has left
         to run. A session carrying an explicit worker override leaves it clear, so the width the caller asked for
-        reaches every job of every class unchanged.
+        reaches every job of a class the budgets bound unchanged.
     """
     cpu_budget: int = 1
     """The total number of CPU cores this session may commit across every resource class at once."""
@@ -245,7 +245,8 @@ def start_execution_session(
         Each job takes its worker count when the dispatcher submits it, and that count travels to the pipeline as a
         dispatch argument, so one configuration file serves every job dispatched concurrently against it. A session
         accepting the class defaults widens a job of an elastic class toward that class's ceiling over the cores the
-        host holds free, while a session carrying a worker override gives every job the width it requested.
+        host holds free, while a session carrying a worker override gives every job of a class the budgets bound the
+        width it requested.
 
         Each class resolves its own concurrency cap, and the session CPU budget is recorded alongside those caps
         because every class dispatches during the same cycle. The dispatcher holds the sum of the cores committed by
