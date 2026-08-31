@@ -365,12 +365,13 @@ class ROIDetection:
     normalized pixel count and are discarded on that evidence, and the discard is permanent, so no later classification
     threshold can recover them. Raising this value trades recall for a smaller extraction workload."""
 
-    threshold_scaling: float = 2.0
+    threshold_scaling: float = 1.0
     """The scaling factor for the ROI detection threshold. The final threshold multiplies this value by a fixed base
     multiplier of 5.0 and by the selected pyramid scale index, which is clamped to a minimum of 1. The product is then
     multiplied by a recording-length factor, the binned frame count divided by 1200, also clamped to a minimum of 1.
     Higher values require ROIs to stand out more distinctly from background noise, resulting in fewer but more confident
-    detections. Lower values detect more ROIs but may include false positives."""
+    detections. Lower values detect more ROIs but may include false positives. The default of 1.0 leaves the base
+    multiplier unscaled."""
 
     spatial_highpass_window: int = 25
     """The window size, in pixels, for spatial high-pass filtering used during neuropil subtraction. The algorithm
