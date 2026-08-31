@@ -183,12 +183,14 @@ Detects individual neurons (ROIs) from the registered movie. The movie is tempor
 remove neuropil background, then decomposed via iterative source extraction to identify spatial components (cell masks)
 and their temporal activity. When `preclassification_threshold` is above zero, each candidate ROI is preclassified as
 cell or non-cell using a pre-trained two-feature classifier (normalized pixel count and compactness). Skewness requires
-extracted fluorescence traces, so it only joins the feature set during the final classification in Section 8.
+extracted fluorescence traces, so it only joins the feature set during the final classification in Section 8. The
+threshold defaults to zero, because the filter decides on shape alone and discards permanently, so a region it rejects
+never reaches the classifier that would have judged it on its activity.
 
 | Parameter                     | Type  | Default | Description                                                        |
 |-------------------------------|-------|---------|--------------------------------------------------------------------|
 | `enabled`                     | bool  | True    | Enable the plane's processing stage. False also skips extraction.  |
-| `preclassification_threshold` | float | 0.5     | Min classifier confidence to keep ROI. 0 = keep all.               |
+| `preclassification_threshold` | float | 0.0     | Min classifier confidence to keep ROI. 0 = keep all.               |
 | `threshold_scaling`           | float | 2.0     | Detection threshold scaling. Higher = more distinct ROIs needed.   |
 | `spatial_highpass_window`     | int   | 25      | High-pass window for neuropil subtraction during detection.        |
 | `maximum_overlap`             | float | 0.75    | Max allowed ROI overlap fraction. Higher overlap = discard.        |
@@ -202,12 +204,15 @@ extracted fluorescence traces, so it only joins the feature set during the final
 
 This is the most impactful section for controlling ROI yield.
 
-- **Need more cells detected**: Lower `threshold_scaling` (1.0-1.5) to accept weaker ROI signals. Lower
-  `preclassification_threshold` (0.0-0.3) to retain more candidates for final classification. Increase
+- **Need more cells detected**: Lower `threshold_scaling` (1.0-1.5) to accept weaker ROI signals. Leave
+  `preclassification_threshold` at zero, since any positive value discards candidates before the final classification
+  sees them. Increase
   `maximum_iterations` (80-100) for more extraction passes. Increase `maximum_binned_frames` (8000-10000) to capture
   more temporal structure, at the cost of speed.
-- **Too many false positives**: Raise `threshold_scaling` (2.5-3.0) to require more distinct signals. Raise
-  `preclassification_threshold` (0.6-0.8) to filter weak candidates early.
+- **Too many false positives**: Raise `threshold_scaling` (2.5-3.0) to require more distinct signals. Raising
+  `preclassification_threshold` also removes candidates, and it does so before their traces exist, so it removes small
+  regions along with weak ones. Prefer the detection threshold, and reserve the preclassification threshold for a run
+  whose extraction cost has to be capped.
 - **Noisy or low-SNR data**: Enable `denoise=True` for PCA denoising before detection. Consider lowering
   `threshold_scaling` (1.5) to compensate for reduced signal clarity.
 - **Densely labeled tissue**: Raise `maximum_overlap` (0.85) to tolerate more spatial overlap between ROIs.
