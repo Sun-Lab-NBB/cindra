@@ -208,7 +208,7 @@ class TestSetConfigValues:
         assert result["valid"] is True
         assert result["changed"] == {
             "registration.batch_size": {"previous": 100, "current": 250},
-            "roi_detection.threshold_scaling": {"previous": 2.0, "current": 1.5},
+            "roi_detection.threshold_scaling": {"previous": 1.0, "current": 1.5},
         }
 
         written = SingleRecordingConfiguration.load(file_path=file_path)
