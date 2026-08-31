@@ -480,7 +480,8 @@ brightness variations do not change the result.
 
 The algorithm temporally bins frames to improve signal-to-noise ratio, optionally applies PCA denoising, then runs a
 sparse iterative detection procedure that identifies compact fluorescent sources. Detected ROIs are optionally filtered
-by a lightweight preclassification step (when the preclassification threshold is above zero), and shape statistics
+by a lightweight preclassification step, which is disabled by default because it decides on shape before any trace
+exists and its removals are permanent, and shape statistics
 (area, compactness, aspect ratio) are computed for each surviving ROI.
 
 Reads:

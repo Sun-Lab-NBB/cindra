@@ -357,10 +357,13 @@ class ROIDetection:
     """Determines whether to perform ROI detection. When disabled, the plane's whole processing stage is skipped, so no
     fluorescence traces are extracted, no ROIs are classified, and no spikes are deconvolved."""
 
-    preclassification_threshold: float = 0.5
+    preclassification_threshold: float = 0.0
     """The classifier probability threshold used to pre-filter ROIs before signal extraction. This is the minimum
     classifier confidence value (that the classified ROI is a cell) for the ROI to be processed further. Setting this to
-    0.0 keeps all detected ROIs."""
+    0.0 keeps all detected ROIs, which is the default because the filter runs before any fluorescence is extracted and
+    therefore judges a region on its shape alone, without the skewness of its trace. Small regions carry a low
+    normalized pixel count and are discarded on that evidence, and the discard is permanent, so no later classification
+    threshold can recover them. Raising this value trades recall for a smaller extraction workload."""
 
     threshold_scaling: float = 2.0
     """The scaling factor for the ROI detection threshold. The final threshold multiplies this value by a fixed base
