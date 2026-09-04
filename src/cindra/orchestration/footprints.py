@@ -83,12 +83,14 @@ _INTERNAL_ELEMENT_BYTES: int = 2
 
 _DETECTION_ARRAY_COPIES: float = 3.60
 """The copies of the binned movie the detection stage holds at its peak, which is the scale-0 thresholded variance.
-Live at that moment are the binned frames, the five convolved scales, the comparison output, and the boolean
-predicate."""
+The binned frames and the five convolved scales dominate that moment. The value is the envelope measured against the
+stage, so it stands above the sum of those arrays and leaves admission a margin. Lowering it to the arrays a reading
+of the source finds live takes the estimate below the peak the stage reaches."""
 
 _DETECTION_DENOISE_ARRAY_COPIES: float = 4.7
 """The copies of the binned movie the detection stage holds at its peak when PCA denoising runs, which adds the
-reconstruction and the block reconstructions the block pool retains."""
+reconstruction and the block reconstructions the pool holds while they are in flight. The value is the envelope
+measured against the stage, so it stands above the sum of those arrays."""
 
 _BIN_BATCH_SIZE: int = 500
 """The frames the movie binning reads per batch. Binning happens inside each batch and each batch truncates its own

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from weakref import ReferenceType, ref
+from unittest.mock import patch
+from concurrent.futures import Future, ThreadPoolExecutor
+
 import numpy as np
 import pytest
 
@@ -59,7 +63,8 @@ class TestFitAndReconstructBlock:
 
 
 class TestPcaDenoise:
-    """Tests the in-place block blend, its worker count validation, and its parallel-to-sequential agreement."""
+    """Tests the in-place block blend, its worker count validation, its parallel-to-sequential agreement, and its
+    block release."""
 
     def test_in_place_modification(self) -> None:
         """Verifies that pca_denoise modifies frames in-place."""
@@ -68,6 +73,43 @@ class TestPcaDenoise:
         original = frames.copy()
         pca_denoise(frames=frames, block_size=(32, 32), component_fraction=0.5)
         assert not np.array_equal(frames, original)
+
+    def test_parallel_path_releases_each_block_once_accumulated(self) -> None:
+        """Verifies that the parallel path releases each block reconstruction once it is accumulated."""
+        generator = np.random.default_rng(seed=42)
+        frames = generator.standard_normal((40, 96, 96)).astype(np.float32)
+
+        # The futures are tracked weakly, because a strong reference here would hold every result alive and
+        # measure the test rather than the denoiser.
+        tracked: list[ReferenceType[Future]] = []
+        live_after_each: list[int] = []
+        original_submit = ThreadPoolExecutor.submit
+        original_result = Future.result
+
+        def tracking_submit(self: ThreadPoolExecutor, *arguments: object, **keywords: object) -> Future:
+            """Collects a weak reference to every future the denoiser submits."""
+            future = original_submit(self, *arguments, **keywords)
+            tracked.append(ref(future))
+            return future
+
+        def counting_result(self: Future, *arguments: object, **keywords: object) -> object:
+            """Records how many submitted futures still hold a reconstruction as each one is consumed."""
+            value = original_result(self, *arguments, **keywords)
+            live_after_each.append(
+                sum(1 for holder in tracked if (held := holder()) is not None and held._result is not None)
+            )
+            return value
+
+        with (
+            patch.object(ThreadPoolExecutor, "submit", tracking_submit),
+            patch.object(Future, "result", counting_result),
+        ):
+            pca_denoise(frames=frames, block_size=(32, 32), component_fraction=0.5, parallel_workers=2)
+
+        # A run holding every reconstruction shows this count climb to the block count. Releasing each future
+        # once its block is accumulated keeps the live count bounded well below it.
+        assert live_after_each, "the parallel path consumed no futures"
+        assert max(live_after_each) < len(tracked)
 
     def test_output_shape_preserved(self) -> None:
         """Verifies that the output shape matches the input shape."""

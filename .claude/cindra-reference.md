@@ -138,8 +138,13 @@
 
 ### Key patterns
 
-- **Numba parallelization**: Functions use `@njit(cache=True, parallel=True)` with `prange` over each kernel's outermost
-  independent axis, which is frames in registration and ROIs in extraction. A parallel kernel carries no eager
+- **Numba parallelization**: Functions use `@njit(cache=True, parallel=True)` with `prange` over the axis that keeps
+  the working set of one thread inside cache. A kernel that streams a batch of frames splits over frames, because the
+  batch spans hundreds of megabytes and a kernel parallelized over ROIs re-reads the whole batch once per ROI and
+  spends its run streaming the same memory thousands of times. The two extraction kernels visit each frame once and
+  let every ROI gather from it, which is worth five times the throughput on the neuropil kernel that reads the batch
+  hardest. A kernel whose work is already partitioned another way splits over that partition instead, which covers the
+  deconvolution kernel over ROIs, the deformation kernels over samples, and the nonrigid block kernels over blocks. A parallel kernel carries no eager
   signature. A signature compiles the kernel when its module is imported, which starts the threading layer before
   `verify_openmp_runtime()` runs and fails a host with no runtime at `import cindra` rather than at the stage that needs
   it.
