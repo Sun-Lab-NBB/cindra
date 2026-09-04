@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -88,20 +89,21 @@ def pca_denoise(
     # Limits each block fit to a single BLAS thread. The worker budget is already spent on the block pool below, so
     # leaving the BLAS thread count unconstrained would multiply the two and oversubscribe the host. The limit also
     # encloses the accumulation, because the BLAS width the fits run at decides their summation order. Each block is
-    # centered inside the worker that fits it and accumulated as soon as it returns, so the resident set holds one block
-    # per worker rather than a centered and a reconstructed copy of every block at once.
+    # centered inside the worker that fits it.
     with threadpool_limits(limits=1):
         if parallel_workers == 1:
             for block_slice in block_slices:
                 _accumulate(block_slice=block_slice, block_reconstruction=_center_and_reconstruct(block_slice))
         else:
             with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
-                futures = [executor.submit(_center_and_reconstruct, block_slice) for block_slice in block_slices]
+                pending = deque(executor.submit(_center_and_reconstruct, block_slice) for block_slice in block_slices)
 
                 # Consumes the futures in submission order rather than completion order. Blocks overlap, so most
                 # pixels accumulate a float32 sum over several of them, and float addition is not associative.
-                for block_slice, future in zip(block_slices, futures, strict=True):
-                    _accumulate(block_slice=block_slice, block_reconstruction=future.result())
+                # Each future leaves the queue as its block is accumulated, because a future holds its result
+                # alive after it is read, which would otherwise keep every reconstruction resident to the end.
+                for block_slice in block_slices:
+                    _accumulate(block_slice=block_slice, block_reconstruction=pending.popleft().result())
 
     reconstruction /= normalization
     reconstruction += frame_mean
@@ -123,12 +125,14 @@ def _fit_and_reconstruct_block(
         component_count: The number of PCA components to retain.
 
     Returns:
-        The reconstructed block data with shape (num_frames, num_pixels).
+        The low-rank reconstruction with shape (num_frames, num_pixels), or the input array itself when the block is
+        uniform.
     """
     # Uniform blocks have zero variance, making PCA undefined. Returns the block unchanged to avoid a
-    # division-by-zero warning inside sklearn.
+    # division-by-zero warning inside sklearn. The returned array is the caller's own block in this branch, so a
+    # caller that reuses the block after the call copies it first.
     if np.ptp(block) == 0.0:
-        return block.copy()
+        return block
 
     # A float32 block yields float32 components, so the projection and its back-projection stay float32 throughout.
     model = PCA(n_components=component_count, random_state=0).fit(block)

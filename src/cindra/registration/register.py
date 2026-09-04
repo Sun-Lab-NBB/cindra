@@ -878,11 +878,15 @@ def _register_alignment_channel(
                 level=LogLevel.INFO,
             )
 
-            if bidirectional_phase_offset != 0:
-                apply_bidirectional_phase_correction(
-                    frames=frames,
-                    bidirectional_phase_offset=bidirectional_phase_offset,
-                )
+        # Corrects the reference sample under the same condition that governs the batch loop below, so the
+        # reference carries the same correction as every frame later matched against it. A configured override
+        # skips the estimation above. An uncorrected sample leaves the reference odd rows shifted, which biases
+        # every offset the plane reports.
+        if bidirectional_phase_offset != 0 and not bidirectional_phase_corrected:
+            apply_bidirectional_phase_correction(
+                frames=frames,
+                bidirectional_phase_offset=bidirectional_phase_offset,
+            )
 
         console.echo(message=f"Computing plane {plane_index} reference frame...", level=LogLevel.INFO)
         timer.reset()

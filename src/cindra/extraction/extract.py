@@ -35,9 +35,10 @@ def extract_traces(context: RuntimeContext | MultiRecordingRuntimeContext, *, wo
         multi-recording contexts, backward-transformed tracked ROI masks are used without reclassification, and the
         extraction statistics are computed after the traces rather than between them.
 
-        Extraction and deconvolution run entirely inside Numba kernels parallelized over ROIs, so the worker count is
-        applied as the Numba thread mask before dispatch and covers both branches. The mask is thread-local, so
-        concurrently dispatched recordings can hold different worker budgets inside a single process.
+        Extraction and deconvolution run entirely inside Numba kernels, the extraction pair parallelized over frames
+        and the deconvolution kernel over ROIs, so the worker count is applied as the Numba thread mask before
+        dispatch and covers both branches. The mask is thread-local, so concurrently dispatched recordings can hold
+        different worker budgets inside a single process.
 
     Args:
         context: The runtime context for the recording being processed. Modified in-place to store extraction
@@ -195,6 +196,10 @@ def _extract_cell_fluorescence(  # pragma: no cover
         (frame_count, mask_size) array per cell. Since Numba's np.dot on 2D x 1D compiles to a plain scalar loop,
         the fused version performs the same arithmetic with fewer memory operations.
 
+        Parallelizes over frames rather than over ROIs, so each thread holds one frame while every ROI gathers from
+        it. A batch spans hundreds of megabytes, which is far larger than any cache, so an ROI-major order re-reads
+        the whole batch once per ROI and spends the run streaming the same memory thousands of times.
+
     Args:
         output_prototype: The pre-initialized output array to be updated with the extracted fluorescence traces.
         data: The raw activity data from which to extract the ROI fluorescence traces.
@@ -209,16 +214,15 @@ def _extract_cell_fluorescence(  # pragma: no cover
     roi_count = output_prototype.shape[0]
     frame_count = data.shape[0]
 
-    for cell_index in prange(roi_count):
-        start = mask_offsets[cell_index]
-        end = mask_offsets[cell_index + 1]
+    for frame_index in prange(frame_count):
+        frame = data[frame_index]
 
         # Accumulates lambda-weighted pixel fluorescence directly from scattered reads, avoiding a per-cell
         # temporary array allocation. Weights bias the trace toward pixels more likely to belong to the cell.
-        for frame_index in range(frame_count):
+        for cell_index in range(roi_count):
             accumulator = np.float32(0.0)
-            for pixel_offset in range(start, end):
-                accumulator += data[frame_index, flat_roi_masks[pixel_offset]] * flat_lambda_weights[pixel_offset]
+            for pixel_offset in range(mask_offsets[cell_index], mask_offsets[cell_index + 1]):
+                accumulator += frame[flat_roi_masks[pixel_offset]] * flat_lambda_weights[pixel_offset]
             output_prototype[cell_index, frame_index] = accumulator
 
     return output_prototype
@@ -238,6 +242,10 @@ def _extract_neuropil_fluorescence(  # pragma: no cover
         An ROI whose neuropil mask holds no pixels reports zero neuropil fluorescence, which matches the traces an
         ROI receives when neuropil extraction is disabled.
 
+        Parallelizes over frames rather than over ROIs, so each thread holds one frame while every ROI gathers from
+        it. A neuropil mask holds several times the pixels of the cell mask it surrounds, so this kernel reads the
+        batch hardest and gains the most from visiting each frame once.
+
     Args:
         output_prototype: The pre-initialized output array to be updated with the extracted fluorescence traces.
         data: The raw activity data from which to extract the fluorescence traces.
@@ -251,22 +259,24 @@ def _extract_neuropil_fluorescence(  # pragma: no cover
     roi_count = output_prototype.shape[0]
     frame_count = data.shape[0]
 
-    for cell_index in prange(roi_count):
-        start = mask_offsets[cell_index]
-        end = mask_offsets[cell_index + 1]
-
-        # Pre-computes the reciprocal of the neuropil pixel count to replace per-frame division with multiplication.
-        # A mask with no pixels takes a zero reciprocal, since float32 division by zero yields infinity, which the
-        # empty accumulator below would turn into a NaN trace that propagates into every downstream array.
+    # Pre-computes the reciprocal of each neuropil pixel count to replace per-frame division with multiplication.
+    # A mask with no pixels takes a zero reciprocal, since float32 division by zero yields infinity, which the
+    # empty accumulator below would turn into a NaN trace that propagates into every downstream array.
+    reciprocals = np.zeros(roi_count, dtype=np.float32)
+    for cell_index in range(roi_count):
         pixel_count = neuropil_pixel_count[cell_index]
-        reciprocal = np.float32(0.0) if pixel_count == 0 else np.float32(1.0) / np.float32(pixel_count)
+        if pixel_count > 0:
+            reciprocals[cell_index] = np.float32(1.0) / np.float32(pixel_count)
+
+    for frame_index in prange(frame_count):
+        frame = data[frame_index]
 
         # Computes the average fluorescence over the entire neuropil region for each frame.
-        for frame_index in range(frame_count):
+        for cell_index in range(roi_count):
             accumulator = np.float32(0.0)
-            for pixel_offset in range(start, end):
-                accumulator += data[frame_index, flat_neuropil_masks[pixel_offset]]
-            output_prototype[cell_index, frame_index] = accumulator * reciprocal
+            for pixel_offset in range(mask_offsets[cell_index], mask_offsets[cell_index + 1]):
+                accumulator += frame[flat_neuropil_masks[pixel_offset]]
+            output_prototype[cell_index, frame_index] = accumulator * reciprocals[cell_index]
 
     return output_prototype
 

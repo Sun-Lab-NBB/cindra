@@ -164,7 +164,7 @@ def detect_rois_in_frames(
     scale_widths = np.zeros(_SCALE_COUNT, dtype=np.uint16)
     for scale_index in range(_SCALE_COUNT):
         convolved_scale = _convolve_square_2d(frames=downsampled_frames, filter_size=_BASE_FILTER_SIZE)
-        downsampled_frames = (2 * downsample(data=downsampled_frames)).astype(np.float32)
+        downsampled_frames = (2 * downsample(data=downsampled_frames)).astype(np.float32, copy=False)
         scale_coordinates = downsample(data=grid_coordinates[scale_index], taper_edge=False)
         grid_coordinates.append(scale_coordinates)
         _, scale_heights[scale_index], scale_widths[scale_index] = convolved_scale.shape

@@ -70,11 +70,13 @@ def compute_delta_fluorescence(
     if baseline_method == "maximin":
         # Uses truncate=3.0 to match the original suite2p's 3-sigma FIR Gaussian kernel, and mode='nearest'
         # (replicate edge values) for the min/max filters to match the original's boundary handling.
-        baseline = gaussian_filter(input=subtracted, sigma=[0.0, baseline_sigma], truncate=3.0).astype(np.float32)
+        baseline = gaussian_filter(input=subtracted, sigma=[0.0, baseline_sigma], truncate=3.0).astype(
+            np.float32, copy=False
+        )
         baseline = minimum_filter1d(input=baseline, size=window_frames, axis=1, mode="nearest")
         baseline = maximum_filter1d(input=baseline, size=window_frames, axis=1, mode="nearest")
     elif baseline_method == "constant":
-        baseline = gaussian_filter(input=subtracted, sigma=[0.0, baseline_sigma]).astype(np.float32)
+        baseline = gaussian_filter(input=subtracted, sigma=[0.0, baseline_sigma]).astype(np.float32, copy=False)
         baseline = np.amin(a=baseline)
     elif baseline_method == "constant_percentile":
         baseline = np.percentile(a=subtracted, q=baseline_percentile, axis=1, keepdims=True).astype(np.float32)
