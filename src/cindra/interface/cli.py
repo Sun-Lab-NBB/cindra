@@ -250,9 +250,10 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     default=None,
     help=(
         "[Single-recording] The number of parallel workers to allocate to the binarization step. When this option is "
-        "omitted, the step receives its measured default allocation of 3 workers. The allocated count is capped at "
-        "4, because added decode threads stop shortening the conversion past that point. Setting this to -1 uses "
-        "every available core, minus the cores reserved for system use."
+        "omitted, the step receives its measured default allocation of 4 workers, which is the decode ceiling "
+        "itself. A larger request is capped at that ceiling, because added decode threads stop shortening the "
+        "conversion past that point. Setting this to -1 uses every available core, minus the cores reserved for "
+        "system use."
     ),
 )
 @click.option(

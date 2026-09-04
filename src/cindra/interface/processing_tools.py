@@ -1259,7 +1259,7 @@ def execute_processing_jobs_tool(
         binarization to registration to processing to combination for single-recording work and discovery to extraction
         for multi-recording work.
 
-        Each job runs under the resource class of its phase. Binarization holds 3 cores per job at a fixed concurrency
+        Each job runs under the resource class of its phase. Binarization holds 4 cores per job at a fixed concurrency
         of 4. Combination holds 1 core per job, because it merges result files serially, and its concurrency is bounded
         by the CPU budget alone. Registration holds 8 cores per job as its floor and widens toward its ceiling of 32,
         while processing holds 8 and widens toward its ceiling of 16. Both
@@ -1282,7 +1282,7 @@ def execute_processing_jobs_tool(
             hexadecimal job identifier from the prepare manifest), and 'pipeline_type' ('single-recording' or
             'multi-recording').
         workers_per_job: CPU cores per job, overriding the measured default of every class that carries no hard
-            concurrency ceiling. Leave as None to accept the measured defaults, which are 3 cores for binarization, 8
+            concurrency ceiling. Leave as None to accept the measured defaults, which are 4 cores for binarization, 8
             for registration, 8 for processing, 1 for combination, 2 for multi-recording discovery, and 16 for
             multi-recording extraction. Those figures are the floor each class runs at while the session dispatches at
             its full concurrency. A None request also lets a job of an elastic class widen at dispatch toward its class
@@ -1782,7 +1782,7 @@ def execute_full_pipeline_tool(
             Each must contain 'configuration_path', 'output_roots' (the output roots of the completed
             single-recording runs the dataset spans), and 'dataset_name'.
         workers_per_job: CPU cores per job, overriding the measured default of every class that carries no hard
-            concurrency ceiling. Leave as None to accept the measured defaults of 3 cores for binarization, 1 for
+            concurrency ceiling. Leave as None to accept the measured defaults of 4 cores for binarization, 1 for
             combination, 8 for registration, 8 for processing, 2 for multi-recording discovery, and 16 for
             multi-recording extraction. Those figures are the floor each class runs at while the session dispatches at
             its full concurrency. A None request also lets a job of an elastic class widen at dispatch toward its class
