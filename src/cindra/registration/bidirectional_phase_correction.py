@@ -32,18 +32,21 @@ def compute_bidirectional_phase_offset(frames: NDArray[np.float32], workers: int
     _, _height, width = frames.shape
 
     # Computes the real FFT of odd lines (1, 3, 5, ...) along the x-axis. Uses rfft since input is real-valued,
-    # which is ~2x faster than fft and uses half the memory. Casts to complex64 to prevent complex128 promotion.
-    odd_lines_fft = fft.rfft(x=frames[:, 1::2, :], axis=2, workers=workers).astype(np.complex64)
+    # which is ~2x faster than fft and uses half the memory. The cast guards against complex128 promotion and
+    # returns the transform untouched while it already holds complex64, which is what a float32 frame yields.
+    odd_lines_fft = fft.rfft(x=frames[:, 1::2, :], axis=2, workers=workers).astype(np.complex64, copy=False)
     odd_lines_fft /= np.abs(odd_lines_fft) + np.float32(NORMALIZATION_EPSILON)
 
-    even_lines_fft = fft.rfft(x=frames[:, ::2, :], axis=2, workers=workers).astype(np.complex64)
+    even_lines_fft = fft.rfft(x=frames[:, ::2, :], axis=2, workers=workers).astype(np.complex64, copy=False)
     np.conj(even_lines_fft, out=even_lines_fft)
     even_lines_fft /= np.abs(even_lines_fft) + np.float32(NORMALIZATION_EPSILON)
 
     # Truncates even lines to match odd lines count (in case of odd height).
     even_lines_fft = even_lines_fft[:, : odd_lines_fft.shape[1], :]
 
-    cross_correlation = fft.irfft(x=odd_lines_fft * even_lines_fft, n=width, axis=2, workers=workers).astype(np.float32)
+    cross_correlation = fft.irfft(x=odd_lines_fft * even_lines_fft, n=width, axis=2, workers=workers).astype(
+        np.float32, copy=False
+    )
     cross_correlation = cross_correlation.mean(axis=(0, 1))
     cross_correlation = fft.fftshift(x=cross_correlation)
 
