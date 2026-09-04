@@ -129,9 +129,10 @@ def _fit_and_reconstruct_block(
         The reconstructed block data with shape (num_frames, num_pixels).
     """
     # Uniform blocks have zero variance, making PCA undefined. Returns the block unchanged to avoid a
-    # division-by-zero warning inside sklearn.
+    # division-by-zero warning inside sklearn. The caller centers the block into a temporary it drops at the
+    # call, so the block reaches the accumulator with no other reference and needs no duplicate of its own.
     if np.ptp(block) == 0.0:
-        return block.copy()
+        return block
 
     # A float32 block yields float32 components, so the projection and its back-projection stay float32 throughout.
     model = PCA(n_components=component_count, random_state=0).fit(block)
