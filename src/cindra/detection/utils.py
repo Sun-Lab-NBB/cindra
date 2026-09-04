@@ -124,8 +124,8 @@ def compute_thresholded_variance(frames: NDArray[np.float32], intensity_threshol
         An array with shape (height, width) containing the thresholded root-sum-of-squares for each pixel.
     """
     # Accumulates one frame at a time rather than thresholding the whole stack, so the transient holds a single
-    # frame instead of a second copy of every frame. Reducing over axis 0 accumulates sequentially, so the running
-    # sum below visits the frames in the order the reduction would, and both forms round to the same result.
+    # frame instead of a second copy of every frame. The running sum visits the frames in acquisition order, which
+    # is the order a NumPy reduction over axis 0 uses, so the pixel sums round identically.
     accumulator = np.zeros(frames.shape[1:], dtype=np.float32)
     for frame in frames:
         thresholded = np.where(frame > intensity_threshold, frame, np.float32(0.0))

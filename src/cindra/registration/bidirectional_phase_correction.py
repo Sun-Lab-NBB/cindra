@@ -33,7 +33,7 @@ def compute_bidirectional_phase_offset(frames: NDArray[np.float32], workers: int
 
     # Computes the real FFT of odd lines (1, 3, 5, ...) along the x-axis. Uses rfft since input is real-valued,
     # which is ~2x faster than fft and uses half the memory. The cast guards against complex128 promotion and
-    # returns the transform untouched while it already holds complex64, which is what a float32 frame yields.
+    # leaves an already-complex64 transform untouched.
     odd_lines_fft = fft.rfft(x=frames[:, 1::2, :], axis=2, workers=workers).astype(np.complex64, copy=False)
     odd_lines_fft /= np.abs(odd_lines_fft) + np.float32(NORMALIZATION_EPSILON)
 
