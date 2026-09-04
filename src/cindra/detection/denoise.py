@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -88,20 +89,22 @@ def pca_denoise(
     # Limits each block fit to a single BLAS thread. The worker budget is already spent on the block pool below, so
     # leaving the BLAS thread count unconstrained would multiply the two and oversubscribe the host. The limit also
     # encloses the accumulation, because the BLAS width the fits run at decides their summation order. Each block is
-    # centered inside the worker that fits it and accumulated as soon as it returns, so the resident set holds one block
-    # per worker rather than a centered and a reconstructed copy of every block at once.
+    # centered inside the worker that fits it, accumulated in submission order, and released once accumulated,
+    # so the resident set holds the blocks still in flight rather than a reconstruction of every block.
     with threadpool_limits(limits=1):
         if parallel_workers == 1:
             for block_slice in block_slices:
                 _accumulate(block_slice=block_slice, block_reconstruction=_center_and_reconstruct(block_slice))
         else:
             with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
-                futures = [executor.submit(_center_and_reconstruct, block_slice) for block_slice in block_slices]
+                pending = deque(executor.submit(_center_and_reconstruct, block_slice) for block_slice in block_slices)
 
                 # Consumes the futures in submission order rather than completion order. Blocks overlap, so most
                 # pixels accumulate a float32 sum over several of them, and float addition is not associative.
-                for block_slice, future in zip(block_slices, futures, strict=True):
-                    _accumulate(block_slice=block_slice, block_reconstruction=future.result())
+                # Each future leaves the queue as its block is accumulated, because a future holds its result
+                # alive after it is read, which would otherwise keep every reconstruction resident to the end.
+                for block_slice in block_slices:
+                    _accumulate(block_slice=block_slice, block_reconstruction=pending.popleft().result())
 
     reconstruction /= normalization
     reconstruction += frame_mean

@@ -530,6 +530,38 @@ class TestRegisterPlane:
         assert context.runtime.registration.bidirectional_phase_offset != 0
         assert context.runtime.registration.bidirectional_phase_corrected
 
+    def test_configured_bidirectional_offset_corrects_the_reference_sample(
+        self,
+        tmp_path: Path,
+        single_recording_context: Callable[..., RuntimeContext],
+        gaussian_blob_image: Callable[..., NDArray[np.float64]],
+    ) -> None:
+        """Verifies that a configured bidirectional offset corrects the frames the reference is built from."""
+        movie = _build_static_blob_movie(gaussian_blob_image=gaussian_blob_image)
+        # Plants the same artifact the override describes, so a correctly corrected plane holds still.
+        movie[:, 1::2, :] = np.roll(movie[:, 1::2, :], shift=4, axis=2)
+
+        def configure(configuration: SingleRecordingConfiguration) -> None:
+            # The override supplies the offset directly, so the estimation branch never runs.
+            configuration.registration.compute_bidirectional_phase_offset = False
+            configuration.registration.bidirectional_phase_offset_override = 4
+
+        context = single_recording_context(
+            tmp_path=tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
+        )
+
+        register_plane(context=context, workers=1)
+
+        # A reference built from uncorrected frames disagrees with every corrected batch matched against it,
+        # which biases the offsets of a movie that does not move.
+        registration_directory = tmp_path / "output" / "cindra" / "plane_0" / "registration_data"
+        y_offsets = np.load(registration_directory / "rigid_y_offsets.npy")
+        x_offsets = np.load(registration_directory / "rigid_x_offsets.npy")
+
+        assert np.all(np.abs(y_offsets) <= 1)
+        assert np.all(np.abs(x_offsets) <= 1)
+        assert context.runtime.registration.bidirectional_phase_offset == 4
+
     def test_estimates_zero_bidirectional_phase_offset(
         self,
         tmp_path: Path,
