@@ -77,7 +77,7 @@ CPU worker allocation lives outside the configuration file. Each processing stag
 invocation argument, supplied by the `cindra run` options `-bw/--binarize-workers`, `-rw/--register-workers` and
 `-pw/--process-workers`, or by `execute_processing_jobs_tool` and `execute_full_pipeline_tool` at dispatch time. Both
 interfaces share one convention. Omitting a `cindra run` worker option, or leaving the MCP `workers_per_job` as None,
-applies the measured default of 3 workers for binarization, 8 for registration on the host CPU, 2 for a device-backed
+applies the measured default of 4 workers for binarization, 8 for registration on the host CPU, 2 for a device-backed
 registration, and 8 for processing. On the MCP execute tools that default is a floor rather than a fixed width. A
 session that leaves `workers_per_job` as None widens each registration and processing job at dispatch as its queue
 drains, up to the 32 and 16 core ceilings the classes declare. Setting either to -1 requests every available core. Any

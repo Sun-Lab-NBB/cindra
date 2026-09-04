@@ -293,7 +293,7 @@ exceeds the whole budget still runs rather than stalling the session.
 
 | Phase    | Resource class     | Cores per job | Dispatch ceiling | Concurrency                         |
 |----------|--------------------|---------------|------------------|-------------------------------------|
-| BINARIZE | `binarization`     | 3             | None             | Hard ceiling of 4                   |
+| BINARIZE | `binarization`     | 4             | None             | Hard ceiling of 4                   |
 | REGISTER | `registration`     | 8             | 32               | Session CPU budget, 4 jobs reserved |
 | REGISTER | `registration_gpu` | 2             | None             | One job per session CUDA device     |
 | PROCESS  | `processing`       | 8             | 16               | Session CPU budget, 5 jobs reserved |
@@ -302,7 +302,7 @@ exceeds the whole budget still runs rather than stalling the session.
 Every cap but the two hard ceilings derives from the host as `min(max(1, budget // cores_per_job), max(1, job_count))`,
 so a wider machine raises it without being asked. The dispatcher then admits against the live core and memory budgets
 rather than against the cap alone. The engine saturates the host it is given, so leave both parameters as None unless
-the user asks for an override. Binarization's ceiling of 4 never lifts, because the stage decodes at the storage's rate
+the user asks for an override. Binarization's concurrency ceiling of 4 never lifts, because the stage decodes at the storage's rate
 rather than the host's core count. A registration job takes `registration_gpu` when the session passed `gpu_devices`.
 `Cores per job` is the smallest width a class gives a job and `Dispatch ceiling` is the largest, so a class whose
 ceiling stands higher widens each job it dispatches over the cores no running job holds. That widening applies only

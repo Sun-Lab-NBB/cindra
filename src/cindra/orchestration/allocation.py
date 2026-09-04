@@ -19,8 +19,10 @@ from .jobs import MultiRecordingJobNames, SingleRecordingJobNames
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-BINARIZATION_WORKERS: int = 3
-"""The number of CPU cores one binarization job holds."""
+BINARIZATION_WORKERS: int = 4
+"""The number of CPU cores one binarization job holds, which matches the TIFF decode ceiling so that the conversion
+reaches the widest decode that ceiling allows. A cold sweep over this stage peaks near this width and falls away
+above it, because the contention a wider decode adds on the storage outweighs the decompression it parallelizes."""
 
 REGISTRATION_WORKERS: int = 8
 """The number of CPU cores one registration job holds while the session dispatches at its full concurrency."""
