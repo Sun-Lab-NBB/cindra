@@ -35,9 +35,10 @@ def extract_traces(context: RuntimeContext | MultiRecordingRuntimeContext, *, wo
         multi-recording contexts, backward-transformed tracked ROI masks are used without reclassification, and the
         extraction statistics are computed after the traces rather than between them.
 
-        Extraction and deconvolution run entirely inside Numba kernels parallelized over ROIs, so the worker count is
-        applied as the Numba thread mask before dispatch and covers both branches. The mask is thread-local, so
-        concurrently dispatched recordings can hold different worker budgets inside a single process.
+        Extraction and deconvolution run entirely inside Numba kernels, the extraction pair parallelized over frames
+        and the deconvolution kernel over ROIs, so the worker count is applied as the Numba thread mask before
+        dispatch and covers both branches. The mask is thread-local, so concurrently dispatched recordings can hold
+        different worker budgets inside a single process.
 
     Args:
         context: The runtime context for the recording being processed. Modified in-place to store extraction
@@ -243,7 +244,7 @@ def _extract_neuropil_fluorescence(  # pragma: no cover
 
         Parallelizes over frames rather than over ROIs, so each thread holds one frame while every ROI gathers from
         it. A neuropil mask holds several times the pixels of the cell mask it surrounds, so this kernel reads the
-        batch harder than its cell counterpart and gains the most from visiting each frame once.
+        batch hardest and gains the most from visiting each frame once.
 
     Args:
         output_prototype: The pre-initialized output array to be updated with the extracted fluorescence traces.

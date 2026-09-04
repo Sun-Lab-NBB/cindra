@@ -536,7 +536,7 @@ class TestRegisterPlane:
         single_recording_context: Callable[..., RuntimeContext],
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
-        """Verifies that a configured bidirectional offset corrects the frames the reference is built from."""
+        """Verifies that a configured bidirectional offset corrects the sample frames that produce the reference."""
         movie = _build_static_blob_movie(gaussian_blob_image=gaussian_blob_image)
         # Plants the same artifact the override describes, so a correctly corrected plane holds still.
         movie[:, 1::2, :] = np.roll(movie[:, 1::2, :], shift=4, axis=2)

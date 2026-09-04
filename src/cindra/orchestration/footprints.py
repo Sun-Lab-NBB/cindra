@@ -81,14 +81,15 @@ the whole of the next read."""
 _INTERNAL_ELEMENT_BYTES: int = 2
 """The width of one element of the internal binary format. A wider source is halved and cast down to it."""
 
-_DETECTION_ARRAY_COPIES: float = 3.60
+_DETECTION_ARRAY_COPIES: float = 2.35
 """The copies of the binned movie the detection stage holds at its peak, which is the scale-0 thresholded variance.
-Live at that moment are the binned frames, the five convolved scales, the comparison output, and the boolean
-predicate."""
+Live at that moment are the binned frames and the five convolved scales. The variance accumulates one frame at a
+time, so the transient it adds is a single frame rather than a copy of the movie."""
 
-_DETECTION_DENOISE_ARRAY_COPIES: float = 4.7
+_DETECTION_DENOISE_ARRAY_COPIES: float = 3.45
 """The copies of the binned movie the detection stage holds at its peak when PCA denoising runs, which adds the
-reconstruction and the block reconstructions the block pool retains."""
+reconstruction and the block reconstructions still in flight. The pool releases each reconstruction as it is
+accumulated, so the blocks resident at once follow the worker count rather than the block count."""
 
 _BIN_BATCH_SIZE: int = 500
 """The frames the movie binning reads per batch. Binning happens inside each batch and each batch truncates its own

@@ -89,8 +89,7 @@ def pca_denoise(
     # Limits each block fit to a single BLAS thread. The worker budget is already spent on the block pool below, so
     # leaving the BLAS thread count unconstrained would multiply the two and oversubscribe the host. The limit also
     # encloses the accumulation, because the BLAS width the fits run at decides their summation order. Each block is
-    # centered inside the worker that fits it, accumulated in submission order, and released once accumulated,
-    # so the resident set holds the blocks still in flight rather than a reconstruction of every block.
+    # centered inside the worker that fits it.
     with threadpool_limits(limits=1):
         if parallel_workers == 1:
             for block_slice in block_slices:
@@ -126,11 +125,12 @@ def _fit_and_reconstruct_block(
         component_count: The number of PCA components to retain.
 
     Returns:
-        The reconstructed block data with shape (num_frames, num_pixels).
+        The low-rank reconstruction with shape (num_frames, num_pixels), or the input array itself when the block is
+        uniform.
     """
     # Uniform blocks have zero variance, making PCA undefined. Returns the block unchanged to avoid a
-    # division-by-zero warning inside sklearn. The caller centers the block into a temporary it drops at the
-    # call, so the block reaches the accumulator with no other reference and needs no duplicate of its own.
+    # division-by-zero warning inside sklearn. The returned array is the caller's own block in this branch, so a
+    # caller that reuses the block after the call copies it first.
     if np.ptp(block) == 0.0:
         return block
 

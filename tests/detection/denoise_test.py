@@ -63,7 +63,8 @@ class TestFitAndReconstructBlock:
 
 
 class TestPcaDenoise:
-    """Tests the in-place block blend, its worker count validation, and its parallel-to-sequential agreement."""
+    """Tests the in-place block blend, its worker count validation, its parallel-to-sequential agreement, and its
+    block release."""
 
     def test_in_place_modification(self) -> None:
         """Verifies that pca_denoise modifies frames in-place."""
@@ -74,7 +75,7 @@ class TestPcaDenoise:
         assert not np.array_equal(frames, original)
 
     def test_parallel_path_releases_each_block_once_accumulated(self) -> None:
-        """Verifies that the parallel path does not retain every block reconstruction to the end of the run."""
+        """Verifies that the parallel path releases each block reconstruction once it is accumulated."""
         generator = np.random.default_rng(seed=42)
         frames = generator.standard_normal((40, 96, 96)).astype(np.float32)
 
