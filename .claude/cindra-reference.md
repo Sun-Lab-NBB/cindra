@@ -370,13 +370,16 @@
   `numba.config` and before importing modules that compile `@njit` functions. Do not move this. macOS runs OpenMP
   because the Numba macOS wheel ships no tbbpool extension, so the TBB layer is unavailable there whatever runtime is
   installed
-- The macOS OpenMP layer loads `libomp.dylib` from the dynamic loader's default search path, and
-  `cindra.orchestration.openmp` owns the discovery and linking that put it there. Both pipeline entry points call
-  `verify_openmp_runtime()` before they dispatch a stage, so a macOS host carrying no loadable runtime aborts having
-  done no work, while `cindra omp` reports the runtimes found on the host and `cindra omp --yes` links one. Numba
-  raises its threading-layer error at the first parallelized call rather than at import, which is what the check
-  replaces. Keep the check off the import path, because a message written there reaches the stdio MCP server's
-  JSON-RPC stream before any CLI code can silence the console
+- The macOS OpenMP layer loads `libomp.dylib` through the rpath dependency Numba's omppool extension records, and
+  `cindra.orchestration.openmp` owns the discovery and linking that satisfy it. That extension carries no LC_RPATH
+  entry of its own, so the loader expands the name against the running interpreter's entries and reaches its library
+  directory alone. `_LINK_DIRECTORY` therefore names that directory, and every check resolves the runtime through the
+  extension rather than through its file name, because the loader's default fallback list serves a file name alone.
+  Both pipeline entry points call `verify_openmp_runtime()` before they dispatch a stage, so a macOS host carrying no
+  loadable runtime aborts having done no work, while `cindra omp` reports the runtimes found on the host and
+  `cindra omp --yes` links one. Numba raises its threading-layer error at the first parallelized call rather than at
+  import, which is what the check replaces. Keep the check off the import path, because a message written there reaches
+  the stdio MCP server's JSON-RPC stream before any CLI code can silence the console
 - A registration job runs on a CUDA device only where the caller named one, so `verify_gpu_runtime(device=...)` runs in
   two places. `run_single_recording_pipeline` calls it before its first dispatch, so a host exposing no usable device
   aborts having done no work. `dispatch_single_recording_job` calls it inside the REGISTER branch of the tracker's
