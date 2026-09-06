@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -15,6 +16,7 @@ from cindra.dataclasses import (
     SingleRecordingRuntimeData,
     SingleRecordingConfiguration,
 )
+from cindra.orchestration.gpu import resolve_gpu_devices
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -30,6 +32,19 @@ _DEFAULT_FRAME_WIDTH: int = 48
 
 _DEFAULT_FRAME_COUNT: int = 40
 """The default synthetic frame count for single-recording fixtures."""
+
+_COVERAGE_OMIT_VARIABLE: str = "CINDRA_COVERAGE_OMIT"
+"""The environment variable the pyproject coverage omit list reads to drop the modules this host cannot execute."""
+
+_DEVICE_BACKEND_PATTERN: str = "*/cindra/registration/gpu.py"
+"""Matches the registration backend that runs on a CUDA device alone, which a host reaching none never executes."""
+
+# Resolves the coverage omission from the devices the host exposes, so the gate stands at 100% over the code this host
+# runs. Coverage reads its omit list before it imports this module, so the value set here reaches the xdist workers the
+# session spawns rather than the process spawning them, and those workers are what measure the suite. A serial run
+# therefore falls back to the default the pyproject omit list states. An explicit setting wins over both.
+if _COVERAGE_OMIT_VARIABLE not in os.environ:
+    os.environ[_COVERAGE_OMIT_VARIABLE] = "" if resolve_gpu_devices().available else _DEVICE_BACKEND_PATTERN
 
 
 @pytest.fixture
