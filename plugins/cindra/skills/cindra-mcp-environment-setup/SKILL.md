@@ -271,17 +271,20 @@ This is the passing outcome. Nothing was changed and nothing needs to be. Contin
 **The report found a runtime:**
 
 ```bash
-sudo cindra omp --yes
+cindra omp --yes
 ```
 
-The link goes into `/usr/local/lib`, which the loader searches by default, so writing it needs permission to modify that
-directory. The command then loads the runtime from a fresh interpreter and reports whether it now resolves.
+The link goes into the library directory of the interpreter that runs the command, which is the one directory the loader
+reaches when it expands the rpath dependency Numba's omppool extension records. Run the command from the environment
+that runs the pipeline, because another environment receives the link instead. A conda environment grants the write
+without sudo, while a system-wide interpreter needs it and the command names that in its refusal. The command then
+loads the runtime from a fresh interpreter and reports whether it now resolves.
 
 **The report found no runtime:**
 
 ```bash
 brew install libomp
-sudo cindra omp --yes
+cindra omp --yes
 ```
 
 A conda environment can take the runtime from conda-forge instead, which `cindra omp` discovers through `CONDA_PREFIX`:
@@ -349,7 +352,7 @@ the MCP tools on the next session, since the current session's MCP subprocesses 
 | MCP server connected but tools fail                          | Not an environment issue                          | Check tool-specific error messages                                                        |
 | cindra-gui tools unavailable                                 | Plugin not installed or outdated                  | Reinstall the cindra Claude Code plugin                                                   |
 | Skills available but MCP tools missing                       | Plugin installed without pip package              | `pip install cindra` in the active environment                                            |
-| `RuntimeError: Unable to locate the OpenMP runtime` on macOS | `libomp.dylib` is not on the loader's search path | `sudo cindra omp --yes`, after `brew install libomp` when `cindra omp` reports no runtime |
+| `RuntimeError: Unable to locate the OpenMP runtime` on macOS | `libomp.dylib` is not on the loader's search path | `cindra omp --yes`, after `brew install libomp` when `cindra omp` reports no runtime      |
 | Every registration job fails naming a CUDA device            | The host reaches no usable CUDA device            | `pip install cupy-cuda13x[ctk]`, or `cupy-cuda12x[ctk]` for a CUDA 12 driver              |
 
 ---
@@ -391,7 +394,7 @@ MCP Environment Setup, tool-settled (run `/mcp`, `which cindra`, `which cindra-g
 - [ ] Confirmed Python version matches >=3.14,<3.15
 - [ ] Confirmed the installed cindra version is 2.0.0 or later
 - [ ] Verified cindra plugin is installed (provides both server registrations)
-- [ ] On macOS, reported the OpenMP runtime state with 'cindra omp' and linked one with 'sudo cindra omp --yes'
+- [ ] On macOS, reported the OpenMP runtime state with 'cindra omp' and linked one with 'cindra omp --yes'
 - [ ] For a batch naming a CUDA device, gated on check_gpu_runtime_tool 'ready' and surfaced its remedy
 
 MCP Environment Setup, reader-judged:

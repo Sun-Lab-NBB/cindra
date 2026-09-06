@@ -291,6 +291,10 @@ source_pkgs = ["cindra"]
 omit = [
     "*/cindra/gui/*",
     "*/cindra/interface/*",
+    # The device registration backend runs on a CUDA device alone, so the test session resolves this pattern from the
+    # devices the host exposes and the gate stands at 100% over the code that host runs. The default stated here serves
+    # a serial run, which reads this list before the session resolves it.
+    "${CINDRA_COVERAGE_OMIT-*/cindra/registration/gpu.py}",
 ]
 
 # Used by the 'coverage' tox task to merge the coverage data files the '{py314}-test' task produces.
@@ -309,11 +313,11 @@ source = [
 [tool.coverage.html]
 directory = "reports/coverage_html"
 
-# Specifies the coverage gate and additional ignore directives. The GUI and interface modules are omitted from
+# Specifies the reporting behavior and additional ignore directives. The GUI and interface modules are omitted from
 # measurement above. The lines carrying a 'pragma: no cover' comment, such as the Numba JIT bodies and the defensive
-# branches guarding degenerate geometry, do not count against the gate.
+# branches guarding degenerate geometry, do not count against the gate. The gate itself rides the tox commands that
+# enforce it, because a 'fail_under' declared here is ambient and gates every ad hoc 'pytest --cov' run as well.
 [tool.coverage.report]
-fail_under = 100     # Requires the test suite to cover every measured statement and branch
 show_missing = true  # Lists the statements missed by the test suite, so a failed check names the lines to cover
 
 # Every entry is a regular expression matched against each source line, and a match on a 'def' or on any other clause

@@ -77,7 +77,7 @@ confined to one platform. It runs on macOS alone and errors on every other host,
 runtime a Linux or Windows host needs. `check_threading_runtime_tool` is the portable check. It runs everywhere,
 reports the layer the host's platform selects under `required_layer`, and names a remedy, so it substitutes for the
 report half of `cindra omp` on macOS alone and covers every other host on its own. Creating the macOS link still needs
-the CLI, because the write target usually requires sudo.
+the CLI, because no MCP tool writes it.
 
 ---
 

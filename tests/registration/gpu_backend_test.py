@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -30,6 +31,12 @@ if TYPE_CHECKING:
     from cindra.dataclasses import RuntimeContext, SingleRecordingConfiguration
     from cindra.registration.batch import BatchRegistrationResult
 
+_STORAGE_MINIMUM: int = int(np.iinfo(np.int16).min)
+"""The lowest value the plane binary stores, which bounds the narrowing a device backend performs itself."""
+
+_STORAGE_MAXIMUM: int = int(np.iinfo(np.int16).max)
+"""The highest value the plane binary stores, which bounds the narrowing a device backend performs itself."""
+
 _SMOOTHING_SIGMA: float = 1.15
 """The Gaussian smoothing sigma that shapes the reference kernels and the edge taper of these tests."""
 
@@ -53,12 +60,15 @@ _BATCH_PARAMETERS: dict[str, Any] = {
 # Every worker process that reaches a device builds its own CUDA context, which costs hundreds of megabytes of device
 # memory apiece. Holding the device tests to one worker keeps a wide parallel run from filling the card with contexts,
 # so this group name is shared with every other module that reaches a device.
-pytestmark = [
-    pytest.mark.xdist_group(name="cuda_device"),
-    pytest.mark.skipif(not resolve_gpu_devices().available, reason="the host exposes no usable CUDA device"),
-]
+pytestmark = [pytest.mark.xdist_group(name="cuda_device")]
+
+_DEVICE_REQUIRED = pytest.mark.skipif(
+    not resolve_gpu_devices().available, reason="the host exposes no usable CUDA device"
+)
+"""Skips a test class that reaches a CUDA device, leaving the classes that reach none running on every host."""
 
 
+@_DEVICE_REQUIRED
 class TestBufferReuseContract:
     """Tests which returned arrays survive being held while later batches are produced."""
 
@@ -99,6 +109,7 @@ class TestBufferReuseContract:
             np.testing.assert_array_equal(result.frame_sum, snapshot[4])
 
 
+@_DEVICE_REQUIRED
 class TestDeviceParity:
     """Tests that the device backend resolves the offsets the host backend resolves."""
 
@@ -147,6 +158,7 @@ class TestDeviceParity:
         assert wide.frame_sum is None
 
 
+@_DEVICE_REQUIRED
 class TestDeviceSelection:
     """Tests that register_plane routes the pass to the resource the device argument names."""
 
@@ -242,6 +254,7 @@ class TestDeviceSelection:
         np.testing.assert_allclose(gpu[2], cpu[2], rtol=1e-4, atol=0.05)
 
 
+@_DEVICE_REQUIRED
 class TestPreprocessingPaths:
     """Tests the optional preprocessing stages against the host kernels that define them."""
 
@@ -335,6 +348,7 @@ class TestPreprocessingPaths:
         np.testing.assert_array_equal(device.x_offsets_nonrigid, host.x_offsets_nonrigid)
 
 
+@_DEVICE_REQUIRED
 class TestPrecomputedOffsets:
     """Tests the entry point that registers the secondary channel."""
 
@@ -402,6 +416,7 @@ class TestPrecomputedOffsets:
             )
 
 
+@_DEVICE_REQUIRED
 class TestBackendGuards:
     """Tests the refusals that keep an unusable request off the device."""
 
@@ -460,6 +475,10 @@ class TestBackendGuards:
                 backend=backend, frames=movie.astype(np.float32), nonrigid_enabled=False, **parameters
             )
 
+
+class TestRuntimeGuard:
+    """Tests the runtime guard every device backend runs before it reaches a device."""
+
     def test_absent_runtime_is_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Verifies the backend refuses to initialize while the CuPy distribution is absent."""
         monkeypatch.setattr("cindra.registration.gpu.cupy", None)
@@ -471,6 +490,155 @@ class TestBackendGuards:
             _require_gpu_runtime()
 
 
+class TestDeviceDispatch:
+    """Tests the dispatch branches register_plane takes for a device, with the backend backed by the host kernels."""
+
+    def test_dispatch_writes_the_binary_the_host_pass_writes(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        single_recording_context: Callable[..., RuntimeContext],
+        read_binary_movie: Callable[..., NDArray[np.int16]],
+    ) -> None:
+        """Verifies the dispatch path writes the binary, the offsets, and the mean image the host pass writes."""
+        monkeypatch.setattr("cindra.registration.register.GpuRegistrationBackend", _HostBackedBackend)
+        movie, _ = _build_shifted_movie(frame_count=64, height=128, width=128)
+
+        outputs = {}
+        for label, device in (("host", None), ("dispatch", 0)):
+            root = tmp_path / label
+            root.mkdir()
+            context = single_recording_context(
+                tmp_path=root,
+                frame_height=128,
+                frame_width=128,
+                frame_count=64,
+                movie=movie,
+                configure=_set_batch_size,
+            )
+            register_plane(context=context, workers=1, device=device)
+            registration_directory = root / "output" / "cindra" / "plane_0" / "registration_data"
+            outputs[label] = (
+                np.load(registration_directory / "rigid_y_offsets.npy"),
+                np.load(registration_directory / "rigid_x_offsets.npy"),
+                read_binary_movie(
+                    file_path=context.runtime.io.registered_binary_path, frame_height=128, frame_width=128
+                ).copy(),
+                context.runtime.detection.mean_image.copy(),
+            )
+
+        host, dispatch = outputs["host"], outputs["dispatch"]
+        np.testing.assert_array_equal(dispatch[0], host[0])
+        np.testing.assert_array_equal(dispatch[1], host[1])
+        np.testing.assert_array_equal(dispatch[2], host[2])
+        np.testing.assert_allclose(dispatch[3], host[3], rtol=1e-5, atol=1e-3)
+
+    def test_two_step_refinement_releases_the_backend_of_each_step(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        single_recording_context: Callable[..., RuntimeContext],
+    ) -> None:
+        """Verifies a two-step run builds one backend per step and releases both."""
+        built: list[_HostBackedBackend] = []
+
+        def _record(reference_data: ReferenceData, device: int) -> _HostBackedBackend:
+            backend = _HostBackedBackend(reference_data=reference_data, device=device)
+            built.append(backend)
+            return backend
+
+        monkeypatch.setattr("cindra.registration.register.GpuRegistrationBackend", _record)
+        movie, _ = _build_shifted_movie(frame_count=48, height=128, width=128)
+
+        def configure(configuration: SingleRecordingConfiguration) -> None:
+            configuration.registration.batch_size = 24
+            configuration.registration.two_step_registration = True
+
+        context = single_recording_context(
+            tmp_path=tmp_path, frame_height=128, frame_width=128, frame_count=48, movie=movie, configure=configure
+        )
+        register_plane(context=context, workers=1, device=0)
+
+        assert len(built) == 2
+        assert all(backend.released for backend in built)
+
+    def test_configured_gpu_batch_size_replaces_the_shared_size(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        single_recording_context: Callable[..., RuntimeContext],
+    ) -> None:
+        """Verifies a configured device batch size shapes the batches the dispatch path reads."""
+        built: list[_HostBackedBackend] = []
+
+        def _record(reference_data: ReferenceData, device: int) -> _HostBackedBackend:
+            backend = _HostBackedBackend(reference_data=reference_data, device=device)
+            built.append(backend)
+            return backend
+
+        monkeypatch.setattr("cindra.registration.register.GpuRegistrationBackend", _record)
+        movie, _ = _build_shifted_movie(frame_count=48, height=128, width=128)
+
+        def configure(configuration: SingleRecordingConfiguration) -> None:
+            configuration.registration.batch_size = 24
+            configuration.registration.gpu_batch_size = 16
+
+        context = single_recording_context(
+            tmp_path=tmp_path, frame_height=128, frame_width=128, frame_count=48, movie=movie, configure=configure
+        )
+        register_plane(context=context, workers=1, device=0)
+
+        assert built[0].batch_sizes == [16, 16, 16]
+
+    def test_two_channel_dispatch_writes_the_binaries_the_host_pass_writes(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        single_recording_context: Callable[..., RuntimeContext],
+        read_binary_movie: Callable[..., NDArray[np.int16]],
+    ) -> None:
+        """Verifies the dispatch path applies the alignment offsets to the secondary channel like the host pass."""
+        monkeypatch.setattr("cindra.registration.register.GpuRegistrationBackend", _HostBackedBackend)
+        movie, _ = _build_shifted_movie(frame_count=48, height=128, width=128)
+        movie_channel_2 = (movie // 2).astype(np.int16)
+
+        outputs = {}
+        for label, device in (("host", None), ("dispatch", 0)):
+            root = tmp_path / label
+            root.mkdir()
+
+            def configure(configuration: SingleRecordingConfiguration) -> None:
+                configuration.registration.batch_size = 24
+                configuration.nonrigid_registration.enabled = True
+                configuration.nonrigid_registration.block_size = _BLOCK_SIZE
+
+            context = single_recording_context(
+                tmp_path=root,
+                frame_height=128,
+                frame_width=128,
+                frame_count=48,
+                movie=movie,
+                movie_channel_2=movie_channel_2,
+                configure=configure,
+            )
+            register_plane(context=context, workers=1, device=device)
+            outputs[label] = (
+                read_binary_movie(
+                    file_path=context.runtime.io.registered_binary_path, frame_height=128, frame_width=128
+                ).copy(),
+                read_binary_movie(
+                    file_path=context.runtime.io.registered_binary_path_channel_2,
+                    frame_height=128,
+                    frame_width=128,
+                ).copy(),
+            )
+
+        host, dispatch = outputs["host"], outputs["dispatch"]
+        np.testing.assert_array_equal(dispatch[0], host[0])
+        np.testing.assert_array_equal(dispatch[1], host[1])
+
+
+@_DEVICE_REQUIRED
 class TestRemainingBranches:
     """Tests the branches the ordinary registration passes do not reach."""
 
@@ -559,6 +727,7 @@ class TestRemainingBranches:
         assert backend._released
 
 
+@_DEVICE_REQUIRED
 class TestConfiguredBatchSize:
     """Tests the device batch size the configuration names for a pass running on a CUDA device."""
 
@@ -672,3 +841,71 @@ def _register_single_batch(
 def _build_parameters(**overrides: Any) -> dict[str, Any]:
     """Builds the per-pass parameter set with the named overrides applied."""
     return {**_BATCH_PARAMETERS, **overrides}
+
+
+def _set_batch_size(configuration: SingleRecordingConfiguration) -> None:
+    """Narrows the registration batch so a short movie spans several batches."""
+    configuration.registration.batch_size = 20
+
+
+class _HostBackedBackend:
+    """Presents the device backend's interface while registering every batch through the host kernels.
+
+    The dispatch branches register_plane takes for a device carry no CuPy call of their own, so a backend backed by the
+    host kernels exercises them on a host that reaches no CUDA device. Every output matches the host pass exactly,
+    which is what the tests using this stub assert.
+
+    Attributes:
+        released: Determines whether the backend released its allocations.
+        batch_sizes: The frame count of every batch the backend registered, in the order it registered them.
+    """
+
+    def __init__(self, reference_data: ReferenceData, device: int) -> None:
+        self._reference_data: ReferenceData = reference_data
+        self._device: int = device
+        self.released: bool = False
+        self.batch_sizes: list[int] = []
+
+    def register_batches(
+        self, batches: Iterator[NDArray[np.int16]], **parameters: Any
+    ) -> Iterator[BatchRegistrationResult]:
+        """Registers every batch through the host kernels and narrows the result the way a device backend does."""
+        for batch in batches:
+            self.batch_sizes.append(int(batch.shape[0]))
+            result = _register_frames_batch(
+                reference_data=self._reference_data, frames=batch.astype(np.float32), workers=1, **parameters
+            )
+            frame_sum = result.frames.sum(axis=0).astype(np.float32)
+            narrowed = np.clip(result.frames, _STORAGE_MINIMUM, _STORAGE_MAXIMUM).astype(np.int16)
+            yield replace(result, frames=narrowed, frame_sum=frame_sum)
+
+    def apply_precomputed_offsets(
+        self,
+        frames: NDArray[np.int16],
+        y_offsets: NDArray[np.int32],
+        x_offsets: NDArray[np.int32],
+        y_offsets_nonrigid: NDArray[np.float32] | None,
+        x_offsets_nonrigid: NDArray[np.float32] | None,
+        bidirectional_phase_offset: int,
+        *,
+        bidirectional_phase_corrected: bool,
+        nonrigid_enabled: bool,
+    ) -> tuple[NDArray[np.int16], NDArray[np.float32]]:
+        """Applies the precomputed offsets through the host kernel and narrows the result to the storage width."""
+        registered = _apply_precomputed_offsets_batch(
+            frames=frames.astype(np.float32),
+            y_offsets=y_offsets,
+            x_offsets=x_offsets,
+            y_offsets_nonrigid=y_offsets_nonrigid,
+            x_offsets_nonrigid=x_offsets_nonrigid,
+            blocks=self._reference_data.blocks,
+            bidirectional_phase_offset=bidirectional_phase_offset,
+            bidirectional_phase_corrected=bidirectional_phase_corrected,
+            nonrigid_enabled=nonrigid_enabled,
+        )
+        narrowed = np.clip(registered, _STORAGE_MINIMUM, _STORAGE_MAXIMUM).astype(np.int16)
+        return narrowed, registered.sum(axis=0).astype(np.float32)
+
+    def release(self) -> None:
+        """Records that the backend released the allocations a device backend would hold."""
+        self.released = True
