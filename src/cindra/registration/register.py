@@ -861,7 +861,7 @@ def _register_alignment_channel(
         bidirectional_phase_offset = initial_bidirectional_phase_offset or recorded_bidirectional_phase_offset
 
         sample_indices = np.linspace(
-            start=0, stop=frame_count, num=1 + np.minimum(reference_frame_count, frame_count), dtype=int
+            start=0, stop=frame_count, num=1 + np.minimum(reference_frame_count, frame_count), dtype=np.intp
         )[:-1]
         frames = frames_file[sample_indices].astype(np.float32)
 
