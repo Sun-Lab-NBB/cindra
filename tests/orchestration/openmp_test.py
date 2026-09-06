@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from pathlib import Path
 import subprocess
 
@@ -42,6 +43,13 @@ class TestRuntimeProbe:
             raise OSError(name)
 
         monkeypatch.setattr("cindra.orchestration.openmp.ctypes.CDLL", _raise)
+        assert not _openmp_runtime_loadable()
+
+    @pytest.mark.parametrize("origin", [None, "missing"])
+    def test_loadable_reports_false_when_the_extension_is_unavailable(self, monkeypatch, origin):
+        """Verifies that the probe reports failure when the Numba extension carries no loadable file."""
+        specification = None if origin == "missing" else SimpleNamespace(origin=origin)
+        monkeypatch.setattr("cindra.orchestration.openmp.importlib.util.find_spec", lambda name: specification)
         assert not _openmp_runtime_loadable()
 
     @pytest.mark.parametrize(("return_code", "expected"), [(0, True), (1, False)])
@@ -166,8 +174,9 @@ class TestRuntimeLinking:
 
         expected_message = (
             f"Unable to link the OpenMP runtime into {link_path.parent}. Writing the link requires permission to "
-            f"modify that directory, which usually means running the command through sudo. The loader reported: "
-            f"the filesystem refused the link."
+            f"modify that directory, which a system-wide interpreter grants through sudo. Keep the same interpreter "
+            f"on the elevated run, because the link target follows the interpreter that runs the command. The loader "
+            f"reported: the filesystem refused the link."
         )
         with pytest.raises(RuntimeError, match=error_format(message=expected_message)):
             _link_openmp_runtime(runtime_path=runtime_path, link_path=link_path)
@@ -186,8 +195,9 @@ class TestRuntimeLinking:
         monkeypatch.setattr(Path, "mkdir", _raise)
         expected_message = (
             f"Unable to link the OpenMP runtime into {tmp_path / 'lib'}. Writing the link requires permission to "
-            f"modify that directory, which usually means running the command through sudo. The loader reported: "
-            f"read-only file system."
+            f"modify that directory, which a system-wide interpreter grants through sudo. Keep the same interpreter "
+            f"on the elevated run, because the link target follows the interpreter that runs the command. The loader "
+            f"reported: read-only file system."
         )
         with pytest.raises(RuntimeError, match=error_format(message=expected_message)):
             _link_openmp_runtime(runtime_path=runtime_path, link_path=tmp_path / "lib" / "libomp.dylib")
