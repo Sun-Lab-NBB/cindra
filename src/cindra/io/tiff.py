@@ -565,12 +565,15 @@ def _read_tiff(tiff: TiffFile, start_index: int, batch_size: int, decode_workers
     # Converts to int16, rescaling where possible. Halves uint16 (0 to 65535) and int32 values, then clips to the
     # int16 range (-32768 to 32767) so out-of-range int32 magnitudes saturate instead of wrapping during the cast.
     # A halved uint16 spans 0 to 32767, which already lies inside the int16 range, so only int32 needs the clip.
-    if frames.dtype.type in {np.uint16, np.int32}:
+    # Each test compares the dtype rather than the scalar type it carries, because a platform that gives two scalar
+    # types the same width keeps them distinct. Windows resolves a 32-bit signed page to numpy.intc, which compares
+    # equal to the int32 dtype while being a different type than numpy.int32.
+    if frames.dtype in (np.dtype(np.uint16), np.dtype(np.int32)):
         halved = frames // 2
-        if frames.dtype.type == np.int32:
+        if frames.dtype == np.dtype(np.int32):
             np.clip(halved, a_min=np.iinfo(np.int16).min, a_max=np.iinfo(np.int16).max, out=halved)
         frames = halved.astype(dtype=np.int16)
-    elif frames.dtype.type != np.int16:
+    elif frames.dtype != np.dtype(np.int16):
         frames = frames.astype(dtype=np.int16)
 
     return frames
