@@ -2195,9 +2195,7 @@ def check_threading_runtime_tool() -> dict[str, object]:
     }
 
     if not summary.loadable:
-        result["remedy"] = (
-            "brew install libomp" if summary.status == OpenMPStatus.UNRESOLVED else "sudo cindra omp --yes"
-        )
+        result["remedy"] = "brew install libomp" if summary.status == OpenMPStatus.UNRESOLVED else "cindra omp --yes"
 
     return result
 

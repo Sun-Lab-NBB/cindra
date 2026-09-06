@@ -62,9 +62,9 @@ all and still reports as `ready: true`.
 ### check_threading_runtime_tool
 
 Returns `ready`, `platform`, `required_layer` (`omp` on macOS, `tbb` elsewhere), and a `detail` sentence. A host that is
-not ready also carries one of three `remedy` commands: `sudo cindra omp --yes` when macOS holds a runtime it has not
-linked, `brew install libomp` when macOS holds none, and `pip install tbb4py` off macOS. The first needs elevated
-privileges, so surface it to the user rather than running it. On macOS the report adds `discovered_runtimes`, holding
+not ready also carries one of three `remedy` commands: `cindra omp --yes` when macOS holds a runtime it has not
+linked, `brew install libomp` when macOS holds none, and `pip install tbb4py` off macOS. Each one changes the host, so
+surface it to the user rather than running it. On macOS the report adds `discovered_runtimes`, holding
 the single runtime the discovery would link, and `searched_paths`, holding the candidates examined. When no runtime was
 found, `discovered_runtimes` is empty while `searched_paths` still lists every candidate the discovery examined, which
 is the list to surface to the user. Both are empty only when the runtime already loads, because a host that already

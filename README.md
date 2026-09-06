@@ -79,9 +79,12 @@ ___
 On macOS, cindra uses Numba's OpenMP threading layer, because the Numba macOS wheel carries no TBB support. The
 OpenMP runtime (`libomp.dylib`) ships with neither Numba nor macOS itself, so it is installed separately.
 
-Run `cindra omp` to report the runtimes present on the host, and `sudo cindra omp --yes` to make one loadable. The
-command finds runtimes installed by [Homebrew](https://brew.sh/) or MacPorts, present in the active conda environment,
-or carried inside an installed Python package. Install one with `brew install libomp` when the command finds none.
+Run `cindra omp` to report the runtimes present on the host, and `cindra omp --yes` to make one loadable. The command
+finds runtimes installed by [Homebrew](https://brew.sh/) or MacPorts, present in the active conda environment, or
+carried inside an installed Python package, and links the one it finds into the library directory of the interpreter
+that runs it. That directory belongs to the interpreter, so a conda environment needs no elevated permission while a
+system-wide interpreter does. Keep the same interpreter on an elevated run, because the link target follows the
+interpreter that runs the command. Install one with `brew install libomp` when the command finds none.
 Without a loadable runtime, processing fails once it reaches a parallelized stage. Linux and Windows run the TBB
 threading layer, which needs no additional steps, so `cindra omp` errors when run on them.
 
@@ -1015,6 +1018,9 @@ pipelines require that mamba is installed through the [miniforge3](https://githu
    `mamba install tox uv tox-uv` command.
 5. Use the `tox -e create` command to create the project-specific development environment followed by `tox -e install`
    command to install the project into that environment as a library.
+6. ***macOS only,*** activate the environment created by step 5 and run `cindra omp --yes` to link an OpenMP runtime
+   into it. Run `brew install libomp` first when `cindra omp` reports that the host holds none. The environment carries
+   no OpenMP runtime of its own, and the `py314-test` task fails without one.
 
 ### Additional Dependencies
 
@@ -1066,6 +1072,10 @@ Claude Code skills and AI development assets for this project are distributed th
 Install both marketplaces to make all associated skills and development tools available to compatible AI coding agents.
 
 ### Automation Troubleshooting
+
+***Note,*** on macOS, a test run in which most tests fail with `ValueError: No threading layer could be loaded` holds
+no loadable OpenMP runtime. The hint that error carries names `intel-openmp`, which the macOS threading layer does not
+use. Run `cindra omp --yes` from the activated development environment instead.
 
 Many packages used in `tox` automation pipelines (uv, mypy, ruff) and `tox` itself may experience runtime failures. In
 most cases, this is related to their caching behavior. If an unintelligible error is encountered with any of the
