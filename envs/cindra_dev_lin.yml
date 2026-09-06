@@ -34,7 +34,6 @@ dependencies:
   - python_abi=3.14=9_cp314
   - readline=8.3=hd6e31c0_1
   - tk=8.6.13=noxft_h1df4ec4_4
-  - tomli=2.4.1=pyhcf101f3_0
   - tomli-w=1.2.0=pyhd8ed1ab_0
   - tox=4.61.2=pyhcf101f3_0
   - tox-uv=1.36.0=pyhcf101f3_0
