@@ -229,8 +229,10 @@ def _compute_pc_extremes(
     mean_image = frames_flat.mean(axis=0)
     frames_centered = frames_flat - mean_image
 
-    # The transpose puts frames on the feature axis, so the components come back as per-frame projections.
-    pca = PCA(n_components=component_count).fit(frames_centered.T)
+    # The transpose puts frames on the feature axis, so the components come back as per-frame projections. The fixed
+    # random state pins the randomized solver that scikit-learn selects for large inputs, so reprocessing a recording
+    # reproduces its metrics.
+    pca = PCA(n_components=component_count, random_state=0).fit(frames_centered.T)
     projections: NDArray[np.float32] = pca.components_.T.astype(np.float32)
 
     sorted_indices = np.argsort(a=projections, axis=0)
