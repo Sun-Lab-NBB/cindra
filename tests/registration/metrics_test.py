@@ -164,6 +164,19 @@ class TestComputePcExtremes:
         high_mean = float(pc_high[0].mean())
         assert abs(high_mean - low_mean) > 1.0
 
+    def test_repeated_runs_return_identical_arrays(self) -> None:
+        """Verifies that two runs over the same frames return identical extreme images and projections."""
+        # Two hundred frames of 32 by 32 pixels lead scikit-learn to select its randomized solver, the one that draws
+        # from a random state.
+        generator = np.random.default_rng(seed=7)
+        frames = generator.standard_normal(size=(200, 32, 32)).astype(np.float32)
+
+        first = _compute_pc_extremes(frames=frames, extreme_frame_count=50, component_count=10)
+        second = _compute_pc_extremes(frames=frames, extreme_frame_count=50, component_count=10)
+
+        for first_array, second_array in zip(first, second, strict=True):
+            np.testing.assert_array_equal(first_array, second_array)
+
 
 class TestRegisterPcExtremes:
     """Tests the shift measured between the extreme images under each of the two preprocessing modes."""
