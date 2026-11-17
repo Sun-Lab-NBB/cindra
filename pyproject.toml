@@ -9,7 +9,7 @@ name = "cindra"
 version = "2.0.1"
 description = "Provides pipelines for processing neural imaging data and tracking Regions of Interest across multiple recordings."
 readme = "README.md"
-license = "GPL-3.0-or-later"
+license = "GPL-3.0-only"
 license-files = ["LICENSE"]
 requires-python = ">=3.14,<3.15"
 authors = [

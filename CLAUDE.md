@@ -133,11 +133,12 @@ under `src/cindra/interface/`.
 
 ## Project context
 
-This is **cindra**, a reimplementation of the [suite2p](https://github.com/MouseLand/suite2p) neural imaging processing
-library with expanded documentation, optimized algorithms, modern Python 3.14 support, and a novel multi-recording ROI
-tracking pipeline based on the [OSM manuscript](https://www.nature.com/articles/s41586-024-08548-w). The library
-provides CLI and MCP server interfaces for agentic processing, and interactive GUIs for visualization of pipeline
-outputs.
+This is **cindra**. It began as a fork of [suite2p](https://github.com/MouseLand/suite2p) and has since been rewritten
+throughout. It reimplements the suite2p single-recording pipeline, the multi-recording tracking method of the [OSM
+study](https://www.nature.com/articles/s41586-024-08548-w), and [pirt](https://github.com/almarklein/pirt)'s
+diffeomorphic registration, and adds its own orchestration, parameter tracking, data caching, and agent interfaces. The
+library targets Python 3.14 and provides CLI and MCP server interfaces for agentic processing, and interactive GUIs for
+visualization of pipeline outputs.
 
 ### Key areas
 

@@ -15,14 +15,15 @@ ___
 
 ## Detailed Description
 
-Cindra is a ground-up reimplementation of the [suite2p](https://github.com/MouseLand/suite2p) library, merged with
-a similarly reimplemented multi-recording ROI tracking pipeline from the
-[OSM manuscript](https://www.nature.com/articles/s41586-024-08548-w). The library maintains the algorithmic core of
-these projects with extensive architecture, documentation, and implementation enhancements focused on improving memory
-efficiency and runtime speed. Single-recording registration runs on a CUDA device when the run names one, and on the
-host CPU otherwise. Cindra offers CLI, GUI, and MCP server interfaces alongside the Python API to streamline user
-interaction with the library. The [License](#license) section names the upstream projects that supplied these
-algorithms, along with the copyright notices that cover them.
+Cindra began as a fork of [suite2p](https://github.com/MouseLand/suite2p) and has since been rewritten throughout. It
+reimplements the suite2p single-recording pipeline, the multi-recording tracking method of the [OSM
+study](https://www.nature.com/articles/s41586-024-08548-w), and [pirt](https://github.com/almarklein/pirt)'s
+diffeomorphic registration, and adds its own orchestration, parameter tracking, data caching, and agent interfaces. The
+library maintains the algorithmic core of these projects, with an implementation focused on memory efficiency and
+runtime speed. Single-recording registration runs on a CUDA device when the run names one, and on the host CPU
+otherwise. Cindra offers CLI, GUI, and MCP server interfaces alongside the Python API to streamline user interaction
+with the library. The [License](#license) section names the upstream projects that supplied these algorithms, along with
+the copyright notices that cover them.
 
 ___
 
@@ -33,9 +34,9 @@ ___
 - Reimplements the single-recording suite2p pipeline: TIFF binarization, rigid and nonrigid motion correction, ROI
   detection with PCA denoising, cell classification, fluorescence extraction, neuropil subtraction, and OASIS spike
   deconvolution.
-- Implements a novel multi-recording ROI tracking pipeline: diffeomorphic demons registration to a common coordinate
-  space, spatial clustering for cross-recording ROI matching, and template-based fluorescence extraction across
-  recordings.
+- Reimplements the multi-recording tracking method of the OSM study: diffeomorphic demons registration to a common
+  coordinate space, spatial clustering for cross-recording ROI matching, and template-based fluorescence extraction
+  across recordings.
 - Provides a configuration-driven architecture using YAML files, allowing each pipeline phase to run on its own via
   API or CLI for local and remote parallelization.
 - Includes three interactive PySide6/PyQtGraph GUI viewers for inspecting ROI detection, registration quality, and
@@ -47,7 +48,7 @@ ___
 - Uses Numba JIT compilation with Intel TBB threading (OpenMP on macOS) for parallelized frame-level computation.
 - Supports GPU registration, running single-recording motion correction on a CUDA device through CuPy on Linux and
   Windows. The host CPU is the default, and every other pipeline stage runs on it whatever device a run names.
-- GPL-3.0-or-later License.
+- GPL-3.0-only License.
 
 ___
 
@@ -1100,27 +1101,28 @@ ___
 
 ## License
 
-This project is licensed under the GPL-3.0-or-later License: see the [LICENSE](LICENSE) file for details.
+This project is licensed under the GPL-3.0-only License: see the [LICENSE](LICENSE) file for details.
 
-The single-recording pipeline algorithms reimplemented in this library originate from the
-[suite2p](https://github.com/MouseLand/suite2p) project. All original algorithm rights belong to the original authors
-and fall under the following copyright notice:
-**Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu.**
+Cindra began as a fork of [suite2p](https://github.com/MouseLand/suite2p) and has since been rewritten throughout. This
+repository keeps the suite2p commit history, which dates every change. The single-recording pipeline algorithms
+reimplemented in this library originate from suite2p. All original suite2p rights belong to the original authors and
+fall under the following copyright notice: **Copyright (C) 2023 Howard Hughes Medical Institute Janelia Research Campus,
+the labs of Carsen Stringer and Marius Pachitariu.**
 
 For the original suite2p algorithm documentation, see the
 [original suite2p settings reference](https://suite2p.readthedocs.io/en/latest/settings.html).
 
-The multi-recording ROI tracking pipeline algorithms reimplemented in this library originate from the
-[OSM Manuscript](https://www.nature.com/articles/s41586-024-08548-w). All original algorithm rights belong to the
+The multi-recording tracking method reimplemented in this library originates from the
+[OSM study](https://www.nature.com/articles/s41586-024-08548-w). All original algorithm rights belong to the
 original authors.
 
 The diffeomorphic registration algorithms reimplemented in this library originate from the
 [pirt](https://github.com/almarklein/pirt) library. Copyright 2010-2017 Almar Klein, University of Twente.
 
-All implementation details in this library, including the complete reimplementation of the above algorithms, the
-codebase architecture, documentation, CLI, GUI, and MCP interfaces, belong to the original authors and fall under the
-following copyright notice:
-**Copyright © 2026 Sun (NeuroAI) lab, Authored by Ivan Kondratyev and Natalie Yeung.**
+All implementation details in this library, including the rewritten code, the reimplementation of the above algorithms,
+the orchestration, parameter tracking, data caching, and agent interfaces, the codebase architecture, documentation,
+CLI, and GUI, belong to the cindra authors and fall under the following copyright notice: **Copyright © 2026 Sun
+(NeuroAI) lab, Authored by Ivan Kondratyev and Natalie Yeung.**
 
 ___
 
